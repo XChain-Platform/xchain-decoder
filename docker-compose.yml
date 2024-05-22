@@ -1,0 +1,24 @@
+version: '3'
+
+services:
+  xchain_decoder:
+    build: .
+    volumes:
+      - xchain_decoder_data:/data/
+    networks: 
+      - network1
+    ports:
+      - "3001:3000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "30m"
+        max-file: "10"
+        
+networks:
+  network1:
+    name: xchain_network
+    external: true
+    
+volumes:
+  xchain_decoder_data:
