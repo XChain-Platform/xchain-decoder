@@ -6,6 +6,6 @@ WORKDIR /XChainDecoder
 RUN npm install
 
 COPY ./src /XChainDecoder/src
-COPY ./.env /XChainDecoder/.env
+COPY ./.en[v] /XChainDecoder/.env
 
 CMD ["npm", "run", "api"]
