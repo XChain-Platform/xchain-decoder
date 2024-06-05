@@ -25,10 +25,10 @@ const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many transactions need to be processed before inserting the data into the database
 
 class XChainDecoder {
-	constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodeUser, nodePassword) {
+	constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword) {
       this.network = CryptoNetworks.getBitcoinJsNetwork(network)
 	  
-	  this.connector = new BlockchainConnector(nodeUrl, nodeUser, nodePassword)
+	  this.connector = new BlockchainConnector(nodeUrl, nodePort, nodeUser, nodePassword)
 	  this.dbUrl = dbUrl
 	  this.dbPort = dbPort
 	  this.dbName = dbName

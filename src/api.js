@@ -12,6 +12,7 @@ const jsonRouter = require('express-json-rpc-router')
 
 const NETWORK = process.env.NETWORK
 const NODE_URL =  process.env.NODE_URL
+const NODE_PORT =  process.env.NODE_PORT
 const NODE_USER =  process.env.NODE_USER
 const NODE_PASSWORD =  process.env.NODE_PASSWORD
 const DB_URL =  process.env.DB_URL
@@ -23,7 +24,7 @@ const DB_PASSWORD =  process.env.DB_PASSWORD
 
 async function startApi(){
 	//Start the indexer
-	const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, NODE_URL, NODE_USER, NODE_PASSWORD);
+	const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD);
 	decoder.start()
 
 	// Create the app
