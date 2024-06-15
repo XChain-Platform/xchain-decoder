@@ -52,7 +52,7 @@ class Database {
 				databaseCreated = true
 			} catch(err){
 				console.log("There was an error trying to connect to the database. Trying again in a few seconds...")
-				await sleep(10000) //Waiting ten seconds
+				await this.sleep(10000) //Waiting ten seconds
 			}
 		}
 		
