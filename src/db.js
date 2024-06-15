@@ -41,16 +41,20 @@ class Database {
 		console.log("Creating database!")
 		let connection = null
 		let result = null
+		let databaseCreated = false
 		
-		try {
-			connection = await mariadb.createConnection(connectionParams)
-			result = await connection.query(
-				"CREATE DATABASE IF NOT EXISTS "+this.dbName
-			)
-		} catch(err){
-			console.log(err)
+		while (!databaseCreated){
+			try {
+				connection = await mariadb.createConnection(connectionParams)
+				result = await connection.query(
+					"CREATE DATABASE IF NOT EXISTS "+this.dbName
+				)
+				databaseCreated = true
+			} catch(err){
+				console.log("There was an error trying to connect to the database. Trying again in a few seconds...")
+				await sleep(10000) //Waiting ten seconds
+			}
 		}
-		
 		
 		await connection.end()
 		await this.createTables()
