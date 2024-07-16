@@ -17,14 +17,14 @@ const NODE_USER =  process.env.NODE_USER
 const NODE_PASSWORD =  process.env.NODE_PASSWORD
 const DB_URL =  process.env.DB_URL
 const DB_PORT =  process.env.DB_PORT
-const DB_NAME =  process.env.DB_NAME
+const DECODER_DB_NAME =  process.env.DECODER_DB_NAME
 const DB_USER =  process.env.DB_USER
 const DB_PASSWORD =  process.env.DB_PASSWORD
-
+const DECODER_API_PORT = process.env.DECODER_API_PORT
 
 async function startApi(){
 	//Start the indexer
-	const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD);
+	const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD);
 	decoder.start()
 
 	// Create the app
@@ -53,8 +53,8 @@ async function startApi(){
 
 
 	// Start the server
-	app.listen(3000, () => {
-	  console.log('API listening on port 3000');
+	app.listen(DECODER_API_PORT, () => {
+	  console.log('API listening on port '+DECODER_API_PORT);
 	});
 }
 
