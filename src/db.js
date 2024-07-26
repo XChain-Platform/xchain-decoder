@@ -18,7 +18,7 @@ class Database {
 			password: password,
 			database: dbName,
 			connectionLimit: 10,
-			connectTimeout: 0,
+			//connectTimeout: 0,
 			port: port
 		}
 		

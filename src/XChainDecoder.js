@@ -297,6 +297,7 @@ class XChainDecoder {
 		let blocksCount = 0
 		let transactionsCount = 0
 		
+		main_parsing:
 		while (true){
 			if (this.stopFlag){
 				if (this.mempoolInterval != null){
@@ -367,12 +368,17 @@ class XChainDecoder {
 					await this.db.beginTransaction()
 				}
 				
-				await this.db.insertBlock({
-					block_index:nextBlockHeight,
-					block_hash:nextBlockHash, 
-					block_time:block.timestamp, 
-					previous_block_hash:block.prevHash.reverse().toString("hex")
-				})
+				if (!(await this.db.insertBlock(
+					{
+						block_index:nextBlockHeight,
+						block_hash:nextBlockHash, 
+						block_time:block.timestamp, 
+						previous_block_hash:block.prevHash.reverse().toString("hex")
+					}
+				))){
+					await this.sleep(3000)
+					continue main_parsing
+				}
 				
 				//Loop through the transactions and saving only the ones that have valid data
 				var transactions = block.transactions
@@ -391,7 +397,7 @@ class XChainDecoder {
 								lastProcessedTxIndex = lastProcessedTxIndex + 1
 								transactionsCount = transactionsCount + 1
 							
-								await this.db.insertTransaction({
+								if (!(await this.db.insertTransaction({
 									index: lastProcessedTxIndex,
 									hash: nextTransactionHash,
 									block_index: nextBlockHeight,
@@ -401,7 +407,10 @@ class XChainDecoder {
 									fee: 0,
 									data: parseResult["data"].toString("hex")
 									
-								})
+								}))){
+									await this.sleep(3000)
+									continue main_parsing
+								}
 							} else {
 								throw new Error("Source missing in valid transaction!")
 							}

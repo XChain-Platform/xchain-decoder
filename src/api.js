@@ -18,13 +18,13 @@ const NODE_PASSWORD =  process.env.NODE_PASSWORD
 const DB_URL =  process.env.DB_URL
 const DB_PORT =  process.env.DB_PORT
 const DECODER_DB_NAME =  process.env.DECODER_DB_NAME
-const DB_USER =  process.env.DB_USER
+const DECODER_DB_USER =  process.env.DECODER_DB_USER
 const DB_PASSWORD =  process.env.DB_PASSWORD
 const DECODER_API_PORT = process.env.DECODER_API_PORT
 
 async function startApi(){
 	//Start the indexer
-	const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD);
+	const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DECODER_DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD);
 	decoder.start()
 
 	// Create the app
