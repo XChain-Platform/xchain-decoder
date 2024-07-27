@@ -173,7 +173,7 @@ class XChainDecoder {
 				let decompiledScript = bitcoin.script.decompile(nextOutput.script)
 				let nextDataBuffer = new Buffer.allocUnsafe(0)
 				
-				if (decompiledScript.length > 0){
+				if ((decompiledScript != null) && (decompiledScript.length > 0)){
 					/*
 					* OP_RETURN
 					*
