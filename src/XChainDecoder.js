@@ -134,7 +134,7 @@ class XChainDecoder {
 				source = bitcoin.address.fromOutputScript(output.script, this.network)
 			} catch(err){
 				//Ignoring specific sources
-				let decompiledScript = bitcoin.script.decompile(output.script)
+				/*let decompiledScript = bitcoin.script.decompile(output.script)
 				if ( //P2PK
 					(decompiledScript.length == 2)
 					&&(Buffer.isBuffer(decompiledScript[0]))
@@ -149,7 +149,9 @@ class XChainDecoder {
 					//Do nothing, null will be returned
 				} else {
 					throw err
-				}
+				}*/
+				
+				//Bitcoinjs-lib didn't find a valid address, ignore it, null will be returned
 			}
 		}
 		
