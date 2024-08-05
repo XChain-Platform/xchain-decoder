@@ -298,6 +298,8 @@ class XChainDecoder {
 		
 		let blocksCount = 0
 		let transactionsCount = 0
+		let validTransactionsCount = 0
+		let outputCount = 0
 		
 		main_parsing:
 		while (true){
@@ -324,7 +326,9 @@ class XChainDecoder {
 				}
 				
 				if (lastProcessedBlockIndex > this.blockchainInfoLastBlock){
-					throw Error("The last processed block height is greater than the last block from the network")
+					console.log("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+")")
+					await sleep(5000)
+					continue
 				}
 			}
 			
@@ -378,6 +382,7 @@ class XChainDecoder {
 						previous_block_hash:block.prevHash.reverse().toString("hex")
 					}
 				))){
+					console.log("Error trying to insert a Block to the database")
 					await this.sleep(3000)
 					continue main_parsing
 				}
@@ -397,7 +402,7 @@ class XChainDecoder {
 						if (parseResult["data"].length > 0){
 							if (parseResult["source"] != null){
 								lastProcessedTxIndex = lastProcessedTxIndex + 1
-								transactionsCount = transactionsCount + 1
+								validTransactionsCount = validTransactionsCount + 1
 							
 								if (!(await this.db.insertTransaction({
 									index: lastProcessedTxIndex,
@@ -418,16 +423,22 @@ class XChainDecoder {
 							}
 						}
 					}
+					
+					outputCount = outputCount + nextTransaction.outs.length
 				}
+				
+				transactionsCount = transactionsCount + transactions.length
 				
 				//If the pendings blocks are enough, then commit the transaction and print statistics
 				if ((blocksQuantity == DB_TRANSACTION_BLOCKS_QUANTITY-1) || (nextBlockHeight == this.blockchainInfoLastBlock)){
-					console.log("Parsing block "+(nextBlockHeight)+"("+nextBlockHash+")")
-					console.log("Inserting data Blocks ("+blocksCount+") Valid Transactions ("+transactionsCount+")")
+					console.log("Parsing block "+(nextBlockHeight)+"("+nextBlockHash+") Txs ("+transactionsCount+") Outputs ("+outputCount+")")
+					console.log("Inserting data Blocks ("+blocksCount+") Valid Transactions ("+validTransactionsCount+")")
 					await this.db.commitTransaction()
 					
 					blocksCount = 0
 					transactionsCount = 0
+					validTransactionsCount = 0
+					outputCount = 0
 					
 					let endTimeStamp = Date.now()
 					
