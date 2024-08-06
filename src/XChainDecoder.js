@@ -164,11 +164,8 @@ class XChainDecoder {
 		
 		//Ignore coin base transactions
 		if (firstInputTxId != "0000000000000000000000000000000000000000000000000000000000000000"){
-		
+			let source = null
 			let dataBuffer = Buffer.allocUnsafe(0)
-			
-			//Get the source from the output spent by the first input of this transaction
-			let source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
 			
 			for (let txOutputIndex=0;txOutputIndex < transaction.outs.length;txOutputIndex++){
 				let nextOutput = transaction.outs[txOutputIndex]
@@ -185,7 +182,9 @@ class XChainDecoder {
 						(decompiledScript.length == 2)
 						&& (decompiledScript[0] == bitcoin.opcodes.OP_RETURN)
 					){
-						let source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
+						if (source != null){
+							source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
+						}	
 						let dataWithoutObfuscation = await this.removeObfuscation(decompiledScript[1], firstInputTxId)
 						//let dataWithoutObfuscation = null
 						
@@ -233,7 +232,9 @@ class XChainDecoder {
 						(decompiledScript.length == 6)
 						&& (decompiledScript[5] == bitcoin.opcodes.OP_CHECKMULTISIG)
 					){
-						let source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
+						if (source != null){
+							source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
+						}
 						
 						let pubkey1 = decompiledScript[1].subarray(1) //removing the 02 at the beginning
 						let pubkey2 = decompiledScript[2].subarray(1) //removing the 02 at the beginning
@@ -262,6 +263,12 @@ class XChainDecoder {
 				if (nextDataBuffer.length > 0){
 					dataBuffer = Buffer.concat([dataBuffer,nextDataBuffer])
 				}
+			}
+			
+			if ((dataBuffer.length > 0) && (source == null)){
+				//Get the source from the output spent by the first input of this transaction
+				//only if there is data and the source was not retrieved before
+				source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
 			}
 			
 			return {data:dataBuffer, source:source, destination:null}
