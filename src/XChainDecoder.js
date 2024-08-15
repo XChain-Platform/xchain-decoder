@@ -334,7 +334,7 @@ class XChainDecoder {
 				
 				if (lastProcessedBlockIndex > this.blockchainInfoLastBlock){
 					console.log("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+")")
-					await sleep(5000)
+					await this.sleep(5000)
 					continue
 				}
 			}
