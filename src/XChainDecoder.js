@@ -280,12 +280,18 @@ class XChainDecoder {
 	async start(){
 		this.db = new Database(this.dbUrl, this.dbPort, this.dbName, this.dbUser, this.dbPassword)
 		
-		await this.db.createDatabase()
-		let dbVerified = await this.db.verifyDatabaseExists()
-		if (!dbVerified){
-			console.log("Database doesn't exist!!!!")
-			throw new Error("Database "+this.dbName+" doesn't exist")
-		}
+
+        // Verify the Decoder database exists
+        let dbStatus   = await this.db.createDatabase();
+        let dbVerified = await this.db.verifyDatabase();
+        if(!dbVerified){
+            util.throwError("Database " + this.dbName + " doesn't exist!");
+        } else {
+            // Verify the Indexer tables exists
+            let tablesVerified = await this.db.verifyTables();
+            if(!tablesVerified)
+                util.throwError("Database " + this.dbName + " tables don't exist!");
+        }
 	
 		console.log("Connected to database!")
 		console.log("Parsing...")
