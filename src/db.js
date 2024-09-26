@@ -3,140 +3,171 @@
 const mariadb = require('mariadb');
 
 class Database {
-	constructor(url, port, dbName, user, password) {
-		this.url = url
-		this.port = port
-		this.dbName = dbName
-		this.user = user
-		this.password = password
-		
+	constructor(host, port, dbName, user, pass){
+        // Database connection information
+        this.host   = host;
+        this.port   = port;
+        this.dbName = dbName;
+        this.user   = user;
+        this.pass   = pass;
 		const DUPLICATED_TRANSACTION = 1
-		
-		let connectionParams = {
-			host: url,
-			user: user,
-			password: password,
-			database: dbName,
-			connectionLimit: 10,
-			//connectTimeout: 0,
-			port: port
-		}
-		
-		this.pool = mariadb.createPool(connectionParams)	 
-		this.transactionConnection = null
+		// Database connection parameters
+        this.connectionParams = {
+            host:     this.host,
+            user:     this.user,
+            password: this.pass,
+            database: this.dbName,
+            port:     this.port
+        };
+        // Database pool connection parameters
+        this.connectionPoolParams = {
+            host:     this.host,
+            user:     this.user,
+            password: this.pass,
+            database: this.dbName,
+            port:     this.port,
+            // Connection options
+            connectionLimit:  10,
+            //connectTimeout: 0,
+            insertIdAsNumber: true
+        };
+        // Setup pool of connections
+        this.pool = mariadb.createPool(this.connectionPoolParams);
+        this.transactionConnection = null;
 	}
 	
 	async sleep(ms) {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 	
-	async createDatabase(){
-		let connectionParams = {
-			host: this.url,
-			user: this.user,
-			password: this.password,
-			port: this.port
-		}
-		
-		console.log("Creating database!")
-		let connection = null
-		let result = null
-		let databaseCreated = false
-		
-		while (!databaseCreated){
-			try {
-				connection = await mariadb.createConnection(connectionParams)
-				result = await connection.query(
-					"CREATE DATABASE IF NOT EXISTS "+this.dbName
-				)
-				databaseCreated = true
-			} catch(err){
-				console.log("There was an error trying to connect to the database. Trying again in a few seconds...")
-				await this.sleep(10000) //Waiting ten seconds
-			}
-		}
-		
-		await connection.end()
-		await this.createTables()
-		return true
-	}
-	
-	async verifyDatabaseExists(){
-		let connectionParams = {
-			host: this.url,
-			user: this.user,
-			password: this.password,
-			port: this.port
-		}
-		
-		while (true){
-			try{
-				let connection = await mariadb.createConnection(connectionParams)
-				
-				let result = await connection.query(
-					"SELECT * FROM information_schema.tables"
-					+" WHERE table_schema = ? AND table_name = ?"
-					, [this.dbName, 'Block']
-				)
-				await connection.end()
-				
-				if (result.length > 0){
-					return true
-				}
-				
-				return false
-			} catch (e) {
-				console.log(e)
-				console.log("There were problems when trying to check if the database exists. Trying again...")
-				await this.sleep(5000)
-			}
-		}
-	}
-	
-	async createTables() {
-		const blockTable = `
-		CREATE TABLE IF NOT EXISTS Block (
-			block_index INT UNIQUE,
-			block_hash VARCHAR(64) UNIQUE,
-			block_time INTEGER,
-			previous_block_hash VARCHAR(64) UNIQUE,
-			PRIMARY KEY (block_hash)
-		) ENGINE=InnoDB`;
-		
-		const transactionTable = `
-		CREATE TABLE IF NOT EXISTS Transaction (
-			tx_index INTEGER UNIQUE,
-			tx_hash VARCHAR(64) UNIQUE,
-			block_index INTEGER NOT NULL,
-			source VARCHAR(64),
-			destination VARCHAR(64),
-			amount INTEGER,
-			fee INTEGER,
-			data BLOB,
-			FOREIGN KEY (block_index) REFERENCES Block(block_index),
-			PRIMARY KEY (tx_hash)
-		) ENGINE=InnoDB`;
-		
-		const blockIndexIndex = `
-		CREATE INDEX IF NOT EXISTS block_block_index_index ON Block (block_index)`;
-		
-		const transactionIndexIndex = `
-		CREATE INDEX IF NOT EXISTS transaction_tx_index_index ON Transaction (tx_index)`;
-		
-		let connection = await this.getConnection()
-		try{
-			await connection.query(blockTable)
-			await connection.query(transactionTable)
-			await connection.query(blockIndexIndex)
-			await connection.query(transactionIndexIndex)
-			
-			await connection.release()
-		} catch(err){
-			console.log("Error trying to create the tables")
-			console.log(err)
-		}
-	}
-	
+
+    // Verify a database exists and return true or false
+    async verifyDatabase(){
+        let connectionParams = {
+            host:     this.host,
+            user:     this.user,
+            password: this.pass,
+            port:     this.port
+        };
+        while(true){
+            try {
+                let db     = await mariadb.createConnection(connectionParams);
+                let result = await db.query("SELECT * FROM information_schema.schemata WHERE schema_name = ?",[this.dbName]);
+                await db.end();
+                if(result.length > 0)
+                    return true;
+                return false;
+            } catch (e){
+                // console.log('e=',e);
+                console.log("There was an error trying to check if the " + this.dbName + " database exists. Trying again in a few seconds...");
+                await util.sleep(5000); // Wait 5 seconds
+            }
+        }
+    }
+
+    // Handle creating a database
+    async createDatabase(){
+        // First time connecting, do not specify database name or we throw error
+        let connectionParams = {
+            host:     this.host,
+            user:     this.user,
+            password: this.pass,
+            port:     this.port
+        };
+        let databaseCreated = false;
+        console.log("Creating " + this.dbName + " database!");
+        while(!databaseCreated){
+            try {
+                let db     = await mariadb.createConnection(connectionParams);
+                let result = await db.query("CREATE DATABASE IF NOT EXISTS " + this.dbName);
+                await db.end();
+                databaseCreated = true;
+            } catch(e){
+                console.log('e=',e);
+                console.log("There was an error trying to connect to the " + this.dbName + " database. Trying again in a few seconds...");
+                await util.sleep(5000); // Waiting 5 seconds
+            }
+        }
+        return true;
+    }
+    
+    // Handle verifying all database tables exist 
+    async verifyTables(){
+        let path  = '/XChainDecoder/src/sql';
+        let files = fs.readdirSync(path);
+        let file  = null;
+        let db    = await this.getConnection();
+        // Loop through SQL files
+        for (file of files){
+            var isSql = file.indexOf('.sql');
+            if(isSql){
+                let table   = file.substring(0, file.indexOf('.sql'));
+                console.log('Verifying ' + table + ' table exists...');
+                try {
+                    let result = await db.query("SELECT * FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",[this.dbName, table]);
+                    if(result.length > 0){
+                        continue;
+                    } else {
+                        await this.createTable(file);
+                    }
+                } catch(e){
+                    console.log('e=',e);
+                    util.throwError('Error while trying to verify ' + table + ' table exists!');
+                    return false;
+                }
+            }
+        }
+        await this.releaseConnection();
+        return true;
+    }
+
+    // Handle creating database tables
+    async createTable(file){
+        let path    = '/XChainDecoder/src/sql';
+        let data    = fs.readFileSync(path + '/' + file, "utf8");
+        let table   = file.substring(0, file.indexOf('.sql'));
+        let db      = await this.getConnection();
+        let queries = data.split(';');
+        let query   = null;
+        console.log('Creating ' + table + ' table and indexes...');
+        // Loop through SQL queries
+        for(query of queries){
+            query = query.trim();
+            // Ignore empty queries
+            if(query=='')
+                continue;
+            try {
+                let result = await db.query(query);
+                if(result.length > 0)
+                    continue;
+            } catch(e){
+                // console.log('e=',e);
+                util.throwError('Error while trying to create ' + table + ' table!');
+            }
+        }
+        // Dont release connection after each table is created, connection released in verifyTables() after ALL tables created and verified
+        // await this.releaseConnection();
+    }
+
+    // Handle getting a database Connection    
+    async getConnection(){
+        if(this.transactionConnection)
+            return this.transactionConnection;
+        var connection = null;
+        while(connection == null){        
+            try {
+                connection = await this.pool.getConnection();
+                // console.log("Connected to database!");
+            } catch (e){
+                console.log("Can't connect to mariadb. Trying again...");
+                connection = null;
+                await util.sleep(1000);
+            }
+        }
+        this.transactionConnection = connection;
+        return connection;
+    }
+
 	async beginTransaction(){
 		if (this.transactionConnection != null){
 			await this.endTransaction()
@@ -176,27 +207,6 @@ class Database {
 		}
 		
 		return false	  
-	}
-	
-	async getConnection() {
-		if (this.transactionConnection){
-			return this.transactionConnection
-		}
-		
-		var connection = null
-		
-		while (connection == null){		
-			try {
-				connection = await this.pool.getConnection()
-				//console.log("Connected to database!")
-			} catch (e){
-				console.log(e)
-				console.log("Can't connect to mariadb. Trying again...")
-				connection = null
-				await this.sleep(1000)
-			}
-		}
-		return connection
 	}
 	
 	async getLastBlock(){
@@ -331,6 +341,83 @@ class Database {
 		await connection.query(dropBlockTable)
 		await connection.release()
 	}
+
+    // Lookup a record in the `index_transactions` table and return record id
+    async getTransactionId(hash){
+        let id    = null;
+        let db    = await this.getConnection();
+        let query = "SELECT id FROM index_transactions WHERE `hash`=? LIMIT 1"
+        try {
+            let rows = await db.query(query, [hash]);
+            if(rows.length > 0)
+                id = rows[0].id;
+        } catch (err) {
+            console.error('Error looking up hash record id in index_transactions table:', err);
+        }
+        await this.releaseConnection();
+        return id;
+    }
+
+    // Create records in the 'index_transactions' table and return record id
+    async createTransaction(hash){
+        // Ignore empty hashes and return hardcoded record id
+        if(hash==null||hash=='')
+            return 1;
+        var id = await this.getTransactionId(hash);
+        // Handle creating record
+        if(id==null){
+            let db    = await this.getConnection();
+            let query = "INSERT INTO index_transactions (`hash`) values (?)"
+            try {
+                let result = await db.query(query, [hash]);
+                if(result.insertId)
+                    id = result.insertId;
+            } catch (err) {
+                console.error('Error trying to create hash record in index_transactions table:', err);
+            }
+            await this.releaseConnection();
+        }
+        return id;
+    }
+
+    // Lookup a record in the `index_addresses` table and return record id
+    async getAddressId(address){
+        let id    = null;
+        let db    = await this.getConnection();
+        let query = "SELECT id FROM index_addresses WHERE `address`=? LIMIT 1"
+        try {
+            let rows = await db.query(query, [address]);
+            if(rows.length > 0)
+                id = rows[0].id;
+        } catch (err) {
+            console.error('Error looking up address record id in index_addresses table:', err);
+        }
+        await this.releaseConnection();
+        return id;
+    }
+
+    // Create records in the 'index_addresses' table and return record id
+    async createAddress(address){
+        // Ignore empty address and return hardcoded record id
+        if(address==null||address=='')
+            return 1;
+        var id = await this.getTransactionId(hash);
+        // Handle creating record
+        if(id==null){
+            let db    = await this.getConnection();
+            let query = "INSERT INTO index_addresses (`address`) values (?)"
+            try {
+                let result = await db.query(query, [address]);
+                if(result.insertId)
+                    id = result.insertId;
+            } catch (err) {
+                console.error('Error trying to create address record in index_addresses table:', err);
+            }
+            await this.releaseConnection();
+        }
+        return id;
+    }
+
 }
 
 module.exports = Database
