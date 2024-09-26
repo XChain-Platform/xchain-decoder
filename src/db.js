@@ -401,7 +401,7 @@ class Database {
         // Ignore empty address and return hardcoded record id
         if(address==null||address=='')
             return 1;
-        var id = await this.getTransactionId(hash);
+        var id = await this.getAddressId(address);
         // Handle creating record
         if(id==null){
             let db    = await this.getConnection();
