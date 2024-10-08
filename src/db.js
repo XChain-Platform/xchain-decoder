@@ -169,6 +169,15 @@ class Database {
         return connection;
     }
 
+	// Handle releasing a connection and freeing it up for additional queries
+	async releaseConnection(){
+        if(this.transactionConnection != null){
+            // console.log("releasing database connection");
+            await this.transactionConnection.release();
+            this.transactionConnection = null;
+        }  
+    }
+
 	async beginTransaction(){
 		if (this.transactionConnection != null){
 			await this.endTransaction()
