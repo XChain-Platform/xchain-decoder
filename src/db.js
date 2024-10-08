@@ -1,6 +1,7 @@
 //const Database = require('./db.js')
 
 const mariadb = require('mariadb');
+const fs      = require('fs');
 
 class Database {
 	constructor(host, port, dbName, user, pass){
