@@ -15,11 +15,11 @@ const NODE_URL =  process.env.NODE_URL
 const NODE_PORT =  process.env.NODE_PORT
 const NODE_USER =  process.env.NODE_USER
 const NODE_PASSWORD =  process.env.NODE_PASSWORD
-const DB_URL =  process.env.DB_URL
-const DB_PORT =  process.env.DB_PORT
+const DB_URL =  process.env.DECODER_DB_HOST
+const DB_PORT =  process.env.DECODER_DB_PORT
 const DECODER_DB_NAME =  process.env.DECODER_DB_NAME
 const DECODER_DB_USER =  process.env.DECODER_DB_USER
-const DB_PASSWORD =  process.env.DB_PASSWORD
+const DB_PASSWORD =  process.env.DECODER_DB_PASS
 const DECODER_API_PORT = process.env.DECODER_API_PORT
 
 async function startApi(){
