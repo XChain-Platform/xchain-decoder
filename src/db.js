@@ -291,6 +291,7 @@ class Database {
 				LEFT JOIN index_addresses ia_source ON ia_source.id = t.source_id 
 				LEFT JOIN index_addresses ia_destination ON ia_destination.id = t.destination_id 
 				WHERE it.hash = ?;
+		`;
 		
 		let connection = await this.getConnection()
 		
