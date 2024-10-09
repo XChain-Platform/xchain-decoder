@@ -2,9 +2,11 @@
 
 const mariadb = require('mariadb');
 const fs      = require('fs');
+const util    = require('./util')
 
 class Database {
 	constructor(host, port, dbName, user, pass){
+        this.sqlPath  = __dirname+'/sql';
         // Database connection information
         this.host   = host;
         this.port   = port;
@@ -94,7 +96,7 @@ class Database {
     
     // Handle verifying all database tables exist 
     async verifyTables(){
-        let path  = '/XChainDecoder/src/sql';
+        let path  = this.sqlPath;
         let files = fs.readdirSync(path);
         let file  = null;
         let db    = await this.getConnection();
@@ -124,7 +126,7 @@ class Database {
 
     // Handle creating database tables
     async createTable(file){
-        let path    = '/XChainDecoder/src/sql';
+        let path    = this.sqlPath;
         let data    = fs.readFileSync(path + '/' + file, "utf8");
         let table   = file.substring(0, file.indexOf('.sql'));
         let db      = await this.getConnection();
@@ -221,7 +223,7 @@ class Database {
 	
 	async getLastBlock(){
 		const query = `
-			SELECT MAX(block_index) AS max_height FROM Block ;
+			SELECT MAX(block_index) AS max_height FROM blocks ;
 		`;
 		
 		let connection = await this.getConnection()
@@ -246,23 +248,25 @@ class Database {
 	
 	async insertBlock(block) {
 		const query = `
-		INSERT INTO Block (
+		INSERT INTO blocks (
         block_index,
-		block_hash,
+		block_hash_id,
         block_time,
-        previous_block_hash
+        previous_block_hash_id
 		) VALUES (?, ?, ?, ?);
 		`;
 		
+		let blockHashId = await this.createTransaction(block.block_hash)
+		let previousBlockHashId = await this.createTransaction(block.previous_block_hash)
 		
 		let connection = await this.getConnection()
 		
 		try {
 			await connection.query(query, [
 				block.block_index,
-				block.block_hash,
+				blockHashId,
 				block.block_time,
-				block.previous_block_hash
+				previousBlockHashId
 			])
 			
 			return true
@@ -277,8 +281,16 @@ class Database {
 	
 	async getTransaction(txid){
 		const query = `
-			SELECT * FROM Transaction WHERE tx_hash = ?;
-		`;
+			SELECT 
+				t.*, 
+				ia_source.address AS source, 
+				ia_destination.address AS destination, 
+				it.hash AS hash 
+				FROM transactions t 
+				LEFT JOIN index_transactions it ON it.id = t.tx_hash_id 
+				LEFT JOIN index_addresses ia_source ON ia_source.id = t.source_id 
+				LEFT JOIN index_addresses ia_destination ON ia_destination.id = t.destination_id 
+				WHERE it.hash = ?;
 		
 		let connection = await this.getConnection()
 		
@@ -298,12 +310,12 @@ class Database {
 	
 	async insertTransaction(tx) {
 		const query = `
-			INSERT INTO Transaction (
+			INSERT INTO transactions (
 			tx_index,
-			tx_hash,
+			tx_hash_id,
 			block_index,
-			source,
-			destination,
+			source_id,
+			destination_id,
 			amount,
 			fee,
 			data
@@ -313,12 +325,16 @@ class Database {
 		let connection = await this.getConnection()
 		
 		try {
+			let txHashId = await this.createTransaction(tx.hash)
+			let sourceId = await this.createAddress(tx.source)
+			let destinationId = await this.createAddress(tx.destination)
+		
 			await connection.query(query, [
 				tx.index,
-				tx.hash,
+				txHashId,
 				tx.block_index,
-				tx.source,
-				tx.destination,
+				sourceId,
+				destinationId,
 				tx.amount,
 				tx.fee,
 				tx.data
@@ -342,13 +358,17 @@ class Database {
 	async dropDatabase(){
 		console.log("Droping database")
 		
-		const dropBlockTable = "DROP TABLE IF EXISTS Block"
-		const dropTransactionTable = "DROP TABLE IF EXISTS Transaction"
+		const dropBlockTable = "DROP TABLE IF EXISTS blocks"
+		const dropTransactionTable = "DROP TABLE IF EXISTS transactions"
+		const dropIndexAddressesTable = "DROP TABLE IF EXISTS index_addresses"
+		const dropIndexTransactionsTable = "DROP TABLE IF EXISTS index_transactions"
 		
 		let connection = await this.getConnection()
 		
 		await connection.query(dropTransactionTable)
 		await connection.query(dropBlockTable)
+		await connection.query(dropIndexAddressesTable)
+		await connection.query(dropIndexTransactionsTable)
 		await connection.release()
 	}
 
