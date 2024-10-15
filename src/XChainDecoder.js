@@ -277,6 +277,43 @@ class XChainDecoder {
 		}
 	}
 	
+	async verifyReorg(){
+		let thereAreDifferences = true
+		let blocksDeleted = []
+	
+		while (thereAreDifferences){
+			let lastBlockIndex = await this.db.getLastBlockIndex()
+			let lastBlock = await this.db.getBlockByIndex(lastBlockIndex)
+			let blockHashFromNode
+			try {
+				blockHashFromNode = await this.connector.getBlockHash(lastBlockIndex)
+			} catch (err){
+				console.log("There was a problem trying to get a block hash from the node. Trying again...")
+				await this.sleep(3000)
+				continue
+			}
+			
+			if (lastBlock["block_hash"] != blockHashFromNode){
+				try {
+					await this.db.deleteBlockByIndex(lastBlockIndex)
+					
+					blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["hash"]})
+				} catch (err){
+					console.log(err)
+					console.log("There was a problem trying to delete a block while verifying a reorg")
+				}
+			} else {
+				thereAreDifferences = false
+			}
+		}
+		
+		if (blocksDeleted.length > 0){
+			await this.db.insertEvent("REORG", blocksDeleted)
+		}
+		
+		return true
+	}
+	
 	async start(){
 		this.db = new Database(this.dbUrl, this.dbPort, this.dbName, this.dbUser, this.dbPassword)
 		
@@ -296,8 +333,8 @@ class XChainDecoder {
 		console.log("Connected to database!")
 		console.log("Parsing...")
 		
-		let lastProcessedBlockIndex = await this.db.getLastBlock()
-		let lastProcessedTxIndex = -1
+		let lastProcessedBlockIndex = await this.db.getLastBlockIndex()
+		let lastProcessedTxIndex = await this.db.getLastTxIndex()
 		
 		if (lastProcessedBlockIndex < this.startBlockIndex - 1){
 			lastProcessedBlockIndex = this.startBlockIndex - 1
@@ -339,7 +376,11 @@ class XChainDecoder {
 				}
 				
 				if (lastProcessedBlockIndex > this.blockchainInfoLastBlock){
-					console.log("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+")")
+					if (lastProcessedBlockIndex == this.startBlockIndex - 1){
+						console.log("Last block from the node ("+this.blockchainInfoLastBlock+") is still behind the starting block ("+this.startBlockIndex+")")	
+					} else {
+						console.log("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+")")
+					}
 					await this.sleep(5000)
 					continue
 				}
@@ -381,7 +422,31 @@ class XChainDecoder {
 				}
 				
 				var block = bitcoin.Block.fromHex(Buffer.from(nextBlockHex,"hex"))
-				
+				let previousBlockHash = block.prevHash.reverse().toString("hex")
+
+				//verify if there is an reorg
+				if (nextBlockHeight > 0){
+					let previousBlock = await this.db.getBlockByIndex(nextBlockHeight-1)
+						
+					//previousBlockHash is not the same, it must be a reorg	
+					if (previousBlockHash != previousBlock.block_hash){
+						await this.db.endTransaction()
+						console.log("A reorg has been detected. Cleaning blocks...")
+						await this.verifyReorg()
+						lastProcessedBlockIndex = await this.db.getLastBlockIndex()
+						lastProcessedTxIndex = await this.db.getLastTxIndex()
+						blocksQuantity = 0
+						transactionsCount = 0
+						validTransactionsCount = 0
+						outputCount = 0
+						startTimeStamp = Date.now()
+						console.log("Blocks were updated")
+						continue
+					}
+				}
+
+
+
 				//If there are no blocks pending then start the database transaction
 				if (blocksQuantity == 0){
 					await this.db.beginTransaction()
