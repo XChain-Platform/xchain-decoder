@@ -167,7 +167,6 @@ class Database {
                 await util.sleep(1000);
             }
         }
-        this.transactionConnection = connection;
         return connection;
     }
 
@@ -208,7 +207,7 @@ class Database {
 		if (this.transactionConnection != null){
 			try {
 				await this.transactionConnection.commit()
-				this.transactionConnection.release()
+				await this.transactionConnection.release()
 				this.transactionConnection = null
 				return true
 			} catch (e){
@@ -221,7 +220,24 @@ class Database {
 		return false	  
 	}
 	
-	async getLastBlock(){
+	async deleteBlockByIndex(blockIndex){
+		await this.beginTransaction()
+		let connection = await this.getConnection()
+		
+		let query = `
+			DELETE FROM transactions WHERE block_index = ?;
+		`;
+		await connection.query(query, [blockIndex])
+		query = `
+			DELETE FROM blocks WHERE block_index = ?;
+		`;
+		await connection.query(query, [blockIndex])
+		await this.commitTransaction()
+		
+		return true
+	}
+	
+	async getLastBlockIndex(){
 		const query = `
 			SELECT MAX(block_index) AS max_height FROM blocks ;
 		`;
@@ -230,7 +246,7 @@ class Database {
 		
 		try {
 			const rows = await connection.query(query)
-			await connection.release()
+			//await connection.release()
 			if (rows.length > 0){
 				if (rows[0]["max_height"] == null){
 					return -1
@@ -243,6 +259,65 @@ class Database {
 		} catch (err) {
 			console.error('Error selecting max block height:', err);
 			return false;
+		} finally {
+			if (this.transactionConnection == null){
+				await connection.release()
+			}
+		}
+	}
+	
+	async getLastTxIndex(){
+		const query = `
+			SELECT MAX(tx_index) AS max_tx_index FROM transactions;
+		`;
+		
+		let connection = await this.getConnection()
+		
+		try {
+			const rows = await connection.query(query)
+			if (rows.length > 0){
+				if (rows[0]["max_tx_index"] == null){
+					return -1
+				} else {
+					return rows[0]["max_tx_index"]
+				}
+			} else {
+				return -1	
+			}
+		} catch (err) {
+			console.error('Error selecting max tx index:', err);
+			return false;
+		} finally {
+			if (this.transactionConnection == null){
+				await connection.release()
+			}
+		}
+	}
+	
+	async getBlockByIndex(blockIndex){
+		const query = `
+			SELECT b.*, it.hash AS block_hash, previous_it.hash AS previous_block_hash FROM blocks b
+			LEFT JOIN index_transactions it ON it.id = b.block_hash_id
+			LEFT JOIN index_transactions previous_it ON previous_it.id = b.previous_block_hash_id
+			WHERE block_index = ?;
+		`;
+		
+		let connection = await this.getConnection()
+		
+		try {
+			const rows = await connection.query(query, [blockIndex])
+			if (rows.length > 0){
+				return rows[0]
+			} else {
+				return null
+			}
+		} catch (err) {
+			console.error('Error selecting max block height:', err);
+			return null
+		} finally {
+			if (this.transactionConnection == null){
+				await connection.release()
+			}
 		}
 	}
 	
@@ -276,6 +351,10 @@ class Database {
 				await this.endTransaction()
 			}
 			return false;
+		} finally {
+			if (this.transactionConnection == null){
+				await connection.release()
+			}
 		}
 	}
 	
@@ -306,6 +385,10 @@ class Database {
 		} catch (err) {
 			console.error('Error selecting a transaction from the db:', err);
 			return false;
+		} finally {
+			if (this.transactionConnection == null){
+				await connection.release()
+			}
 		}
 	}
 	
@@ -352,6 +435,10 @@ class Database {
 				}
 				return false;
 			}
+		} finally {
+			if (this.transactionConnection == null){
+				await connection.release()
+			}
 		}	
 	}
 	
@@ -363,6 +450,7 @@ class Database {
 		const dropTransactionTable = "DROP TABLE IF EXISTS transactions"
 		const dropIndexAddressesTable = "DROP TABLE IF EXISTS index_addresses"
 		const dropIndexTransactionsTable = "DROP TABLE IF EXISTS index_transactions"
+		const dropEventsTable = "DROP TABLE IF EXISTS events"
 		
 		let connection = await this.getConnection()
 		
@@ -370,6 +458,7 @@ class Database {
 		await connection.query(dropBlockTable)
 		await connection.query(dropIndexAddressesTable)
 		await connection.query(dropIndexTransactionsTable)
+		await connection.query(dropEventsTable)
 		await connection.release()
 	}
 
@@ -384,9 +473,13 @@ class Database {
                 id = rows[0].id;
         } catch (err) {
             console.error('Error looking up hash record id in index_transactions table:', err);
-        }
-        await this.releaseConnection();
-        return id;
+        } finally {
+			if (this.transactionConnection == null){
+				await db.release()
+			}
+		}
+        
+		return id;
     }
 
     // Create records in the 'index_transactions' table and return record id
@@ -405,8 +498,11 @@ class Database {
                     id = result.insertId;
             } catch (err) {
                 console.error('Error trying to create hash record in index_transactions table:', err);
-            }
-            await this.releaseConnection();
+            } finally {
+				if (this.transactionConnection == null){
+					await db.release()
+				}
+			}
         }
         return id;
     }
@@ -422,9 +518,12 @@ class Database {
                 id = rows[0].id;
         } catch (err) {
             console.error('Error looking up address record id in index_addresses table:', err);
-        }
-        await this.releaseConnection();
-        return id;
+        } finally {
+			if (this.transactionConnection == null){
+				await db.release()
+			}
+		}
+		return id;
     }
 
     // Create records in the 'index_addresses' table and return record id
@@ -443,12 +542,53 @@ class Database {
                     id = result.insertId;
             } catch (err) {
                 console.error('Error trying to create address record in index_addresses table:', err);
-            }
-            await this.releaseConnection();
+            } finally {
+				if (this.transactionConnection == null){
+					await db.release()
+				}
+			}
         }
         return id;
     }
-
+	
+	async insertEvent(code, data){
+		const query = `
+			INSERT INTO events (
+			time,
+			code,
+			data
+		) VALUES (?, ?, ?);
+		`;
+		
+		let connection = await this.getConnection()
+		
+		try {
+			let timeString = new Date().toISOString().slice(0, 19).replace('T', ' ');
+			let dataString = JSON.stringify(data)
+		
+			await connection.query(query, [
+				timeString,
+				code,
+				dataString
+			])
+			
+			return true
+		} catch (err) {
+			if (err.errno == 1062){
+				return this.DUPLICATED_TRANSACTION
+			} else {
+				console.error('Error inserting event:', err);
+				if (this.transactionConnection){
+					await this.releaseConnection()
+				}
+				return false;
+			}
+		} finally {
+			if (this.transactionConnection == null){
+				await connection.release()
+			}
+		}
+	}
 }
 
 module.exports = Database
