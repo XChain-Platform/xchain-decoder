@@ -1,4 +1,6 @@
 {
+  "name":"xchain-decoder",
+  "version": "0.0.1",
   "dependencies": {
     "axios": "^1.6.7",
     "bip32": "^4.0.0",
@@ -22,6 +24,6 @@
   },
   "scripts": {
     "api": "node ./src/api.js",
-	"test": "mocha --timeout 0 --require ./test/prepareRegtest.test.js"
+    "test": "mocha --timeout 0 --require ./test/prepareRegtest.test.js"
   }
 }
