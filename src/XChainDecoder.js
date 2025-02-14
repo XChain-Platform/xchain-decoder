@@ -8,12 +8,14 @@ const Database = require('./db.js')
 const ecc = require('tiny-secp256k1')
 const BlockchainConnector = require('./BlockchainConnector')
 const CryptoNetworks = require('./CryptoNetworks')
+const bs = require("binary-search")
 
 //We need to init the ecc to parse taproot addresses from output scripts
 bitcoin.initEccLib(ecc);
 
 const CHECK_BLOCK_DELAY_MS = 1000 //1 second to continously ask for new block when all has been parsed
 const MEMPOOL_INTERVAL = 60000 //1 second between mempool checks
+const MEMPOOL_BATCH_SIZE = 1000
 
 const MAGIC_WORD = "XCHN"
 const MAGIC_WORD_BUFFER = Buffer.from(MAGIC_WORD)
@@ -425,10 +427,10 @@ class XChainDecoder {
 				let previousBlockHash = block.prevHash.reverse().toString("hex")
 
 				//verify if there is an reorg
-				if (nextBlockHeight > 0){
-					let previousBlock = await this.db.getBlockByIndex(nextBlockHeight-1)
-						
-					//previousBlockHash is not the same, it must be a reorg	
+				if (nextBlockHeight > this.startBlockIndex){
+					let previousBlock = await this.db.getBlockByIndex(nextBlockHeight - 1)
+
+					//previousBlockHash is not the same, it must be a reorg
 					if (previousBlockHash != previousBlock.block_hash){
 						await this.db.endTransaction()
 						console.log("A reorg has been detected. Cleaning blocks...")
@@ -541,8 +543,104 @@ class XChainDecoder {
 	}
 	
 	async updateMempool(){
-		//console.log("Trying to update mempool...")
-		//TODO: mempool parsing
+		if (!this.mempoolBusy) {
+			let mempoolStartTime = Date.now()
+			this.mempoolBusy = true
+			let rawMempool = []
+			try {
+				let rawMempoolUnordered = await this.connector.getRawMempool()
+
+				for (let nextUnorderedItemIndex in rawMempoolUnordered) {
+					let nextUnorderedItem = rawMempoolUnordered[nextUnorderedItemIndex]
+
+					let newIndex = bs(rawMempool, nextUnorderedItem, function (element, needle) { return needle.localeCompare(element) })
+
+					if (newIndex < 0) {
+						rawMempool.splice(-newIndex - 1, 0, nextUnorderedItem)
+					}
+				}
+
+
+
+			} catch (error) {
+				console.log(error)
+				console.log("There were problems getting the mempool, trying again later.")
+				this.mempoolBusy = false
+				return
+			}
+
+			//let transactionsCount = 0
+			let validTransactionsCount = 0
+			
+			//await this.mempoolDb.beginTransaction()
+			//This deletes the txs that are in the database but not longer in the mempool. Also, it removes
+			//the transactions that already exist in the database, leaving rawMempool only with the new transactions from the mempool
+			let deletedInfo = await this.db.deleteAndCompareTxsNotInList(rawMempool)
+
+			let deletedTransactionsCount = deletedInfo.transactionsDeleted
+			
+			let i = 0
+			while (i < rawMempool.length) {
+				let nextRawMempoolChunk = rawMempool.slice(i, i + MEMPOOL_BATCH_SIZE)
+
+				let nextTxsHex = []
+				try {
+					nextTxsHex = await this.connector.getRawTransactions(nextRawMempoolChunk)
+
+				} catch (err) {
+					console.log(err)
+					console.log("There was an error trying to get raw transactions from the mempool. Trying again...")
+					await this.sleep(1000)
+					continue
+				}
+
+				//for (let nextTxHexIndex in nextTxsHex) {
+				let nextTxHexIndex = 0
+				while (nextTxHexIndex < nextTxsHex.length) { 
+					let nextTxHex = nextTxsHex[nextTxHexIndex]
+
+					if (nextTxHex != null) {
+						let nextTx = bitcoin.Transaction.fromHex(Buffer.from(nextTxHex, "hex"))
+						let nextTransactionHash = nextTx.getId()
+
+						let parseResult = await this.parseTransaction(nextTx)
+
+						if (!(await this.db.insertMempoolTransaction({
+							hash: nextTransactionHash,
+							source: parseResult["source"],
+							destination: parseResult["destination"],
+							amount: parseResult["amount"],
+							fee: 0,
+							data: (parseResult["data"] != null ? parseResult["data"].toString("hex") : null)
+
+						}))) {
+							await this.sleep(3000)
+							continue
+						} else {
+							if ((parseResult["data"] != null) && (parseResult["data"].length > 0)) {
+								validTransactionsCount = validTransactionsCount + 1
+							}
+						}
+
+						//transactionsCount = transactionsCount + 1
+						nextTxHexIndex = nextTxHexIndex + 1
+					}
+				}
+
+				i = i + MEMPOOL_BATCH_SIZE
+				//await this.sleep(10000)
+			}
+
+			//await this.mempoolDb.endTransaction()
+			this.mempoolBusy = false
+			let mempoolEndTime = Date.now()
+			let timeString = this.millisecondsToTimeString(mempoolEndTime - mempoolStartTime)
+
+			console.log("Mempool updated!"
+				+ " Transactions (" + rawMempool.length + " in mempool, " + validTransactionsCount + " valid, " + deletedTransactionsCount + " less) [" + timeString + "]")
+		} else {
+			console.log("Mempool is still busy")
+		}
 	}
 	
 }

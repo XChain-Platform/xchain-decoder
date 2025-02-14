@@ -1,3 +1,4 @@
+const util = require('./util')
 const axios = require('axios');
 axios.defaults.timeout = 5000
 
@@ -183,45 +184,58 @@ class BlockchainConnector {
 		}
 	}
 	
-	async getRawTransaction(txid){
-		let tries = 10
-		
-		while (tries > 0){
-			try {
-				const data = {
-					jsonrpc: '2.0',
-					method: 'getrawtransaction',
-					params: [txid],
-					id: 1
-				}
-				
-				// Make the request to the node
-				const response = await axios.post(this.url, data, {
-					auth: {
-						username: this.rpcUser,
-						password: this.rpcPassword,
+	async getRawTransaction(txid) {
+		return new Promise(async (resolve, reject) => {
+			let maxTries = 10
+			let tries = 0
+			while (tries < maxTries) {
+				tries++
+				try {
+					const data = {
+						jsonrpc: '2.0',
+						method: 'getrawtransaction',
+						params: [txid],
+						id: 1
 					}
-				})
 
-				// Verify if there is a result and return it
-				if (response.data.result) {
-					return response.data.result;
-				} else {
-					throw new Error('Error getting raw transaction');
-				}
-			} catch (error){
-				if (error.code === 'ECONNABORTED'){
-					tries = tries - 1
-					console.log("Getting timeout trying to get a raw transaction, trying again...")
-					//Do nothing, let the while to try again
-				} else {
-					//console.error('Error:', error);
-					throw error;
+					// Make the request to the node
+					const response = await axios.post(this.url, data, {
+						auth: {
+							username: this.rpcUser,
+							password: this.rpcPassword,
+						}
+					})
+
+					// Verify if there is a result and return it
+					if (response.data.result) {
+						resolve(response.data.result);
+						break
+					} else {
+						console.log(response.error)
+						reject('Error getting raw transaction');
+						break
+					}
+				} catch (error) {
+					await util.sleep(500)
 				}
 			}
+
+			if (tries >= maxTries) {
+				reject(null)
+			}
+		})
+	}
+
+	async getRawTransactions(txIdArray) {
+		let requests = []
+
+		for (let nextTxIdIndex in txIdArray) {
+			let nextTxId = txIdArray[nextTxIdIndex]
+
+			requests.push(this.getRawTransaction(nextTxId))
 		}
-		
-		throw new Error("There were problems getting a raw transaction. ")
+
+		return Promise.all(requests)
 	}
 }
 

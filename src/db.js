@@ -3,6 +3,7 @@
 const mariadb = require('mariadb');
 const fs      = require('fs');
 const util    = require('./util')
+const bs = require("binary-search")
 
 class Database {
 	constructor(host, port, dbName, user, pass){
@@ -441,7 +442,53 @@ class Database {
 			}
 		}	
 	}
-	
+
+	async insertMempoolTransaction(tx) {
+		const query = `
+			INSERT INTO mempool_transactions (
+			tx_hash_id,
+			source_id,
+			destination_id,
+			amount,
+			fee,
+			data
+		) VALUES (?, ?, ?, ?, ?, ?);
+		`;
+
+		let connection = await this.getConnection()
+
+		try {
+			let txHashId = await this.createTransaction(tx.hash)
+			let sourceId = await this.createAddress(tx.source)
+			let destinationId = await this.createAddress(tx.destination)
+
+			await connection.query(query, [
+				txHashId,
+				sourceId,
+				destinationId,
+				tx.amount,
+				tx.fee,
+				tx.data
+			])
+
+			return true
+		} catch (err) {
+			if (err.errno == 1062) {
+				return this.DUPLICATED_TRANSACTION
+			} else {
+				console.error('Error inserting mempool transaction:', err);
+				if (this.transactionConnection) {
+					await this.endTransaction()
+				}
+				return false;
+			}
+		} finally {
+			if (this.transactionConnection == null) {
+				await connection.release()
+			}
+		}
+	}
+
 	//This is only used in tests
 	async dropDatabase(){
 		console.log("Droping database")
@@ -588,6 +635,56 @@ class Database {
 				await connection.release()
 			}
 		}
+	}
+
+	async deleteAndCompareTxsNotInList(txidList) {
+		return new Promise(async (resolve, reject) => {
+			let deletedTxHashIds = []
+			let db = await this.getConnection();
+
+			const query = `
+				SELECT 
+					it.hash AS hash,
+					mpt.tx_hash_id AS hash_id
+					FROM mempool_transactions mpt 
+					LEFT JOIN index_transactions it ON it.id = mpt.tx_hash_id;
+			`;
+
+			try {
+				let rows = await db.query(query);
+
+				for (let nextRowIndex in rows) {
+					let nextRow = rows[nextRowIndex]
+
+					const txid = nextRow["hash"]
+					const txHashId = nextRow["hash_id"]
+					const txidIndex = bs(txidList, txid, function (element, needle) { return needle.localeCompare(element) })
+
+					if (txidIndex < 0) {
+						//await thisLevelUp.deleteTransaction(txid)
+						deletedTxHashIds.push(txHashId)
+					} else {
+						txidList.splice(txidIndex, 1)
+					}
+				}
+
+				if (deletedTxHashIds.length > 0) {
+					let deleteQuery = `
+						DELETE FROM mempool_transactions WHERE tx_hash_id IN (`+ deletedTxHashIds.join(",") + `);
+					`
+					await db.query(deleteQuery);
+				}
+
+				resolve({ transactionsDeleted: deletedTxHashIds.length})
+			} catch (err) {
+				console.error('Error querying mempool_transactions:', err);
+				reject(null)
+			} finally {
+				if (this.transactionConnection == null) {
+					await db.release()
+				}
+			}
+		})
 	}
 }
 
