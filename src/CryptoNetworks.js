@@ -18,7 +18,7 @@ class CryptoNetworks {
 			case "bitcoin-mainnet":
 				return 844000
 			case "bitcoin-testnet":
-				return 2816000
+				return 0
 			case "bitcoin-regtest":
 				return 0
 		}
