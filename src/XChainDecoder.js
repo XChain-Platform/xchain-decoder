@@ -1,4 +1,4 @@
-const util = require('util')
+const util = require('./util')
 const BitcoinCore = require('bitcoin-core');
 const crypto = require('crypto');
 const bs58check = require('bs58check')
@@ -27,30 +27,32 @@ const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many transactions need to be processed before inserting the data into the database
 
 class XChainDecoder {
-	constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword) {
-      this.network = CryptoNetworks.getBitcoinJsNetwork(network)
+	constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword, auxPow) {
+		this.network = CryptoNetworks.getBitcoinJsNetwork(network)
 	  
-	  this.connector = new BlockchainConnector(nodeUrl, nodePort, nodeUser, nodePassword)
-	  this.dbUrl = dbUrl
-	  this.dbPort = dbPort
-	  this.dbName = dbName
-	  this.dbUser = dbUser
-	  this.dbPassword = dbPassword
-	  this.startBlockIndex = CryptoNetworks.getFirstBlock(network)
+		this.connector = new BlockchainConnector(nodeUrl, nodePort, nodeUser, nodePassword)
+		this.dbUrl = dbUrl
+		this.dbPort = dbPort
+		this.dbName = dbName
+		this.dbUser = dbUser
+		this.dbPassword = dbPassword
+		this.startBlockIndex = CryptoNetworks.getFirstBlock(network)
 	  
-	  this.db = null
-	  this.mempoolDb = null
-	  this.fm = null
+		this.db = null
+		this.mempoolDb = null
+		this.fm = null
 	  
-	  this.debugTime = {}
+		this.debugTime = {}
 	  
-	  this.synced = false
+		this.synced = false
 	  
-	  this.blockchainInfoLastBlock = -1
-	  this.mempoolInterval = null
-	  this.mempoolBusy = false
-	  
-	  this.stopFlag = false
+		this.blockchainInfoLastBlock = -1
+		this.mempoolInterval = null
+		this.mempoolBusy = false
+
+		this.stopFlag = false
+
+		this.auxPow = auxPow
     }
 	
 	async sleep(ms) {
@@ -162,7 +164,7 @@ class XChainDecoder {
 	
 	async parseTransaction(transaction){
 		let nextTxId = transaction.getId()
-		let firstInputTxId = transaction.ins[0].hash.reverse().toString("hex")
+		let firstInputTxId = util.uint8ArrayToHex(transaction.ins[0].hash.reverse())
 		
 		//Ignore coin base transactions
 		if (firstInputTxId != "0000000000000000000000000000000000000000000000000000000000000000"){
@@ -416,7 +418,12 @@ class XChainDecoder {
 				let nextBlockHex = null				
 				try {
 					nextBlockHash = await this.connector.getBlockHash(nextBlockHeight)
-					nextBlockHex = await this.connector.getBlock(nextBlockHash)
+
+					if (this.auxPow) {
+						nextBlockHex = await this.connector.getBlockWithoutAuxPow(nextBlockHash)
+					} else {
+						nextBlockHex = await this.connector.getBlock(nextBlockHash)
+                    }
 				} catch (e){
 					console.log("Error trying to get next block from the node. Trying again...")
 					await this.sleep(3000)
@@ -424,7 +431,7 @@ class XChainDecoder {
 				}
 				
 				var block = bitcoin.Block.fromHex(Buffer.from(nextBlockHex,"hex"))
-				let previousBlockHash = block.prevHash.reverse().toString("hex")
+				let previousBlockHash = util.uint8ArrayToHex(block.prevHash.reverse())
 
 				//verify if there is an reorg
 				if (nextBlockHeight > this.startBlockIndex){
@@ -459,7 +466,7 @@ class XChainDecoder {
 						block_index:nextBlockHeight,
 						block_hash:nextBlockHash, 
 						block_time:block.timestamp, 
-						previous_block_hash:block.prevHash.reverse().toString("hex")
+						previous_block_hash:util.uint8ArrayToHex(block.prevHash.reverse())
 					}
 				))){
 					console.log("Error trying to insert a Block to the database")
@@ -492,7 +499,7 @@ class XChainDecoder {
 									destination: parseResult["destination"],
 									amount: parseResult["amount"],
 									fee: 0,
-									data: parseResult["data"].toString("hex")
+									data: util.uint8ArrayToHex(parseResult["data"])
 									
 								}))){
 									await this.sleep(3000)
@@ -611,7 +618,7 @@ class XChainDecoder {
 							destination: parseResult["destination"],
 							amount: parseResult["amount"],
 							fee: 0,
-							data: (parseResult["data"] != null ? parseResult["data"].toString("hex") : null)
+						data: (parseResult["data"] != null ? util.uint8ArrayToHex(parseResult["data"]) : null)
 
 						}))) {
 							await this.sleep(3000)
