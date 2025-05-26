@@ -8,6 +8,7 @@ const Database = require('./db.js')
 const ecc = require('tiny-secp256k1')
 const BlockchainConnector = require('./BlockchainConnector')
 const CryptoNetworks = require('./CryptoNetworks')
+const XChainBlockDecoder = require('./XChainBlockDecoder')
 const bs = require("binary-search")
 
 //We need to init the ecc to parse taproot addresses from output scripts
@@ -37,6 +38,7 @@ class XChainDecoder {
         this.dbUser = dbUser
         this.dbPassword = dbPassword
         this.startBlockIndex = CryptoNetworks.getFirstBlock(network)
+        this.xchainBlockDecoder = new XChainBlockDecoder(network)
       
         this.db = null
         this.mempoolDb = null
@@ -165,9 +167,10 @@ class XChainDecoder {
     async parseTransaction(transaction){
         let nextTxId = transaction.getId()
         let firstInputTxId = util.uint8ArrayToHex(transaction.ins[0].hash.reverse())
+        let standardInput = ("standard_input" in transaction.ins[0]?transaction.ins[0]["standard_input"]:true)
         
         //Ignore coin base transactions
-        if (firstInputTxId != "0000000000000000000000000000000000000000000000000000000000000000"){
+        if ((firstInputTxId != "0000000000000000000000000000000000000000000000000000000000000000") && standardInput){
             let source = null
             let dataBuffer = Buffer.allocUnsafe(0)
             let rawData = null
@@ -437,7 +440,7 @@ class XChainDecoder {
                     continue
                 }
                 
-                var block = bitcoin.Block.fromHex(Buffer.from(nextBlockHex,"hex"))
+                var block = this.xchainBlockDecoder.blockFromHex(nextBlockHex)
                 let previousBlockHash = util.uint8ArrayToHex(block.prevHash.reverse())
 
                 //verify if there is an reorg
