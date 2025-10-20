@@ -1,15 +1,15 @@
 const util = require('./util')
-const BitcoinCore = require('bitcoin-core');
-const crypto = require('crypto');
+const crypto = require('crypto')
 const bs58check = require('bs58check')
 const bitcoin = require('bitcoinjs-lib')
-const { createHash } = require('crypto');
+const { createHash } = require('crypto')
 const Database = require('./db.js')
 const ecc = require('tiny-secp256k1')
 const BlockchainConnector = require('./BlockchainConnector')
 const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
 const bs = require("binary-search")
+const textDecoder = new TextDecoder('utf-8')
 
 //We need to init the ecc to parse taproot addresses from output scripts
 bitcoin.initEccLib(ecc);
@@ -509,7 +509,7 @@ class XChainDecoder {
                                     destination: parseResult["destination"],
                                     amount: parseResult["amount"],
                                     fee: 0,
-                                    data: util.uint8ArrayToHex(parseResult["data"])
+                                    data: textDecoder.decode(parseResult["data"])
                                     
                                 }))){
                                     await this.sleep(3000)
