@@ -104,7 +104,7 @@ class XChainDecoder {
                 var cipherKey = txid.substr(0,16)
                 var iv = txid.substr(16,16)
                 
-                var decipher = crypto.createDecipheriv('aes-128-cbc', cipherKey, iv);
+                var decipher = crypto.createDecipheriv('aes-128-ctr', cipherKey, iv);
                 decryptedData = decipher.update(data) // + decipher.final()
                 decryptedData = Buffer.concat([decryptedData, decipher.final()])
             } catch (err){
@@ -125,17 +125,36 @@ class XChainDecoder {
     async getSourceFromOutput(txId, outputIndex){
         let source = null
         let output = null
+        let outputTransaction = null
         
         try {
             //Obtaining the output
             let outputRawTransaction = await this.connector.getRawTransaction(txId)
-            let outputTransaction = bitcoin.Transaction.fromHex(outputRawTransaction)
+            outputTransaction = bitcoin.Transaction.fromHex(outputRawTransaction)
             output = outputTransaction.outs[outputIndex]
         } catch (err){
             //Do nothing, the source will be null
         }
         
         if (output != null){
+            let script = output.script
+            //Check if output is a P2SH. If so, 
+            //then the source address will be extracted 
+            //from the output of the first input instead
+            if (
+                (script.length == 23) //23 bytes for a standard p2sh
+                && (script[0] == 0xa9) //OP_HASH160
+                && (script[1] == 0x14) //PUSH 20 bytes
+                && (script[23 - 1] == 0x87) //OP_EQUAL
+            ){
+                let prevOutputIndex = outputTransaction.ins[0].index
+                let prevTxHash = util.uint8ArrayToHex(outputTransaction.ins[0].hash.reverse())
+                let prevRawTransaction = await this.connector.getRawTransaction(prevTxHash)
+                let prevTransaction = bitcoin.Transaction.fromHex(prevRawTransaction)
+                output = prevTransaction.outs[prevOutputIndex]
+            }
+            
+            
             try {
                 source = bitcoin.address.fromOutputScript(output.script, this.network)
             } catch(err){
@@ -190,9 +209,9 @@ class XChainDecoder {
                         (decompiledScript.length == 2)
                         && (decompiledScript[0] == bitcoin.opcodes.OP_RETURN)
                     ){
-                        if (source != null){
-                            source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
-                        }   
+                        //if (source == null){
+                        //    source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
+                        //}   
                         let dataWithoutObfuscation = await this.removeObfuscation(decompiledScript[1], firstInputTxId)
                         //let dataWithoutObfuscation = null
                         
@@ -240,9 +259,9 @@ class XChainDecoder {
                         (decompiledScript.length == 6)
                         && (decompiledScript[5] == bitcoin.opcodes.OP_CHECKMULTISIG)
                     ){
-                        if (source != null){
-                            source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
-                        }
+                        //if (source == null){
+                        //    source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
+                        //}
                         
                         let pubkey1 = decompiledScript[1].subarray(1) //removing the 02 at the beginning
                         let pubkey2 = decompiledScript[2].subarray(1) //removing the 02 at the beginning
