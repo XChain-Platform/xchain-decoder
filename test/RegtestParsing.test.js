@@ -1,4 +1,19 @@
-// XChainDecoder.test.js
+/*********************************************************************
+ * 
+ * Copyright © 2025 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
+ *
+ * Licensed under the Dankest Community License (Apache License 2.0 + Additional Terms).
+ * You may not use this file except in compliance with that License.
+ * 
+ * A copy of the License is available at:
+ *     https://dankest.llc/license
+ *
+ * This software is provided “AS IS”, without warranties or conditions of any kind.
+ * 
+ ********************************************************************/
+
+ // XChainDecoder.test.js
 const { BIP32Factory } = require('bip32')
 const ecc = require('tiny-secp256k1')
 const bip32 = BIP32Factory(ecc)
