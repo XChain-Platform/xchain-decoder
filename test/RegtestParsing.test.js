@@ -124,8 +124,7 @@ describe('XChainDecoder', () => {
 					console.log("Couldn't get tx ("+txHash+"), trying again in a few seconds...")
 					await sleep(1000)
 				} else {
-					//console.log("tx------------------>")
-					//console.log(tx)
+					console.log("Got tx ("+txHash+")!")
 				}
 			}
 						

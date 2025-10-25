@@ -24,13 +24,14 @@ const Database = require('../src/db.js')
 
 const NETWORK = process.env.NETWORK
 const NODE_URL =  process.env.NODE_URL
+const NODE_PORT =  process.env.NODE_PORT
 const NODE_USER =  process.env.NODE_USER
 const NODE_PASSWORD =  process.env.NODE_PASSWORD
-const DB_URL =  process.env.DB_URL
-const DB_PORT =  process.env.DB_PORT
-const DB_NAME =  process.env.DB_NAME
-const DB_USER =  process.env.DB_USER
-const DB_PASSWORD =  process.env.DB_PASSWORD
+const DB_URL =  process.env.DECODER_DB_HOST
+const DB_PORT =  process.env.DECODER_DB_PORT
+const DB_NAME =  process.env.DECODER_DB_NAME
+const DB_USER =  process.env.DECODER_DB_USER
+const DB_PASSWORD =  process.env.DECODER_DB_PASS
 
 var decoder = null
 
@@ -65,9 +66,10 @@ exports.mochaHooks = {
 	 //Prepare the database	 
 	 db = new Database(DB_URL, DB_PORT, DB_NAME+'_regtest', DB_USER, DB_PASSWORD)
 	 await db.dropDatabase()
-
+	 await db.verifyTables()
+	 
 	 //Prepare the decoder
-	 decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DB_NAME+'_regtest', DB_USER, DB_PASSWORD, NODE_URL, NODE_USER, NODE_PASSWORD);
+	 decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DB_NAME+'_regtest', DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD);
 	 
 	 if (checkNode()){
 	   // Stop regtest node
