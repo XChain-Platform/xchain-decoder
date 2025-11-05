@@ -20,7 +20,7 @@
  ********************************************************************/
 
 // Load required libraries
-const util = require('util')
+const util = require('./util')
 const crypto = require('crypto');
 const bs58check = require('bs58check')
 const bitcoin = require('bitcoinjs-lib')
