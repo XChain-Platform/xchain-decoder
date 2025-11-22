@@ -26,7 +26,7 @@ const util    = require('./util')
 const bs = require("binary-search")
 
 class Database {
-	constructor(host, port, dbName, user, pass){
+    constructor(host, port, dbName, user, pass){
         this.sqlPath  = __dirname+'/sql';
         // Database connection information
         this.host   = host;
@@ -34,8 +34,8 @@ class Database {
         this.dbName = dbName;
         this.user   = user;
         this.pass   = pass;
-		const DUPLICATED_TRANSACTION = 1
-		// Database connection parameters
+        const DUPLICATED_TRANSACTION = 1
+        // Database connection parameters
         this.connectionParams = {
             host:     this.host,
             user:     this.user,
@@ -58,12 +58,12 @@ class Database {
         // Setup pool of connections
         this.pool = mariadb.createPool(this.connectionPoolParams);
         this.transactionConnection = null;
-	}
-	
-	async sleep(ms) {
-		return new Promise((resolve) => setTimeout(resolve, ms));
-	}
-	
+    }
+    
+    async sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+    
 
     // Verify a database exists and return true or false
     async verifyDatabase(){
@@ -191,8 +191,8 @@ class Database {
         return connection;
     }
 
-	// Handle releasing a connection and freeing it up for additional queries
-	async releaseConnection(){
+    // Handle releasing a connection and freeing it up for additional queries
+    async releaseConnection(){
         if(this.transactionConnection != null){
             // console.log("releasing database connection");
             await this.transactionConnection.release();
@@ -200,334 +200,336 @@ class Database {
         }  
     }
 
-	async beginTransaction(){
-		if (this.transactionConnection != null){
-			await this.endTransaction()
-		}
-		
-		this.transactionConnection = await this.getConnection()
-		try {
-			await this.transactionConnection.beginTransaction()
-		} catch(err){
-			throw err
-		}
-		
-		
-	}
-	
-	async endTransaction(){
-		if (this.transactionConnection != null){
-			console.log("rolling back")
-			await this.transactionConnection.rollback()
-			await this.transactionConnection.release()
-			this.transactionConnection = null
-		}  
-	}
-	
-	async commitTransaction(){
-		if (this.transactionConnection != null){
-			try {
-				await this.transactionConnection.commit()
-				await this.transactionConnection.release()
-				this.transactionConnection = null
-				return true
-			} catch (e){
-				console.log(e)
-				console.log("There was an error trying to commit a transaction")
-				this.transactionConnection = null //the transaction is not valid anymore
-			}
-		}
-		
-		return false	  
-	}
-	
-	async deleteBlockByIndex(blockIndex){
-		await this.beginTransaction()
-		let connection = await this.getConnection()
-		
-		let query = `
-			DELETE FROM transactions WHERE block_index = ?;
-		`;
-		await connection.query(query, [blockIndex])
-		query = `
-			DELETE FROM blocks WHERE block_index = ?;
-		`;
-		await connection.query(query, [blockIndex])
-		await this.commitTransaction()
-		
-		return true
-	}
-	
-	async getLastBlockIndex(){
-		const query = `
-			SELECT MAX(block_index) AS max_height FROM blocks ;
-		`;
-		
-		let connection = await this.getConnection()
-		
-		try {
-			const rows = await connection.query(query)
-			//await connection.release()
-			if (rows.length > 0){
-				if (rows[0]["max_height"] == null){
-					return -1
-				} else {
-					return rows[0]["max_height"]
-				}
-			} else {
-				return -1	
-			}
-		} catch (err) {
-			console.error('Error selecting max block height:', err);
-			return false;
-		} finally {
-			if (this.transactionConnection == null){
-				await connection.release()
-			}
-		}
-	}
-	
-	async getLastTxIndex(){
-		const query = `
-			SELECT MAX(tx_index) AS max_tx_index FROM transactions;
-		`;
-		
-		let connection = await this.getConnection()
-		
-		try {
-			const rows = await connection.query(query)
-			if (rows.length > 0){
-				if (rows[0]["max_tx_index"] == null){
-					return -1
-				} else {
-					return rows[0]["max_tx_index"]
-				}
-			} else {
-				return -1	
-			}
-		} catch (err) {
-			console.error('Error selecting max tx index:', err);
-			return false;
-		} finally {
-			if (this.transactionConnection == null){
-				await connection.release()
-			}
-		}
-	}
-	
-	async getBlockByIndex(blockIndex){
-		const query = `
-			SELECT b.*, it.hash AS block_hash, previous_it.hash AS previous_block_hash FROM blocks b
-			LEFT JOIN index_transactions it ON it.id = b.block_hash_id
-			LEFT JOIN index_transactions previous_it ON previous_it.id = b.previous_block_hash_id
-			WHERE block_index = ?;
-		`;
-		
-		let connection = await this.getConnection()
-		
-		try {
-			const rows = await connection.query(query, [blockIndex])
-			if (rows.length > 0){
-				return rows[0]
-			} else {
-				return null
-			}
-		} catch (err) {
-			console.error('Error selecting max block height:', err);
-			return null
-		} finally {
-			if (this.transactionConnection == null){
-				await connection.release()
-			}
-		}
-	}
-	
-	async insertBlock(block) {
-		const query = `
-		INSERT INTO blocks (
+    async beginTransaction(){
+        if (this.transactionConnection != null){
+            await this.endTransaction()
+        }
+        
+        this.transactionConnection = await this.getConnection()
+        try {
+            await this.transactionConnection.beginTransaction()
+        } catch(err){
+            throw err
+        }
+        
+        
+    }
+    
+    async endTransaction(){
+        if (this.transactionConnection != null){
+            console.log("rolling back")
+            await this.transactionConnection.rollback()
+            await this.transactionConnection.release()
+            this.transactionConnection = null
+        }  
+    }
+    
+    async commitTransaction(){
+        if (this.transactionConnection != null){
+            try {
+                await this.transactionConnection.commit()
+                await this.transactionConnection.release()
+                this.transactionConnection = null
+                return true
+            } catch (e){
+                console.log(e)
+                console.log("There was an error trying to commit a transaction")
+                this.transactionConnection = null //the transaction is not valid anymore
+            }
+        }
+        
+        return false      
+    }
+    
+    async deleteBlockByIndex(blockIndex){
+        await this.beginTransaction()
+        let connection = await this.getConnection()
+        
+        let query = `
+            DELETE FROM transactions WHERE block_index = ?;
+        `;
+        await connection.query(query, [blockIndex])
+        query = `
+            DELETE FROM blocks WHERE block_index = ?;
+        `;
+        await connection.query(query, [blockIndex])
+        await this.commitTransaction()
+        
+        return true
+    }
+    
+    async getLastBlockIndex(){
+        const query = `
+            SELECT MAX(block_index) AS max_height FROM blocks ;
+        `;
+        
+        let connection = await this.getConnection()
+        
+        try {
+            const rows = await connection.query(query)
+            //await connection.release()
+            if (rows.length > 0){
+                if (rows[0]["max_height"] == null){
+                    return -1
+                } else {
+                    return rows[0]["max_height"]
+                }
+            } else {
+                return -1   
+            }
+        } catch (err) {
+            console.error('Error selecting max block height:', err);
+            return false;
+        } finally {
+            if (this.transactionConnection == null){
+                await connection.release()
+            }
+        }
+    }
+    
+    async getLastTxIndex(){
+        const query = `
+            SELECT MAX(tx_index) AS max_tx_index FROM transactions;
+        `;
+        
+        let connection = await this.getConnection()
+        
+        try {
+            const rows = await connection.query(query)
+            if (rows.length > 0){
+                if (rows[0]["max_tx_index"] == null){
+                    return -1
+                } else {
+                    return rows[0]["max_tx_index"]
+                }
+            } else {
+                return -1   
+            }
+        } catch (err) {
+            console.error('Error selecting max tx index:', err);
+            return false;
+        } finally {
+            if (this.transactionConnection == null){
+                await connection.release()
+            }
+        }
+    }
+    
+    async getBlockByIndex(blockIndex){
+        const query = `
+            SELECT b.*, it.hash AS block_hash, previous_it.hash AS previous_block_hash FROM blocks b
+            LEFT JOIN index_transactions it ON it.id = b.block_hash_id
+            LEFT JOIN index_transactions previous_it ON previous_it.id = b.previous_block_hash_id
+            WHERE block_index = ?;
+        `;
+        
+        let connection = await this.getConnection()
+        
+        try {
+            const rows = await connection.query(query, [blockIndex])
+            if (rows.length > 0){
+                return rows[0]
+            } else {
+                return null
+            }
+        } catch (err) {
+            console.error('Error selecting max block height:', err);
+            return null
+        } finally {
+            if (this.transactionConnection == null){
+                await connection.release()
+            }
+        }
+    }
+    
+    async insertBlock(block) {
+        const query = `
+        INSERT INTO blocks (
         block_index,
-		block_hash_id,
+        block_hash_id,
         block_time,
         previous_block_hash_id
-		) VALUES (?, ?, ?, ?);
-		`;
-		
-		let blockHashId = await this.createTransaction(block.block_hash)
-		let previousBlockHashId = await this.createTransaction(block.previous_block_hash)
-		
-		let connection = await this.getConnection()
-		
-		try {
-			await connection.query(query, [
-				block.block_index,
-				blockHashId,
-				block.block_time,
-				previousBlockHashId
-			])
-			
-			return true
-		} catch (err) {
-			console.error('Error inserting block:', err);
-			if (this.transactionConnection){
-				await this.endTransaction()
-			}
-			return false;
-		} finally {
-			if (this.transactionConnection == null){
-				await connection.release()
-			}
-		}
-	}
-	
-	async getTransaction(txid){
-		const query = `
-			SELECT 
-				t.*, 
-				ia_source.address AS source, 
-				ia_destination.address AS destination, 
-				it.hash AS hash 
-				FROM transactions t 
-				LEFT JOIN index_transactions it ON it.id = t.tx_hash_id 
-				LEFT JOIN index_addresses ia_source ON ia_source.id = t.source_id 
-				LEFT JOIN index_addresses ia_destination ON ia_destination.id = t.destination_id 
-				WHERE it.hash = ?;
-		`;
-		
-		let connection = await this.getConnection()
-		
-		try {
-			const rows = await connection.query(query,[txid])
-			await connection.release()
-			if (rows.length > 0){
-				return rows[0]
-			} else {
-				return null
-			}
-		} catch (err) {
-			console.error('Error selecting a transaction from the db:', err);
-			return false;
-		} finally {
-			if (this.transactionConnection == null){
-				await connection.release()
-			}
-		}
-	}
-	
-	async insertTransaction(tx) {
-		const query = `
-			INSERT INTO transactions (
-			tx_index,
-			tx_hash_id,
-			block_index,
-			source_id,
-			destination_id,
-			amount,
-			fee,
-			data
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-		`;
-		
-		let connection = await this.getConnection()
-		
-		try {
-			let txHashId = await this.createTransaction(tx.hash)
-			let sourceId = await this.createAddress(tx.source)
-			let destinationId = await this.createAddress(tx.destination)
-		
-			await connection.query(query, [
-				tx.index,
-				txHashId,
-				tx.block_index,
-				sourceId,
-				destinationId,
-				tx.amount,
-				tx.fee,
-				tx.data
-			])
-			
-			return true
-		} catch (err) {
-			if (err.errno == 1062){
-				return this.DUPLICATED_TRANSACTION
-			} else {
-				console.error('Error inserting transaction:', err);
-				if (this.transactionConnection){
-					await this.endTransaction()
-				}
-				return false;
-			}
-		} finally {
-			if (this.transactionConnection == null){
-				await connection.release()
-			}
-		}	
-	}
+        ) VALUES (?, ?, ?, ?);
+        `;
+        
+        let blockHashId = await this.createTransaction(block.block_hash)
+        let previousBlockHashId = await this.createTransaction(block.previous_block_hash)
+        
+        let connection = await this.getConnection()
+        
+        try {
+            await connection.query(query, [
+                block.block_index,
+                blockHashId,
+                block.block_time,
+                previousBlockHashId
+            ])
+            
+            return true
+        } catch (err) {
+            console.error('Error inserting block:', err);
+            if (this.transactionConnection){
+                await this.endTransaction()
+            }
+            return false;
+        } finally {
+            if (this.transactionConnection == null){
+                await connection.release()
+            }
+        }
+    }
+    
+    async getTransaction(txid){
+        const query = `
+            SELECT 
+                t.*, 
+                ia_source.address AS source, 
+                ia_destination.address AS destination, 
+                it.hash AS hash 
+                FROM transactions t 
+                LEFT JOIN index_transactions it ON it.id = t.tx_hash_id 
+                LEFT JOIN index_addresses ia_source ON ia_source.id = t.source_id 
+                LEFT JOIN index_addresses ia_destination ON ia_destination.id = t.destination_id 
+                WHERE it.hash = ?;
+        `;
+        
+        let connection = await this.getConnection()
+        
+        try {
+            const rows = await connection.query(query,[txid])
+            await connection.release()
+            if (rows.length > 0){
+                return rows[0]
+            } else {
+                return null
+            }
+        } catch (err) {
+            console.error('Error selecting a transaction from the db:', err);
+            return false;
+        } finally {
+            if (this.transactionConnection == null){
+                await connection.release()
+            }
+        }
+    }
+    
+    async insertTransaction(tx) {
+        const query = `
+            INSERT INTO transactions (
+            tx_index,
+            tx_hash_id,
+            block_index,
+            source_id,
+            destination_id,
+            amount,
+            fee,
+            data,
+            has_dispenses
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        `;
+        
+        let connection = await this.getConnection()
+        
+        try {
+            let txHashId = await this.createTransaction(tx.hash)
+            let sourceId = await this.createAddress(tx.source)
+            let destinationId = await this.createAddress(tx.destination)
+        
+            await connection.query(query, [
+                tx.index,
+                txHashId,
+                tx.block_index,
+                sourceId,
+                destinationId,
+                tx.amount,
+                tx.fee,
+                tx.data,
+                tx.hasDispenses
+            ])
+            
+            return true
+        } catch (err) {
+            if (err.errno == 1062){
+                return this.DUPLICATED_TRANSACTION
+            } else {
+                console.error('Error inserting transaction:', err);
+                if (this.transactionConnection){
+                    await this.endTransaction()
+                }
+                return false;
+            }
+        } finally {
+            if (this.transactionConnection == null){
+                await connection.release()
+            }
+        }   
+    }
 
-	async insertMempoolTransaction(tx) {
-		const query = `
-			INSERT INTO mempool_transactions (
-			tx_hash_id,
-			source_id,
-			destination_id,
-			amount,
-			fee,
-			data
-		) VALUES (?, ?, ?, ?, ?, ?);
-		`;
+    async insertMempoolTransaction(tx) {
+        const query = `
+            INSERT INTO mempool_transactions (
+            tx_hash_id,
+            source_id,
+            destination_id,
+            amount,
+            fee,
+            data
+        ) VALUES (?, ?, ?, ?, ?, ?);
+        `;
 
-		let connection = await this.getConnection()
+        let connection = await this.getConnection()
 
-		try {
-			let txHashId = await this.createTransaction(tx.hash)
-			let sourceId = await this.createAddress(tx.source)
-			let destinationId = await this.createAddress(tx.destination)
+        try {
+            let txHashId = await this.createTransaction(tx.hash)
+            let sourceId = await this.createAddress(tx.source)
+            let destinationId = await this.createAddress(tx.destination)
 
-			await connection.query(query, [
-				txHashId,
-				sourceId,
-				destinationId,
-				tx.amount,
-				tx.fee,
-				tx.data
-			])
+            await connection.query(query, [
+                txHashId,
+                sourceId,
+                destinationId,
+                tx.amount,
+                tx.fee,
+                tx.data
+            ])
 
-			return true
-		} catch (err) {
-			if (err.errno == 1062) {
-				return this.DUPLICATED_TRANSACTION
-			} else {
-				console.error('Error inserting mempool transaction:', err);
-				if (this.transactionConnection) {
-					await this.endTransaction()
-				}
-				return false;
-			}
-		} finally {
-			if (this.transactionConnection == null) {
-				await connection.release()
-			}
-		}
-	}
+            return true
+        } catch (err) {
+            if (err.errno == 1062) {
+                return this.DUPLICATED_TRANSACTION
+            } else {
+                console.error('Error inserting mempool transaction:', err);
+                if (this.transactionConnection) {
+                    await this.endTransaction()
+                }
+                return false;
+            }
+        } finally {
+            if (this.transactionConnection == null) {
+                await connection.release()
+            }
+        }
+    }
 
-	//This is only used in tests
-	async dropDatabase(){
-		console.log("Droping database")
-		
-		const dropBlockTable = "DROP TABLE IF EXISTS blocks"
-		const dropTransactionTable = "DROP TABLE IF EXISTS transactions"
-		const dropIndexAddressesTable = "DROP TABLE IF EXISTS index_addresses"
-		const dropIndexTransactionsTable = "DROP TABLE IF EXISTS index_transactions"
-		const dropEventsTable = "DROP TABLE IF EXISTS events"
-		
-		let connection = await this.getConnection()
-		
-		await connection.query(dropTransactionTable)
-		await connection.query(dropBlockTable)
-		await connection.query(dropIndexAddressesTable)
-		await connection.query(dropIndexTransactionsTable)
-		await connection.query(dropEventsTable)
-		await connection.release()
-	}
+    //This is only used in tests
+    async dropDatabase(){
+        console.log("Droping database")
+        
+        const dropBlockTable = "DROP TABLE IF EXISTS blocks"
+        const dropTransactionTable = "DROP TABLE IF EXISTS transactions"
+        const dropIndexAddressesTable = "DROP TABLE IF EXISTS index_addresses"
+        const dropIndexTransactionsTable = "DROP TABLE IF EXISTS index_transactions"
+        const dropEventsTable = "DROP TABLE IF EXISTS events"
+        
+        let connection = await this.getConnection()
+        
+        await connection.query(dropTransactionTable)
+        await connection.query(dropBlockTable)
+        await connection.query(dropIndexAddressesTable)
+        await connection.query(dropIndexTransactionsTable)
+        await connection.query(dropEventsTable)
+        await connection.release()
+    }
 
     // Lookup a record in the `index_transactions` table and return record id
     async getTransactionId(hash){
@@ -541,12 +543,12 @@ class Database {
         } catch (err) {
             console.error('Error looking up hash record id in index_transactions table:', err);
         } finally {
-			if (this.transactionConnection == null){
-				await db.release()
-			}
-		}
+            if (this.transactionConnection == null){
+                await db.release()
+            }
+        }
         
-		return id;
+        return id;
     }
 
     // Create records in the 'index_transactions' table and return record id
@@ -566,10 +568,10 @@ class Database {
             } catch (err) {
                 console.error('Error trying to create hash record in index_transactions table:', err);
             } finally {
-				if (this.transactionConnection == null){
-					await db.release()
-				}
-			}
+                if (this.transactionConnection == null){
+                    await db.release()
+                }
+            }
         }
         return id;
     }
@@ -586,11 +588,11 @@ class Database {
         } catch (err) {
             console.error('Error looking up address record id in index_addresses table:', err);
         } finally {
-			if (this.transactionConnection == null){
-				await db.release()
-			}
-		}
-		return id;
+            if (this.transactionConnection == null){
+                await db.release()
+            }
+        }
+        return id;
     }
 
     // Create records in the 'index_addresses' table and return record id
@@ -610,102 +612,237 @@ class Database {
             } catch (err) {
                 console.error('Error trying to create address record in index_addresses table:', err);
             } finally {
-				if (this.transactionConnection == null){
-					await db.release()
-				}
-			}
+                if (this.transactionConnection == null){
+                    await db.release()
+                }
+            }
         }
         return id;
     }
-	
-	async insertEvent(code, data){
-		const query = `
-			INSERT INTO events (
-			time,
-			code,
-			data
-		) VALUES (?, ?, ?);
-		`;
-		
-		let connection = await this.getConnection()
-		
-		try {
-			let timeString = new Date().toISOString().slice(0, 19).replace('T', ' ');
-			let dataString = JSON.stringify(data)
-		
-			await connection.query(query, [
-				timeString,
-				code,
-				dataString
-			])
-			
-			return true
-		} catch (err) {
-			if (err.errno == 1062){
-				return this.DUPLICATED_TRANSACTION
-			} else {
-				console.error('Error inserting event:', err);
-				if (this.transactionConnection){
-					await this.releaseConnection()
-				}
-				return false;
-			}
-		} finally {
-			if (this.transactionConnection == null){
-				await connection.release()
-			}
-		}
-	}
+    
+    async insertEvent(code, data){
+        const query = `
+            INSERT INTO events (
+            time,
+            code,
+            data
+        ) VALUES (?, ?, ?);
+        `;
+        
+        let connection = await this.getConnection()
+        
+        try {
+            let timeString = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            let dataString = JSON.stringify(data)
+        
+            await connection.query(query, [
+                timeString,
+                code,
+                dataString
+            ])
+            
+            return true
+        } catch (err) {
+            if (err.errno == 1062){
+                return this.DUPLICATED_TRANSACTION
+            } else {
+                console.error('Error inserting event:', err);
+                if (this.transactionConnection){
+                    await this.releaseConnection()
+                }
+                return false;
+            }
+        } finally {
+            if (this.transactionConnection == null){
+                await connection.release()
+            }
+        }
+    }
 
-	async deleteAndCompareTxsNotInList(txidList) {
-		return new Promise(async (resolve, reject) => {
-			let deletedTxHashIds = []
-			let db = await this.getConnection();
+    async deleteAndCompareTxsNotInList(txidList) {
+        return new Promise(async (resolve, reject) => {
+            let deletedTxHashIds = []
+            let db = await this.getConnection();
 
-			const query = `
-				SELECT 
-					it.hash AS hash,
-					mpt.tx_hash_id AS hash_id
-					FROM mempool_transactions mpt 
-					LEFT JOIN index_transactions it ON it.id = mpt.tx_hash_id;
-			`;
+            const query = `
+                SELECT 
+                    it.hash AS hash,
+                    mpt.tx_hash_id AS hash_id
+                    FROM mempool_transactions mpt 
+                    LEFT JOIN index_transactions it ON it.id = mpt.tx_hash_id;
+            `;
 
-			try {
-				let rows = await db.query(query);
+            try {
+                let rows = await db.query(query);
 
-				for (let nextRowIndex in rows) {
-					let nextRow = rows[nextRowIndex]
+                for (let nextRowIndex in rows) {
+                    let nextRow = rows[nextRowIndex]
 
-					const txid = nextRow["hash"]
-					const txHashId = nextRow["hash_id"]
-					const txidIndex = bs(txidList, txid, function (element, needle) { return needle.localeCompare(element) })
+                    const txid = nextRow["hash"]
+                    const txHashId = nextRow["hash_id"]
+                    const txidIndex = bs(txidList, txid, function (element, needle) { return needle.localeCompare(element) })
 
-					if (txidIndex < 0) {
-						//await thisLevelUp.deleteTransaction(txid)
-						deletedTxHashIds.push(txHashId)
-					} else {
-						txidList.splice(txidIndex, 1)
-					}
-				}
+                    if (txidIndex < 0) {
+                        //await thisLevelUp.deleteTransaction(txid)
+                        deletedTxHashIds.push(txHashId)
+                    } else {
+                        txidList.splice(txidIndex, 1)
+                    }
+                }
 
-				if (deletedTxHashIds.length > 0) {
-					let deleteQuery = `
-						DELETE FROM mempool_transactions WHERE tx_hash_id IN (`+ deletedTxHashIds.join(",") + `);
-					`
-					await db.query(deleteQuery);
-				}
+                if (deletedTxHashIds.length > 0) {
+                    let deleteQuery = `
+                        DELETE FROM mempool_transactions WHERE tx_hash_id IN (`+ deletedTxHashIds.join(",") + `);
+                    `
+                    await db.query(deleteQuery);
+                }
 
-				resolve({ transactionsDeleted: deletedTxHashIds.length})
-			} catch (err) {
-				console.error('Error querying mempool_transactions:', err);
-				reject(null)
-			} finally {
-				if (this.transactionConnection == null) {
-					await db.release()
-				}
-			}
-		})
-	}
+                resolve({ transactionsDeleted: deletedTxHashIds.length})
+            } catch (err) {
+                console.error('Error querying mempool_transactions:', err);
+                reject(null)
+            } finally {
+                if (this.transactionConnection == null) {
+                    await db.release()
+                }
+            }
+        })
+    }
+    
+    async insertOpenDispenser(openDispenser) {
+        const query = `
+            INSERT INTO open_dispensers (
+            tx_index,
+            address_id,
+            expiration
+        ) VALUES (?, ?, FROM_UNIXTIME(?));
+        `;
+        
+        let connection = await this.getConnection()
+        
+        try {
+            let txIndex = openDispenser.txIndex
+            let addressId = await this.createAddress(openDispenser.address)
+            let expiration = openDispenser.expiration
+            
+            await connection.query(query, [
+                txIndex,
+                addressId,
+                expiration
+            ])
+            
+            return true
+        } catch (err) {
+            if (err.errno == 1062){
+                return this.DUPLICATED_TRANSACTION
+            } else {
+                console.error('Error inserting transaction:', err);
+                if (this.transactionConnection){
+                    await this.endTransaction()
+                }
+                return false;
+            }
+        } finally {
+            if (this.transactionConnection == null){
+                await connection.release()
+            }
+        }   
+    }
+    
+    async insertDispenseOutput(openDispenser) {
+        const query = `
+            INSERT INTO dispenser_outputs (
+            tx_index,
+            vout,
+            destination_id,
+            amount
+        ) VALUES (?, ?, ?, ?);
+        `
+        
+        let connection = await this.getConnection()
+        
+        try {
+            let txIndex = openDispenser.txIndex
+            let vout = openDispenser.vout
+            let destinationId = await this.createAddress(openDispenser.destinationAddress)
+            let amount = openDispenser.amount
+            
+            await connection.query(query, [
+                txIndex,
+                vout,
+                destinationId,
+                amount
+            ])
+            
+            return true
+        } catch (err) {
+            if (err.errno == 1062){
+                return this.DUPLICATED_TRANSACTION
+            } else {
+                console.error('Error inserting transaction:', err);
+                if (this.transactionConnection){
+                    await this.endTransaction()
+                }
+                return false;
+            }
+        } finally {
+            if (this.transactionConnection == null){
+                await connection.release()
+            }
+        }   
+    }
+    
+    async isThereADispenserForAddress(address){
+        let db    = await this.getConnection();
+        let query = 
+            `SELECT COUNT(op.*) AS dispensers_count
+            FROM open_dispensers op 
+            LEFT JOIN index_addresses ia ON ia.id = op.address_id
+            WHERE ia.address = ?`
+        try {
+            let rows = await db.query(query, [address]);
+            if(rows.length > 0)
+                return rows[0]["dispensers_count"] > 0
+        } catch (err) {
+            console.error('Error looking up address record id in index_addresses table:', err);
+        } finally {
+            if (this.transactionConnection == null){
+                await db.release()
+            }
+        }
+        return false;
+    }
+    
+    async deleteOpenDispensers(minExpiration) {
+        const query = `
+            DELETE FROM open_dispensers 
+            WHERE expiration < FROM_UNIXTIME(?);
+        `;
+        
+        let connection = await this.getConnection()
+        
+        try {
+            await connection.query(query, [
+                minExpiration
+            ])
+            
+            return true
+        } catch (err) {
+            if (err.errno == 1062){
+                return this.DUPLICATED_TRANSACTION
+            } else {
+                console.error('Error inserting transaction:', err);
+                if (this.transactionConnection){
+                    await this.endTransaction()
+                }
+                return false;
+            }
+        } finally {
+            if (this.transactionConnection == null){
+                await connection.release()
+            }
+        }   
+    }
 }
 
 module.exports = Database
