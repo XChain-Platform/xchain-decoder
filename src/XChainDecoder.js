@@ -209,6 +209,7 @@ class XChainDecoder {
         let nextTxId = transaction.getId()
         let firstInputTxId = util.uint8ArrayToHex(transaction.ins[0].hash.reverse())
         let standardInput = ("standard_input" in transaction.ins[0]?transaction.ins[0]["standard_input"]:true)
+        let dispenseOutputs = []
         
         //Ignore coin base transactions
         if ((firstInputTxId != "0000000000000000000000000000000000000000000000000000000000000000") && standardInput){
@@ -220,6 +221,21 @@ class XChainDecoder {
                 let nextOutput = transaction.outs[txOutputIndex]
                 let decompiledScript = bitcoin.script.decompile(nextOutput.script)
                 let nextDataBuffer = new Buffer.allocUnsafe(0)
+                
+                let outputAddress = bitcoin.address.fromOutputScript(nextOutput.script, this.network)
+                let outputIsDispense = await this.db.isThereADispenserForAddress(outputAddress)
+                
+                if (outputIdDispense){
+                    let dispenseOutput = {
+                        txIndex:nextTxId,
+                        vout:txOutputIndex,
+                        destinationAddress:outputAddress,
+                        amount:nextOutput.value
+                    }
+                    
+                    dispenseOutputs.push(outputIdDispense)
+                }
+                
                 
                 if ((decompiledScript != null) && (decompiledScript.length > 0)){
                     /*
@@ -326,7 +342,13 @@ class XChainDecoder {
                 source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
             }
             
-            return {data:dataBuffer, rawData: rawData, source:source, destination:null}
+            return {
+                data:dataBuffer, 
+                rawData: rawData, 
+                source:source, 
+                destination:null, 
+                dispenseOutputs:dispenseOutputs
+            }
         } else {
             return null
         }
@@ -525,6 +547,9 @@ class XChainDecoder {
                     continue main_parsing
                 }
                 
+                //Delete all open dispensers that have expired
+                await deleteOpenDispensers(block.timestamp)
+                
                 //Loop through the transactions and saving only the ones that have valid data
                 var transactions = block.transactions
                 blocksCount = blocksCount + 1
@@ -536,27 +561,62 @@ class XChainDecoder {
                     let parseResult = await this.parseTransaction(nextTransaction)
                     
                     if (parseResult != null){
-                    
-                        if (parseResult["data"].length > 0){
-                            if (parseResult["source"] != null){
-                                lastProcessedTxIndex = lastProcessedTxIndex + 1
-                                validTransactionsCount = validTransactionsCount + 1
+                        let dispenseOutputs = parseResult['dispenseOutputs']
+                        
+                        if (//the transaction must have a data and a source or at least some possible dispenses
+                            (
+                                (parseResult["data"].length > 0) 
+                                && 
+                                (parseResult["source"] != null)
+                            )
+                            || dispenseOutputs.length > 0
+                        ){
+                            lastProcessedTxIndex = lastProcessedTxIndex + 1
+                            validTransactionsCount = validTransactionsCount + 1
+                            let decodedData = textDecoder.decode(parseResult["data"])
                             
-                                if (!(await this.db.insertTransaction({
-                                    index: lastProcessedTxIndex,
-                                    hash: nextTransactionHash,
-                                    block_index: nextBlockHeight,
-                                    source: parseResult["source"],
-                                    destination: parseResult["destination"],
-                                    amount: parseResult["amount"],
-                                    fee: 0,
-                                    data: textDecoder.decode(parseResult["data"])
-                                    
-                                }))){
-                                    await this.sleep(3000)
-                                    continue main_parsing
-                                }
+                            if (!(await this.db.insertTransaction({
+                                index: lastProcessedTxIndex,
+                                hash: nextTransactionHash,
+                                block_index: nextBlockHeight,
+                                source: parseResult["source"],
+                                destination: parseResult["destination"],
+                                amount: parseResult["amount"],
+                                fee: 0,
+                                data: decodedData,
+                                hasDispenses: (dispenseOutputs.length > 0?true:false)
+                                
+                            }))){
+                                await this.sleep(3000)
+                                continue main_parsing
                             } else {
+                                //Catch any dispenser message to add it to
+                                //the list of possible dispenses
+                                if (decodedData.startsWith("DISPENSER")){
+                                    let decodedDataSplit = decodedData.split("|")
+                                    let commandVersion = decodedDataSplit[1]
+                                    
+                                    if (parseInt(commandVersion) == 0){
+                                        let giveCoin = decodedDataSplit[2]
+                                        let getCoin = decodedDataSplit[6]
+                                        let getAddress = decodedDataSplit[9]
+                                        let expiration = decodedDataSplit[12]
+                                        
+                                        if ((getCoin != "") || (giveCoin != "")){
+                                            if (!(await this.db.insertOpenDispenser({
+                                                txIndex: lastProcessedTxIndex,
+                                                address: parseResult["source"],
+                                                expiration: expiration
+                                            }))){
+                                                await this.sleep(3000)
+                                                continue main_parsing
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            if ((parseResult["data"].length > 0) && !(parseResult["source"] != null)){
                                 throw new Error("Source missing in valid transaction!")
                             }
                         }
