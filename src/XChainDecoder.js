@@ -222,20 +222,27 @@ class XChainDecoder {
                 let decompiledScript = bitcoin.script.decompile(nextOutput.script)
                 let nextDataBuffer = new Buffer.allocUnsafe(0)
                 
-                let outputAddress = bitcoin.address.fromOutputScript(nextOutput.script, this.network)
-                let outputIsDispense = await this.db.isThereADispenserForAddress(outputAddress)
-                
-                if (outputIdDispense){
-                    let dispenseOutput = {
-                        txIndex:nextTxId,
-                        vout:txOutputIndex,
-                        destinationAddress:outputAddress,
-                        amount:nextOutput.value
-                    }
-                    
-                    dispenseOutputs.push(outputIdDispense)
+                let outputAddress = null
+                try {
+                    outputAddress = bitcoin.address.fromOutputScript(nextOutput.script, this.network)
+                } catch (err){
+                    //the output script has no matching address
                 }
                 
+                if (outputAddress){
+                    let outputIsDispense = await this.db.isThereADispenserForAddress(outputAddress)
+                    
+                    if (outputIsDispense){
+                        let dispenseOutput = {
+                            txIndex:nextTxId,
+                            vout:txOutputIndex,
+                            destinationAddress:outputAddress,
+                            amount:nextOutput.value
+                        }
+                        
+                        dispenseOutputs.push(dispenseOutput)
+                    }
+                }
                 
                 if ((decompiledScript != null) && (decompiledScript.length > 0)){
                     /*
@@ -548,7 +555,7 @@ class XChainDecoder {
                 }
                 
                 //Delete all open dispensers that have expired
-                await deleteOpenDispensers(block.timestamp)
+                await this.db.deleteOpenDispensers(block.timestamp)
                 
                 //Loop through the transactions and saving only the ones that have valid data
                 var transactions = block.transactions

@@ -795,7 +795,7 @@ class Database {
     async isThereADispenserForAddress(address){
         let db    = await this.getConnection();
         let query = 
-            `SELECT COUNT(op.*) AS dispensers_count
+            `SELECT COUNT(*) AS dispensers_count
             FROM open_dispensers op 
             LEFT JOIN index_addresses ia ON ia.id = op.address_id
             WHERE ia.address = ?`
