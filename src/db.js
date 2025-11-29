@@ -234,7 +234,7 @@ class Database {
             } catch (e){
                 console.log(e)
                 console.log("There was an error trying to commit a transaction")
-                this.transactionConnection = null //the transaction is not valid anymore
+                await this.endTransaction()
             }
         }
         
@@ -749,7 +749,7 @@ class Database {
         }   
     }
     
-    async insertDispenseOutput(openDispenser) {
+    async insertDispenseOutput(dispenseOutput) {
         const query = `
             INSERT INTO dispenser_outputs (
             tx_index,
@@ -762,10 +762,10 @@ class Database {
         let connection = await this.getConnection()
         
         try {
-            let txIndex = openDispenser.txIndex
-            let vout = openDispenser.vout
-            let destinationId = await this.createAddress(openDispenser.destinationAddress)
-            let amount = openDispenser.amount
+            let txIndex = await this.createTransaction(dispenseOutput.txIndex)
+            let vout = dispenseOutput.vout
+            let destinationId = await this.createAddress(dispenseOutput.destinationAddress)
+            let amount = dispenseOutput.amount
             
             await connection.query(query, [
                 txIndex,
@@ -779,7 +779,7 @@ class Database {
             if (err.errno == 1062){
                 return this.DUPLICATED_TRANSACTION
             } else {
-                console.error('Error inserting transaction:', err);
+                console.error('Error inserting dispense output:', err);
                 if (this.transactionConnection){
                     await this.endTransaction()
                 }

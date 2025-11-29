@@ -581,6 +581,7 @@ class XChainDecoder {
                             lastProcessedTxIndex = lastProcessedTxIndex + 1
                             validTransactionsCount = validTransactionsCount + 1
                             let decodedData = textDecoder.decode(parseResult["data"])
+                            let hasDispenses = (dispenseOutputs.length > 0?true:false)
                             
                             if (!(await this.db.insertTransaction({
                                 index: lastProcessedTxIndex,
@@ -591,12 +592,21 @@ class XChainDecoder {
                                 amount: parseResult["amount"],
                                 fee: 0,
                                 data: decodedData,
-                                hasDispenses: (dispenseOutputs.length > 0?true:false)
+                                hasDispenses: hasDispenses
                                 
                             }))){
                                 await this.sleep(3000)
                                 continue main_parsing
                             } else {
+                                //Store dispenses outputs
+                                if (hasDispenses){
+                                    for (let nextDispenseOutput of dispenseOutputs){
+                                        this.db.insertDispenseOutput(
+                                            nextDispenseOutput
+                                        )
+                                    }
+                                }
+                            
                                 //Catch any dispenser message to add it to
                                 //the list of possible dispenses
                                 if (decodedData.startsWith("DISPENSER")){
@@ -736,7 +746,7 @@ class XChainDecoder {
                             destination: parseResult["destination"],
                             amount: parseResult["amount"],
                             fee: 0,
-                        data: (parseResult["data"] != null ? util.uint8ArrayToHex(parseResult["data"]) : null)
+                            data: (parseResult["data"] != null ? util.uint8ArrayToHex(parseResult["data"]) : null)
 
                         }))) {
                             await this.sleep(3000)
