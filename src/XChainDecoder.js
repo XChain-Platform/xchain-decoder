@@ -216,7 +216,8 @@ class XChainDecoder {
             let source = null
             let dataBuffer = Buffer.allocUnsafe(0)
             let rawData = null
-            
+            let getSource = false
+                
             for (let txOutputIndex=0;txOutputIndex < transaction.outs.length;txOutputIndex++){
                 let nextOutput = transaction.outs[txOutputIndex]
                 let decompiledScript = bitcoin.script.decompile(nextOutput.script)
@@ -241,6 +242,7 @@ class XChainDecoder {
                         }
                         
                         dispenseOutputs.push(dispenseOutput)
+                        getSource = true
                     }
                 }
                 
@@ -337,15 +339,19 @@ class XChainDecoder {
                 }
             }
             
-            if ((dataBuffer.length > 0) && (source == null)){
+            if (dataBuffer.length > 0){
                 let decompiledData = bitcoin.script.decompile(dataBuffer)
                 dataBuffer = decompiledData[0]
                 
                 if (decompiledData.length > 1){
                     rawData = decompiledData[1]
                 }
-                //Get the source from the output spent by the first input of this transaction
-                //only if there is data and the source was not retrieved before
+                getSource = true
+            }
+            
+            //Get the source from the output spent by the first input of this transaction
+            //only if there is data or a dispense and the source was not retrieved before
+            if (getSource && (source == null)){
                 source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
             }
             
