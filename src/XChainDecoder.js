@@ -606,9 +606,9 @@ class XChainDecoder {
                             } else {
                                 //Store dispenses outputs
                                 if (hasDispenses){
-                                    for (let nextDispenseOutput of dispenseOutputs){
-                                        this.db.insertDispenseOutput(
-                                            nextDispenseOutput
+                                    for (let nextOutput of dispenseOutputs){
+                                        this.db.insertTransactionOutput(
+                                            nextOutput
                                         )
                                     }
                                 }
@@ -626,7 +626,7 @@ class XChainDecoder {
                                         let expiration = decodedDataSplit[12]
                                         
                                         if ((getCoin != "") || (giveCoin != "")){
-                                            if (!(await this.db.insertOpenDispenser({
+                                            if (!(await this.db.insertDispenser({
                                                 txIndex: lastProcessedTxIndex,
                                                 address: parseResult["source"],
                                                 expiration: expiration
