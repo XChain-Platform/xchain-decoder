@@ -771,7 +771,7 @@ class Database {
                 txIndex,
                 vout,
                 destinationId,
-                amount
+                amount.toString()
             ])
             
             return true
