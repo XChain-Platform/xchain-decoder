@@ -25,6 +25,8 @@ const fs      = require('fs');
 const util    = require('./util')
 const bs = require("binary-search")
 
+const SATOSHIS_DECIMALS = 8
+
 class Database {
     constructor(host, port, dbName, user, pass){
         this.sqlPath  = __dirname+'/sql';
@@ -239,6 +241,23 @@ class Database {
         }
         
         return false      
+    }
+    
+    bigIntSatoshiToDecimalsString(bigIntValue) {
+        const strBigInt = bigIntValue.toString();
+        const bigIntLength = strBigInt.length;
+
+        if (bigIntLength <= SATOSHIS_DECIMALS) {
+            let missingZeros = SATOSHIS_DECIMALS - bigIntLength;
+            let decimalPart = '0'.repeat(missingZeros) + strBigInt;
+            return `0.${decimalPart}`;
+        }
+
+        const decimalSeparatorIndex = bigIntLength - SATOSHIS_DECIMALS;
+        const integerPart = strBigInt.slice(0, decimalSeparatorIndex);
+        const decimalPart = strBigInt.slice(decimalSeparatorIndex);
+
+        return `${integerPart}.${decimalPart}`;
     }
     
     async deleteBlockByIndex(blockIndex){
@@ -765,13 +784,13 @@ class Database {
             let txIndex = await this.createTransaction(dispenseOutput.txIndex)
             let vout = dispenseOutput.vout
             let destinationId = await this.createAddress(dispenseOutput.destinationAddress)
-            let amount = dispenseOutput.amount
+            let amount = this.bigIntSatoshiToDecimalsString(dispenseOutput.amount)
             
             await connection.query(query, [
                 txIndex,
                 vout,
                 destinationId,
-                amount.toString()
+                amount
             ])
             
             return true
