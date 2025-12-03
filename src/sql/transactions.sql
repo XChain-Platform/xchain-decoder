@@ -7,7 +7,6 @@ CREATE TABLE transactions (
     destination_id INTEGER UNSIGNED,           -- id of record in index_addresses
     amount         BIGINT,                     -- BTC amount sent
     fee            BIGINT,                     -- BTC Fee paid (miners fee)
-    has_dispenses  BOOLEAN NOT NULL DEFAULT 0, -- true if the tx has outputs that could target a dispenser
     data           MEDIUMTEXT                  -- Decoded data
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 

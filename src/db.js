@@ -442,8 +442,7 @@ class Database {
             destination_id,
             amount,
             fee,
-            data,
-            has_dispenses
+            data
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
         `;
         
@@ -462,8 +461,7 @@ class Database {
                 destinationId,
                 tx.amount,
                 tx.fee,
-                tx.data,
-                tx.hasDispenses
+                tx.data
             ])
             
             return true
