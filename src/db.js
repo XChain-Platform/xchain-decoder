@@ -709,9 +709,9 @@ class Database {
         })
     }
     
-    async insertOpenDispenser(openDispenser) {
+    async insertDispenser(openDispenser) {
         const query = `
-            INSERT INTO open_dispensers (
+            INSERT INTO dispensers (
             tx_index,
             address_id,
             expiration
@@ -749,9 +749,9 @@ class Database {
         }   
     }
     
-    async insertDispenseOutput(dispenseOutput) {
+    async insertTransactionOutput(dispenseOutput) {
         const query = `
-            INSERT INTO dispenser_outputs (
+            INSERT INTO transaction_outputs (
             tx_index,
             vout,
             destination_id,
@@ -796,7 +796,7 @@ class Database {
         let db    = await this.getConnection();
         let query = 
             `SELECT COUNT(*) AS dispensers_count
-            FROM open_dispensers op 
+            FROM dispensers op 
             LEFT JOIN index_addresses ia ON ia.id = op.address_id
             WHERE ia.address = ?`
         try {
@@ -815,7 +815,7 @@ class Database {
     
     async deleteOpenDispensers(minExpiration) {
         const query = `
-            DELETE FROM open_dispensers 
+            DELETE FROM dispensers 
             WHERE expiration < FROM_UNIXTIME(?);
         `;
         
