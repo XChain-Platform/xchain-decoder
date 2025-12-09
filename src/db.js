@@ -443,7 +443,7 @@ class Database {
             amount,
             fee,
             data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
         `;
         
         let connection = await this.getConnection()

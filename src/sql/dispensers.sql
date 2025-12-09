@@ -1,5 +1,5 @@
 DROP TABLE IF EXISTS dispenser;
-CREATE TABLE dispenser (
+CREATE TABLE dispensers (
     tx_index       INTEGER UNSIGNED,
     address_id     INTEGER UNSIGNED,
     expiration     DATETIME,
