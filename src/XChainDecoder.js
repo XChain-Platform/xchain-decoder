@@ -46,6 +46,7 @@ const P2SH_BUFFER = Buffer.from("p2sh")
 const P2WSH_BUFFER = Buffer.from("p2wsh")
 
 const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
+const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node need to have to start parsing
 
 const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many transactions need to be processed before inserting the data into the database
 
@@ -441,6 +442,9 @@ class XChainDecoder {
         let validTransactionsCount = 0
         let outputCount = 0
         
+        
+        let nodeSyncedProblem = false
+        
         main_parsing:
         while (true){
             if (this.stopFlag){
@@ -456,6 +460,19 @@ class XChainDecoder {
             if (!lastBlockchainInfo || (lastProcessedBlockIndex >= this.blockchainInfoLastBlock)){
                 try {
                     lastBlockchainInfo = await this.connector.getBlockchainInfo()
+                    
+                    if (lastBlockchainInfo["verificationprogress"] < MIN_VERIFICATION_PROGRESS_TO_PARSE){
+                        if (!nodeSyncedProblem){
+                            console.log("The node is not synced. Waiting for it to synchronize...")
+                        }
+                        
+                        lastBlockchainInfo = null
+                        nodeSyncedProblem = true
+                        await this.sleep(3000)
+                        continue
+                    } else {
+                        nodeSyncedProblem = false
+                    }
                     
                     this.blockchainInfoLastBlock = lastBlockchainInfo["blocks"]
                 } catch (e){
