@@ -81,7 +81,7 @@ class XChainBlockDecoder {
                 if (witnessCommit) block.witnessCommit = witnessCommit;
                 return block; 
             default:
-                return bitcoin.Block.fromHex(blockHex)
+                return bitcoinjs.Block.fromBuffer(buffer)
         }
     }
 }
