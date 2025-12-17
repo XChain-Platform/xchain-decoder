@@ -111,27 +111,23 @@ class CryptoNetworks {
     // Handle getting first block for a given network
     // TODO: this config data should come from xchain-hub (https://github.com/XChain-platform/xchain-hub/issues/1)
     static getFirstBlock(networkName){
-        let block = 0;
         switch(networkName){
             case "bitcoin-mainnet":
-                block = 900000;
+                return 900000;
             case "bitcoin-testnet":
-                block = 100000;
+                return 100000;
             case "litecoin-mainnet":
-                block = 3000000;
+                return 3000000;
             case "litecoin-testnet":
-                block = 4470000;
+                return 4470000;
             case "dogecoin-mainnet":
-                block = 6000000;
+                return 6000000;
             case "dogecoin-testnet":
-                block = 19900000;
+                return 19900000;
             // All regtest networks start parsing at block 0
-            case "bitcoin-regtest":
-            case "litecoin-regtest":
-            case "dogecoin-regtest":
-                block = 0;
+            default:
+                return 0;
         }
-        return block;
     }
 }
 
