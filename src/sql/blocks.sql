@@ -4,7 +4,7 @@ CREATE TABLE blocks (
     block_time               INTEGER UNSIGNED,
     block_hash_id            INTEGER UNSIGNED,  -- id of record in index_transactions table
     previous_block_hash_id   INTEGER UNSIGNED   -- id of record in index_transactions table
-) ENGINE=MyISAM DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
 CREATE INDEX block_hash_id          ON blocks (block_hash_id);
 CREATE INDEX previous_block_hash_id ON blocks (previous_block_hash_id);

@@ -4,5 +4,5 @@ CREATE TABLE events (
     time DATETIME,
     code VARCHAR(32),
     data TEXT
-) ENGINE=MyISAM DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 

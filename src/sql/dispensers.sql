@@ -4,5 +4,5 @@ CREATE TABLE dispensers (
     address_id     INTEGER UNSIGNED,
     expiration     DATETIME,
     PRIMARY KEY(tx_index, address_id)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
