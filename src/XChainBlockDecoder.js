@@ -17,21 +17,21 @@ class XChainBlockDecoder {
     }
 
     transactionFromHex(txHex){
-        let txBuffer = Buffer.from(txHex, "hex")
-
         if (this.coin === "litecoin") {
-            // Litecoin MWEB transactions have marker=0x00 and flag=0x08.
-            // bitcoinjs-lib resets to offset 4 when flag != 0x01, misreading the
-            // remaining bytes as input/output counts and hitting a UInt64 range error.
-            // Strip the 2-byte marker+flag so it parses as a normal transaction.
-            const marker = txBuffer.readUInt8(4)
-            const flag   = txBuffer.readUInt8(5)
-            if (marker === 0x00 && flag === LITECOIN_HOGEX_FLAG) {
-                txBuffer = Buffer.concat([txBuffer.slice(0, 4), txBuffer.slice(6)])
+            const marker = txHex.substr(8, 2)
+            const flag   = txHex.substr(10, 2)
+            if (
+                (txHex.substr(0, 8) === "01000000" || txHex.substr(0, 8) === "02000000") &&
+                marker === "00" &&
+                (flag === "08" || flag === "09")
+            ) {
+                // Strip the 2-byte marker+flag (MWEB flag 0x08, or segwit+MWEB 0x09).
+                // bitcoinjs-lib misreads these flags causing UInt64 range errors.
+                txHex = txHex.substr(0, 8) + txHex.substr(12)
             }
         }
-
-        return transaction_js_1.Transaction.fromBuffer(txBuffer)
+        // Non-strict mode ignores trailing MWEB extension data after the tx.
+        return transaction_js_1.Transaction.fromBuffer(Buffer.from(txHex, "hex"), true)
     }
     
     doubleSha256AndReverse(data){
