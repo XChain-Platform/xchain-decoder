@@ -179,7 +179,8 @@ class XChainDecoder {
             
             
             try {
-                source = bitcoin.address.fromOutputScript(output.script, this.network)
+                if (!this.isFutureSegwitScript(output.script))
+                    source = bitcoin.address.fromOutputScript(output.script, this.network)
             } catch(err){
                 //Ignoring specific sources
                 /*let decompiledScript = bitcoin.script.decompile(output.script)
@@ -206,6 +207,13 @@ class XChainDecoder {
         return source
     }
     
+    isFutureSegwitScript(script) {
+        // Native segwit scripts start with the witness version opcode.
+        // OP_0=0x00 (v0), OP_1=0x51 (v1/taproot) are handled by bitcoinjs-lib.
+        // OP_2=0x52 and above are "future" versions that trigger a console warning.
+        return script.length >= 2 && script[0] >= 0x52
+    }
+
     async parseTransaction(transaction){
         let nextTxId = transaction.getId()
         let firstInputTxId = util.uint8ArrayToHex(transaction.ins[0].hash.reverse())
@@ -226,7 +234,8 @@ class XChainDecoder {
                 
                 let outputAddress = null
                 try {
-                    outputAddress = bitcoin.address.fromOutputScript(nextOutput.script, this.network)
+                    if (!this.isFutureSegwitScript(nextOutput.script))
+                        outputAddress = bitcoin.address.fromOutputScript(nextOutput.script, this.network)
                 } catch (err){
                     //the output script has no matching address
                 }
