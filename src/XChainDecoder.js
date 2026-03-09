@@ -754,7 +754,7 @@ class XChainDecoder {
                     let nextTxHex = nextTxsHex[nextTxHexIndex]
 
                     if (nextTxHex != null) {
-                        let nextTx = bitcoin.Transaction.fromHex(Buffer.from(nextTxHex, "hex"))
+                        let nextTx = this.xchainBlockDecoder.transactionFromHex(nextTxHex)
                         let nextTransactionHash = nextTx.getId()
 
                         let parseResult = await this.parseTransaction(nextTx)
