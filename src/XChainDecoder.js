@@ -764,6 +764,13 @@ class XChainDecoder {
 
                     if (nextTxHex != null) {
                         let nextTx = this.xchainBlockDecoder.transactionFromHex(nextTxHex)
+
+                        if (nextTx.ins.length === 0) {
+                            // HogEx / MWEB-only transactions have no inputs and carry no XChain data
+                            nextTxHexIndex = nextTxHexIndex + 1
+                            continue
+                        }
+
                         let nextTransactionHash = nextTx.getId()
 
                         let parseResult = await this.parseTransaction(nextTx)
