@@ -156,7 +156,7 @@ class XChainDecoder {
             outputTransaction = bitcoin.Transaction.fromHex(outputRawTransaction)
             output = outputTransaction.outs[outputIndex]
         } catch (err){
-            //Do nothing, the source will be null
+            console.error(`getSourceFromOutput: failed to fetch tx ${txId} (output ${outputIndex}): ${err.message}`)
         }
         
         if (output != null){
@@ -281,24 +281,30 @@ class XChainDecoder {
                                 if (dataWithoutObfuscation.subarray(MAGIC_WORD.length).equals(P2SH_BUFFER)){
                                     for (let txInputIndex=0;txInputIndex < transaction.ins.length;txInputIndex++){
                                         let nextInput = transaction.ins[txInputIndex]
-                                        
-                                        let decodedScriptSig = bitcoin.script.decompile(nextInput["script"])
-                                        let decodedRedeemScript = bitcoin.script.decompile(decodedScriptSig[2])
-                                        let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
-                                        nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
+                                        try {
+                                            let decodedScriptSig = bitcoin.script.decompile(nextInput["script"])
+                                            let decodedRedeemScript = bitcoin.script.decompile(decodedScriptSig[2])
+                                            let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
+                                            nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
+                                        } catch (e) {
+                                            console.error(`P2SH data extraction failed for input ${txInputIndex} of tx ${nextTxId}: ${e.message}`)
+                                        }
                                     }
-                                    
+
                                 /*
                                 * P2WSH
                                 *
-                                */  
+                                */
                                 } else if (dataWithoutObfuscation.subarray(MAGIC_WORD.length).equals(P2WSH_BUFFER)){
                                     for (let txInputIndex=0;txInputIndex < transaction.ins.length;txInputIndex++){
                                         let nextInput = transaction.ins[txInputIndex]
-                                        
-                                        let decodedRedeemScript = bitcoin.script.decompile(nextInput["witness"][2])
-                                        let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
-                                        nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
+                                        try {
+                                            let decodedRedeemScript = bitcoin.script.decompile(nextInput["witness"][2])
+                                            let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
+                                            nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
+                                        } catch (e) {
+                                            console.error(`P2WSH data extraction failed for input ${txInputIndex} of tx ${nextTxId}: ${e.message}`)
+                                        }
                                     }
                                 } else {
                                     nextDataBuffer = Buffer.concat([nextDataBuffer,dataWithoutObfuscation.subarray(MAGIC_WORD.length)])
@@ -661,8 +667,8 @@ class XChainDecoder {
                                 }
                             }
                         } else {
-                            if ((parseResult["data"].length > 0) && !(parseResult["source"] != null)){
-                                throw new Error("Source missing in valid transaction!")
+                            if ((parseResult["data"].length > 0) && (parseResult["source"] == null)){
+                                console.error(`Skipping tx ${nextTransactionHash}: XChain data found but source address could not be resolved`)
                             }
                         }
                     }
