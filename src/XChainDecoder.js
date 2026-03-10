@@ -752,7 +752,8 @@ class XChainDecoder {
 
                 } catch (err) {
                     console.log(err)
-                    console.log("There was an error trying to get raw transactions from the mempool. Trying again...")
+                    console.log("There was an error trying to get raw transactions from the mempool. Skipping batch and continuing...")
+                    i = i + MEMPOOL_BATCH_SIZE
                     await this.sleep(1000)
                     continue
                 }

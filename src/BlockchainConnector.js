@@ -238,7 +238,7 @@ class BlockchainConnector {
                         params: [txid],
                         id: 1
                     }
-                    
+
                     // Make the request to the node
                     const response = await axios.post(this.url, data, {
                         auth: {
@@ -252,17 +252,21 @@ class BlockchainConnector {
                         resolve(response.data.result);
                         break
                     } else {
-                        console.log(response.error)
-                        reject('Error getting raw transaction');
+                        const rpcError = response.data.error
+                        console.log('RPC error getting raw transaction:', rpcError)
+                        reject(new Error(rpcError ? rpcError.message : 'Error getting raw transaction'));
                         break
                     }
                 } catch (error){
-                    await this.sleep(500)
+                    // -429 Work queue depth exceeded: back off longer before retrying
+                    const isQueueFull = error.response?.status === 429 ||
+                        error.response?.data?.error?.code === -429
+                    await this.sleep(isQueueFull ? 5000 : 500)
                 }
             }
-            
+
             if (tries >= maxTries){
-                reject(null)
+                reject(new Error(`getRawTransaction failed after ${maxTries} attempts for txid ${txid}`))
             }
         })
     }
