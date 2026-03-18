@@ -636,6 +636,7 @@ class XChainDecoder {
                             } else {
                                 //Store dispenses outputs
                                 for (let nextOutput of dispenseOutputs){
+                                    nextOutput.txIndex = lastProcessedTxIndex
                                     this.db.insertTransactionOutput(
                                         nextOutput
                                     )

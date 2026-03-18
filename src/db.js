@@ -779,7 +779,7 @@ class Database {
         let connection = await this.getConnection()
         
         try {
-            let txIndex = await this.createTransaction(dispenseOutput.txIndex)
+            let txIndex = dispenseOutput.txIndex
             let vout = dispenseOutput.vout
             let destinationId = await this.createAddress(dispenseOutput.destinationAddress)
             let amount = this.bigIntSatoshiToDecimalsString(dispenseOutput.amount)
