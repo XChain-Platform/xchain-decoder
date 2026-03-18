@@ -208,10 +208,16 @@ class XChainDecoder {
     }
     
     isFutureSegwitScript(script) {
-        // Native segwit scripts start with the witness version opcode.
-        // OP_0=0x00 (v0), OP_1=0x51 (v1/taproot) are handled by bitcoinjs-lib.
-        // OP_2=0x52 and above are "future" versions that trigger a console warning.
-        return script.length >= 2 && script[0] >= 0x52
+        // Native segwit scripts: version byte (OP_0..OP_16) + push length + witness program
+        // Total length is 4-42 bytes.  OP_0 (v0) and OP_1 (v1/taproot) are handled by
+        // bitcoinjs-lib; OP_2-OP_16 (0x52-0x60) are "future" versions that trigger a
+        // console warning.  Must also verify the push-length byte matches, otherwise
+        // non-segwit scripts like P2PKH (starts with OP_DUP=0x76) would be misclassified.
+        if (script.length < 4 || script.length > 42) return false
+        let version = script[0]
+        if (version < 0x52 || version > 0x60) return false
+        let pushLen = script[1]
+        return pushLen >= 2 && pushLen <= 40 && script.length === pushLen + 2
     }
 
     async parseTransaction(transaction){
