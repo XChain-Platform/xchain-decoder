@@ -416,7 +416,6 @@ class Database {
         
         try {
             const rows = await connection.query(query,[txid])
-            await connection.release()
             if (rows.length > 0){
                 return rows[0]
             } else {
@@ -677,53 +676,50 @@ class Database {
     }
 
     async deleteAndCompareTxsNotInList(txidList) {
-        return new Promise(async (resolve, reject) => {
-            let deletedTxHashIds = []
-            let db = await this.getConnection();
+        let deletedTxHashIds = []
+        let db = await this.getConnection();
 
-            const query = `
-                SELECT 
-                    it.hash AS hash,
-                    mpt.tx_hash_id AS hash_id
-                    FROM mempool_transactions mpt 
-                    LEFT JOIN index_transactions it ON it.id = mpt.tx_hash_id;
-            `;
+        const query = `
+            SELECT
+                it.hash AS hash,
+                mpt.tx_hash_id AS hash_id
+                FROM mempool_transactions mpt
+                LEFT JOIN index_transactions it ON it.id = mpt.tx_hash_id;
+        `;
 
-            try {
-                let rows = await db.query(query);
+        try {
+            let rows = await db.query(query);
 
-                for (let nextRowIndex in rows) {
-                    let nextRow = rows[nextRowIndex]
+            for (let nextRowIndex in rows) {
+                let nextRow = rows[nextRowIndex]
 
-                    const txid = nextRow["hash"]
-                    const txHashId = nextRow["hash_id"]
-                    const txidIndex = bs(txidList, txid, function (element, needle) { return needle.localeCompare(element) })
+                const txid = nextRow["hash"]
+                const txHashId = nextRow["hash_id"]
+                const txidIndex = bs(txidList, txid, function (element, needle) { return needle.localeCompare(element) })
 
-                    if (txidIndex < 0) {
-                        //await thisLevelUp.deleteTransaction(txid)
-                        deletedTxHashIds.push(txHashId)
-                    } else {
-                        txidList.splice(txidIndex, 1)
-                    }
-                }
-
-                if (deletedTxHashIds.length > 0) {
-                    let deleteQuery = `
-                        DELETE FROM mempool_transactions WHERE tx_hash_id IN (`+ deletedTxHashIds.join(",") + `);
-                    `
-                    await db.query(deleteQuery);
-                }
-
-                resolve({ transactionsDeleted: deletedTxHashIds.length})
-            } catch (err) {
-                console.error('Error querying mempool_transactions:', err);
-                reject(null)
-            } finally {
-                if (this.transactionConnection == null) {
-                    await db.release()
+                if (txidIndex < 0) {
+                    deletedTxHashIds.push(txHashId)
+                } else {
+                    txidList.splice(txidIndex, 1)
                 }
             }
-        })
+
+            if (deletedTxHashIds.length > 0) {
+                let deleteQuery = `
+                    DELETE FROM mempool_transactions WHERE tx_hash_id IN (`+ deletedTxHashIds.join(",") + `);
+                `
+                await db.query(deleteQuery);
+            }
+
+            return { transactionsDeleted: deletedTxHashIds.length}
+        } catch (err) {
+            console.error('Error querying mempool_transactions:', err);
+            return { transactionsDeleted: 0 }
+        } finally {
+            if (this.transactionConnection == null) {
+                await db.release()
+            }
+        }
     }
     
     async insertDispenser(openDispenser) {
