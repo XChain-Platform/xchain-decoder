@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-04-02
+
+### Added
+- Smoke test suite (52 tests) for rapid service health checks
+- 8 smoke test files covering module loading, crypto networks, deobfuscation, OP_RETURN parsing, multisig parsing, block decoding, API ping, and database initialization
+- `npm run test:smoke` script (runs in ~50ms, no external services required)
+- Optional MariaDB smoke tests gated by `SMOKE_DB=1` environment variable
+- Smoke testing plan document (`reports/XCHAIN_DECODER_SMOKE_TESTING_PLAN.md`)
+
 ## [1.0.0] - 2026-04-02
 
 ### Changed
