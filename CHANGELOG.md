@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-02
+
+### Added
+- End-to-end test suite (50+ tests) validating the complete decoder pipeline
+- 5 E2E test files: actionDecoding, dispenserLifecycle, multiBlockProcessing, errorHandling, indexerContract
+- E2E test helpers: extended txBuilder (mempool, reorg, decoder restart), extended assertions (dispenser, mempool, normalization integrity)
+- `npm run test:e2e` script (requires bitcoind regtest + MariaDB)
+- E2E testing plan document (`reports/XCHAIN_DECODER_E2E_TESTING_PLAN.md`)
+
 ## [1.1.0] - 2026-04-02
 
 ### Added
