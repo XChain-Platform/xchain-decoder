@@ -31,7 +31,8 @@ const BlockchainConnector = require('./BlockchainConnector')
 const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
 const bs = require("binary-search")
-const textDecoder = new TextDecoder('utf-8')
+const strictTextDecoder = new TextDecoder('utf-8', { fatal: true })
+const lenientTextDecoder = new TextDecoder('utf-8')
 
 //We need to init the ecc to parse taproot addresses from output scripts
 bitcoin.initEccLib(ecc);
@@ -47,6 +48,13 @@ const P2WSH_BUFFER = Buffer.from("p2wsh")
 
 const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node need to have to start parsing
+
+const MAX_ACTION_DATA_LENGTH = 8192
+const VALID_ACTION_NAMES = new Set([
+    'ADDRESS', 'AIRDROP', 'BATCH', 'BROADCAST', 'CALLBACK', 'DESTROY',
+    'DISPENSER', 'DIVIDEND', 'FILE', 'ISSUE', 'LINK', 'LIST', 'MESSAGE',
+    'MINT', 'ORDER', 'SEND', 'SLEEP', 'SWAP', 'SWEEP'
+])
 
 const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many transactions need to be processed before inserting the data into the database
 
@@ -289,7 +297,9 @@ class XChainDecoder {
                                         let nextInput = transaction.ins[txInputIndex]
                                         try {
                                             let decodedScriptSig = bitcoin.script.decompile(nextInput["script"])
+                                            if (!decodedScriptSig || decodedScriptSig.length < 3 || !Buffer.isBuffer(decodedScriptSig[2])) continue
                                             let decodedRedeemScript = bitcoin.script.decompile(decodedScriptSig[2])
+                                            if (!decodedRedeemScript || decodedRedeemScript.length < 1 || !Buffer.isBuffer(decodedRedeemScript[0])) continue
                                             let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
                                             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
                                         } catch (e) {
@@ -305,7 +315,9 @@ class XChainDecoder {
                                     for (let txInputIndex=0;txInputIndex < transaction.ins.length;txInputIndex++){
                                         let nextInput = transaction.ins[txInputIndex]
                                         try {
+                                            if (!nextInput["witness"] || nextInput["witness"].length < 3 || !Buffer.isBuffer(nextInput["witness"][2])) continue
                                             let decodedRedeemScript = bitcoin.script.decompile(nextInput["witness"][2])
+                                            if (!decodedRedeemScript || decodedRedeemScript.length < 1 || !Buffer.isBuffer(decodedRedeemScript[0])) continue
                                             let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
                                             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
                                         } catch (e) {
@@ -632,7 +644,25 @@ class XChainDecoder {
                         ){
                             lastProcessedTxIndex = lastProcessedTxIndex + 1
                             validTransactionsCount = validTransactionsCount + 1
-                            let decodedData = textDecoder.decode(parseResult["data"])
+
+                            if (parseResult["data"].length > MAX_ACTION_DATA_LENGTH) {
+                                console.error(`Skipping tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["data"].length} > ${MAX_ACTION_DATA_LENGTH})`)
+                                continue
+                            }
+
+                            let decodedData
+                            try {
+                                decodedData = strictTextDecoder.decode(parseResult["data"])
+                            } catch (e) {
+                                decodedData = lenientTextDecoder.decode(parseResult["data"])
+                                console.error(`Tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`)
+                            }
+
+                            let actionName = decodedData.split("|")[0]
+                            if (!VALID_ACTION_NAMES.has(actionName)) {
+                                console.error(`Skipping tx ${nextTransactionHash}: unknown ACTION name '${actionName.substring(0, 32)}'`)
+                                continue
+                            }
                             
                             if (!(await this.db.insertTransaction({
                                 index: lastProcessedTxIndex,
@@ -662,13 +692,15 @@ class XChainDecoder {
                                     let decodedDataSplit = decodedData.split("|")
                                     let commandVersion = decodedDataSplit[1]
 
-                                    if (parseInt(commandVersion) == 0 && decodedDataSplit.length >= 13){
+                                    if (parseInt(commandVersion, 10) === 0 && decodedDataSplit.length >= 13){
                                         let giveCoin = decodedDataSplit[2]
                                         let getCoin = decodedDataSplit[6]
                                         let getAddress = decodedDataSplit[9]
-                                        let expiration = decodedDataSplit[12]
+                                        let expiration = Number(decodedDataSplit[12])
 
-                                        if ((getCoin != "") || (giveCoin != "")){
+                                        if (isNaN(expiration) || expiration < 0 || expiration > 4294967295) {
+                                            console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[12]}'`)
+                                        } else if ((getCoin != "") || (giveCoin != "")){
                                             if (!(await this.db.insertDispenser({
                                                 txIndex: lastProcessedTxIndex,
                                                 address: parseResult["source"],

@@ -28,6 +28,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const helmet = require('helmet');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const XChainDecoder  = require('./XChainDecoder');
 const jsonRouter = require('express-json-rpc-router')
 
@@ -56,8 +57,16 @@ async function startApi(){
     // Use Helmet to increase security
     app.use(helmet());
 
-    // Allow JSON requests
-    app.use(bodyParser.json());
+    // Rate limiting
+    app.use(rateLimit({
+        windowMs: 60 * 1000,
+        max: 100,
+        standardHeaders: true,
+        legacyHeaders: false
+    }));
+
+    // Allow JSON requests with size limit
+    app.use(bodyParser.json({ limit: '100kb' }));
 
     // Allow CORS for development
     app.use(cors());

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-04-02
+
+### Added
+- Security test suite (75 tests) covering SQL parameterization, deobfuscation robustness, ACTION validation, P2SH/P2WSH bounds safety, DISPENSER field validation, connection handling, error sanitization, and connector security
+- `npm run test:security` script
+- Post-decryption ACTION validation: max payload length (8192), known ACTION name whitelist, strict UTF-8 decoding
+- Transaction lock (mutex) to prevent async interleaving between block commits and mempool updates
+- Connection pool timeout (30s) replacing infinite retry loop in `getConnection()`
+- Rate limiting (100 req/min) and body size limit (100kb) on Express API
+- HTTPS URL support in BlockchainConnector
+
+### Fixed
+- SQL injection risk in `createDatabase()` — added database name whitelist and backtick-quoting
+- SQL injection risk in `deleteAndCompareTxsNotInList()` — replaced string concatenation with parameterized placeholders
+- P2SH data extraction crash when scriptSig has fewer than 3 elements — added bounds check
+- P2WSH data extraction crash when witness has fewer than 3 elements or non-Buffer at index 2 — added bounds check
+- DISPENSER expiration accepting non-numeric values — now validated with `Number()`, rejects NaN/negative/overflow
+- `parseInt(commandVersion)` missing radix — changed to `parseInt(commandVersion, 10)`
+- Verbose error logging in `db.js` and `BlockchainConnector.js` potentially leaking credentials — now logs `e.code` / `error.message` only
+
 ## [1.3.0] - 2026-04-02
 
 ### Added

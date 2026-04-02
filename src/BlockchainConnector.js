@@ -25,7 +25,8 @@ axios.defaults.timeout = 5000
 
 class BlockchainConnector {
     constructor(url, port, rpcUser, rpcPassword) {
-        this.url = "http://"+url+":"+port
+        let protocol = (url.startsWith("https://") || url.startsWith("http://")) ? "" : "http://"
+        this.url = protocol + url + ":" + port
         this.port = port
         this.rpcUser = rpcUser
         this.rpcPassword = rpcPassword
@@ -142,7 +143,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get block hex, trying again...")
                     //Do nothing, let the while to try again
                 } else {
-                    console.error('Error:', error);
+                    console.error('Error getting block header:', error.message);
                     throw error;
                 }
             }

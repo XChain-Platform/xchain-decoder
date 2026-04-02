@@ -26,9 +26,14 @@ const util    = require('./util')
 const bs = require("binary-search")
 
 const SATOSHIS_DECIMALS = 8
+const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/
+const GET_CONNECTION_TIMEOUT_MS = 30000
 
 class Database {
     constructor(host, port, dbName, user, pass){
+        if (!DB_NAME_REGEX.test(dbName)) {
+            throw new Error('Invalid database name: must contain only alphanumeric characters and underscores')
+        }
         this.sqlPath  = __dirname+'/sql';
         // Database connection information
         this.host   = host;
@@ -60,6 +65,8 @@ class Database {
         // Setup pool of connections
         this.pool = mariadb.createPool(this.connectionPoolParams);
         this.transactionConnection = null;
+        this._transactionLock = false;
+        this._transactionLockQueue = [];
     }
     
     async sleep(ms) {
@@ -105,12 +112,11 @@ class Database {
         while(!databaseCreated){
             try {
                 let db     = await mariadb.createConnection(connectionParams);
-                let result = await db.query("CREATE DATABASE IF NOT EXISTS " + this.dbName);
+                let result = await db.query("CREATE DATABASE IF NOT EXISTS `" + this.dbName + "`");
                 await db.end();
                 databaseCreated = true;
             } catch(e){
-                console.log('e=',e);
-                console.log("There was an error trying to connect to the " + this.dbName + " database. Trying again in a few seconds...");
+                console.log("There was an error trying to create the " + this.dbName + " database: " + e.code + ". Trying again in a few seconds...");
                 await util.sleep(5000); // Waiting 5 seconds
             }
         }
@@ -137,7 +143,7 @@ class Database {
                         await this.createTable(file);
                     }
                 } catch(e){
-                    console.log('e=',e);
+                    console.log('Error verifying table ' + table + ': ' + e.code);
                     util.throwError('Error while trying to verify ' + table + ' table exists!');
                     return false;
                 }
@@ -175,16 +181,19 @@ class Database {
         // await this.releaseConnection();
     }
 
-    // Handle getting a database Connection    
+    // Handle getting a database Connection
     async getConnection(){
         if(this.transactionConnection)
             return this.transactionConnection;
         var connection = null;
-        while(connection == null){        
+        let startTime = Date.now()
+        while(connection == null){
             try {
                 connection = await this.pool.getConnection();
-                // console.log("Connected to database!");
             } catch (e){
+                if (Date.now() - startTime > GET_CONNECTION_TIMEOUT_MS) {
+                    throw new Error('Failed to get database connection after ' + GET_CONNECTION_TIMEOUT_MS + 'ms: ' + e.code)
+                }
                 console.log("Can't connect to mariadb. Trying again...");
                 connection = null;
                 await util.sleep(1000);
@@ -202,45 +211,64 @@ class Database {
         }  
     }
 
+    async _acquireTransactionLock(){
+        if (!this._transactionLock) {
+            this._transactionLock = true
+            return
+        }
+        await new Promise(resolve => this._transactionLockQueue.push(resolve))
+    }
+
+    _releaseTransactionLock(){
+        if (this._transactionLockQueue.length > 0) {
+            let next = this._transactionLockQueue.shift()
+            next()
+        } else {
+            this._transactionLock = false
+        }
+    }
+
     async beginTransaction(){
+        await this._acquireTransactionLock()
+
         if (this.transactionConnection != null){
             await this.endTransaction()
         }
-        
+
         this.transactionConnection = await this.getConnection()
         try {
             await this.transactionConnection.beginTransaction()
         } catch(err){
+            this._releaseTransactionLock()
             throw err
         }
-        
-        
     }
-    
+
     async endTransaction(){
         if (this.transactionConnection != null){
             console.log("rolling back")
             await this.transactionConnection.rollback()
             await this.transactionConnection.release()
             this.transactionConnection = null
-        }  
+        }
+        this._releaseTransactionLock()
     }
-    
+
     async commitTransaction(){
         if (this.transactionConnection != null){
             try {
                 await this.transactionConnection.commit()
                 await this.transactionConnection.release()
                 this.transactionConnection = null
+                this._releaseTransactionLock()
                 return true
             } catch (e){
-                console.log(e)
-                console.log("There was an error trying to commit a transaction")
+                console.log("There was an error trying to commit a transaction: " + e.code)
                 await this.endTransaction()
             }
         }
-        
-        return false      
+
+        return false
     }
     
     bigIntSatoshiToDecimalsString(bigIntValue) {
@@ -713,10 +741,9 @@ class Database {
             }
 
             if (deletedTxHashIds.length > 0) {
-                let deleteQuery = `
-                    DELETE FROM mempool_transactions WHERE tx_hash_id IN (`+ deletedTxHashIds.join(",") + `);
-                `
-                await db.query(deleteQuery);
+                let placeholders = deletedTxHashIds.map(() => '?').join(',')
+                let deleteQuery = `DELETE FROM mempool_transactions WHERE tx_hash_id IN (${placeholders})`
+                await db.query(deleteQuery, deletedTxHashIds);
             }
 
             return { transactionsDeleted: deletedTxHashIds.length}
