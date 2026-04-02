@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-04-02
+
+### Added
+- Fuzz test suite with 5 harness files covering removeObfuscation, parseTransaction, blockDecoder, dispenserParsing, and full pipeline
+- 3 mutation engines: bitFlip, byteManipulate, and protocol-aware structureAware mutators
+- Fuzz infrastructure: invariant checkers, crash reporter (logs failing inputs to disk), seed corpus support
+- `npm run test:fuzz` and per-harness scripts (`test:fuzz:quick`, `test:fuzz:deobfuscation`, `test:fuzz:parse`, `test:fuzz:block`, `test:fuzz:dispenser`, `test:fuzz:pipeline`)
+
 ## [1.4.0] - 2026-04-02
 
 ### Added
