@@ -1,0 +1,23 @@
+{
+  "txid": "aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011",
+  "xchnPayload": {
+    "plain": "XCHNSmall data",
+    "cipher": "d1553796a58103aaf18ee595b319"
+  },
+  "nonXchnPayload": {
+    "plain": "Not an XCHN payload at all",
+    "cipher": "c7790bf89782429edee6cfd4b71943e019d162e5369e7a4a6cd9"
+  },
+  "xchnP2sh": {
+    "plain": "XCHNp2sh",
+    "cipher": "d155379686de11ae"
+  },
+  "xchnP2wsh": {
+    "plain": "XCHNp2wsh",
+    "cipher": "d155379686de15b5f5"
+  },
+  "xchnEmpty": {
+    "plain": "XCHN",
+    "cipher": "d1553796"
+  }
+}
