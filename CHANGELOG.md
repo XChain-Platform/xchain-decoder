@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-04-02
+
+### Added
+- Integration test suite (30 tests) verifying decoder→DB pipeline against regtest
+- Test helpers: txBuilder (tx construction/broadcasting), assertions (indexer contract query)
+- `npm run test:integration` script (requires bitcoind regtest + MariaDB)
+- Integration test plan document (`reports/XCHAIN_DECODER_INTEGRATION_TESTING_PLAN.md`)
+
 ## [0.0.3] - 2026-04-02
 
 ### Added
