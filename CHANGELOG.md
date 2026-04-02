@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-04-02
+
+### Added
+- Boundary test suite (78 tests) covering AES deobfuscation, script type detection, multisig zero-trim, DISPENSER field extraction, expiration values, and satoshi conversion edge cases
+- 4 boundary test files under `test/unit/boundary/`
+
+### Fixed
+- `bigIntSatoshiToDecimalsString` producing malformed output for negative inputs (e.g. `-100` → `"0.0000-100"`)
+- Short DISPENSER strings (< 13 fields) creating immortal dispensers due to `undefined != ""` evaluating to true
+- Crash in `parseTransaction` when `bitcoin.script.decompile(dataBuffer)` returns null for non-script data
+- Crash in multisig parsing when decompiled pubkey elements are opcodes (integers) instead of Buffers
+
 ## [1.2.0] - 2026-04-02
 
 ### Added

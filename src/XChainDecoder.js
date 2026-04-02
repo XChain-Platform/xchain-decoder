@@ -332,10 +332,14 @@ class XChainDecoder {
                         //    source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
                         //}
                         
+                        if (!Buffer.isBuffer(decompiledScript[1]) || !Buffer.isBuffer(decompiledScript[2])) {
+                            continue
+                        }
+
                         let pubkey1 = decompiledScript[1].subarray(1) //removing the 02 at the beginning
                         let pubkey2 = decompiledScript[2].subarray(1) //removing the 02 at the beginning
                         //let pubkey3 = decompiledScript[3] //actual pubkey
-                        
+
                         let data = Buffer.concat([pubkey1, pubkey2])
 
                         //Removing ending 00's
@@ -363,12 +367,16 @@ class XChainDecoder {
             
             if (dataBuffer.length > 0){
                 let decompiledData = bitcoin.script.decompile(dataBuffer)
-                dataBuffer = decompiledData[0]
-                
-                if (decompiledData.length > 1){
-                    rawData = decompiledData[1]
+                if (decompiledData != null && decompiledData.length > 0) {
+                    dataBuffer = decompiledData[0]
+
+                    if (decompiledData.length > 1){
+                        rawData = decompiledData[1]
+                    }
+                    getSource = true
+                } else {
+                    dataBuffer = Buffer.allocUnsafe(0)
                 }
-                getSource = true
             }
             
             //Get the source from the output spent by the first input of this transaction
@@ -653,13 +661,13 @@ class XChainDecoder {
                                 if (decodedData.startsWith("DISPENSER")){
                                     let decodedDataSplit = decodedData.split("|")
                                     let commandVersion = decodedDataSplit[1]
-                                    
-                                    if (parseInt(commandVersion) == 0){
+
+                                    if (parseInt(commandVersion) == 0 && decodedDataSplit.length >= 13){
                                         let giveCoin = decodedDataSplit[2]
                                         let getCoin = decodedDataSplit[6]
                                         let getAddress = decodedDataSplit[9]
                                         let expiration = decodedDataSplit[12]
-                                        
+
                                         if ((getCoin != "") || (giveCoin != "")){
                                             if (!(await this.db.insertDispenser({
                                                 txIndex: lastProcessedTxIndex,

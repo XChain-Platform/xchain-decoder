@@ -244,20 +244,28 @@ class Database {
     }
     
     bigIntSatoshiToDecimalsString(bigIntValue) {
+        let negative = false
+        if (bigIntValue < 0) {
+            negative = true
+            bigIntValue = typeof bigIntValue === 'bigint' ? -bigIntValue : -bigIntValue
+        }
+
         const strBigInt = bigIntValue.toString();
         const bigIntLength = strBigInt.length;
+        let result
 
         if (bigIntLength <= SATOSHIS_DECIMALS) {
             let missingZeros = SATOSHIS_DECIMALS - bigIntLength;
             let decimalPart = '0'.repeat(missingZeros) + strBigInt;
-            return `0.${decimalPart}`;
+            result = `0.${decimalPart}`;
+        } else {
+            const decimalSeparatorIndex = bigIntLength - SATOSHIS_DECIMALS;
+            const integerPart = strBigInt.slice(0, decimalSeparatorIndex);
+            const decimalPart = strBigInt.slice(decimalSeparatorIndex);
+            result = `${integerPart}.${decimalPart}`;
         }
 
-        const decimalSeparatorIndex = bigIntLength - SATOSHIS_DECIMALS;
-        const integerPart = strBigInt.slice(0, decimalSeparatorIndex);
-        const decimalPart = strBigInt.slice(decimalSeparatorIndex);
-
-        return `${integerPart}.${decimalPart}`;
+        return negative ? `-${result}` : result;
     }
     
     async deleteBlockByIndex(blockIndex){
