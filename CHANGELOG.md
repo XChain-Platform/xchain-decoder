@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-04-02
+
+### Added
+- Performance and load testing benchmark suite with 7 scenarios: deobfuscation, parse-transaction, block-processing, sustained-sync, spike-load, large-payload, mempool-stress
+- Benchmark infrastructure: MockBlockchainConnector, MockDatabase, DataGenerator (builds valid blocks with encrypted XChain payloads), MetricsCollector (perf_hooks timing, memory/CPU snapshots, event loop lag)
+- CLI harness with --quick, --json, --compare, --save-baseline, --scenario flags
+- Initial baseline captured from full run
+- `npm run test:bench` and per-scenario scripts (`test:bench:quick`, `test:bench:micro`, `test:bench:blocks`, `test:bench:sustained`, `test:bench:spike`, `test:bench:payload`, `test:bench:mempool`, `test:bench:save`, `test:bench:compare`)
+
 ## [1.5.0] - 2026-04-02
 
 ### Added

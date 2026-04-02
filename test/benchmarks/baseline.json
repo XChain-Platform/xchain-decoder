@@ -1,0 +1,498 @@
+{
+  "timestamp": "2026-04-02T23:03:30.049Z",
+  "commit": "da43ecd",
+  "mode": "full",
+  "nodeVersion": "v18.19.1",
+  "platform": "linux",
+  "arch": "arm64",
+  "scenarios": {
+    "deobfuscation": {
+      "scenario": "deobfuscation",
+      "payloadSizes": [
+        100,
+        500,
+        1024,
+        4096,
+        8192
+      ],
+      "results": {
+        "100B": {
+          "iterations": 50000,
+          "totalMs": 162.8,
+          "opsPerSec": 307119,
+          "avgUs": 3.26
+        },
+        "500B": {
+          "iterations": 50000,
+          "totalMs": 162.74,
+          "opsPerSec": 307241,
+          "avgUs": 3.25
+        },
+        "1024B": {
+          "iterations": 50000,
+          "totalMs": 180.48,
+          "opsPerSec": 277041,
+          "avgUs": 3.61
+        },
+        "4096B": {
+          "iterations": 50000,
+          "totalMs": 271.26,
+          "opsPerSec": 184326,
+          "avgUs": 5.43
+        },
+        "8192B": {
+          "iterations": 50000,
+          "totalMs": 280.9,
+          "opsPerSec": 178001,
+          "avgUs": 5.62
+        }
+      }
+    },
+    "parse-transaction": {
+      "scenario": "parse-transaction",
+      "results": {
+        "opreturn": {
+          "iterations": 5000,
+          "totalMs": 1158.46,
+          "opsPerSec": 4316,
+          "avgUs": 231.69
+        },
+        "multisig": {
+          "iterations": 5000,
+          "totalMs": 1217.8,
+          "opsPerSec": 4106,
+          "avgUs": 243.56
+        },
+        "plain": {
+          "iterations": 5000,
+          "totalMs": 87.6,
+          "opsPerSec": 57076,
+          "avgUs": 17.52
+        }
+      }
+    },
+    "block-processing": {
+      "scenario": "block-processing",
+      "blockCount": 100,
+      "results": {
+        "empty": {
+          "blockCount": 100,
+          "totalTxsParsed": 100,
+          "totalXchnFound": 0,
+          "totalMs": 1.33,
+          "blocksPerSec": 75291.7,
+          "txsPerSec": 75292,
+          "avgBlockMs": 0.01,
+          "memoryDeltaMB": 0.9,
+          "dbCalls": {
+            "insertBlock": 0,
+            "insertTransaction": 0,
+            "insertMempoolTransaction": 0,
+            "insertDispenser": 0,
+            "insertTransactionOutput": 0,
+            "beginTransaction": 0,
+            "commitTransaction": 0,
+            "endTransaction": 0,
+            "createTransaction": 0,
+            "createAddress": 0,
+            "isThereADispenserForAddress": 0,
+            "deleteOpenDispensers": 0,
+            "deleteAndCompareTxsNotInList": 0,
+            "getLastBlockIndex": 0,
+            "getLastTxIndex": 0,
+            "getBlockByIndex": 0
+          }
+        },
+        "plain_only_10": {
+          "blockCount": 100,
+          "totalTxsParsed": 1100,
+          "totalXchnFound": 0,
+          "totalMs": 26.13,
+          "blocksPerSec": 3826.3,
+          "txsPerSec": 42090,
+          "avgBlockMs": 0.26,
+          "memoryDeltaMB": -63.5,
+          "dbCalls": {
+            "insertBlock": 0,
+            "insertTransaction": 0,
+            "insertMempoolTransaction": 0,
+            "insertDispenser": 0,
+            "insertTransactionOutput": 0,
+            "beginTransaction": 0,
+            "commitTransaction": 0,
+            "endTransaction": 0,
+            "createTransaction": 0,
+            "createAddress": 0,
+            "isThereADispenserForAddress": 1020,
+            "deleteOpenDispensers": 0,
+            "deleteAndCompareTxsNotInList": 0,
+            "getLastBlockIndex": 0,
+            "getLastTxIndex": 0,
+            "getBlockByIndex": 0
+          }
+        },
+        "light_5": {
+          "blockCount": 100,
+          "totalTxsParsed": 1100,
+          "totalXchnFound": 500,
+          "totalMs": 123.84,
+          "blocksPerSec": 807.5,
+          "txsPerSec": 8882,
+          "avgBlockMs": 1.24,
+          "memoryDeltaMB": -3.4,
+          "dbCalls": {
+            "insertBlock": 0,
+            "insertTransaction": 0,
+            "insertMempoolTransaction": 0,
+            "insertDispenser": 0,
+            "insertTransactionOutput": 0,
+            "beginTransaction": 0,
+            "commitTransaction": 0,
+            "endTransaction": 0,
+            "createTransaction": 0,
+            "createAddress": 0,
+            "isThereADispenserForAddress": 1020,
+            "deleteOpenDispensers": 0,
+            "deleteAndCompareTxsNotInList": 0,
+            "getLastBlockIndex": 0,
+            "getLastTxIndex": 0,
+            "getBlockByIndex": 0
+          }
+        },
+        "medium_20": {
+          "blockCount": 100,
+          "totalTxsParsed": 3100,
+          "totalXchnFound": 2000,
+          "totalMs": 492.8,
+          "blocksPerSec": 202.9,
+          "txsPerSec": 6291,
+          "avgBlockMs": 4.93,
+          "memoryDeltaMB": -28.3,
+          "dbCalls": {
+            "insertBlock": 0,
+            "insertTransaction": 0,
+            "insertMempoolTransaction": 0,
+            "insertDispenser": 0,
+            "insertTransactionOutput": 0,
+            "beginTransaction": 0,
+            "commitTransaction": 0,
+            "endTransaction": 0,
+            "createTransaction": 0,
+            "createAddress": 0,
+            "isThereADispenserForAddress": 3060,
+            "deleteOpenDispensers": 0,
+            "deleteAndCompareTxsNotInList": 0,
+            "getLastBlockIndex": 0,
+            "getLastTxIndex": 0,
+            "getBlockByIndex": 0
+          }
+        },
+        "dense_50": {
+          "blockCount": 100,
+          "totalTxsParsed": 7100,
+          "totalXchnFound": 5000,
+          "totalMs": 1223.25,
+          "blocksPerSec": 81.7,
+          "txsPerSec": 5804,
+          "avgBlockMs": 12.23,
+          "memoryDeltaMB": -3.5,
+          "dbCalls": {
+            "insertBlock": 0,
+            "insertTransaction": 0,
+            "insertMempoolTransaction": 0,
+            "insertDispenser": 0,
+            "insertTransactionOutput": 0,
+            "beginTransaction": 0,
+            "commitTransaction": 0,
+            "endTransaction": 0,
+            "createTransaction": 0,
+            "createAddress": 0,
+            "isThereADispenserForAddress": 7140,
+            "deleteOpenDispensers": 0,
+            "deleteAndCompareTxsNotInList": 0,
+            "getLastBlockIndex": 0,
+            "getLastTxIndex": 0,
+            "getBlockByIndex": 0
+          }
+        }
+      }
+    },
+    "sustained-sync": {
+      "scenario": "sustained-sync",
+      "blockCount": 500,
+      "totalTxs": 5524,
+      "totalXchn": 2253,
+      "wallTimeMs": 557,
+      "blocksPerSec": 897.2,
+      "txsPerSec": 9912,
+      "xchnTxsPerSec": 4043,
+      "cpuUserMs": 609,
+      "cpuSystemMs": 2,
+      "peakMemory": {
+        "heapUsedMB": 48.55772399902344,
+        "rssMB": 193.98828125
+      },
+      "eventLoopLag": {
+        "mean": null,
+        "p50": 0.000511,
+        "p95": 0.000511,
+        "p99": 0.000511,
+        "max": 0
+      },
+      "throughputWindows": [
+        {
+          "blockRange": "0-49",
+          "blocksPerSec": 936.6,
+          "windowMs": 53
+        },
+        {
+          "blockRange": "50-99",
+          "blocksPerSec": 903.3,
+          "windowMs": 55
+        },
+        {
+          "blockRange": "100-149",
+          "blocksPerSec": 961.2,
+          "windowMs": 52
+        },
+        {
+          "blockRange": "150-199",
+          "blocksPerSec": 878.5,
+          "windowMs": 57
+        },
+        {
+          "blockRange": "200-249",
+          "blocksPerSec": 910.9,
+          "windowMs": 55
+        },
+        {
+          "blockRange": "250-299",
+          "blocksPerSec": 865.5,
+          "windowMs": 58
+        },
+        {
+          "blockRange": "300-349",
+          "blocksPerSec": 833.3,
+          "windowMs": 60
+        },
+        {
+          "blockRange": "350-399",
+          "blocksPerSec": 860.6,
+          "windowMs": 58
+        },
+        {
+          "blockRange": "400-449",
+          "blocksPerSec": 929.3,
+          "windowMs": 54
+        },
+        {
+          "blockRange": "450-499",
+          "blocksPerSec": 932.2,
+          "windowMs": 54
+        }
+      ],
+      "throughputDeltaPercent": -0.5,
+      "dbCalls": {
+        "insertBlock": 0,
+        "insertTransaction": 0,
+        "insertMempoolTransaction": 0,
+        "insertDispenser": 0,
+        "insertTransactionOutput": 0,
+        "beginTransaction": 0,
+        "commitTransaction": 0,
+        "endTransaction": 0,
+        "createTransaction": 0,
+        "createAddress": 0,
+        "isThereADispenserForAddress": 5024,
+        "deleteOpenDispensers": 0,
+        "deleteAndCompareTxsNotInList": 0,
+        "getLastBlockIndex": 0,
+        "getLastTxIndex": 0,
+        "getBlockByIndex": 0
+      }
+    },
+    "spike-load": {
+      "scenario": "spike-load",
+      "calm": {
+        "blocks": 50,
+        "txs": 300,
+        "totalMs": 24,
+        "blocksPerSec": 2048.4,
+        "txsPerSec": 12291
+      },
+      "spike": {
+        "blocks": 30,
+        "txsPerBlock": 100,
+        "totalTxs": 3180,
+        "xchnTxs": 3000,
+        "totalMs": 700,
+        "blocksPerSec": 42.9,
+        "txsPerSec": 4543
+      },
+      "throughputRatio": 47.79,
+      "peakMemory": {
+        "heapUsedMB": 69.2038345336914,
+        "rssMB": 192.8671875
+      },
+      "eventLoopLag": {
+        "mean": null,
+        "p50": 0.000511,
+        "p95": 0.000511,
+        "p99": 0.000511,
+        "max": 0
+      },
+      "dbCalls": {
+        "insertBlock": 0,
+        "insertTransaction": 0,
+        "insertMempoolTransaction": 0,
+        "insertDispenser": 0,
+        "insertTransactionOutput": 0,
+        "beginTransaction": 0,
+        "commitTransaction": 0,
+        "endTransaction": 0,
+        "createTransaction": 0,
+        "createAddress": 0,
+        "isThereADispenserForAddress": 3400,
+        "deleteOpenDispensers": 0,
+        "deleteAndCompareTxsNotInList": 0,
+        "getLastBlockIndex": 0,
+        "getLastTxIndex": 0,
+        "getBlockByIndex": 0
+      }
+    },
+    "large-payload": {
+      "scenario": "large-payload",
+      "payloadSizes": [
+        100,
+        500,
+        1024,
+        2048,
+        4096,
+        6144,
+        8192
+      ],
+      "scalingFactor": 1.24,
+      "results": {
+        "100B": {
+          "payloadSize": 100,
+          "iterations": 2000,
+          "totalMs": 468.85,
+          "opsPerSec": 4266,
+          "avgUs": 234.43
+        },
+        "500B": {
+          "payloadSize": 500,
+          "iterations": 2000,
+          "totalMs": 459.47,
+          "opsPerSec": 4353,
+          "avgUs": 229.74
+        },
+        "1024B": {
+          "payloadSize": 1024,
+          "iterations": 2000,
+          "totalMs": 466.57,
+          "opsPerSec": 4287,
+          "avgUs": 233.29
+        },
+        "2048B": {
+          "payloadSize": 2048,
+          "iterations": 2000,
+          "totalMs": 490.08,
+          "opsPerSec": 4081,
+          "avgUs": 245.04
+        },
+        "4096B": {
+          "payloadSize": 4096,
+          "iterations": 2000,
+          "totalMs": 523.3,
+          "opsPerSec": 3822,
+          "avgUs": 261.65
+        },
+        "6144B": {
+          "payloadSize": 6144,
+          "iterations": 2000,
+          "totalMs": 562.48,
+          "opsPerSec": 3556,
+          "avgUs": 281.24
+        },
+        "8192B": {
+          "payloadSize": 8192,
+          "iterations": 2000,
+          "totalMs": 582.09,
+          "opsPerSec": 3436,
+          "avgUs": 291.04
+        }
+      }
+    },
+    "mempool-stress": {
+      "scenario": "mempool-stress",
+      "xchnRatio": 0.1,
+      "results": {
+        "100_txs": {
+          "mempoolSize": 100,
+          "totalMs": 7,
+          "txsPerSec": 15285,
+          "memoryDeltaMB": 0.03,
+          "peakRssMB": 248.3,
+          "rpcCalls": {
+            "getRawMempool": 1,
+            "getRawTransaction": 0,
+            "getRawTransactions": 0
+          },
+          "dbCalls": {
+            "insertMempoolTransaction": 0,
+            "deleteAndCompareTxsNotInList": 1
+          }
+        },
+        "500_txs": {
+          "mempoolSize": 500,
+          "totalMs": 0,
+          "txsPerSec": 1567600,
+          "memoryDeltaMB": 0.08,
+          "peakRssMB": 248.4,
+          "rpcCalls": {
+            "getRawMempool": 1,
+            "getRawTransaction": 0,
+            "getRawTransactions": 0
+          },
+          "dbCalls": {
+            "insertMempoolTransaction": 0,
+            "deleteAndCompareTxsNotInList": 1
+          }
+        },
+        "1000_txs": {
+          "mempoolSize": 1000,
+          "totalMs": 1,
+          "txsPerSec": 1231653,
+          "memoryDeltaMB": 0.14,
+          "peakRssMB": 248.8,
+          "rpcCalls": {
+            "getRawMempool": 1,
+            "getRawTransaction": 0,
+            "getRawTransactions": 0
+          },
+          "dbCalls": {
+            "insertMempoolTransaction": 0,
+            "deleteAndCompareTxsNotInList": 1
+          }
+        },
+        "3000_txs": {
+          "mempoolSize": 3000,
+          "totalMs": 1,
+          "txsPerSec": 2081888,
+          "memoryDeltaMB": 0.47,
+          "peakRssMB": 262.5,
+          "rpcCalls": {
+            "getRawMempool": 1,
+            "getRawTransaction": 0,
+            "getRawTransactions": 0
+          },
+          "dbCalls": {
+            "insertMempoolTransaction": 0,
+            "deleteAndCompareTxsNotInList": 1
+          }
+        }
+      }
+    }
+  }
+}
