@@ -15,6 +15,24 @@ class XChainBlockDecoder {
     blockFromHex(blockHex){
         return this.blockFromBuffer(Buffer.from(blockHex,"hex"))
     }
+
+    transactionFromHex(txHex){
+        if (this.coin === "litecoin") {
+            const marker = txHex.substr(8, 2)
+            const flag   = txHex.substr(10, 2)
+            if (
+                (txHex.substr(0, 8) === "01000000" || txHex.substr(0, 8) === "02000000") &&
+                marker === "00" &&
+                (flag === "08" || flag === "09")
+            ) {
+                // Strip the 2-byte marker+flag (MWEB flag 0x08, or segwit+MWEB 0x09).
+                // bitcoinjs-lib misreads these flags causing UInt64 range errors.
+                txHex = txHex.substr(0, 8) + txHex.substr(12)
+            }
+        }
+        // Non-strict mode ignores trailing MWEB extension data after the tx.
+        return transaction_js_1.Transaction.fromBuffer(Buffer.from(txHex, "hex"), true)
+    }
     
     doubleSha256AndReverse(data){
         const firstHash = crypto.createHash('sha256').update(data).digest();

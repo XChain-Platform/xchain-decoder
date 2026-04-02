@@ -156,7 +156,7 @@ class XChainDecoder {
             outputTransaction = bitcoin.Transaction.fromHex(outputRawTransaction)
             output = outputTransaction.outs[outputIndex]
         } catch (err){
-            //Do nothing, the source will be null
+            console.error(`getSourceFromOutput: failed to fetch tx ${txId} (output ${outputIndex}): ${err.message}`)
         }
         
         if (output != null){
@@ -179,7 +179,8 @@ class XChainDecoder {
             
             
             try {
-                source = bitcoin.address.fromOutputScript(output.script, this.network)
+                if (!this.isFutureSegwitScript(output.script))
+                    source = bitcoin.address.fromOutputScript(output.script, this.network)
             } catch(err){
                 //Ignoring specific sources
                 /*let decompiledScript = bitcoin.script.decompile(output.script)
@@ -206,6 +207,19 @@ class XChainDecoder {
         return source
     }
     
+    isFutureSegwitScript(script) {
+        // Native segwit scripts: version byte (OP_0..OP_16) + push length + witness program
+        // Total length is 4-42 bytes.  OP_0 (v0) and OP_1 (v1/taproot) are handled by
+        // bitcoinjs-lib; OP_2-OP_16 (0x52-0x60) are "future" versions that trigger a
+        // console warning.  Must also verify the push-length byte matches, otherwise
+        // non-segwit scripts like P2PKH (starts with OP_DUP=0x76) would be misclassified.
+        if (script.length < 4 || script.length > 42) return false
+        let version = script[0]
+        if (version < 0x52 || version > 0x60) return false
+        let pushLen = script[1]
+        return pushLen >= 2 && pushLen <= 40 && script.length === pushLen + 2
+    }
+
     async parseTransaction(transaction){
         let nextTxId = transaction.getId()
         let firstInputTxId = util.uint8ArrayToHex(transaction.ins[0].hash.reverse())
@@ -226,7 +240,8 @@ class XChainDecoder {
                 
                 let outputAddress = null
                 try {
-                    outputAddress = bitcoin.address.fromOutputScript(nextOutput.script, this.network)
+                    if (!this.isFutureSegwitScript(nextOutput.script))
+                        outputAddress = bitcoin.address.fromOutputScript(nextOutput.script, this.network)
                 } catch (err){
                     //the output script has no matching address
                 }
@@ -272,24 +287,30 @@ class XChainDecoder {
                                 if (dataWithoutObfuscation.subarray(MAGIC_WORD.length).equals(P2SH_BUFFER)){
                                     for (let txInputIndex=0;txInputIndex < transaction.ins.length;txInputIndex++){
                                         let nextInput = transaction.ins[txInputIndex]
-                                        
-                                        let decodedScriptSig = bitcoin.script.decompile(nextInput["script"])
-                                        let decodedRedeemScript = bitcoin.script.decompile(decodedScriptSig[2])
-                                        let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
-                                        nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
+                                        try {
+                                            let decodedScriptSig = bitcoin.script.decompile(nextInput["script"])
+                                            let decodedRedeemScript = bitcoin.script.decompile(decodedScriptSig[2])
+                                            let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
+                                            nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
+                                        } catch (e) {
+                                            console.error(`P2SH data extraction failed for input ${txInputIndex} of tx ${nextTxId}: ${e.message}`)
+                                        }
                                     }
-                                    
+
                                 /*
                                 * P2WSH
                                 *
-                                */  
+                                */
                                 } else if (dataWithoutObfuscation.subarray(MAGIC_WORD.length).equals(P2WSH_BUFFER)){
                                     for (let txInputIndex=0;txInputIndex < transaction.ins.length;txInputIndex++){
                                         let nextInput = transaction.ins[txInputIndex]
-                                        
-                                        let decodedRedeemScript = bitcoin.script.decompile(nextInput["witness"][2])
-                                        let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
-                                        nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
+                                        try {
+                                            let decodedRedeemScript = bitcoin.script.decompile(nextInput["witness"][2])
+                                            let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
+                                            nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
+                                        } catch (e) {
+                                            console.error(`P2WSH data extraction failed for input ${txInputIndex} of tx ${nextTxId}: ${e.message}`)
+                                        }
                                     }
                                 } else {
                                     nextDataBuffer = Buffer.concat([nextDataBuffer,dataWithoutObfuscation.subarray(MAGIC_WORD.length)])
@@ -621,6 +642,7 @@ class XChainDecoder {
                             } else {
                                 //Store dispenses outputs
                                 for (let nextOutput of dispenseOutputs){
+                                    nextOutput.txIndex = lastProcessedTxIndex
                                     this.db.insertTransactionOutput(
                                         nextOutput
                                     )
@@ -652,8 +674,8 @@ class XChainDecoder {
                                 }
                             }
                         } else {
-                            if ((parseResult["data"].length > 0) && !(parseResult["source"] != null)){
-                                throw new Error("Source missing in valid transaction!")
+                            if ((parseResult["data"].length > 0) && (parseResult["source"] == null)){
+                                console.error(`Skipping tx ${nextTransactionHash}: XChain data found but source address could not be resolved`)
                             }
                         }
                     }
@@ -743,7 +765,8 @@ class XChainDecoder {
 
                 } catch (err) {
                     console.log(err)
-                    console.log("There was an error trying to get raw transactions from the mempool. Trying again...")
+                    console.log("There was an error trying to get raw transactions from the mempool. Skipping batch and continuing...")
+                    i = i + MEMPOOL_BATCH_SIZE
                     await this.sleep(1000)
                     continue
                 }
@@ -754,7 +777,14 @@ class XChainDecoder {
                     let nextTxHex = nextTxsHex[nextTxHexIndex]
 
                     if (nextTxHex != null) {
-                        let nextTx = bitcoin.Transaction.fromHex(Buffer.from(nextTxHex, "hex"))
+                        let nextTx = this.xchainBlockDecoder.transactionFromHex(nextTxHex)
+
+                        if (nextTx.ins.length === 0) {
+                            // HogEx / MWEB-only transactions have no inputs and carry no XChain data
+                            nextTxHexIndex = nextTxHexIndex + 1
+                            continue
+                        }
+
                         let nextTransactionHash = nextTx.getId()
 
                         let parseResult = await this.parseTransaction(nextTx)

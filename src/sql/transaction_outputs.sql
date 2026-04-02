@@ -5,5 +5,5 @@ CREATE TABLE transaction_outputs (
     destination_id INTEGER UNSIGNED, -- id of record in index_addresses
     amount         VARCHAR(250),     -- COIN amount sent
     PRIMARY KEY(tx_index, vout)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 

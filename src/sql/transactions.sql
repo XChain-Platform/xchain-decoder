@@ -8,7 +8,7 @@ CREATE TABLE transactions (
     amount         BIGINT,                     -- BTC amount sent
     fee            BIGINT,                     -- BTC Fee paid (miners fee)
     data           MEDIUMTEXT                  -- Decoded data
-) ENGINE=MyISAM DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
 CREATE UNIQUE INDEX tx_hash_id     ON transactions (tx_hash_id);
 CREATE        INDEX block_index    ON transactions (block_index);
