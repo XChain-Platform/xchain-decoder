@@ -51,9 +51,11 @@ const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node nee
 
 const MAX_ACTION_DATA_LENGTH = 8192
 const VALID_ACTION_NAMES = new Set([
-    'ADDRESS', 'AIRDROP', 'BATCH', 'BROADCAST', 'CALLBACK', 'DESTROY',
-    'DISPENSER', 'DIVIDEND', 'FILE', 'ISSUE', 'LINK', 'LIST', 'MESSAGE',
-    'MINT', 'ORDER', 'SEND', 'SLEEP', 'SWAP', 'SWEEP'
+    'ADDRESS', 'AIRDROP', 'BATCH', 'BROADCAST', 'CALLBACK', 'CLAIM_REWARDS',
+    'DELEGATE', 'DEPLOY', 'DEPOSIT', 'DESTROY', 'DISPENSER', 'DIVIDEND',
+    'EXECUTE', 'FILE', 'ISSUE', 'LINK', 'LIST', 'MESSAGE', 'MINT', 'ORDER',
+    'REVOKE_DELEGATION', 'SEND', 'SLEEP', 'STAKE', 'SWAP', 'SWEEP',
+    'UNSTAKE', 'WITHDRAW'
 ])
 
 const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many transactions need to be processed before inserting the data into the database

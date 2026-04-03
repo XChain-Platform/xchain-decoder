@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-04-02
+
+### Added
+- 9 new actions to VALID_ACTION_NAMES: CLAIM_REWARDS, DELEGATE, DEPLOY, DEPOSIT, EXECUTE, REVOKE_DELEGATION, STAKE, UNSTAKE, WITHDRAW
+
 ## [1.7.3] - 2026-04-02
 
 ### Changed
