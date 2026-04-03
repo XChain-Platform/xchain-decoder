@@ -28,7 +28,7 @@ describe('BlockchainConnector', () => {
     })
 
     describe('#getBlockchainInfo()', () => {
-        it('should return the result on success', async () => {
+        it('[REGRESSION P2] R-RPC-001: should return the result on success', async () => {
             const mockResult = { blocks: 100, verificationprogress: 1.0 }
             axiosStub.resolves({ data: { result: mockResult } })
 
@@ -146,7 +146,7 @@ describe('BlockchainConnector', () => {
             assert.strictEqual(result, 'headerdata')
         })
 
-        it('should retry on timeout (ECONNABORTED)', async () => {
+        it('[REGRESSION P2] R-RPC-001: should retry on timeout (ECONNABORTED)', async () => {
             const timeoutError = new Error('timeout')
             timeoutError.code = 'ECONNABORTED'
 
@@ -173,7 +173,7 @@ describe('BlockchainConnector', () => {
             assert.strictEqual(axiosStub.callCount, 1)
         })
 
-        it('should throw after exhausting all 10 timeout retries', async () => {
+        it('[REGRESSION P2] R-RPC-001: should throw after exhausting all 10 timeout retries', async () => {
             const timeoutError = new Error('timeout')
             timeoutError.code = 'ECONNABORTED'
             axiosStub.rejects(timeoutError)
@@ -237,7 +237,7 @@ describe('BlockchainConnector', () => {
             assert.strictEqual(result, 'txhex')
         }).timeout(5000)
 
-        it('should back off longer on -429 work queue depth exceeded', async () => {
+        it('[REGRESSION P2] R-RPC-002: should back off longer on -429 work queue depth exceeded', async () => {
             const queueError = new Error('queue full')
             queueError.response = { status: 429 }
             axiosStub.onCall(0).rejects(queueError)
@@ -269,7 +269,7 @@ describe('BlockchainConnector', () => {
     })
 
     describe('#getBlockWithoutAuxPow()', () => {
-        it('should strip AuxPoW data from block hex', async () => {
+        it('[REGRESSION P2] R-NET-003: should strip AuxPoW data from block hex', async () => {
             // Header = 200 hex chars (100 bytes, includes 20 bytes of AuxPoW)
             // Standard bitcoin header = 160 hex chars (80 bytes)
             // So dataToRemove = 200 - 160 = 40 hex chars

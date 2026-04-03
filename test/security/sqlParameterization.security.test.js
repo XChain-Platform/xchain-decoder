@@ -18,7 +18,7 @@ describe('Security: SQL Parameterization', () => {
             })
         })
 
-        it('should reject a database name with SQL injection characters', () => {
+        it('[REGRESSION P0] R-SEC-001: should reject a database name with SQL injection characters', () => {
             assert.throws(() => {
                 new Database('localhost', 3306, 'xchain; DROP TABLE blocks;--', 'root', '')
             }, /Invalid database name/)
@@ -70,7 +70,7 @@ describe('Security: SQL Parameterization', () => {
     // --- SEC-01: deleteAndCompareTxsNotInList parameterization ---
 
     describe('deleteAndCompareTxsNotInList parameterization', () => {
-        it('should use parameterized placeholders instead of string concatenation', () => {
+        it('[REGRESSION P0] R-SEC-001: should use parameterized placeholders instead of string concatenation', () => {
             // Verify by reading the source code — the fix replaces .join(",") with placeholders
             const fs = require('fs')
             const dbSource = fs.readFileSync(require.resolve('../../src/db.js'), 'utf-8')

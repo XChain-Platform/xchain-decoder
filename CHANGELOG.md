@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-04-02
+
+### Added
+- Regression test suite with tiered execution (P0 Critical, P1 High, P2 Standard)
+- 76 tests tagged with `[REGRESSION P0/P1/P2]` across unit, boundary, and security test files
+- `npm run test:regression:critical` (P0 only, 47 tests, <1s)
+- `npm run test:regression` (P0+P1, 57 tests, <1s)
+- `npm run test:regression:full` (all tiers, 76 tests, ~5s)
+- `test/regression/` directory with setup and bug-fix regression test template
+- Regression testing plan document (`claude/reports/XCHAIN_DECODER_REGRESSION_TESTING_PLAN.md`)
+
 ## [1.7.1] - 2026-04-02
 
 ### Added

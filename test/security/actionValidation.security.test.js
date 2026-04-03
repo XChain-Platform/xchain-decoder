@@ -81,7 +81,7 @@ describe('Security: ACTION Data Validation', () => {
         ]
 
         for (const action of validActions) {
-            it(`should accept valid ACTION: ${action.split('|')[0]}`, async () => {
+            it(`[REGRESSION P0] R-ACT-001: should accept valid ACTION: ${action.split('|')[0]}`, async () => {
                 const tx = buildTxWithPayload(action)
                 const result = await decoder.parseTransaction(tx)
 
@@ -93,7 +93,7 @@ describe('Security: ACTION Data Validation', () => {
     })
 
     describe('Invalid ACTION names', () => {
-        it('should still decode raw data even with unknown ACTION name', async () => {
+        it('[REGRESSION P0] R-ACT-002: should still decode raw data even with unknown ACTION name', async () => {
             // The decoder stores whatever passes the XCHN check at parse level,
             // the ACTION name validation happens at the block-processing level.
             // At parseTransaction level, data is returned regardless.
@@ -109,7 +109,7 @@ describe('Security: ACTION Data Validation', () => {
     // --- SEC-03: Oversized payloads ---
 
     describe('Payload size limits', () => {
-        it('should parse a payload under MAX_ACTION_DATA_LENGTH', async () => {
+        it('[REGRESSION P0] R-ACT-003: should parse a payload under MAX_ACTION_DATA_LENGTH', async () => {
             const payload = 'SEND|0|XCHAIN|' + '1'.repeat(1000)
             const tx = buildTxWithPayload(payload)
             const result = await decoder.parseTransaction(tx)
@@ -122,7 +122,7 @@ describe('Security: ACTION Data Validation', () => {
     // --- SEC-12: UTF-8 handling ---
 
     describe('UTF-8 data handling', () => {
-        it('should decode valid ASCII ACTION data', async () => {
+        it('[REGRESSION P0] R-ACT-004: should decode valid ASCII ACTION data', async () => {
             const tx = buildTxWithPayload('SEND|0|XCHAIN|1000')
             const result = await decoder.parseTransaction(tx)
 
@@ -135,7 +135,7 @@ describe('Security: ACTION Data Validation', () => {
     // --- P2SH/P2WSH bounds safety (SEC-05) ---
 
     describe('P2SH input bounds safety', () => {
-        it('should not crash on a P2SH marker with empty scriptSig inputs', async () => {
+        it('[REGRESSION P0] R-ACT-005: should not crash on a P2SH marker with empty scriptSig inputs', async () => {
             const tx = new bitcoin.Transaction()
             tx.version = 2
             tx.addInput(PREV_HASH, 1)
@@ -152,7 +152,7 @@ describe('Security: ACTION Data Validation', () => {
             assert.strictEqual(result.data.length, 0)
         })
 
-        it('should not crash on a P2SH marker with a short scriptSig (fewer than 3 elements)', async () => {
+        it('[REGRESSION P0] R-ACT-005: should not crash on a P2SH marker with a short scriptSig (fewer than 3 elements)', async () => {
             const tx = new bitcoin.Transaction()
             tx.version = 2
             tx.addInput(PREV_HASH, 1)
@@ -171,7 +171,7 @@ describe('Security: ACTION Data Validation', () => {
     })
 
     describe('P2WSH input bounds safety', () => {
-        it('should not crash on a P2WSH marker with missing witness data', async () => {
+        it('[REGRESSION P0] R-ACT-005: should not crash on a P2WSH marker with missing witness data', async () => {
             const tx = new bitcoin.Transaction()
             tx.version = 2
             tx.addInput(PREV_HASH, 1)
@@ -226,7 +226,7 @@ describe('Security: ACTION Data Validation', () => {
     // --- Multisig with non-Buffer elements ---
 
     describe('Multisig safety', () => {
-        it('should skip multisig output when pubkey elements are not Buffers', async () => {
+        it('[REGRESSION P0] R-ACT-005: should skip multisig output when pubkey elements are not Buffers', async () => {
             const tx = new bitcoin.Transaction()
             tx.version = 2
             tx.addInput(PREV_HASH, 1)

@@ -111,7 +111,7 @@ describe('Boundary: ACTION String Parsing (A-1 through A-12)', () => {
     })
 
     // A-5: DISPENSER with all 15 fields present (v0 complete happy path)
-    it('A-5: DISPENSER v0 with all 15 fields → complete parse', async () => {
+    it('[REGRESSION P1] R-DSP-001 A-5: DISPENSER v0 with all 15 fields → complete parse', async () => {
         const action = 'DISPENSER|0|BTC|JDOG|1|10|LTC||0.01|bcrt1qaddr|||9999999999|||memo'
         const tx = buildActionTx(action)
         const result = await decoder.parseTransaction(tx)
@@ -145,7 +145,7 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
     // since the actual parsing happens in the block-processing loop.
 
     // A-4: DISPENSER with only 2 fields — now rejected by field-count check
-    it('A-4: short DISPENSER string "DISPENSER|0" — rejected (< 13 fields)', () => {
+    it('[REGRESSION P1] R-DSP-001 A-4: short DISPENSER string "DISPENSER|0" — rejected (< 13 fields)', () => {
         const decodedData = 'DISPENSER|0'
         const decodedDataSplit = decodedData.split('|')
 
@@ -158,7 +158,7 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
     })
 
     // A-7: DISPENSER version non-numeric
-    it('A-7: DISPENSER with version "abc" — parseInt returns NaN, not == 0', () => {
+    it('[REGRESSION P1] R-DSP-002 A-7: DISPENSER with version "abc" — parseInt returns NaN, not == 0', () => {
         const decodedData = 'DISPENSER|abc|BTC|||LTC||||addr|||3600'
         const decodedDataSplit = decodedData.split('|')
         const commandVersion = decodedDataSplit[1]
@@ -238,7 +238,7 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
     // The actual SQL execution requires a DB, but we test the JS-side handling.
 
     // E-1: Unix epoch
-    it('E-1: expiration "0" — valid timestamp, FROM_UNIXTIME(0) = 1970-01-01', () => {
+    it('[REGRESSION P1] R-DSP-002 E-1: expiration "0" — valid timestamp, FROM_UNIXTIME(0) = 1970-01-01', () => {
         const expiration = '0'
         // This is a valid value that the decoder passes directly to the SQL query
         assert.strictEqual(parseInt(expiration), 0)

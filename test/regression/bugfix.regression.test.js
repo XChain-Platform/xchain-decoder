@@ -1,0 +1,27 @@
+/**
+ * Bug-Fix Regression Tests
+ *
+ * This file contains regression tests for specific bugs that have been fixed.
+ * Each test should:
+ *   1. Reference the bug (issue number, PR, or commit)
+ *   2. Reproduce the exact conditions that triggered the bug
+ *   3. Assert the correct (fixed) behavior
+ *   4. Use the [REGRESSION P1] tag prefix for grep-based selection
+ *
+ * Naming convention:
+ *   it('[REGRESSION P1] R-BUG-NNN: <description of what broke>', ...)
+ *
+ * Example:
+ *   it('[REGRESSION P1] R-BUG-001: DISPENSER with 12 fields no longer crashes (fix #42)', ...)
+ */
+
+const assert = require('assert')
+
+describe('Bug-Fix Regressions', () => {
+    // Add regression tests here as bugs are fixed.
+    // Each test must fail without the fix and pass with it.
+
+    it('[REGRESSION P1] R-BUG-000: placeholder — regression suite is loadable', () => {
+        assert.ok(true)
+    })
+})

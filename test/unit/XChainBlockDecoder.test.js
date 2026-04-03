@@ -140,7 +140,7 @@ describe('XChainBlockDecoder', () => {
             assert.strictEqual(tx.outs.length, 2)
         })
 
-        it('should strip MWEB flag (0x08) from litecoin transactions', () => {
+        it('[REGRESSION P2] R-NET-002: should strip MWEB flag (0x08) from litecoin transactions', () => {
             const ltcDecoder = new XChainBlockDecoder('litecoin-mainnet')
             // Build a v2 tx with marker=0x00, flag=0x08 (MWEB)
             // version(4) + marker(1) + flag(1) + varint inputs(1)=0 + varint outputs(1)=0 + locktime(4)
@@ -152,7 +152,7 @@ describe('XChainBlockDecoder', () => {
             assert.strictEqual(tx.ins.length, 0)
         })
 
-        it('should strip MWEB+segwit flag (0x09) from litecoin transactions', () => {
+        it('[REGRESSION P2] R-NET-002: should strip MWEB+segwit flag (0x09) from litecoin transactions', () => {
             const ltcDecoder = new XChainBlockDecoder('litecoin-mainnet')
             const txHex = '02000000' + '00' + '09' + '00' + '00' + '00000000'
             const tx = ltcDecoder.transactionFromHex(txHex)
@@ -160,7 +160,7 @@ describe('XChainBlockDecoder', () => {
             assert.strictEqual(tx.ins.length, 0)
         })
 
-        it('should not strip flags for bitcoin transactions', () => {
+        it('[REGRESSION P2] R-NET-002: should not strip flags for bitcoin transactions', () => {
             const btcDecoder = new XChainBlockDecoder('bitcoin-regtest')
             // A v1 tx with no special flags, just 0 inputs/outputs
             const txHex = '01000000' + '00' + '00' + '00000000'

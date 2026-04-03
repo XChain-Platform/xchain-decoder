@@ -28,7 +28,7 @@ describe('XChainDecoder#removeObfuscation()', () => {
         decoder = createDecoder()
     })
 
-    it('should decrypt a known XCHN payload correctly', async () => {
+    it('[REGRESSION P0] R-DEC-001: should decrypt a known XCHN payload correctly', async () => {
         const cipherBuf = Buffer.from(fixtures.xchnPayload.cipher, 'hex')
         const result = await decoder.removeObfuscation(cipherBuf, fixtures.txid)
 
@@ -37,7 +37,7 @@ describe('XChainDecoder#removeObfuscation()', () => {
         assert.ok(result.subarray(0, 4).equals(Buffer.from('XCHN')))
     })
 
-    it('should decrypt non-XCHN data without error', async () => {
+    it('[REGRESSION P0] R-DEC-003: should decrypt non-XCHN data without error', async () => {
         const cipherBuf = Buffer.from(fixtures.nonXchnPayload.cipher, 'hex')
         const result = await decoder.removeObfuscation(cipherBuf, fixtures.txid)
 
@@ -68,7 +68,7 @@ describe('XChainDecoder#removeObfuscation()', () => {
         assert.strictEqual(result.length, 4)
     })
 
-    it('should return null for non-Buffer input (string)', async () => {
+    it('[REGRESSION P0] R-DEC-004: should return null for non-Buffer input (string)', async () => {
         const result = await decoder.removeObfuscation('not a buffer', fixtures.txid)
         assert.strictEqual(result, null)
     })
@@ -102,7 +102,7 @@ describe('XChainDecoder#removeObfuscation()', () => {
         assert.ok(result1.equals(result2))
     })
 
-    it('should decrypt correctly with different txids (different key/iv)', async () => {
+    it('[REGRESSION P0] R-DEC-005: should decrypt correctly with different txids (different key/iv)', async () => {
         const txid1 = 'aaaaaaaaaaaaaaaa1111111111111111ccccccccccccccccdddddddddddddddd'
         const txid2 = 'bbbbbbbbbbbbbbbb2222222222222222ccccccccccccccccdddddddddddddddd'
         const plaintext = 'XCHNtest data'
@@ -128,7 +128,7 @@ describe('XChainDecoder#removeObfuscation()', () => {
         assert.strictEqual(result.toString('utf-8'), largePlain)
     })
 
-    it('should produce wrong plaintext when decrypted with wrong txid', async () => {
+    it('[REGRESSION P0] R-DEC-005: should produce wrong plaintext when decrypted with wrong txid', async () => {
         const cipherBuf = Buffer.from(fixtures.xchnPayload.cipher, 'hex')
         const wrongTxid = 'ffffffffffffffff0000000000000000aaaaaaaaaaaaaaaa1111111111111111'
         const result = await decoder.removeObfuscation(cipherBuf, wrongTxid)

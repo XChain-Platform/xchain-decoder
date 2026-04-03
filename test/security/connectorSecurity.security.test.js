@@ -19,7 +19,7 @@ describe('Security: BlockchainConnector', () => {
             assert.strictEqual(connector.url, 'http://127.0.0.1:8332')
         })
 
-        it('should preserve https:// when specified', () => {
+        it('[REGRESSION P0] R-SEC-001: should preserve https:// when specified', () => {
             const connector = new BlockchainConnector('https://secure-node.example.com', 8332, 'rpc', 'rpc')
             assert.ok(connector.url.startsWith('https://'))
             assert.strictEqual(connector.url, 'https://secure-node.example.com:8332')
@@ -41,7 +41,7 @@ describe('Security: BlockchainConnector', () => {
             assert.strictEqual(connector.rpcPassword, 'mypass')
         })
 
-        it('should not include credentials in the URL', () => {
+        it('[REGRESSION P0] R-SEC-001: should not include credentials in the URL', () => {
             const connector = new BlockchainConnector('127.0.0.1', 8332, 'myuser', 'mypass')
             assert.ok(!connector.url.includes('myuser'))
             assert.ok(!connector.url.includes('mypass'))

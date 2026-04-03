@@ -9,7 +9,7 @@ describe('Boundary: bigIntSatoshiToDecimalsString (DB-6 through DB-8)', () => {
     })
 
     // DB-6: Zero value
-    it('DB-6: 0 → "0.00000000"', () => {
+    it('[REGRESSION P1] R-DB-004 DB-6: 0 → "0.00000000"', () => {
         const result = db.bigIntSatoshiToDecimalsString(0)
         assert.strictEqual(result, '0.00000000')
     })
@@ -46,13 +46,13 @@ describe('Boundary: bigIntSatoshiToDecimalsString (DB-6 through DB-8)', () => {
     })
 
     // DB-8: Very large satoshi value
-    it('DB-8: 100000000000000000n → "1000000000.00000000"', () => {
+    it('[REGRESSION P1] R-DB-004 DB-8: 100000000000000000n → "1000000000.00000000"', () => {
         const result = db.bigIntSatoshiToDecimalsString(100000000000000000n)
         assert.strictEqual(result, '1000000000.00000000')
     })
 
     // Standard values
-    it('100000000 (1 BTC) → "1.00000000"', () => {
+    it('[REGRESSION P1] R-DB-004: 100000000 (1 BTC) → "1.00000000"', () => {
         const result = db.bigIntSatoshiToDecimalsString(100000000)
         assert.strictEqual(result, '1.00000000')
     })

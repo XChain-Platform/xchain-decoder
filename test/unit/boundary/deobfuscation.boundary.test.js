@@ -28,7 +28,7 @@ describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
     })
 
     // D-1: Empty data buffer
-    it('D-1: should handle empty buffer without crash', async () => {
+    it('[REGRESSION P0] R-DEC-004 D-1: should handle empty buffer without crash', async () => {
         const result = await decoder.removeObfuscation(Buffer.alloc(0), VALID_TXID)
         assert.ok(Buffer.isBuffer(result))
         assert.strictEqual(result.length, 0)
@@ -42,7 +42,7 @@ describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
     })
 
     // D-3: Exactly 4 bytes decrypting to XCHN (empty payload after prefix)
-    it('D-3: should decrypt data that produces exactly XCHN with no payload', async () => {
+    it('[REGRESSION P0] R-DEC-001 D-3: should decrypt data that produces exactly XCHN with no payload', async () => {
         const cipherBuf = encrypt('XCHN', VALID_TXID)
         const result = await decoder.removeObfuscation(cipherBuf, VALID_TXID)
         assert.ok(Buffer.isBuffer(result))
@@ -86,7 +86,7 @@ describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
     })
 
     // D-6: All-zero key and IV — valid AES operation
-    it('D-6: should decrypt with all-zero txid (valid AES key/IV)', async () => {
+    it('[REGRESSION P0] R-DEC-005 D-6: should decrypt with all-zero txid (valid AES key/IV)', async () => {
         const zeroTxid = '0'.repeat(64)
         const plaintext = 'XCHNtest with zero key'
         const cipherBuf = encrypt(plaintext, zeroTxid)
@@ -97,7 +97,7 @@ describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
     })
 
     // D-7: All-f key and IV — valid AES operation
-    it('D-7: should decrypt with all-f txid (valid AES key/IV)', async () => {
+    it('[REGRESSION P0] R-DEC-005 D-7: should decrypt with all-f txid (valid AES key/IV)', async () => {
         const fTxid = 'f'.repeat(64)
         const plaintext = 'XCHNtest with ff key'
         const cipherBuf = encrypt(plaintext, fTxid)

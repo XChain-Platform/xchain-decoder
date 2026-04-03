@@ -69,7 +69,7 @@ describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
     })
 
     // S-1: OP_RETURN with empty push data
-    it('S-1: OP_RETURN with 0-byte push — removeObfuscation receives empty buffer', async () => {
+    it('[REGRESSION P0] R-SCR-001 S-1: OP_RETURN with 0-byte push — removeObfuscation receives empty buffer', async () => {
         const tx = new bitcoin.Transaction()
         tx.version = 2
         addStandardInput(tx)
@@ -176,7 +176,7 @@ describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
 
     // S-6: P2SH marker but transaction has 0 additional inputs to process
     // (In practice the marker is in OP_RETURN, and the data is in inputs' scriptSigs)
-    it('S-6: XCHNp2sh marker with single input — data from that input\'s scriptSig', async () => {
+    it('[REGRESSION P0] R-SCR-002 S-6: XCHNp2sh marker with single input — data from that input\'s scriptSig', async () => {
         const tx = new bitcoin.Transaction()
         tx.version = 2
         addStandardInput(tx)
@@ -195,7 +195,7 @@ describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
     })
 
     // S-7: P2WSH marker with input that has no witness field
-    it('S-7: XCHNp2wsh marker with input missing witness — caught by try/catch', async () => {
+    it('[REGRESSION P0] R-SCR-003 S-7: XCHNp2wsh marker with input missing witness — caught by try/catch', async () => {
         const tx = new bitcoin.Transaction()
         tx.version = 2
         addStandardInput(tx)

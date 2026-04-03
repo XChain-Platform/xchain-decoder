@@ -82,7 +82,7 @@ describe('Security: DISPENSER Field Validation', () => {
     // --- SEC-11: Expiration validation ---
 
     describe('Expiration numeric validation', () => {
-        it('should parse a valid numeric expiration', async () => {
+        it('[REGRESSION P1] R-DSP-001: should parse a valid numeric expiration', async () => {
             const tx = buildDispenserTx(1700000000)
             const result = await decoder.parseTransaction(tx)
 
@@ -103,7 +103,7 @@ describe('Security: DISPENSER Field Validation', () => {
     // --- SEC-13: parseInt radix ---
 
     describe('Version parsing safety', () => {
-        it('should verify parseInt uses radix 10 in source code', () => {
+        it('[REGRESSION P1] R-DSP-002: should verify parseInt uses radix 10 in source code', () => {
             const fs = require('fs')
             const source = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8')
 
@@ -127,7 +127,7 @@ describe('Security: DISPENSER Field Validation', () => {
     // --- Pipe-delimited field injection ---
 
     describe('Field injection resistance', () => {
-        it('should handle extra pipe characters in DISPENSER payload', async () => {
+        it('[REGRESSION P1] R-DSP-001: should handle extra pipe characters in DISPENSER payload', async () => {
             const fields = ['DISPENSER', '0', 'GIVE|INJECTED', '1000', '', '', 'GET_COIN', '500', '', 'addr', '', '', '3600']
             const data = fields.join('|')
 

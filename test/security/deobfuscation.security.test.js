@@ -29,7 +29,7 @@ describe('Security: Deobfuscation Robustness', () => {
     // --- AES-128-CTR key/IV derivation ---
 
     describe('Key/IV derivation from txid', () => {
-        it('should use first 16 chars of txid as key', async () => {
+        it('[REGRESSION P0] R-DEC-002: should use first 16 chars of txid as key', async () => {
             const plaintext = 'XCHNtest'
             const encrypted = encrypt(plaintext, VALID_TXID)
             const result = await decoder.removeObfuscation(encrypted, VALID_TXID)
@@ -37,7 +37,7 @@ describe('Security: Deobfuscation Robustness', () => {
             assert.strictEqual(result.toString('utf-8'), plaintext)
         })
 
-        it('should produce different output for txids that differ only in key portion', async () => {
+        it('[REGRESSION P0] R-DEC-005: should produce different output for txids that differ only in key portion', async () => {
             const txid1 = 'aaaaaaaaaaaaaaaa' + VALID_TXID.substr(16)
             const txid2 = 'bbbbbbbbbbbbbbbb' + VALID_TXID.substr(16)
             const encrypted = encrypt('XCHNtest', txid1)
@@ -59,7 +59,7 @@ describe('Security: Deobfuscation Robustness', () => {
     // --- Corrupted ciphertext ---
 
     describe('Corrupted ciphertext handling', () => {
-        it('should return a buffer (not crash) for corrupted ciphertext', async () => {
+        it('[REGRESSION P0] R-DEC-004: should return a buffer (not crash) for corrupted ciphertext', async () => {
             const corrupted = crypto.randomBytes(100)
             const result = await decoder.removeObfuscation(corrupted, VALID_TXID)
 
@@ -100,7 +100,7 @@ describe('Security: Deobfuscation Robustness', () => {
     // --- XCHN magic word collision probability ---
 
     describe('Magic word false positive resistance', () => {
-        it('should not produce XCHN prefix from random data (100 iterations)', async () => {
+        it('[REGRESSION P0] R-DEC-003: should not produce XCHN prefix from random data (100 iterations)', async () => {
             let falsePositives = 0
 
             for (let i = 0; i < 100; i++) {

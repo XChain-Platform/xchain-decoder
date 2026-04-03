@@ -6,7 +6,7 @@ describe('Security: Connection Handling', () => {
     // --- SEC-06: Connection pool timeout ---
 
     describe('getConnection timeout', () => {
-        it('should verify GET_CONNECTION_TIMEOUT_MS constant exists in source', () => {
+        it('[REGRESSION P0] R-SEC-003: should verify GET_CONNECTION_TIMEOUT_MS constant exists in source', () => {
             const fs = require('fs')
             const source = fs.readFileSync(require.resolve('../../src/db.js'), 'utf-8')
 
@@ -60,7 +60,7 @@ describe('Security: Connection Handling', () => {
             assert.strictEqual(db._transactionLockQueue.length, 0)
         })
 
-        it('should acquire lock on first call', async () => {
+        it('[REGRESSION P0] R-SEC-003: should acquire lock on first call', async () => {
             const db = new Database('localhost', 3306, 'test_db', 'root', '')
 
             await db._acquireTransactionLock()

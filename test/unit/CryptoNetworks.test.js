@@ -5,22 +5,22 @@ const CryptoNetworks = require('../../src/CryptoNetworks')
 describe('CryptoNetworks', () => {
 
     describe('#getBitcoinJsNetwork()', () => {
-        it('should return bitcoinjs bitcoin mainnet for "bitcoin-mainnet"', () => {
+        it('[REGRESSION P2] R-NET-001: should return bitcoinjs bitcoin mainnet for "bitcoin-mainnet"', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('bitcoin-mainnet')
             assert.strictEqual(net, bitcoin.networks.bitcoin)
         })
 
-        it('should return bitcoinjs testnet for "bitcoin-testnet"', () => {
+        it('[REGRESSION P2] R-NET-001: should return bitcoinjs testnet for "bitcoin-testnet"', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('bitcoin-testnet')
             assert.strictEqual(net, bitcoin.networks.testnet)
         })
 
-        it('should return bitcoinjs regtest for "bitcoin-regtest"', () => {
+        it('[REGRESSION P2] R-NET-001: should return bitcoinjs regtest for "bitcoin-regtest"', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('bitcoin-regtest')
             assert.strictEqual(net, bitcoin.networks.regtest)
         })
 
-        it('should return Dogecoin mainnet config with correct pubKeyHash', () => {
+        it('[REGRESSION P2] R-NET-001: should return Dogecoin mainnet config with correct pubKeyHash', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('dogecoin-mainnet')
             assert.strictEqual(net.pubKeyHash, 0x1e)
             assert.strictEqual(net.scriptHash, 0x16)
@@ -38,7 +38,7 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(net.scriptHash, 0xc4)
         })
 
-        it('should return Litecoin mainnet config with bech32 prefix "ltc"', () => {
+        it('[REGRESSION P2] R-NET-001: should return Litecoin mainnet config with bech32 prefix "ltc"', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('litecoin-mainnet')
             assert.strictEqual(net.bech32, 'ltc')
             assert.strictEqual(net.pubKeyHash, 0x30)
@@ -54,7 +54,7 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(net.bech32, 'rltc')
         })
 
-        it('should return undefined for an unknown network', () => {
+        it('[REGRESSION P2] R-NET-001: should return undefined for an unknown network', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('ethereum-mainnet')
             assert.strictEqual(net, undefined)
         })
@@ -88,7 +88,7 @@ describe('CryptoNetworks', () => {
     })
 
     describe('#getFirstBlock()', () => {
-        it('should return 900000 for bitcoin-mainnet', () => {
+        it('[REGRESSION P2] R-NET-005: should return 900000 for bitcoin-mainnet', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-mainnet'), 900000)
         })
 
@@ -96,7 +96,7 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 100000)
         })
 
-        it('should return 3000000 for litecoin-mainnet', () => {
+        it('[REGRESSION P2] R-NET-005: should return 3000000 for litecoin-mainnet', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-mainnet'), 3000000)
         })
 
@@ -104,7 +104,7 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-testnet'), 4470000)
         })
 
-        it('should return 6000000 for dogecoin-mainnet', () => {
+        it('[REGRESSION P2] R-NET-005: should return 6000000 for dogecoin-mainnet', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-mainnet'), 6000000)
         })
 
@@ -112,7 +112,7 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-testnet'), 19900000)
         })
 
-        it('should return 0 for all regtest networks', () => {
+        it('[REGRESSION P2] R-NET-005: should return 0 for all regtest networks', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-regtest'), 0)
             assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-regtest'), 0)
             assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-regtest'), 0)

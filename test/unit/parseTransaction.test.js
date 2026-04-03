@@ -77,7 +77,7 @@ describe('XChainDecoder#parseTransaction()', () => {
 
     // --- Coinbase transaction rejection ---
 
-    it('should return null for a coinbase transaction', async () => {
+    it('[REGRESSION P0] R-SCR-001: should return null for a coinbase transaction', async () => {
         const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
         tx.ins[0].hash = Buffer.alloc(32, 0)
 
@@ -95,7 +95,7 @@ describe('XChainDecoder#parseTransaction()', () => {
 
     // --- OP_RETURN decoding ---
 
-    it('should decode an OP_RETURN transaction with XCHN payload', async () => {
+    it('[REGRESSION P0] R-SCR-001: should decode an OP_RETURN transaction with XCHN payload', async () => {
         const result = await decoder.parseRawTransaction(TX_HEX.opReturn)
 
         assert.ok(result)
@@ -132,7 +132,7 @@ describe('XChainDecoder#parseTransaction()', () => {
 
     // --- Multisig decoding ---
 
-    it('should decode a 1-of-3 multisig transaction', async () => {
+    it('[REGRESSION P0] R-SCR-004: should decode a 1-of-3 multisig transaction', async () => {
         const result = await decoder.parseRawTransaction(TX_HEX.multisig)
 
         assert.ok(result)
@@ -148,7 +148,7 @@ describe('XChainDecoder#parseTransaction()', () => {
 
     // --- Result structure ---
 
-    it('should return an object with data, rawData, source, destination, and dispenseOutputs', async () => {
+    it('[REGRESSION P0] R-SCR-001: should return an object with data, rawData, source, destination, and dispenseOutputs', async () => {
         const result = await decoder.parseRawTransaction(TX_HEX.opReturn)
 
         assert.ok('data' in result)
@@ -250,7 +250,7 @@ describe('XChainDecoder#parseTransaction()', () => {
 
     // --- Dynamic transaction building ---
 
-    it('should decode a dynamically built OP_RETURN transaction', async () => {
+    it('[REGRESSION P0] R-SCR-001: should decode a dynamically built OP_RETURN transaction', async () => {
         const tx = new bitcoin.Transaction()
         tx.version = 2
         addStandardInput(tx)
@@ -265,7 +265,7 @@ describe('XChainDecoder#parseTransaction()', () => {
         assert.strictEqual(result.data.toString('utf-8'), 'SEND|0|XCHAIN|1000')
     })
 
-    it('should decode a DISPENSER payload', async () => {
+    it('[REGRESSION P0] R-SCR-001: should decode a DISPENSER payload', async () => {
         const dispenserData = 'DISPENSER|0|GIVE_COIN||||||GET_COIN|||||||3600'
         const tx = new bitcoin.Transaction()
         tx.version = 2

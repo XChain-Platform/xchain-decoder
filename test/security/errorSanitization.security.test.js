@@ -12,7 +12,7 @@ describe('Security: Error Log Sanitization', () => {
             dbSource = fs.readFileSync(require.resolve('../../src/db.js'), 'utf-8')
         })
 
-        it('should not log full error objects in createDatabase', () => {
+        it('[REGRESSION P0] R-SEC-002: should not log full error objects in createDatabase', () => {
             // The old pattern was: console.log('e=',e)
             // This could leak MariaDB connection details including passwords
             const createDbSection = dbSource.substring(
@@ -54,7 +54,7 @@ describe('Security: Error Log Sanitization', () => {
             )
         })
 
-        it('should use error.code instead of full error for connection failures', () => {
+        it('[REGRESSION P0] R-SEC-002: should use error.code instead of full error for connection failures', () => {
             // createDatabase should log e.code, not e itself
             assert.ok(
                 dbSource.includes('e.code'),
