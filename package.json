@@ -1,7 +1,7 @@
 {
   "name": "xchain-decoder",
   "description": "xchain-decoder decodes XChain platform transactions from a given blockchain and populates a database with the decoded data.",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
@@ -55,9 +55,13 @@
     "test:bench:payload": "node test/benchmarks/harness.js --scenario large-payload",
     "test:bench:mempool": "node test/benchmarks/harness.js --scenario mempool-stress",
     "test:bench:save": "node test/benchmarks/harness.js --save-baseline",
-    "test:bench:compare": "node test/benchmarks/harness.js --compare"
+    "test:bench:compare": "node test/benchmarks/harness.js --compare",
+    "test:mutation": "stryker run",
+    "test:mutation:phase2": "stryker run stryker.phase2.config.mjs"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^8.7.1",
+    "@stryker-mutator/mocha-runner": "^8.7.1",
     "mocha": "^11.7.5",
     "sinon": "^21.0.3"
   }

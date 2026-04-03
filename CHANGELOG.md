@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-04-02
+
+### Added
+- Mutation testing with Stryker Mutator (`npm run test:mutation`, `npm run test:mutation:phase2`)
+- Phase 1 config (`stryker.config.mjs`) targets unit tests against 5 core source files
+- Phase 2 config (`stryker.phase2.config.mjs`) targets unit + security tests
+- Mocha timeout configs for mutation runs (`.mocharc.mutation.yml`, `.mocharc.mutation-phase2.yml`)
+- HTML mutation report output to `reports/mutation/`
+- `.stryker-tmp/` and `stryker.log` added to `.gitignore`
+
 ## [1.7.0] - 2026-04-02
 
 ### Added
