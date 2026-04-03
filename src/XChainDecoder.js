@@ -447,7 +447,9 @@ class XChainDecoder {
     }
     
     async start(){
-        this.db = new Database(this.dbUrl, this.dbPort, this.dbName, this.dbUser, this.dbPassword)
+        if (!this.db) {
+            this.db = new Database(this.dbUrl, this.dbPort, this.dbName, this.dbUser, this.dbPassword)
+        }
         
 
         // Verify the Decoder database exists
@@ -681,7 +683,7 @@ class XChainDecoder {
                                 //Store dispenses outputs
                                 for (let nextOutput of dispenseOutputs){
                                     nextOutput.txIndex = lastProcessedTxIndex
-                                    this.db.insertTransactionOutput(
+                                    await this.db.insertTransactionOutput(
                                         nextOutput
                                     )
                                 }
@@ -811,43 +813,49 @@ class XChainDecoder {
                     continue
                 }
 
-                //for (let nextTxHexIndex in nextTxsHex) {
-                let nextTxHexIndex = 0
-                while (nextTxHexIndex < nextTxsHex.length) { 
+                for (let nextTxHexIndex = 0; nextTxHexIndex < nextTxsHex.length; nextTxHexIndex++) {
                     let nextTxHex = nextTxsHex[nextTxHexIndex]
 
-                    if (nextTxHex != null) {
-                        let nextTx = this.xchainBlockDecoder.transactionFromHex(nextTxHex)
+                    if (nextTxHex == null) {
+                        continue
+                    }
 
-                        if (nextTx.ins.length === 0) {
-                            // HogEx / MWEB-only transactions have no inputs and carry no XChain data
-                            nextTxHexIndex = nextTxHexIndex + 1
-                            continue
+                    let nextTx
+                    try {
+                        nextTx = this.xchainBlockDecoder.transactionFromHex(nextTxHex)
+                    } catch (err) {
+                        console.error(`Mempool: failed to parse tx hex (batch index ${nextTxHexIndex}): ${err.message}`)
+                        continue
+                    }
+
+                    if (nextTx.ins.length === 0) {
+                        // HogEx / MWEB-only transactions have no inputs and carry no XChain data
+                        continue
+                    }
+
+                    let nextTransactionHash = nextTx.getId()
+
+                    let parseResult = await this.parseTransaction(nextTx)
+
+                    if (parseResult == null) {
+                        continue
+                    }
+
+                    if (!(await this.db.insertMempoolTransaction({
+                        hash: nextTransactionHash,
+                        source: parseResult["source"],
+                        destination: parseResult["destination"],
+                        amount: parseResult["amount"],
+                        fee: 0,
+                        data: (parseResult["data"] != null ? util.uint8ArrayToHex(parseResult["data"]) : null)
+
+                    }))) {
+                        await this.sleep(3000)
+                        continue
+                    } else {
+                        if ((parseResult["data"] != null) && (parseResult["data"].length > 0)) {
+                            validTransactionsCount = validTransactionsCount + 1
                         }
-
-                        let nextTransactionHash = nextTx.getId()
-
-                        let parseResult = await this.parseTransaction(nextTx)
-
-                        if (!(await this.db.insertMempoolTransaction({
-                            hash: nextTransactionHash,
-                            source: parseResult["source"],
-                            destination: parseResult["destination"],
-                            amount: parseResult["amount"],
-                            fee: 0,
-                            data: (parseResult["data"] != null ? util.uint8ArrayToHex(parseResult["data"]) : null)
-
-                        }))) {
-                            await this.sleep(3000)
-                            continue
-                        } else {
-                            if ((parseResult["data"] != null) && (parseResult["data"].length > 0)) {
-                                validTransactionsCount = validTransactionsCount + 1
-                            }
-                        }
-
-                        //transactionsCount = transactionsCount + 1
-                        nextTxHexIndex = nextTxHexIndex + 1
                     }
                 }
 

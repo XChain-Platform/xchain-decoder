@@ -239,6 +239,8 @@ class Database {
         try {
             await this.transactionConnection.beginTransaction()
         } catch(err){
+            await this.transactionConnection.release()
+            this.transactionConnection = null
             this._releaseTransactionLock()
             throw err
         }

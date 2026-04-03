@@ -49,7 +49,25 @@ const AUX_POW = process.env.AUX_POW
 async function startApi(){
     //Start the indexer
     const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DECODER_DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD, AUX_POW);
-    decoder.start()
+    let decoderRunning = true
+    let decoderError = null
+    decoder.start().catch((err) => {
+        console.error('Decoder crashed:', err)
+        decoderRunning = false
+        decoderError = err
+    })
+
+    // Graceful shutdown on process signals
+    const shutdown = () => {
+        console.log('Received shutdown signal, stopping decoder...')
+        decoder.stop()
+    }
+    process.on('SIGTERM', shutdown)
+    process.on('SIGINT', shutdown)
+
+    process.on('unhandledRejection', (reason) => {
+        console.error('Unhandled promise rejection:', reason)
+    })
 
     // Create the app
     const app = express();
@@ -76,12 +94,15 @@ async function startApi(){
         // Function to check if xchain-decoder is up
         async ping() {
             return {status:"success"};
+        },
+        // Health check that reports actual decoder state
+        async health() {
+            return {
+                status: decoderRunning ? "healthy" : "unhealthy",
+                synced: decoder.isSynced(),
+                error: decoderError ? decoderError.message : null
+            }
         }
-        /*
-        // Function to create transactions hex for a given data and encoding type
-        async getValidTransactions({blockIndex}) {
-            
-        }*/
     }
 
     // Allow JSON-RPC requests

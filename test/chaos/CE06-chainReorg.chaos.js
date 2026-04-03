@@ -1,0 +1,135 @@
+/**
+ * CE-06: Chain Reorganization Under Load
+ *
+ * Tests the decoder's reorg detection and recovery mechanism,
+ * verifying that it correctly identifies fork points, rolls back
+ * affected blocks, and re-processes the new chain.
+ */
+const assert = require('assert')
+const sinon = require('sinon')
+const XChainDecoder = require('../../src/XChainDecoder')
+const { createMockDatabase, createMockConnector, createMinimalBlockHex, captureConsole } = require('./helpers')
+
+describe('CE-06: Chain Reorganization Detection and Recovery', function () {
+    let decoder
+    let mockDb
+    let mockConnector
+
+    beforeEach(function () {
+        decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
+        mockDb = createMockDatabase()
+        mockConnector = createMockConnector()
+        decoder.db = mockDb
+        decoder.connector = mockConnector
+    })
+
+    afterEach(function () {
+        decoder.stop()
+    })
+
+    it('verifyReorg should detect and roll back mismatched blocks', async function () {
+        // Simulate 3 blocks where the last 2 have wrong hashes
+        let blockIndex = 5
+        mockDb.getLastBlockIndex = sinon.stub().callsFake(async () => blockIndex)
+
+        const dbBlocks = {
+            5: { block_hash: 'old_hash_5' },
+            4: { block_hash: 'old_hash_4' },
+            3: { block_hash: 'matching_hash_3' }
+        }
+
+        const nodeHashes = {
+            5: 'new_hash_5',   // Different from DB
+            4: 'new_hash_4',   // Different from DB
+            3: 'matching_hash_3' // Same
+        }
+
+        mockDb.getBlockByIndex = sinon.stub().callsFake(async (idx) => dbBlocks[idx])
+        mockConnector.getBlockHash = sinon.stub().callsFake(async (idx) => nodeHashes[idx])
+        mockDb.deleteBlockByIndex = sinon.stub().callsFake(async () => {
+            blockIndex--
+            return true
+        })
+
+        await decoder.verifyReorg()
+
+        assert.strictEqual(mockDb.deleteBlockByIndex.callCount, 2, 'Should delete 2 mismatched blocks')
+        assert.ok(mockDb.deleteBlockByIndex.calledWith(5), 'Should delete block 5')
+        assert.ok(mockDb.deleteBlockByIndex.calledWith(4), 'Should delete block 4')
+        assert.ok(mockDb.insertEvent.calledOnce, 'Should insert REORG event')
+        assert.strictEqual(mockDb.insertEvent.firstCall.args[0], 'REORG')
+        assert.strictEqual(mockDb.insertEvent.firstCall.args[1].length, 2, 'REORG event should contain 2 deleted blocks')
+    })
+
+    it('verifyReorg should handle getBlockHash failures during reorg', async function () {
+        let hashCallCount = 0
+        let blockIndex = 3
+
+        mockDb.getLastBlockIndex = sinon.stub().callsFake(async () => blockIndex)
+        mockDb.getBlockByIndex.resolves({ block_hash: 'old' })
+
+        mockConnector.getBlockHash = sinon.stub().callsFake(async () => {
+            hashCallCount++
+            if (hashCallCount === 1) {
+                throw new Error('Node temporarily unavailable')
+            }
+            // On retry, hashes match (no reorg needed)
+            return 'old'
+        })
+
+        const { logs } = await captureConsole(async () => {
+            await decoder.verifyReorg()
+        })
+
+        assert.ok(hashCallCount >= 2, 'Should have retried getBlockHash')
+        const retryLogs = logs.filter(l => l.includes('problem trying to get a block hash'))
+        assert.ok(retryLogs.length >= 1, 'Should log retry message')
+    })
+
+    it('verifyReorg should not insert event when no reorg found', async function () {
+        mockDb.getLastBlockIndex.resolves(5)
+        mockDb.getBlockByIndex.resolves({ block_hash: 'same_hash' })
+        mockConnector.getBlockHash.resolves('same_hash')
+
+        await decoder.verifyReorg()
+
+        assert.ok(!mockDb.insertEvent.called, 'Should not insert REORG event when hashes match')
+        assert.ok(!mockDb.deleteBlockByIndex.called, 'Should not delete any blocks')
+    })
+
+    it('should trigger reorg detection when previous block hash mismatches in main loop', async function () {
+        let loopCount = 0
+        mockConnector.getBlockchainInfo.resolves({ blocks: 5, verificationprogress: 1.0 })
+
+        // Block 2's prevHash won't match what DB has for block 1
+        const blockHex = createMinimalBlockHex()
+        mockConnector.getBlockHash.resolves('blockhash')
+        mockConnector.getBlock.resolves(blockHex)
+
+        mockDb.getLastBlockIndex = sinon.stub().callsFake(async () => {
+            loopCount++
+            if (loopCount > 3) {
+                decoder.stop()
+                return -1 // Reset to avoid infinite loop
+            }
+            return 1
+        })
+        mockDb.getLastTxIndex.resolves(0)
+
+        // The block from getBlock will have a prevHash from the actual block data,
+        // which won't match this mock DB entry
+        mockDb.getBlockByIndex = sinon.stub().resolves({ block_hash: 'completely_different_hash' })
+
+        // Stub verifyReorg to just reset state
+        sinon.stub(decoder, 'verifyReorg').resolves(true)
+
+        const { logs } = await captureConsole(async () => {
+            await decoder.start()
+        })
+
+        const reorgLogs = logs.filter(l => l.includes('reorg has been detected'))
+        assert.ok(reorgLogs.length >= 1, 'Should detect reorg in main loop')
+        assert.ok(decoder.verifyReorg.called, 'Should call verifyReorg')
+        assert.ok(mockDb.endTransaction.called, 'Should end transaction before reorg processing')
+    })
+})

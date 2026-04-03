@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-04-02
+
+### Added
+- Chaos engineering test suite (50 tests across 8 experiment files) covering node unavailability, RPC timeouts, DB pool exhaustion, mid-transaction failures, malformed mempool data, chain reorgs, concurrent instances, signal handling, unhandled rejections, and fire-and-forget DB calls
+- Chaos test infrastructure: mock factories (createMockDatabase, createMockConnector), fault injection helpers (failNTimes, intermittentFault, withLatency), console capture utility
+- `npm run test:chaos` script
+- Health check endpoint (`health` JSON-RPC method) reporting decoder running state, sync status, and error details
+- Process signal handlers (SIGTERM, SIGINT) for graceful decoder shutdown
+- Global `unhandledRejection` handler in api.js
+- Error handler on `decoder.start()` in api.js to track decoder crash state
+
+### Fixed
+- `decoder.start()` had no `.catch()` handler — unhandled rejection could leave Express serving healthy pings while decoder was dead
+- `insertTransactionOutput()` was called without `await` — failures were silently lost, causing missing dispenser output records
+- `transactionFromHex()` in mempool loop was unprotected — single malformed tx hex could crash the entire decoder process
+- `beginTransaction()` leaked connection on `beginTransaction()` call failure — connection released but not returned to pool
+- Mempool tx processing loop used fragile `while` with manual index — null entries or `insertMempoolTransaction` failures caused infinite loops; replaced with `for` loop
+- Mempool `parseTransaction` returning null for coinbase txs caused crash — added null check before accessing result properties
+- `start()` unconditionally created new Database instance — prevented testability; now skips if `this.db` already set
+
 ## [1.6.0] - 2026-04-02
 
 ### Added

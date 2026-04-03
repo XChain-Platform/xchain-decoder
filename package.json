@@ -1,7 +1,7 @@
 {
   "name": "xchain-decoder",
   "description": "xchain-decoder decodes XChain platform transactions from a given blockchain and populates a database with the decoded data.",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
@@ -44,6 +44,7 @@
     "test:fuzz:block": "mocha --timeout 120000 --require ./test/fuzz/setup.js 'test/fuzz/harness/blockDecoder.fuzz.js'",
     "test:fuzz:dispenser": "mocha --timeout 120000 --require ./test/fuzz/setup.js 'test/fuzz/harness/dispenserParsing.fuzz.js'",
     "test:fuzz:pipeline": "mocha --timeout 300000 --require ./test/fuzz/setup.js 'test/fuzz/harness/pipeline.fuzz.js'",
+    "test:chaos": "mocha --timeout 60000 --require ./test/chaos/setup.js 'test/chaos/**/*.chaos.js'",
     "test:security": "mocha --timeout 10000 --require ./test/security/setup.js 'test/security/**/*.security.test.js'",
     "test:bench": "node test/benchmarks/harness.js",
     "test:bench:quick": "node test/benchmarks/harness.js --quick",
