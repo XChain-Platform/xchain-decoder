@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.3] - 2026-04-02
+
+### Changed
+- Rewrote README.md with badges, features, documentation links, quick start, scripts table, and full test suite breakdown to match indexer/SDK format
+
 ## [1.7.2] - 2026-04-02
 
 ### Added
