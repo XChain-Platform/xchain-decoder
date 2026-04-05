@@ -3,23 +3,23 @@ export default {
   plugins: ['@stryker-mutator/mocha-runner'],
 
   mutate: [
-    'src/XChainDecoder.js',
-    'src/XChainBlockDecoder.js',
-    'src/BlockchainConnector.js',
-    'src/CryptoNetworks.js',
-    'src/util.js',
+    '../../src/XChainDecoder.js',
+    '../../src/XChainBlockDecoder.js',
+    '../../src/BlockchainConnector.js',
+    '../../src/CryptoNetworks.js',
+    '../../src/util.js',
   ],
 
   testRunner: 'mocha',
   mochaOptions: {
     // test/unit/setup.js is sufficient for BOTH unit and security tests —
     // both setup files install the same Module._resolveFilename patch.
-    require: ['./test/unit/setup.js'],
+    require: ['../../test/unit/setup.js'],
     spec: [
-      'test/unit/**/*.test.js',
-      'test/security/**/*.security.test.js',
+      '../../test/unit/**/*.test.js',
+      '../../test/security/**/*.security.test.js',
     ],
-    config: '.mocharc.mutation-phase2.yml',
+    config: '../../test/mutation/.mocharc.mutation-phase2.yml',
     'no-package': true,
   },
 
@@ -31,7 +31,7 @@ export default {
 
   reporters: ['html', 'clear-text', 'progress'],
   htmlReporter: {
-    fileName: 'reports/mutation/phase2/index.html',
+    fileName: '../../reports/mutation/phase2/index.html',
   },
 
   thresholds: {

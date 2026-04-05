@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-04-05
+
+### Changed
+- Moved Stryker mutation configs (`stryker.config.mjs`, `stryker.phase2.config.mjs`) and mocharc files (`.mocharc.mutation.yml`, `.mocharc.mutation-phase2.yml`) from project root into `test/mutation/`
+- Updated `test:mutation` and `test:mutation:phase2` npm scripts to reference new config paths
+
 ## [1.8.0] - 2026-04-02
 
 ### Added
