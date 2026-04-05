@@ -1,7 +1,7 @@
 {
   "name": "xchain-decoder",
   "description": "xchain-decoder decodes XChain platform transactions from a given blockchain and populates a database with the decoded data.",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
