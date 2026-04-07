@@ -674,6 +674,36 @@ class Database {
         return id;
     }
     
+    async hasPubkey(addressId){
+        let db = await this.getConnection()
+        try {
+            let rows = await db.query("SELECT 1 FROM pubkeys WHERE address_id=? LIMIT 1", [addressId])
+            return rows.length > 0
+        } catch (err) {
+            console.error('Error checking pubkey existence:', err)
+            return false
+        } finally {
+            if (this.transactionConnection == null){
+                await db.release()
+            }
+        }
+    }
+
+    async insertPubkey(addressId, pubkey){
+        let db = await this.getConnection()
+        try {
+            await db.query("INSERT IGNORE INTO pubkeys (address_id, pubkey) VALUES (?, ?)", [addressId, pubkey])
+            return true
+        } catch (err) {
+            console.error('Error inserting pubkey:', err)
+            return false
+        } finally {
+            if (this.transactionConnection == null){
+                await db.release()
+            }
+        }
+    }
+
     async insertEvent(code, data){
         const query = `
             INSERT INTO events (

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-04-07
+
+### Added
+- `src/sql/pubkeys.sql` — new `pubkeys` table for storing address-to-public-key mappings
+- `extractPubkeyFromInput()` method in `XChainDecoder` — extracts public keys from P2PKH scriptSig, P2WPKH witness, and P2SH-P2WPKH witness data
+- `hasPubkey()` and `insertPubkey()` methods in `Database` for public key storage
+- Public key extraction during XChain transaction parsing — automatically stores the source address public key on first encounter
+
 ## [1.8.3] - 2026-04-06
 
 ### Changed
