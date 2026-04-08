@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-04-08
+
+### Added
+- `PRICE` added to `VALID_ACTION_NAMES` in `XChainDecoder.js` — enables decoding of on-chain validator (PRICE v0) and user oracle (PRICE v1) price actions on all supported chains. Deploy to BTC, LTC, and DOGE decoder instances.
+
 ## [1.9.0] - 2026-04-07
 
 ### Added
