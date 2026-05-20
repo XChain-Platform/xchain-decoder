@@ -123,12 +123,31 @@ class Database {
         return true;
     }
     
-    // Handle verifying all database tables exist 
+    // Handle verifying all database tables exist
     async verifyTables(){
         let path  = this.sqlPath;
         let files = fs.readdirSync(path);
         let file  = null;
         let db    = await this.getConnection();
+        // Snapshot the set of tables currently in this database. SHOW TABLES is a
+        // direct query (no parameter binding quirks) and gives a clean per-DB list,
+        // so the existence check below is reliable on a fresh DB.
+        let existing = new Set();
+        try {
+            let rows = await db.query("SHOW TABLES FROM `" + this.dbName + "`");
+            for (let row of rows){
+                // SHOW TABLES returns one column named "Tables_in_<dbname>".
+                for (let key in row){
+                    existing.add(String(row[key]));
+                    break;
+                }
+            }
+        } catch(e){
+            console.log('Error listing tables in ' + this.dbName + ': ' + (e && e.sqlMessage ? e.sqlMessage : e));
+            util.throwError('Error while listing tables in ' + this.dbName);
+            await this.releaseConnection();
+            return false;
+        }
         // Loop through SQL files
         for (file of files){
             var isSql = file.indexOf('.sql');
@@ -136,11 +155,11 @@ class Database {
                 let table   = file.substring(0, file.indexOf('.sql'));
                 console.log('Verifying ' + table + ' table exists...');
                 try {
-                    let result = await db.query("SELECT * FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",[this.dbName, table]);
-                    if(result.length > 0){
+                    if(existing.has(table)){
                         continue;
                     } else {
                         await this.createTable(file);
+                        existing.add(table);
                     }
                 } catch(e){
                     console.log('Error verifying table ' + table + ': ' + e.code);
