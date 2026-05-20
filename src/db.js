@@ -192,7 +192,6 @@ class Database {
                 if(result.length > 0)
                     continue;
             } catch(e){
-                // console.log('e=',e);
                 util.throwError('Error while trying to create ' + table + ' table!');
             }
         }
