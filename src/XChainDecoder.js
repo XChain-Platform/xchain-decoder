@@ -54,7 +54,7 @@ const VALID_ACTION_NAMES = new Set([
     'ADDRESS', 'AIRDROP', 'BATCH', 'BROADCAST', 'CALLBACK', 'CLAIM_REWARDS',
     'DELEGATE', 'DEPLOY', 'DEPOSIT', 'DESTROY', 'DISPENSER', 'DIVIDEND',
     'EXECUTE', 'FILE', 'ISSUE', 'LINK', 'LIST', 'MESSAGE', 'MINT', 'ORDER',
-    'REVOKE_DELEGATION', 'SEND', 'SLEEP', 'STAKE', 'SWAP', 'SWEEP',
+    'PRICE', 'REVOKE_DELEGATION', 'SEND', 'SLEEP', 'STAKE', 'SWAP', 'SWEEP',
     'UNSTAKE', 'WITHDRAW'
 ])
 
@@ -217,6 +217,27 @@ class XChainDecoder {
         return source
     }
     
+    extractPubkeyFromInput(input){
+        // P2WPKH or P2SH-P2WPKH: pubkey is second witness element
+        if (input.witness && input.witness.length >= 2){
+            let pubkey = input.witness[1]
+            if (pubkey && (pubkey.length === 33 || pubkey.length === 65)){
+                return pubkey.toString('hex')
+            }
+        }
+        // P2PKH: scriptSig is <sig> <pubkey>, decompile and take last element
+        if (input.script && input.script.length > 0){
+            let decompiledScript = bitcoin.script.decompile(input.script)
+            if (decompiledScript && decompiledScript.length >= 2){
+                let lastElement = decompiledScript[decompiledScript.length - 1]
+                if (Buffer.isBuffer(lastElement) && (lastElement.length === 33 || lastElement.length === 65)){
+                    return lastElement.toString('hex')
+                }
+            }
+        }
+        return null
+    }
+
     isFutureSegwitScript(script) {
         // Native segwit scripts: version byte (OP_0..OP_16) + push length + witness program
         // Total length is 4-42 bytes.  OP_0 (v0) and OP_1 (v1/taproot) are handled by
@@ -398,12 +419,23 @@ class XChainDecoder {
             if (getSource && (source == null)){
                 source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
             }
-            
+
+            //Extract and store public key from the first input if source was found
+            if (source){
+                let pubkey = this.extractPubkeyFromInput(transaction.ins[0])
+                if (pubkey){
+                    let addressId = await this.db.getAddressId(source)
+                    if (addressId && !(await this.db.hasPubkey(addressId))){
+                        await this.db.insertPubkey(addressId, pubkey)
+                    }
+                }
+            }
+
             return {
-                data:dataBuffer, 
-                rawData: rawData, 
-                source:source, 
-                destination:null, 
+                data:dataBuffer,
+                rawData: rawData,
+                source:source,
+                destination:null,
                 dispenseOutputs:dispenseOutputs
             }
         } else {

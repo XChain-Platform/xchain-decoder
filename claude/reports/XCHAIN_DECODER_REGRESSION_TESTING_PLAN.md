@@ -1,8 +1,8 @@
 # XChain Decoder - Regression Testing Plan
 
-**Component:** `xchain-decoder`
-**Date:** 2026-04-02
-**Author:** Senior QA Engineer (AI-assisted)
+**Component:** `xchain-decoder`  
+**Date:** 2026-04-02  
+**Author:** Senior QA Engineer (AI-assisted)  
 **Version:** 1.0
 
 ---
@@ -57,8 +57,8 @@ The regression suite is a **curated subset** of tests drawn from all existing te
 
 The regression suite tests the decoder **in isolation** (unit/security) and **in context** (integration/e2e). The boundary is:
 
-- **Input boundary:** Raw block hex and raw transaction hex from coin node (mocked in unit tests, real in integration/e2e)
-- **Output boundary:** MariaDB table state after decoding (verified by direct SQL queries)
+- **Input boundary:** Raw block hex and raw transaction hex from coin node (mocked in unit tests, real in integration/e2e)  
+- **Output boundary:** MariaDB table state after decoding (verified by direct SQL queries)  
 - **Side-effect boundary:** JSON-RPC API responses (ping, health)
 
 ---
@@ -341,8 +341,8 @@ Code Push
 
 #### Test Result Tracking
 
-- **CI dashboard:** Each regression run produces a report with pass/fail/skip counts per tier
-- **Trend tracking:** Track regression suite pass rate over time (target: >99.5% on non-quarantined tests)
+- **CI dashboard:** Each regression run produces a report with pass/fail/skip counts per tier  
+- **Trend tracking:** Track regression suite pass rate over time (target: >99.5% on non-quarantined tests)  
 - **Coverage mapping:** Maintain a matrix mapping regression test IDs to source files they exercise (Section 4 tables serve as the initial version)
 
 #### Metrics to Monitor

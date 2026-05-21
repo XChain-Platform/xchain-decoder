@@ -4,11 +4,14 @@
 # XChain Platform Decoder
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.7.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.8.3-blue" alt="Version">
   <img src="https://img.shields.io/badge/tests-500%2B%20passing-brightgreen" alt="Tests">
-  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20fuzz%20%7C%20chaos%20%7C%20mutation%20%7C%20boundary%20%7C%20smoke%20%7C%20security%20%7C%20regression-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node">
   <img src="https://img.shields.io/badge/license-Dankest%20Community-orange" alt="License">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20fuzz%20%7C%20chaos%20%7C%20mutation%20%7C%20boundary%20%7C%20smoke%20%7C%20security%20%7C%20regression-brightgreen" alt="Coverage">
 </p>
 
 Transaction extraction service for the XChain Platform. Polls cryptocurrency nodes (Bitcoin, Litecoin, Dogecoin) via JSON-RPC, parses every block, identifies XChain-encoded transactions, deobfuscates the embedded ACTION payloads using AES-128-CTR, and writes the raw decoded data to a MariaDB database for the indexer to process.
