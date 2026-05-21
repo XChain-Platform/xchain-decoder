@@ -649,23 +649,25 @@ class XChainDecoder {
                             lastProcessedTxIndex = lastProcessedTxIndex + 1
                             validTransactionsCount = validTransactionsCount + 1
 
-                            if (parseResult["data"].length > MAX_ACTION_DATA_LENGTH) {
-                                console.error(`Skipping tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["data"].length} > ${MAX_ACTION_DATA_LENGTH})`)
-                                continue
-                            }
+                            let decodedData = ""
+                            if (parseResult["data"].length > 0) {
+                                if (parseResult["data"].length > MAX_ACTION_DATA_LENGTH) {
+                                    console.error(`Skipping tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["data"].length} > ${MAX_ACTION_DATA_LENGTH})`)
+                                    continue
+                                }
 
-                            let decodedData
-                            try {
-                                decodedData = strictTextDecoder.decode(parseResult["data"])
-                            } catch (e) {
-                                decodedData = lenientTextDecoder.decode(parseResult["data"])
-                                console.error(`Tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`)
-                            }
+                                try {
+                                    decodedData = strictTextDecoder.decode(parseResult["data"])
+                                } catch (e) {
+                                    decodedData = lenientTextDecoder.decode(parseResult["data"])
+                                    console.error(`Tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`)
+                                }
 
-                            let actionName = decodedData.split("|")[0]
-                            if (!VALID_ACTION_NAMES.has(actionName)) {
-                                console.error(`Skipping tx ${nextTransactionHash}: unknown ACTION name '${actionName.substring(0, 32)}'`)
-                                continue
+                                let actionName = decodedData.split("|")[0]
+                                if (!VALID_ACTION_NAMES.has(actionName)) {
+                                    console.error(`Skipping tx ${nextTransactionHash}: unknown ACTION name '${actionName.substring(0, 32)}'`)
+                                    continue
+                                }
                             }
                             
                             if (!(await this.db.insertTransaction({
