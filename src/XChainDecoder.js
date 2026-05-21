@@ -698,14 +698,14 @@ class XChainDecoder {
                                     let decodedDataSplit = decodedData.split("|")
                                     let commandVersion = decodedDataSplit[1]
 
-                                    if (parseInt(commandVersion, 10) === 0 && decodedDataSplit.length >= 13){
+                                    if (parseInt(commandVersion, 10) === 0 && decodedDataSplit.length >= 14){
                                         let giveCoin = decodedDataSplit[2]
                                         let getCoin = decodedDataSplit[6]
                                         let getAddress = decodedDataSplit[9]
-                                        let expiration = Number(decodedDataSplit[12])
+                                        let expiration = Number(decodedDataSplit[13])
 
                                         if (isNaN(expiration) || expiration < 0 || expiration > 4294967295) {
-                                            console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[12]}'`)
+                                            console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[13]}'`)
                                         } else if ((getCoin != "") || (giveCoin != "")){
                                             if (!(await this.db.insertDispenser({
                                                 txIndex: lastProcessedTxIndex,
