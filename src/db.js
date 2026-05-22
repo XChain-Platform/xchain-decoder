@@ -497,17 +497,18 @@ class Database {
             destination_id,
             amount,
             fee,
-            data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+            data,
+            raw_data
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
         `;
-        
+
         let connection = await this.getConnection()
-        
+
         try {
             let txHashId = await this.createTransaction(tx.hash)
             let sourceId = await this.createAddress(tx.source)
             let destinationId = await this.createAddress(tx.destination)
-        
+
             await connection.query(query, [
                 tx.index,
                 txHashId,
@@ -516,9 +517,10 @@ class Database {
                 destinationId,
                 tx.amount,
                 tx.fee,
-                tx.data
+                tx.data,
+                tx.raw_data || null
             ])
-            
+
             return true
         } catch (err) {
             if (err.errno == 1062){

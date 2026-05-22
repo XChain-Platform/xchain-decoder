@@ -7,7 +7,8 @@ CREATE TABLE transactions (
     destination_id INTEGER UNSIGNED,           -- id of record in index_addresses
     amount         BIGINT,                     -- BTC amount sent
     fee            BIGINT,                     -- BTC Fee paid (miners fee)
-    data           MEDIUMTEXT                  -- Decoded data
+    data           MEDIUMTEXT,                 -- Decoded action string
+    raw_data       MEDIUMBLOB                  -- Raw payload bytes (FILE rawData, etc.)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
 CREATE UNIQUE INDEX tx_hash_id     ON transactions (tx_hash_id);

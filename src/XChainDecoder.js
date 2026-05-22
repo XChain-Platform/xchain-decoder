@@ -710,8 +710,9 @@ class XChainDecoder {
                                 destination: parseResult["destination"],
                                 amount: parseResult["amount"],
                                 fee: 0,
-                                data: decodedData
-                                
+                                data: decodedData,
+                                raw_data: parseResult["rawData"] || null
+
                             }))){
                                 await this.sleep(3000)
                                 continue main_parsing
