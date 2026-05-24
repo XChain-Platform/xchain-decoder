@@ -52,10 +52,10 @@ const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node nee
 const MAX_ACTION_DATA_LENGTH = 8192
 const VALID_ACTION_NAMES = new Set([
     'ADDRESS', 'AIRDROP', 'BATCH', 'BROADCAST', 'CALLBACK', 'CLAIM_REWARDS',
-    'DELEGATE', 'DEPLOY', 'DEPOSIT', 'DESTROY', 'DISPENSER', 'DIVIDEND',
-    'EXECUTE', 'FILE', 'ISSUE', 'LINK', 'LIST', 'MESSAGE', 'MINT', 'ORDER',
-    'PRICE', 'REVOKE_DELEGATION', 'SEND', 'SLEEP', 'STAKE', 'SWAP', 'SWEEP',
-    'UNSTAKE', 'WITHDRAW'
+    'COINPAY', 'DELEGATE', 'DEPLOY', 'DEPOSIT', 'DESTROY', 'DISPENSER',
+    'DIVIDEND', 'EXECUTE', 'FILE', 'ISSUE', 'LINK', 'LIST', 'MESSAGE', 'MINT',
+    'ORDER', 'PRICE', 'REVOKE_DELEGATION', 'SEND', 'SLEEP', 'STAKE', 'SWAP',
+    'SWEEP', 'UNSTAKE', 'WITHDRAW'
 ])
 
 const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many transactions need to be processed before inserting the data into the database
@@ -256,19 +256,20 @@ class XChainDecoder {
         let firstInputTxId = util.uint8ArrayToHex(transaction.ins[0].hash.reverse())
         let standardInput = ("standard_input" in transaction.ins[0]?transaction.ins[0]["standard_input"]:true)
         let dispenseOutputs = []
-        
+        let paymentOutputs = []
+
         //Ignore coin base transactions
         if ((firstInputTxId != "0000000000000000000000000000000000000000000000000000000000000000") && standardInput){
             let source = null
             let dataBuffer = Buffer.allocUnsafe(0)
             let rawData = null
             let getSource = false
-                
+
             for (let txOutputIndex=0;txOutputIndex < transaction.outs.length;txOutputIndex++){
                 let nextOutput = transaction.outs[txOutputIndex]
                 let decompiledScript = bitcoin.script.decompile(nextOutput.script)
                 let nextDataBuffer = new Buffer.allocUnsafe(0)
-                
+
                 let outputAddress = null
                 try {
                     if (!this.isFutureSegwitScript(nextOutput.script))
@@ -276,10 +277,10 @@ class XChainDecoder {
                 } catch (err){
                     //the output script has no matching address
                 }
-                
+
                 if (outputAddress){
                     let outputIsDispense = await this.db.isThereADispenserForAddress(outputAddress)
-                    
+
                     if (outputIsDispense){
                         let dispenseOutput = {
                             txIndex:nextTxId,
@@ -287,9 +288,18 @@ class XChainDecoder {
                             destinationAddress:outputAddress,
                             amount:nextOutput.value
                         }
-                        
+
                         dispenseOutputs.push(dispenseOutput)
                         getSource = true
+                    } else {
+                        // Capture every non-OP_RETURN, non-dispense output. The indexer
+                        // fans out per-output processing for payment actions (e.g. COINPAY)
+                        // by LEFT JOIN-ing transaction_outputs and parsing once per row.
+                        paymentOutputs.push({
+                            vout:txOutputIndex,
+                            destinationAddress:outputAddress,
+                            amount:nextOutput.value
+                        })
                     }
                 }
                 
@@ -436,7 +446,8 @@ class XChainDecoder {
                 rawData: rawData,
                 source:source,
                 destination:null,
-                dispenseOutputs:dispenseOutputs
+                dispenseOutputs:dispenseOutputs,
+                paymentOutputs:paymentOutputs
             }
         } else {
             return null
@@ -724,21 +735,42 @@ class XChainDecoder {
                                         nextOutput
                                     )
                                 }
+
+                                //Store payment outputs for actions whose settlement
+                                //is determined by on-chain native-coin outputs (e.g. COINPAY).
+                                //The indexer fans out per-output by LEFT JOIN-ing
+                                //transaction_outputs in getDecoderBlockData.
+                                if (decodedData.startsWith("COINPAY|")){
+                                    for (let nextOutput of parseResult["paymentOutputs"]){
+                                        nextOutput.txIndex = lastProcessedTxIndex
+                                        await this.db.insertTransactionOutput(
+                                            nextOutput
+                                        )
+                                    }
+                                }
                                 
                                 //Catch any dispenser message to add it to
-                                //the list of possible dispenses
+                                //the list of possible dispenses.
+                                //
+                                //v0 wire format (must stay in sync with the
+                                //indexer — see xchain-indexer/src/actions/dispenser.js):
+                                //  DISPENSER|0|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT
+                                //    |GIVE_OWNERSHIP|GIVE_ESCROW
+                                //    |GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS
+                                //    |FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS
+                                //    |EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO
                                 if (decodedData.startsWith("DISPENSER")){
                                     let decodedDataSplit = decodedData.split("|")
                                     let commandVersion = decodedDataSplit[1]
 
-                                    if (parseInt(commandVersion, 10) === 0 && decodedDataSplit.length >= 14){
+                                    if (parseInt(commandVersion, 10) === 0 && decodedDataSplit.length >= 15){
                                         let giveCoin = decodedDataSplit[2]
-                                        let getCoin = decodedDataSplit[6]
-                                        let getAddress = decodedDataSplit[9]
-                                        let expiration = Number(decodedDataSplit[13])
+                                        let getCoin = decodedDataSplit[7]
+                                        let getAddress = decodedDataSplit[10]
+                                        let expiration = Number(decodedDataSplit[14])
 
                                         if (isNaN(expiration) || expiration < 0 || expiration > 4294967295) {
-                                            console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[13]}'`)
+                                            console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[14]}'`)
                                         } else if ((getCoin != "") || (giveCoin != "")){
                                             if (!(await this.db.insertDispenser({
                                                 txIndex: lastProcessedTxIndex,
