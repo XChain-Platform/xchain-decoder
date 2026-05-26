@@ -27,7 +27,6 @@ const bs = require("binary-search")
 
 const SATOSHIS_DECIMALS = 8
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/
-const GET_CONNECTION_TIMEOUT_MS = 30000
 
 class Database {
     constructor(host, port, dbName, user, pass){
@@ -199,22 +198,32 @@ class Database {
         // await this.releaseConnection();
     }
 
-    // Handle getting a database Connection
+    // Handle getting a database Connection (with exponential backoff + jitter).
+    // Matches the indexer's retry shape so a transient MariaDB blip during
+    // heavy concurrent load (e.g. e2etest container build + initial seeding)
+    // doesn't crash the decoder process. ~5min worst-case patience before
+    // surfacing a real outage.
     async getConnection(){
         if(this.transactionConnection)
             return this.transactionConnection;
-        var connection = null;
-        let startTime = Date.now()
+        var connection  = null;
+        var attempts    = 0;
+        var maxAttempts = 30;
+        var baseDelay   = 500;   // 500ms initial delay
+        var maxDelay    = 15000; // 15s max delay
         while(connection == null){
             try {
                 connection = await this.pool.getConnection();
             } catch (e){
-                if (Date.now() - startTime > GET_CONNECTION_TIMEOUT_MS) {
-                    throw new Error('Failed to get database connection after ' + GET_CONNECTION_TIMEOUT_MS + 'ms: ' + e.code)
-                }
-                console.log("Can't connect to mariadb. Trying again...");
+                attempts++;
+                if(attempts >= maxAttempts)
+                    throw new Error('Failed to get database connection after ' + maxAttempts + ' attempts: ' + e.code)
+                let delay      = Math.min(baseDelay * Math.pow(2, attempts - 1), maxDelay);
+                let jitter     = Math.floor(Math.random() * delay * 0.3);
+                let totalDelay = delay + jitter;
+                console.log("Can't connect to mariadb. Retrying in " + totalDelay + 'ms... (' + attempts + '/' + maxAttempts + ')');
                 connection = null;
-                await util.sleep(1000);
+                await util.sleep(totalDelay);
             }
         }
         return connection;
