@@ -643,11 +643,13 @@ class Database {
         // Handle creating record
         if(id==null){
             let db    = await this.getConnection();
-            let query = "INSERT INTO index_transactions (`hash`) values (?)"
+            // INSERT IGNORE + refetch is race-safe against the UNIQUE index: if a
+            // concurrent caller inserted the same hash between our lookup and here,
+            // the IGNORE skips the duplicate and the refetch below resolves to the
+            // canonical row id — so two callers can never create duplicate rows.
+            let query = "INSERT IGNORE INTO index_transactions (`hash`) values (?)"
             try {
-                let result = await db.query(query, [hash]);
-                if(result.insertId)
-                    id = result.insertId;
+                await db.query(query, [hash]);
             } catch (err) {
                 console.error('Error trying to create hash record in index_transactions table:', err);
             } finally {
@@ -655,6 +657,7 @@ class Database {
                     await db.release()
                 }
             }
+            id = await this.getTransactionId(hash);
         }
         return id;
     }
@@ -687,11 +690,13 @@ class Database {
         // Handle creating record
         if(id==null){
             let db    = await this.getConnection();
-            let query = "INSERT INTO index_addresses (`address`) values (?)"
+            // INSERT IGNORE + refetch is race-safe against the UNIQUE index: if a
+            // concurrent caller inserted the same address between our lookup and here,
+            // the IGNORE skips the duplicate and the refetch below resolves to the
+            // canonical row id — so two callers can never create duplicate rows.
+            let query = "INSERT IGNORE INTO index_addresses (`address`) values (?)"
             try {
-                let result = await db.query(query, [address]);
-                if(result.insertId)
-                    id = result.insertId;
+                await db.query(query, [address]);
             } catch (err) {
                 console.error('Error trying to create address record in index_addresses table:', err);
             } finally {
@@ -699,6 +704,7 @@ class Database {
                     await db.release()
                 }
             }
+            id = await this.getAddressId(address);
         }
         return id;
     }

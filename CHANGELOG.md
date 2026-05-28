@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-05-28
+
+### Fixed
+- `index_addresses` / `index_transactions` lookup tables could accumulate duplicate rows for the same address or hash. Each carried only a non-unique 10/20-char prefix index, and `createAddress` / `createTransaction` upserted with a SELECT-then-INSERT — a time-of-check/time-of-use race in which two concurrent callers both see "no row" and both insert, producing duplicate ids for the same key. The schema now declares full-column **UNIQUE** indexes (also restoring exact, non-prefix lookup selectivity at scale), and both upserts now use `INSERT IGNORE` + refetch, which is race-safe without a wrapping transaction.
+
+### Migration
+- `migrations/2026-05-28-unique-index-tables.sql` upgrades an existing database: the schema files only run on a fresh DB (`verifyTables` skips existing tables), so run this script once against a live database to de-duplicate any accumulated rows (keep lowest id, repoint all foreign-key references, delete duplicates) before the UNIQUE indexes can be applied. Run with the decoder stopped; take a backup first.
+
 ## [1.10.2] - 2026-05-28
 
 ### Security
