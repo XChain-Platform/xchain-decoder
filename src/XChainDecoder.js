@@ -514,7 +514,6 @@ class XChainDecoder {
                 util.throwError("Database " + this.dbName + " tables don't exist!");
         }
     
-        console.log("Connected to database!")
         console.log("Parsing...")
         
         let lastProcessedBlockIndex = await this.db.getLastBlockIndex()

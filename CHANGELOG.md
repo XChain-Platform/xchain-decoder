@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.3] - 2026-05-28
+
+### Removed
+- Dropped a redundant "Connected to database!" status line printed at startup. The database connection is already verified (and any failure throws) immediately before it, and the subsequent "Parsing..." line signals that startup succeeded, so the extra confirmation added only log noise.
+
 ## [1.11.2] - 2026-05-28
 
 ### Security
