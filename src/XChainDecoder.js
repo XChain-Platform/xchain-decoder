@@ -590,8 +590,10 @@ class XChainDecoder {
                 this.synced = true
                 if (this.mempoolInterval == null){
                     console.log("Mempool parsing started!")
-                    this.updateMempool()
-                    this.mempoolInterval = setInterval(this.updateMempool.bind(this), MEMPOOL_INTERVAL)
+                    this.updateMempool().catch(err => console.error('[updateMempool] unhandled error:', err))
+                    this.mempoolInterval = setInterval(() => {
+                        this.updateMempool().catch(err => console.error('[updateMempool] unhandled error:', err))
+                    }, MEMPOOL_INTERVAL)
                 }
                 
                 await this.sleep(CHECK_BLOCK_DELAY_MS)
@@ -868,7 +870,8 @@ class XChainDecoder {
 
             //let transactionsCount = 0
             let validTransactionsCount = 0
-            
+
+            try {
             //await this.mempoolDb.beginTransaction()
             //This deletes the txs that are in the database but not longer in the mempool. Also, it removes
             //the transactions that already exist in the database, leaving rawMempool only with the new transactions from the mempool
@@ -943,12 +946,17 @@ class XChainDecoder {
             }
 
             //await this.mempoolDb.endTransaction()
-            this.mempoolBusy = false
             let mempoolEndTime = Date.now()
             let timeString = this.millisecondsToTimeString(mempoolEndTime - mempoolStartTime)
 
             console.log("Mempool updated!"
                 + " Transactions (" + rawMempool.length + " in mempool, " + validTransactionsCount + " valid, " + deletedTransactionsCount + " less) [" + timeString + "]")
+            } finally {
+                // Always clear the busy flag, even if a DB or parse operation above threw.
+                // Otherwise a single transient failure would leave mempool tracking frozen
+                // for the rest of the process lifetime.
+                this.mempoolBusy = false
+            }
         } else {
             console.log("Mempool is still busy")
         }

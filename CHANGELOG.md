@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.5] - 2026-05-29
+
+### Fixed
+- `updateMempool` no longer freezes mempool tracking for the rest of the process lifetime when a database or parse operation fails mid-cycle. The `mempoolBusy` guard flag was set at the start of each cycle but only cleared on the happy path and on a `getRawMempool` failure; an exception from any of the three post-sort `await`s (`deleteAndCompareTxsNotInList`, `parseTransaction`, `insertMempoolTransaction`) escaped the function as an unhandled rejection and left the flag stuck `true`, so every subsequent interval tick short-circuited on the busy check and silently stopped updating `mempool_transactions` until the process was restarted. The post-sort body is now wrapped in a `try/finally` that always resets the flag, and the `setInterval` callback has a `.catch()` so any such exception is logged instead of suppressed. Added CE-05 chaos scenarios covering a DB throw after the sort phase and verifying the next tick resumes normally.
+
 ## [1.11.4] - 2026-05-29
 
 ### Fixed
