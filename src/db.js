@@ -40,7 +40,7 @@ class Database {
         this.dbName = dbName;
         this.user   = user;
         this.pass   = pass;
-        const DUPLICATED_TRANSACTION = 1
+        this.DUPLICATED_TRANSACTION = 1
         // Database connection parameters
         this.connectionParams = {
             host:     this.host,
@@ -329,7 +329,20 @@ class Database {
         await this.beginTransaction()
         let connection = await this.getConnection()
         
+        // Delete child rows first: transaction_outputs and dispensers are
+        // keyed by tx_index, so they must be removed before the parent
+        // transactions rows they reference are deleted. Otherwise the decoder
+        // re-inserts the same block and hits duplicate-key errors, leaving
+        // stale pre-reorg rows that the indexer reads as valid.
         let query = `
+            DELETE FROM transaction_outputs WHERE tx_index IN (SELECT tx_index FROM transactions WHERE block_index = ?);
+        `;
+        await connection.query(query, [blockIndex])
+        query = `
+            DELETE FROM dispensers WHERE tx_index IN (SELECT tx_index FROM transactions WHERE block_index = ?);
+        `;
+        await connection.query(query, [blockIndex])
+        query = `
             DELETE FROM transactions WHERE block_index = ?;
         `;
         await connection.query(query, [blockIndex])

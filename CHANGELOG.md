@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.4] - 2026-05-29
+
+### Fixed
+- Block deletion during a chain reorganization now also removes the dependent `transaction_outputs` and `dispensers` rows (both keyed by `tx_index`), not just `transactions` and `blocks`. Previously those child rows were orphaned, so when the decoder reprocessed the reorged block it re-inserted the same `(tx_index, vout)` / `(tx_index, address_id)` pairs, hit a duplicate-key error, and silently kept the stale pre-reorg rows — which the indexer then read as valid, producing wrong dispense destinations and amounts.
+- Fixed the `DUPLICATED_TRANSACTION` sentinel, which was declared as a constructor-local `const` and never reachable as `this.DUPLICATED_TRANSACTION` (always `undefined`). Duplicate-key inserts of transaction outputs are now detected and logged with a warning (block index, tx index, vout) instead of being swallowed.
+
 ## [1.11.3] - 2026-05-28
 
 ### Removed

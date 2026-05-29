@@ -735,9 +735,12 @@ class XChainDecoder {
                                 //Store dispenses outputs
                                 for (let nextOutput of dispenseOutputs){
                                     nextOutput.txIndex = lastProcessedTxIndex
-                                    await this.db.insertTransactionOutput(
+                                    let insertResult = await this.db.insertTransactionOutput(
                                         nextOutput
                                     )
+                                    if (insertResult === this.db.DUPLICATED_TRANSACTION){
+                                        console.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${lastProcessedTxIndex}, vout=${nextOutput.vout}) — possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
+                                    }
                                 }
 
                                 //Store payment outputs for actions whose settlement
@@ -747,9 +750,12 @@ class XChainDecoder {
                                 if (decodedData.startsWith("COINPAY|")){
                                     for (let nextOutput of parseResult["paymentOutputs"]){
                                         nextOutput.txIndex = lastProcessedTxIndex
-                                        await this.db.insertTransactionOutput(
+                                        let insertResult = await this.db.insertTransactionOutput(
                                             nextOutput
                                         )
+                                        if (insertResult === this.db.DUPLICATED_TRANSACTION){
+                                            console.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${lastProcessedTxIndex}, vout=${nextOutput.vout}) — possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
+                                        }
                                     }
                                 }
                                 
