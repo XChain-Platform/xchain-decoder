@@ -292,7 +292,7 @@ class Database {
                 this._releaseTransactionLock()
                 return true
             } catch (e){
-                console.log("There was an error trying to commit a transaction: " + e.code)
+                console.error("There was an error trying to commit a transaction: " + e.code)
                 await this.endTransaction()
             }
         }
