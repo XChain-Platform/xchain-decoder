@@ -46,7 +46,11 @@ function addP2PKHOutput(tx, value) {
 const TX_HEX = {
     opReturn: '0200000001aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011010000006b4830303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303021020202020202020202020202020202020202020202020202020202020202020202ffffffff020000000000000000166a145ed141846fd6cbef65cb28316aff11ba07152fcf00e1f505000000001976a914aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88ac00000000',
     opReturnWithRaw: '0200000001aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011010000006b4830303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303021020202020202020202020202020202020202020202020202020202020202020202ffffffff020000000000000000226a205ed141846cc8c7e76787783472e71ffb177e0eda0d24b8406eccc9cd4be35b1000e1f505000000001976a914aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88ac00000000',
-    multisig: '0200000001aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011010000006b4830303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303021020202020202020202020202020202020202020202020202020202020202020202ffffffff02e803000000000000695121025ed141846dc8d3e27dce7b3c6cab14fb07110000000000000000000000000000210200000000000000000000000000000000000000000000000000000000000000002103030303030303030303030303030303030303030303030303030303030303030353ae00e1f505000000001976a914aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88ac00000000'
+    // Genuine AES-128-CTR encryption of "XCHN" + compile(["Multisig data"]) padded
+    // to a full 64-byte chunk (matches real encoder output: the zero-padding is
+    // applied to the plaintext before encryption, so it decrypts back to 0x00 / OP_0
+    // and is harmlessly ignored by bitcoin.script.decompile at reassembly).
+    multisig: '0200000001aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011010000006b4830303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303021020202020202020202020202020202020202020202020202020202020202020202ffffffff02e803000000000000695121025ed141846dc8d3e27dce7b3c6cab14fb07115cbb7a04d9341aadaaa5268635642102e71ca15723d902414e2d1eabfe0fbd6380eb928110bbec51127fce0de72f14652103030303030303030303030303030303030303030303030303030303030303030353ae00e1f505000000001976a914aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88ac00000000'
 }
 
 // Create a decoder with mocked DB and connector
@@ -144,6 +148,66 @@ describe('XChainDecoder#parseTransaction()', () => {
         const data = result.data
 
         assert.notStrictEqual(data[data.length - 1], 0)
+    })
+
+    it('[REGRESSION P0] R-SCR-005: should not drop a 0x00 final ciphertext byte on a full multisig chunk', async () => {
+        // A full 64-byte MULTISIGN chunk (magic(4) + 60 data bytes, no padding)
+        // carries live AES-128-CTR ciphertext in its final byte. ~1/256 of the
+        // time that byte is 0x00. The decoder must NOT strip it: doing so decrypts
+        // one byte short and silently corrupts the decoded action. This test forces
+        // the final ciphertext byte to 0x00 and asserts a byte-for-byte round trip.
+        const { key, iv } = getKeyIv()
+
+        // AES-CTR encrypting an all-zero buffer yields the raw keystream.
+        const ksCipher = crypto.createCipheriv('aes-128-ctr', key, iv)
+        const keystream = Buffer.concat([ksCipher.update(Buffer.alloc(64, 0)), ksCipher.final()])
+
+        // Build a 60-byte compiled script: 1-byte pushdata prefix + 59 data bytes.
+        // Plaintext chunk = XCHN(4) + script(60) = exactly 64 bytes (both pubkey
+        // halves full, no zero-pad), so plaintext[63] is the last data byte.
+        const action = Buffer.alloc(59)
+        for (let i = 0; i < action.length; i++) action[i] = 0x41 + (i % 26)
+        // Force plaintext[63] == keystream[63] so ciphertext[63] == 0x00.
+        action[action.length - 1] = keystream[63]
+
+        const scriptPayload = bitcoin.script.compile([action])
+        assert.strictEqual(scriptPayload.length, 60)
+        const plain = Buffer.concat([Buffer.from('XCHN'), scriptPayload])
+        assert.strictEqual(plain.length, 64)
+
+        const cipher = encryptBuf(plain)
+        assert.strictEqual(cipher.length, 64)
+        // Precondition: the bug only triggers when the final ciphertext byte is 0x00.
+        assert.strictEqual(cipher[63], 0x00)
+
+        // Split into two 32-byte halves, each 0x02-prefixed, as dataToPubkey() does.
+        const pubkey1 = Buffer.concat([Buffer.from([0x02]), cipher.subarray(0, 32)])
+        const pubkey2 = Buffer.concat([Buffer.from([0x02]), cipher.subarray(32, 64)])
+        const pubkey3 = Buffer.concat([Buffer.from([0x03]), Buffer.alloc(32, 0x03)])
+
+        const multisigScript = bitcoin.script.compile([
+            bitcoin.opcodes.OP_1,
+            pubkey1,
+            pubkey2,
+            pubkey3,
+            bitcoin.opcodes.OP_3,
+            bitcoin.opcodes.OP_CHECKMULTISIG
+        ])
+
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+        tx.addOutput(multisigScript, 1000)
+        addP2PKHOutput(tx)
+
+        const result = await decoder.parseTransaction(tx)
+
+        assert.ok(result)
+        assert.ok(Buffer.isBuffer(result.data))
+        // Byte-for-byte: the decoded action must equal the original 59 bytes,
+        // including the final byte the old strip loop would have dropped.
+        assert.strictEqual(result.data.length, action.length)
+        assert.ok(result.data.equals(action), 'decoded data must match original payload byte-for-byte')
     })
 
     // --- Result structure ---

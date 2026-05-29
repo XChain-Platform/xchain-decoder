@@ -388,15 +388,19 @@ class XChainDecoder {
 
                         let data = Buffer.concat([pubkey1, pubkey2])
 
-                        //Removing ending 00's
-                        for (let i=data.length - 1;i>=0;i--){
-                            if (data[i] !== 0){
-                                data = data.slice(0, i + 1)
-                                break
-                            }
-                        }
-                        
-                        let dataWithoutObfuscation = await this.removeObfuscation(data, firstInputTxId)                 
+                        // We intentionally do NOT strip trailing zero bytes here.
+                        // The encoder's dataToPubkey() zero-pads the ciphertext only on
+                        // the FINAL partial chunk to fill the 32-byte pubkey halves, but a
+                        // full 64-byte chunk carries pseudo-random AES-128-CTR ciphertext
+                        // whose last byte is 0x00 ~1/256 of the time. Stripping it dropped a
+                        // real ciphertext byte, decrypted one byte short, and silently
+                        // corrupted the payload (bitcoin.script.decompile then returned null
+                        // on the truncated buffer). Instead we decrypt the full chunk; AES-CTR
+                        // is a stream cipher, so any zero-padding on the final chunk decrypts
+                        // to harmless trailing keystream bytes that fall outside the payload's
+                        // own self-describing compiled-script length and are discarded when the
+                        // reassembled buffer is run through bitcoin.script.decompile() below.
+                        let dataWithoutObfuscation = await this.removeObfuscation(data, firstInputTxId)
                         
                         if (dataWithoutObfuscation != null){
                             if (dataWithoutObfuscation.subarray(0, MAGIC_WORD.length).equals(MAGIC_WORD_BUFFER)){

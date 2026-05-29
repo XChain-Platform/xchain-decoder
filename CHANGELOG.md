@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-05-28
+
+### Fixed
+- MULTISIGN transactions whose final 64-byte chunk ended in a `0x00` ciphertext byte were silently decoded into corrupt data (~1 in 256 affected). The decoder stripped trailing zero bytes from the concatenated pubkey payload *before* decrypting, to remove the zero-padding the encoder adds to partial final chunks. On a *full* 64-byte chunk no padding exists, so the last byte is live AES-128-CTR ciphertext; when it was `0x00` the strip dropped a real byte, `removeObfuscation` decrypted one byte short, `bitcoin.script.decompile` returned `null` on the truncated buffer, and the raw incomplete buffer was written as the decoded action with no error surfaced. The strip is removed entirely: the full chunk is now decrypted, and because AES-CTR is a stream cipher any genuine plaintext zero-padding decrypts back to `0x00` (valid `OP_0`) and falls outside the payload's self-describing compiled-script length, so it is discarded harmlessly at reassembly. Added regression test `R-SCR-005` and regenerated the multisig test fixture to reflect real encoder output.
+
 ## [1.11.0] - 2026-05-28
 
 ### Fixed
