@@ -443,17 +443,23 @@ class XChainDecoder {
                 let decompiledData = bitcoin.script.decompile(dataBuffer)
                 if (decompiledData != null && decompiledData.length > 0) {
                     // A single-byte OP_0 segment ([0x00]) decompiles to the integer 0,
-                    // not a Buffer. Normalize any non-Buffer result to an empty Buffer so
-                    // every downstream consumer can rely on dataBuffer being a Buffer
-                    // (otherwise the integer silently fails .length guards and throws in
+                    // not a Buffer, and a non-standard script can decompile to a leading
+                    // opcode integer. On any non-Buffer result, reject the degenerate decode:
+                    // clear dataBuffer and leave rawData/getSource untouched so a stray opcode
+                    // integer can never reach the raw_data column or trigger a spurious source
+                    // lookup. Every downstream consumer can then rely on dataBuffer being a
+                    // Buffer (otherwise the integer silently fails .length guards and throws in
                     // hex-encoding paths). No valid payload is zero-length, so this is inert
                     // for real data.
-                    dataBuffer = Buffer.isBuffer(decompiledData[0]) ? decompiledData[0] : Buffer.allocUnsafe(0)
-
-                    if (decompiledData.length > 1){
-                        rawData = decompiledData[1]
+                    if (!Buffer.isBuffer(decompiledData[0])){
+                        dataBuffer = Buffer.allocUnsafe(0)
+                    } else {
+                        dataBuffer = decompiledData[0]
+                        if (decompiledData.length > 1){
+                            rawData = decompiledData[1]
+                        }
+                        getSource = true
                     }
-                    getSource = true
                 } else {
                     dataBuffer = Buffer.allocUnsafe(0)
                 }
