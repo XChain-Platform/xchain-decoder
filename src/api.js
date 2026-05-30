@@ -97,10 +97,14 @@ async function startApi(){
         },
         // Health check that reports actual decoder state
         async health() {
+            const syncStatus = decoder.getSyncStatus();
             return {
                 status: decoderRunning ? "healthy" : "unhealthy",
                 synced: decoder.isSynced(),
-                ...decoder.getSyncStatus(),
+                ...syncStatus,
+                lastProcessedBlock: syncStatus.last_processed_block,
+                chainTipBlock: syncStatus.node_height,
+                blockLag: syncStatus.lag,
                 rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors,
                 parse_errors: decoder.parseErrors,
                 error: decoderError ? decoderError.message : null
