@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- `package.json` — added a `form-data` override pinning the package to `^4.0.5` across the whole dependency tree. The direct dependency (via axios) already resolves to a patched `4.0.5`, so this changes no currently-resolved version; it is a defensive guard that prevents any future transitive dependency from reintroducing a pre-4.0.5 `form-data`, which used `Math.random()` rather than a CSPRNG for multipart boundary generation (GHSA-fjxv-7rqg-78g4).
+
 ## [1.11.10] - 2026-05-30
 
 ### Fixed
