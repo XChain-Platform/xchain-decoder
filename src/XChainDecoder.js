@@ -508,7 +508,7 @@ class XChainDecoder {
             try {
                 blockHashFromNode = await this.connector.getBlockHash(lastBlockIndex)
             } catch (err){
-                console.log("There was a problem trying to get a block hash from the node. Trying again...")
+                console.log("There was a problem trying to get a block hash from the node. Trying again...", err)
                 await this.sleep(3000)
                 continue
             }
@@ -608,7 +608,7 @@ class XChainDecoder {
                     this.blockchainInfoLastBlock = lastBlockchainInfo["blocks"]
                 } catch (e){
                     console.log(e)
-                    console.log("Error trying to get network info from the node. Trying again...")
+                    console.log("Error trying to get network info from the node. Trying again...", e)
                     await this.sleep(3000)
                     continue
                 }
@@ -750,7 +750,7 @@ class XChainDecoder {
                                 } catch (e) {
                                     this.parseErrors++
                                     decodedData = lenientTextDecoder.decode(parseResult["data"])
-                                    console.error(`Tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`)
+                                    console.error(`Tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`, e)
                                 }
 
                                 let actionName = decodedData.split("|")[0]
@@ -908,7 +908,7 @@ class XChainDecoder {
 
             } catch (error) {
                 console.log(error)
-                console.log("There were problems getting the mempool, trying again later.")
+                console.log("There were problems getting the mempool, trying again later.", error)
                 this.mempoolBusy = false
                 return
             }
@@ -934,7 +934,7 @@ class XChainDecoder {
 
                 } catch (err) {
                     console.error(`mempool: failed to fetch raw transactions for batch starting at index ${i}: `, err)
-                    console.error("Skipping batch and continuing...")
+                    console.error("Skipping batch and continuing...", err)
                     i = i + MEMPOOL_BATCH_SIZE
                     await this.sleep(1000)
                     continue

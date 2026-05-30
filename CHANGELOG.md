@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - `package.json` — added a `form-data` override pinning the package to `^4.0.5` across the whole dependency tree. The direct dependency (via axios) already resolves to a patched `4.0.5`, so this changes no currently-resolved version; it is a defensive guard that prevents any future transitive dependency from reintroducing a pre-4.0.5 `form-data`, which used `Math.random()` rather than a CSPRNG for multipart boundary generation (GHSA-fjxv-7rqg-78g4).
 
+### Changed
+- Several `catch` blocks in `src/XChainDecoder.js` now append the caught error to their `console.log` / `console.error` call instead of logging only a fixed message string. The block-hash retry, network-info retry, invalid-UTF-8 decode, mempool-fetch, and batch-skip paths now carry the error (and its stack) on the message line, so an operator reading logs after an incident can see what actually failed.
+
 ## [1.11.10] - 2026-05-30
 
 ### Fixed
