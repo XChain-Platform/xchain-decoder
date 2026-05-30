@@ -184,7 +184,7 @@ class XChainDecoder {
             output = outputTransaction.outs[outputIndex]
         } catch (err){
             this.rpcErrors++
-            console.error(`getSourceFromOutput: failed to fetch tx ${txId} (output ${outputIndex}): ${err.message}`)
+            console.error(`getSourceFromOutput: failed to fetch tx ${txId} (output ${outputIndex}): `, err)
         }
         
         if (output != null){
@@ -355,7 +355,7 @@ class XChainDecoder {
                                             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
                                         } catch (e) {
                                             this.rpcErrors++
-                                            console.error(`P2SH data extraction failed for input ${txInputIndex} of tx ${nextTxId}: ${e.message}`)
+                                            console.error(`P2SH data extraction failed for input ${txInputIndex} of tx ${nextTxId}:`, e)
                                         }
                                     }
 
@@ -374,7 +374,7 @@ class XChainDecoder {
                                             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
                                         } catch (e) {
                                             this.rpcErrors++
-                                            console.error(`P2WSH data extraction failed for input ${txInputIndex} of tx ${nextTxId}: ${e.message}`)
+                                            console.error(`P2WSH data extraction failed for input ${txInputIndex} of tx ${nextTxId}:`, e)
                                         }
                                     }
                                 } else {
@@ -513,7 +513,7 @@ class XChainDecoder {
                     
                     blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["hash"]})
                 } catch (err){
-                    console.error(`reorg: failed to delete block ${lastBlockIndex} (${lastBlock.block_hash}): ${err.message}`, err)
+                    console.error(`reorg: failed to delete block ${lastBlockIndex} (${lastBlock.block_hash}): `, err)
                     if (++retryCount >= 10) throw new Error('verifyReorg: deleteBlockByIndex failed after 10 attempts, aborting')
                     await this.sleep(3000); continue
                 }
@@ -655,7 +655,7 @@ class XChainDecoder {
                         nextBlockHex = await this.connector.getBlock(nextBlockHash)
                     }
                 } catch (e){
-                    console.error('Error fetching block at height ' + nextBlockHeight + ': ' + e.message, e)
+                    console.error('Error fetching block at height ' + nextBlockHeight + ':', e)
                     await this.sleep(3000)
                     continue
                 }
@@ -927,7 +927,7 @@ class XChainDecoder {
                     nextTxsHex = await this.connector.getRawTransactions(nextRawMempoolChunk)
 
                 } catch (err) {
-                    console.error(`mempool: failed to fetch raw transactions for batch starting at index ${i}: ${err.message}`, err)
+                    console.error(`mempool: failed to fetch raw transactions for batch starting at index ${i}: `, err)
                     console.error("Skipping batch and continuing...")
                     i = i + MEMPOOL_BATCH_SIZE
                     await this.sleep(1000)
@@ -946,7 +946,7 @@ class XChainDecoder {
                         nextTx = this.xchainBlockDecoder.transactionFromHex(nextTxHex)
                     } catch (err) {
                         this.parseErrors++
-                        console.error(`Mempool: failed to parse tx hex (batch index ${nextTxHexIndex}): ${err.message}`)
+                        console.error(`Mempool: failed to parse tx hex (batch index ${nextTxHexIndex}): `, err)
                         continue
                     }
 

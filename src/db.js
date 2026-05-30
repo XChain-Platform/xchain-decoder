@@ -90,7 +90,7 @@ class Database {
                     return true;
                 return false;
             } catch (e){
-                console.error('Error checking if database ' + this.dbName + ' exists: ' + e.message, e)
+                console.error('Error checking if database ' + this.dbName + ' exists:', e)
                 await util.sleep(5000); // Wait 5 seconds
             }
         }
@@ -114,7 +114,7 @@ class Database {
                 await db.end();
                 databaseCreated = true;
             } catch(e){
-                console.error('Error creating database ' + this.dbName + ': ' + e.message, e)
+                console.error('Error creating database ' + this.dbName + ':', e)
                 await util.sleep(5000); // Waiting 5 seconds
             }
         }
@@ -220,7 +220,7 @@ class Database {
                 let delay      = Math.min(baseDelay * Math.pow(2, attempts - 1), maxDelay);
                 let jitter     = Math.floor(Math.random() * delay * 0.3);
                 let totalDelay = delay + jitter;
-                console.error('MariaDB connection attempt ' + attempts + '/' + maxAttempts + ' failed: ' + e.message + '. Retrying in ' + totalDelay + 'ms...', e)
+                console.error('MariaDB connection attempt ' + attempts + '/' + maxAttempts + ' failed. Retrying in ' + totalDelay + 'ms...', e)
                 connection = null;
                 await util.sleep(totalDelay);
             }

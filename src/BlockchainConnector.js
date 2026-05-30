@@ -68,7 +68,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get network info, trying again...")
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting network info:', error.message);
+                    console.error('Error getting network info:', error);
                     throw error;
                 }
             }
@@ -108,7 +108,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get blockchain info, trying again...")
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting blockchain info:', error.message);
+                    console.error('Error getting blockchain info:', error);
                     throw error;
                 }
             }
@@ -149,7 +149,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get block hash, trying again...")
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting block hash:', error.message);
+                    console.error('Error getting block hash:', error);
                     throw error;
                 }
             }
@@ -191,7 +191,7 @@ class BlockchainConnector {
                     //Do nothing, let the while to try again
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting block header:', error.message);
+                    console.error('Error getting block header:', error);
                     throw error;
                 }
             }
@@ -248,7 +248,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get raw mempool, trying again...")
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting raw mempool:', error.message);
+                    console.error('Error getting raw mempool:', error);
                     throw error;
                 }
             }
@@ -289,7 +289,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get mempool entry, trying again...")
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting mempool entry:', error.message);
+                    console.error('Error getting mempool entry:', error);
                     throw error;
                 }
             }
@@ -400,7 +400,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get block, trying again...")
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting block:', error.message);
+                    console.error('Error getting block:', error);
                     throw error;
                 }
             }
