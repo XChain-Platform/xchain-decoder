@@ -513,8 +513,7 @@ class XChainDecoder {
                     
                     blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["hash"]})
                 } catch (err){
-                    console.log(err)
-                    console.log("There was a problem trying to delete a block while verifying a reorg")
+                    console.error(`reorg: failed to delete block ${lastBlockIndex} (${lastBlock.block_hash}): ${err.message}`, err)
                     if (++retryCount >= 10) throw new Error('verifyReorg: deleteBlockByIndex failed after 10 attempts, aborting')
                     await this.sleep(3000); continue
                 }
@@ -928,8 +927,8 @@ class XChainDecoder {
                     nextTxsHex = await this.connector.getRawTransactions(nextRawMempoolChunk)
 
                 } catch (err) {
-                    console.log(err)
-                    console.log("There was an error trying to get raw transactions from the mempool. Skipping batch and continuing...")
+                    console.error(`mempool: failed to fetch raw transactions for batch starting at index ${i}: ${err.message}`, err)
+                    console.error("Skipping batch and continuing...")
                     i = i + MEMPOOL_BATCH_SIZE
                     await this.sleep(1000)
                     continue
