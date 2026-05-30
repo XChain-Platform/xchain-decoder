@@ -415,6 +415,11 @@ class XChainDecoder {
                 }
             }
             
+            // Capture compiled byte length before decompile strips OP_PUSHDATA2's 3-byte overhead.
+            // The MAX_ACTION_DATA_LENGTH guard downstream must measure the on-chain payload size,
+            // not the decompiled-and-shortened buffer.
+            let compiledDataLength = dataBuffer.length
+
             if (dataBuffer.length > 0){
                 let decompiledData = bitcoin.script.decompile(dataBuffer)
                 if (decompiledData != null && decompiledData.length > 0) {
@@ -448,6 +453,7 @@ class XChainDecoder {
 
             return {
                 data:dataBuffer,
+                compiledDataLength: compiledDataLength,
                 rawData: rawData,
                 source:source,
                 destination:null,
@@ -700,8 +706,8 @@ class XChainDecoder {
 
                             let decodedData = ""
                             if (parseResult["data"].length > 0) {
-                                if (parseResult["data"].length > MAX_ACTION_DATA_LENGTH) {
-                                    console.error(`Skipping tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["data"].length} > ${MAX_ACTION_DATA_LENGTH})`)
+                                if (parseResult["compiledDataLength"] > MAX_ACTION_DATA_LENGTH) {
+                                    console.error(`Skipping tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${MAX_ACTION_DATA_LENGTH})`)
                                     continue
                                 }
 

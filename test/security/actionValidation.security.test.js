@@ -117,6 +117,22 @@ describe('Security: ACTION Data Validation', () => {
             assert.ok(result)
             assert.ok(result.data.length > 0)
         })
+
+        it('[REGRESSION P0] R-ACT-003: parseResult.compiledDataLength reflects on-chain payload size, not the post-decompile length', async () => {
+            // bitcoin.script.decompile strips the OP_PUSHDATA prefix (1-3 bytes depending on
+            // payload size). The MAX_ACTION_DATA_LENGTH guard must compare against the on-chain
+            // compiled size, otherwise compiled payloads of 8193-8195 bytes silently pass.
+            const payload = 'SEND|0|XCHAIN|' + '1'.repeat(1000)
+            const tx = buildTxWithPayload(payload)
+            const result = await decoder.parseTransaction(tx)
+
+            assert.ok(result)
+            assert.strictEqual(typeof result.compiledDataLength, 'number')
+            assert.ok(
+                result.compiledDataLength > result.data.length,
+                `compiledDataLength (${result.compiledDataLength}) should exceed decompiled data.length (${result.data.length}) by the OP_PUSHDATA overhead`
+            )
+        })
     })
 
     // --- SEC-12: UTF-8 handling ---
