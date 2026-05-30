@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.9] - 2026-05-29
+
+### Fixed
+- `BlockchainConnector.getRawTransaction` no longer rejects when `getrawtransaction` returns an empty result. A mempool transaction can be mined or evicted between `getRawMempool` listing it and the per-tx fetch — a common race during high mempool churn. The method previously `reject`ed in that case, and because `getRawTransactions` fans the fetches out through `Promise.all`, a single missing tx propagated the rejection and caused `updateMempool` to silently skip its entire batch of up to `MEMPOOL_BATCH_SIZE` (1000) txids, leaving temporary gaps in `mempool_transactions`. It now resolves `null` for an empty result; the existing null-filter in `updateMempool` drops only the one missing tx and the rest of the batch is processed normally. This matches the long-standing behaviour of the UTXO tracker's connector.
+
 ## [1.11.8] - 2026-05-29
 
 ### Fixed

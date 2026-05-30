@@ -325,9 +325,11 @@ class BlockchainConnector {
                         resolve(response.data.result);
                         break
                     } else {
-                        const rpcError = response.data.error
-                        console.log('RPC error getting raw transaction:', rpcError)
-                        reject(new Error(rpcError ? rpcError.message : 'Error getting raw transaction'));
+                        // Tx no longer retrievable (mined/evicted between getRawMempool and this
+                        // call, or an empty RPC result) — resolve null so a single missing tx does
+                        // not fail the whole Promise.all batch. Callers filter nulls.
+                        console.log(`getRawTransaction: no result for txid ${txid} (evicted/confirmed?)`)
+                        resolve(null);
                         break
                     }
                 } catch (error){

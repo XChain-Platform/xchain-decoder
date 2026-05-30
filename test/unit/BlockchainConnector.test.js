@@ -209,13 +209,14 @@ describe('BlockchainConnector', () => {
             assert.strictEqual(result, 'rawtxhex')
         })
 
-        it('should reject when response has no result', async () => {
+        it('should resolve null when response has no result (tx mined/evicted)', async () => {
+            // A mempool tx can be mined or evicted between getRawMempool and this fetch.
+            // Resolving null (rather than rejecting) lets the caller filter out the one
+            // missing tx instead of failing the whole Promise.all batch.
             axiosStub.resolves({ data: { result: null, error: { message: 'tx not found' } } })
 
-            await assert.rejects(
-                () => connector.getRawTransaction('txid123'),
-                { message: 'tx not found' }
-            )
+            const result = await connector.getRawTransaction('txid123')
+            assert.strictEqual(result, null)
         })
 
         it('should retry on network failure up to 10 times', async () => {
@@ -265,6 +266,18 @@ describe('BlockchainConnector', () => {
         it('should return empty array for empty input', async () => {
             const results = await connector.getRawTransactions([])
             assert.deepStrictEqual(results, [])
+        })
+
+        it('should not fail the whole batch when one tx is mined/evicted (resolves null)', async () => {
+            // tx2 was evicted between getRawMempool and the fetch: empty RPC result.
+            // The batch must still return the other txs with a null hole for the missing one,
+            // rather than rejecting and dropping every txid in the batch.
+            axiosStub.onCall(0).resolves({ data: { result: 'txhex1' } })
+            axiosStub.onCall(1).resolves({ data: { result: null, error: { message: 'tx not found' } } })
+            axiosStub.onCall(2).resolves({ data: { result: 'txhex3' } })
+
+            const results = await connector.getRawTransactions(['tx1', 'tx2', 'tx3'])
+            assert.deepStrictEqual(results, ['txhex1', null, 'txhex3'])
         })
     })
 
