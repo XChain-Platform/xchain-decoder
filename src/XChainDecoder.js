@@ -81,7 +81,8 @@ class XChainDecoder {
         this.debugTime = {}
       
         this.synced = false
-      
+
+        this.lastProcessedBlockIndex = -1
         this.blockchainInfoLastBlock = -1
         this.mempoolInterval = null
         this.mempoolBusy = false
@@ -122,6 +123,17 @@ class XChainDecoder {
     
     isSynced(){
         return this.synced
+    }
+
+    getSyncStatus() {
+        if (this.lastProcessedBlockIndex === -1) {
+            return { last_processed_block: null, node_height: null, lag: null }
+        }
+        return {
+            last_processed_block: this.lastProcessedBlockIndex,
+            node_height: this.blockchainInfoLastBlock,
+            lag: this.blockchainInfoLastBlock - this.lastProcessedBlockIndex
+        }
     }
     
     stop(){
@@ -522,11 +534,11 @@ class XChainDecoder {
     
         console.log("Parsing...")
         
-        let lastProcessedBlockIndex = await this.db.getLastBlockIndex()
+        let lastProcessedBlockIndex = this.lastProcessedBlockIndex = await this.db.getLastBlockIndex()
         let lastProcessedTxIndex = await this.db.getLastTxIndex()
-        
+
         if (lastProcessedBlockIndex < this.startBlockIndex - 1){
-            lastProcessedBlockIndex = this.startBlockIndex - 1
+            lastProcessedBlockIndex = this.lastProcessedBlockIndex = this.startBlockIndex - 1
         }
         
         let lastBlockchainInfo = null
@@ -645,7 +657,7 @@ class XChainDecoder {
                         await this.db.endTransaction()
                         console.log("A reorg has been detected. Cleaning blocks...")
                         await this.verifyReorg()
-                        lastProcessedBlockIndex = await this.db.getLastBlockIndex()
+                        lastProcessedBlockIndex = this.lastProcessedBlockIndex = await this.db.getLastBlockIndex()
                         lastProcessedTxIndex = await this.db.getLastTxIndex()
                         blocksQuantity = 0
                         transactionsCount = 0
@@ -842,7 +854,7 @@ class XChainDecoder {
                 }
                 
                 blocksQuantity = blocksQuantity + 1
-                lastProcessedBlockIndex = nextBlockHeight
+                lastProcessedBlockIndex = this.lastProcessedBlockIndex = nextBlockHeight
             }
         }
     }

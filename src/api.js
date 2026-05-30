@@ -100,6 +100,7 @@ async function startApi(){
             return {
                 status: decoderRunning ? "healthy" : "unhealthy",
                 synced: decoder.isSynced(),
+                ...decoder.getSyncStatus(),
                 error: decoderError ? decoderError.message : null
             }
         }
