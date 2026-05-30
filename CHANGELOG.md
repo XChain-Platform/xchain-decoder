@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.8] - 2026-05-29
+
+### Fixed
+- `BlockchainConnector.getRawTransaction` retry back-off now correctly detects RPC work-queue overflow. The previous `error.response?.status === 429` check was dead code — Bitcoin Core and Litecoin Core never return HTTP 429 for a full work queue; they return HTTP 500 with a JSON body carrying `error.code === -429` (which the second arm already handled). That unreachable arm has been removed. In addition, Dogecoin v1.14 closes the TCP connection outright when its RPC queue fills, surfacing as an `ECONNRESET`/`ECONNREFUSED` socket error with no HTTP response; these are now also treated as work-queue-full, so the connector applies the 5s back-off instead of hammering an overwhelmed daemon with rapid 500ms retries.
+
 ## [1.11.7] - 2026-05-29
 
 ### Changed

@@ -334,9 +334,15 @@ class BlockchainConnector {
                     if (error.code === 'ECONNABORTED') {
                         console.log("Getting timeout trying to get raw transaction, trying again...")
                     }
-                    // -429 Work queue depth exceeded: back off longer before retrying
-                    const isQueueFull = error.response?.status === 429 ||
-                        error.response?.data?.error?.code === -429
+                    // Work queue depth exceeded: back off longer before retrying.
+                    // Bitcoin/Litecoin Core signal this with HTTP 500 + a JSON body
+                    // carrying error.code === -429 (they never return HTTP 429).
+                    // Dogecoin v1.14 instead drops the TCP connection outright when its
+                    // RPC queue fills, surfacing as an ECONNRESET/ECONNREFUSED socket error
+                    // with no HTTP response at all.
+                    const isQueueFull = error.response?.data?.error?.code === -429
+                        || error.code === 'ECONNRESET'
+                        || error.code === 'ECONNREFUSED'
                     await this.sleep(isQueueFull ? 5000 : 500)
                 }
             }
