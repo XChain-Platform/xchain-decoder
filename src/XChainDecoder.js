@@ -60,6 +60,7 @@ const VALID_ACTION_NAMES = new Set([
 ])
 
 const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many transactions need to be processed before inserting the data into the database
+const LOG_BLOCK_INTERVAL = 1000 //During catch-up sync, only log progress every N blocks
 
 class XChainDecoder {
     constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword, auxPow) {
@@ -847,8 +848,10 @@ class XChainDecoder {
                 
                 //If the pendings blocks are enough, then commit the transaction and print statistics
                 if ((blocksQuantity == DB_TRANSACTION_BLOCKS_QUANTITY-1) || (nextBlockHeight == this.blockchainInfoLastBlock)){
-                    console.log("Parsing block "+(nextBlockHeight)+"("+nextBlockHash+") Txs ("+transactionsCount+") Outputs ("+outputCount+")")
-                    console.log("Inserting data Blocks ("+blocksCount+") Valid Transactions ("+validTransactionsCount+")")
+                    if ((nextBlockHeight % LOG_BLOCK_INTERVAL === 0) || ((this.blockchainInfoLastBlock - nextBlockHeight) <= SYNCED_THRESHOLD)) {
+                        console.log("Parsing block "+(nextBlockHeight)+"("+nextBlockHash+") Txs ("+transactionsCount+") Outputs ("+outputCount+")")
+                        console.log("Inserting data Blocks ("+blocksCount+") Valid Transactions ("+validTransactionsCount+")")
+                    }
                     await this.db.commitTransaction()
                     
                     blocksCount = 0
