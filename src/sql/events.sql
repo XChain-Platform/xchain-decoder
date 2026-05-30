@@ -6,3 +6,5 @@ CREATE TABLE events (
     data TEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
+CREATE INDEX code_id ON events (code, id);
+

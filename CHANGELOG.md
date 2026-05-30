@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.10] - 2026-05-30
+
+### Fixed
+- `src/sql/events.sql` — added a composite index `code_id` on `events (code, id)`. Reorg-detection looks up the most recent event of a given code with `SELECT data FROM events WHERE code='REORG' ORDER BY id DESC LIMIT 1`, which runs once per block cycle. Without an index on `code`, MariaDB had to full-scan the entire `events` table to evaluate the `WHERE` filter before it could apply the `ORDER BY id DESC LIMIT 1` — a cost that grows linearly as the table accumulates hundreds of thousands of rows over months of mainnet operation. The composite `(code, id)` index lets the engine satisfy both the filter and the descending-id ordering in a single backward index scan, with no separate sort step. Schema-source change only; existing deployments need a one-time `ALTER TABLE events ADD INDEX code_id (code, id)`.
+
 ## [1.11.9] - 2026-05-29
 
 ### Fixed
