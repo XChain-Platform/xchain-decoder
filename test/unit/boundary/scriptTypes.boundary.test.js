@@ -84,6 +84,30 @@ describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
         assert.strictEqual(result.data.length, 0)
     })
 
+    // S-1b: XCHN payload whose inner compiled script is a single OP_0 byte ([0x00]).
+    // bitcoin.script.decompile([0x00]) returns [0] — the integer zero, NOT a Buffer.
+    // The decompile result must be normalized to an empty Buffer so the integer never
+    // propagates into downstream consumers (length guards that silently drop the tx,
+    // or hex-encoding paths that throw on a non-Buffer value).
+    it('[REGRESSION P0] R-SCR-004 S-1b: XCHN payload decompiling to OP_0 — data is an empty Buffer, not integer 0', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+
+        // buildXchnPayload compiles the inner data with bitcoin.script.compile.
+        // An empty buffer compiles to OP_0 (0x00), so after the XCHN prefix is stripped
+        // the decoder runs bitcoin.script.decompile([0x00]) → [0] (integer zero).
+        const cipher = buildXchnPayload(Buffer.alloc(0))
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
+        addP2PKHOutput(tx)
+
+        const result = await decoder.parseTransaction(tx)
+        assert.ok(result)
+        // The integer 0 must have been normalized to an empty Buffer.
+        assert.ok(Buffer.isBuffer(result.data), 'result.data must be a Buffer, not the integer 0')
+        assert.strictEqual(result.data.length, 0)
+    })
+
     // S-2: OP_RETURN with 76-byte push (max single-byte push opcode)
     it('S-2: OP_RETURN with 76-byte push — full deobfuscation path', async () => {
         const tx = new bitcoin.Transaction()

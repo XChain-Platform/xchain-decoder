@@ -441,7 +441,13 @@ class XChainDecoder {
             if (dataBuffer.length > 0){
                 let decompiledData = bitcoin.script.decompile(dataBuffer)
                 if (decompiledData != null && decompiledData.length > 0) {
-                    dataBuffer = decompiledData[0]
+                    // A single-byte OP_0 segment ([0x00]) decompiles to the integer 0,
+                    // not a Buffer. Normalize any non-Buffer result to an empty Buffer so
+                    // every downstream consumer can rely on dataBuffer being a Buffer
+                    // (otherwise the integer silently fails .length guards and throws in
+                    // hex-encoding paths). No valid payload is zero-length, so this is inert
+                    // for real data.
+                    dataBuffer = Buffer.isBuffer(decompiledData[0]) ? decompiledData[0] : Buffer.allocUnsafe(0)
 
                     if (decompiledData.length > 1){
                         rawData = decompiledData[1]
@@ -649,7 +655,7 @@ class XChainDecoder {
                         nextBlockHex = await this.connector.getBlock(nextBlockHash)
                     }
                 } catch (e){
-                    console.log("Error trying to get next block from the node. Trying again...")
+                    console.error('Error fetching block at height ' + nextBlockHeight + ': ' + e.message, e)
                     await this.sleep(3000)
                     continue
                 }
