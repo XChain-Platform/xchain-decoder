@@ -90,6 +90,9 @@ class XChainDecoder {
         this.stopFlag = false
 
         this.auxPow = auxPow
+
+        this.rpcErrors = 0
+        this.parseErrors = 0
     }
     
     async sleep(ms) {
@@ -179,6 +182,7 @@ class XChainDecoder {
             outputTransaction = bitcoin.Transaction.fromHex(outputRawTransaction)
             output = outputTransaction.outs[outputIndex]
         } catch (err){
+            this.rpcErrors++
             console.error(`getSourceFromOutput: failed to fetch tx ${txId} (output ${outputIndex}): ${err.message}`)
         }
         
@@ -349,6 +353,7 @@ class XChainDecoder {
                                             let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
                                             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
                                         } catch (e) {
+                                            this.rpcErrors++
                                             console.error(`P2SH data extraction failed for input ${txInputIndex} of tx ${nextTxId}: ${e.message}`)
                                         }
                                     }
@@ -367,6 +372,7 @@ class XChainDecoder {
                                             let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
                                             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
                                         } catch (e) {
+                                            this.rpcErrors++
                                             console.error(`P2WSH data extraction failed for input ${txInputIndex} of tx ${nextTxId}: ${e.message}`)
                                         }
                                     }
@@ -719,6 +725,7 @@ class XChainDecoder {
                             let decodedData = ""
                             if (parseResult["data"].length > 0) {
                                 if (parseResult["compiledDataLength"] > MAX_ACTION_DATA_LENGTH) {
+                                    this.parseErrors++
                                     console.error(`Skipping tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${MAX_ACTION_DATA_LENGTH})`)
                                     continue
                                 }
@@ -726,12 +733,14 @@ class XChainDecoder {
                                 try {
                                     decodedData = strictTextDecoder.decode(parseResult["data"])
                                 } catch (e) {
+                                    this.parseErrors++
                                     decodedData = lenientTextDecoder.decode(parseResult["data"])
                                     console.error(`Tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`)
                                 }
 
                                 let actionName = decodedData.split("|")[0]
                                 if (!VALID_ACTION_NAMES.has(actionName)) {
+                                    this.parseErrors++
                                     console.error(`Skipping tx ${nextTransactionHash}: unknown ACTION name '${actionName.substring(0, 32)}'`)
                                     continue
                                 }
@@ -800,6 +809,7 @@ class XChainDecoder {
                                         let expiration = Number(decodedDataSplit[14])
 
                                         if (isNaN(expiration) || expiration < 0 || expiration > 4294967295) {
+                                            this.parseErrors++
                                             console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[14]}'`)
                                         } else if ((getCoin != "") || (giveCoin != "")){
                                             if (!(await this.db.insertDispenser({
@@ -924,6 +934,7 @@ class XChainDecoder {
                     try {
                         nextTx = this.xchainBlockDecoder.transactionFromHex(nextTxHex)
                     } catch (err) {
+                        this.parseErrors++
                         console.error(`Mempool: failed to parse tx hex (batch index ${nextTxHexIndex}): ${err.message}`)
                         continue
                     }

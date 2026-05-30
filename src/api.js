@@ -101,6 +101,8 @@ async function startApi(){
                 status: decoderRunning ? "healthy" : "unhealthy",
                 synced: decoder.isSynced(),
                 ...decoder.getSyncStatus(),
+                rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors,
+                parse_errors: decoder.parseErrors,
                 error: decoderError ? decoderError.message : null
             }
         }

@@ -30,6 +30,7 @@ class BlockchainConnector {
         this.port = port
         this.rpcUser = rpcUser
         this.rpcPassword = rpcPassword
+        this.rpcErrors = 0
         }
 
     async sleep(ms) {
@@ -106,6 +107,7 @@ class BlockchainConnector {
                 throw new Error('Error getting block hash');
             }
         } catch (error) {
+            this.rpcErrors++
             console.error('Error:', error.message);
             throw error;
         }
@@ -143,6 +145,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get block hex, trying again...")
                     //Do nothing, let the while to try again
                 } else {
+                    this.rpcErrors++
                     console.error('Error getting block header:', error.message);
                     throw error;
                 }
@@ -192,11 +195,12 @@ class BlockchainConnector {
                 throw new Error('Error getting raw mempool info');
             }
         } catch (error){
+            this.rpcErrors++
             console.error('Error:', error.message);
             throw error;
         }
     }
-    
+
     async getMempoolEntry(txid){
         try {
             const data = {
@@ -221,6 +225,7 @@ class BlockchainConnector {
                 throw new Error('Error getting mempool entry');
             }
         } catch (error){
+            this.rpcErrors++
             console.error('Error:', error.message);
             throw error;
         }
@@ -267,6 +272,7 @@ class BlockchainConnector {
             }
 
             if (tries >= maxTries){
+                this.rpcErrors++
                 reject(new Error(`getRawTransaction failed after ${maxTries} attempts for txid ${txid}`))
             }
         })
@@ -308,6 +314,7 @@ class BlockchainConnector {
                 throw new Error('Error getting block hex');
             }
         } catch (error) {
+            this.rpcErrors++
             console.error('Error:', error.message);
             throw error;
         }
