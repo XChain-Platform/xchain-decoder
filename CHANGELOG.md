@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.6] - 2026-05-29
+
+### Fixed
+- Litecoin's `dustThreshold` in `CryptoNetworks.js` was set to `546` (the Bitcoin value) for all three network variants (`litecoin-mainnet`, `litecoin-testnet`, `litecoin-regtest`). Litecoin's dust threshold is `5460` satoshis (10× Bitcoin's), and the encoder already uses that value. The decoder now reports `5460` for all three LTC variants, so any classification or validation that reads `network.dustThreshold` applies the correct floor and no longer treats LTC outputs between 546 and 5459 satoshis as non-dust.
+
 ## [1.11.5] - 2026-05-29
 
 ### Fixed
