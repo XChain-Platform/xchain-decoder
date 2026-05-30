@@ -21,7 +21,7 @@
 
 // Load required libraries
 const axios = require('axios');
-axios.defaults.timeout = 5000
+axios.defaults.timeout = parseInt(process.env.NODE_RPC_TIMEOUT ?? '30000', 10)
 
 class BlockchainConnector {
     constructor(url, port, rpcUser, rpcPassword) {
@@ -38,79 +38,124 @@ class BlockchainConnector {
     }
 
     async getNetworkInfo(){
-        const data = {
-            jsonrpc: '2.0',
-            method: 'getnetworkinfo',
-            id: 1
-        }
-        
-        // Make the request to the node
-        const response = await axios.post(this.url, data, {
-            auth: {
-                username: this.rpcUser,
-                password: this.rpcPassword,
-            }
-        })
+        let tries = 10
 
-        // Verify if there is a result and return it
-        if (response.data.result) {
-            return response.data.result;
-        } else {
-            throw new Error('Error getting network info');
+        while (tries > 0) {
+            try {
+                const data = {
+                    jsonrpc: '2.0',
+                    method: 'getnetworkinfo',
+                    id: 1
+                }
+
+                // Make the request to the node
+                const response = await axios.post(this.url, data, {
+                    auth: {
+                        username: this.rpcUser,
+                        password: this.rpcPassword,
+                    }
+                })
+
+                // Verify if there is a result and return it
+                if (response.data.result) {
+                    return response.data.result;
+                } else {
+                    throw new Error('Error getting network info');
+                }
+            } catch (error) {
+                if (error.code === 'ECONNABORTED') {
+                    tries = tries - 1
+                    console.log("Getting timeout trying to get network info, trying again...")
+                } else {
+                    this.rpcErrors++
+                    console.error('Error getting network info:', error.message);
+                    throw error;
+                }
+            }
         }
+
+        throw new Error("There were problems getting network info.")
     }
     
     async getBlockchainInfo(){
-        const data = {
-            jsonrpc: '2.0',
-            method: 'getblockchaininfo',
-            id: 1
-        }
-        
-        // Make the request to the node
-        const response = await axios.post(this.url, data, {
-            auth: {
-                username: this.rpcUser,
-                password: this.rpcPassword,
-            }
-        })
+        let tries = 10
 
-        // Verify if there is a result and return it
-        if (response.data.result) {
-            return response.data.result;
-        } else {
-            throw new Error('Error getting blockchain info');
+        while (tries > 0) {
+            try {
+                const data = {
+                    jsonrpc: '2.0',
+                    method: 'getblockchaininfo',
+                    id: 1
+                }
+
+                // Make the request to the node
+                const response = await axios.post(this.url, data, {
+                    auth: {
+                        username: this.rpcUser,
+                        password: this.rpcPassword,
+                    }
+                })
+
+                // Verify if there is a result and return it
+                if (response.data.result) {
+                    return response.data.result;
+                } else {
+                    throw new Error('Error getting blockchain info');
+                }
+            } catch (error) {
+                if (error.code === 'ECONNABORTED') {
+                    tries = tries - 1
+                    console.log("Getting timeout trying to get blockchain info, trying again...")
+                } else {
+                    this.rpcErrors++
+                    console.error('Error getting blockchain info:', error.message);
+                    throw error;
+                }
+            }
         }
+
+        throw new Error("There were problems getting blockchain info.")
     }
 
     async getBlockHash(blockindex) {
-        try {
-            const data = {
-                jsonrpc: '2.0',
-                method: 'getblockhash',
-                params: [blockindex],
-                id: 1,
-            }
+        let tries = 10
 
-            // Make the request to the node
-            const response = await axios.post(this.url, data, {
-                auth: {
-                    username: this.rpcUser,
-                    password: this.rpcPassword,
+        while (tries > 0) {
+            try {
+                const data = {
+                    jsonrpc: '2.0',
+                    method: 'getblockhash',
+                    params: [blockindex],
+                    id: 1,
                 }
-            })
 
-            // Verify if there is a result and return it
-            if (response.data.result) {
-                return response.data.result;
-            } else {
-                throw new Error('Error getting block hash');
+                // Make the request to the node
+                const response = await axios.post(this.url, data, {
+                    auth: {
+                        username: this.rpcUser,
+                        password: this.rpcPassword,
+                    }
+                })
+
+                // Verify if there is a result and return it
+                if (response.data.result) {
+                    return response.data.result;
+                } else {
+                    throw new Error('Error getting block hash');
+                }
+            } catch (error) {
+                if (error.code === 'ECONNABORTED') {
+                    tries = tries - 1
+                    console.log("Getting timeout trying to get block hash, trying again...")
+                } else {
+                    this.rpcErrors++
+                    console.error('Error getting block hash:', error.message);
+                    throw error;
+                }
             }
-        } catch (error) {
-            this.rpcErrors++
-            console.error('Error:', error.message);
-            throw error;
         }
+
+        throw new Error("There were problems getting block hash.")
     }
 
     async getBlockHeader(blockhash, hexFormat = true) {
@@ -173,62 +218,84 @@ class BlockchainConnector {
     }
     
     async getRawMempool(){
-        try {
-            const data = {
-                jsonrpc: '2.0',
-                method: 'getrawmempool',
-                id: 1
-            }
-            
-            // Make the request to the node
-            const response = await axios.post(this.url, data, {
-                auth: {
-                    username: this.rpcUser,
-                    password: this.rpcPassword,
-                }
-            })
+        let tries = 10
 
-            // Verify if there is a result and return it
-            if (response.data.result) {
-                return response.data.result;
-            } else {
-                throw new Error('Error getting raw mempool info');
+        while (tries > 0) {
+            try {
+                const data = {
+                    jsonrpc: '2.0',
+                    method: 'getrawmempool',
+                    id: 1
+                }
+
+                // Make the request to the node
+                const response = await axios.post(this.url, data, {
+                    auth: {
+                        username: this.rpcUser,
+                        password: this.rpcPassword,
+                    }
+                })
+
+                // Verify if there is a result and return it
+                if (response.data.result) {
+                    return response.data.result;
+                } else {
+                    throw new Error('Error getting raw mempool info');
+                }
+            } catch (error) {
+                if (error.code === 'ECONNABORTED') {
+                    tries = tries - 1
+                    console.log("Getting timeout trying to get raw mempool, trying again...")
+                } else {
+                    this.rpcErrors++
+                    console.error('Error getting raw mempool:', error.message);
+                    throw error;
+                }
             }
-        } catch (error){
-            this.rpcErrors++
-            console.error('Error:', error.message);
-            throw error;
         }
+
+        throw new Error("There were problems getting raw mempool.")
     }
 
     async getMempoolEntry(txid){
-        try {
-            const data = {
-                jsonrpc: '2.0',
-                method: 'getmempoolentry',
-                params: [txid],
-                id: 1
-            }
-            
-            // Make the request to the node
-            const response = await axios.post(this.url, data, {
-                auth: {
-                    username: this.rpcUser,
-                    password: this.rpcPassword,
-                }
-            })
+        let tries = 10
 
-            // Verify if there is a result and return it
-            if (response.data.result) {
-                return response.data.result;
-            } else {
-                throw new Error('Error getting mempool entry');
+        while (tries > 0) {
+            try {
+                const data = {
+                    jsonrpc: '2.0',
+                    method: 'getmempoolentry',
+                    params: [txid],
+                    id: 1
+                }
+
+                // Make the request to the node
+                const response = await axios.post(this.url, data, {
+                    auth: {
+                        username: this.rpcUser,
+                        password: this.rpcPassword,
+                    }
+                })
+
+                // Verify if there is a result and return it
+                if (response.data.result) {
+                    return response.data.result;
+                } else {
+                    throw new Error('Error getting mempool entry');
+                }
+            } catch (error) {
+                if (error.code === 'ECONNABORTED') {
+                    tries = tries - 1
+                    console.log("Getting timeout trying to get mempool entry, trying again...")
+                } else {
+                    this.rpcErrors++
+                    console.error('Error getting mempool entry:', error.message);
+                    throw error;
+                }
             }
-        } catch (error){
-            this.rpcErrors++
-            console.error('Error:', error.message);
-            throw error;
         }
+
+        throw new Error("There were problems getting mempool entry.")
     }
     
     async getRawTransaction(txid){
@@ -264,6 +331,9 @@ class BlockchainConnector {
                         break
                     }
                 } catch (error){
+                    if (error.code === 'ECONNABORTED') {
+                        console.log("Getting timeout trying to get raw transaction, trying again...")
+                    }
                     // -429 Work queue depth exceeded: back off longer before retrying
                     const isQueueFull = error.response?.status === 429 ||
                         error.response?.data?.error?.code === -429
@@ -291,33 +361,44 @@ class BlockchainConnector {
     }
     
     async getBlock(blockhash, hexFormat=true) {
-        try {
-            const data = {
-                jsonrpc: '2.0',
-                method: 'getblock',
-                params: [blockhash, !hexFormat],
-                id: 1,
-            }
+        let tries = 10
 
-            // Make the request to the node
-            const response = await axios.post(this.url, data, {
-                auth: {
-                    username: this.rpcUser,
-                    password: this.rpcPassword,
+        while (tries > 0) {
+            try {
+                const data = {
+                    jsonrpc: '2.0',
+                    method: 'getblock',
+                    params: [blockhash, !hexFormat],
+                    id: 1,
                 }
-            })
 
-            // Verify if there is a result and return it
-            if (response.data.result) {
-                return response.data.result;
-            } else {
-                throw new Error('Error getting block hex');
+                // Make the request to the node
+                const response = await axios.post(this.url, data, {
+                    auth: {
+                        username: this.rpcUser,
+                        password: this.rpcPassword,
+                    }
+                })
+
+                // Verify if there is a result and return it
+                if (response.data.result) {
+                    return response.data.result;
+                } else {
+                    throw new Error('Error getting block hex');
+                }
+            } catch (error) {
+                if (error.code === 'ECONNABORTED') {
+                    tries = tries - 1
+                    console.log("Getting timeout trying to get block, trying again...")
+                } else {
+                    this.rpcErrors++
+                    console.error('Error getting block:', error.message);
+                    throw error;
+                }
             }
-        } catch (error) {
-            this.rpcErrors++
-            console.error('Error:', error.message);
-            throw error;
         }
+
+        throw new Error("There were problems getting block.")
     }
 }
 
