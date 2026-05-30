@@ -105,6 +105,16 @@ async function startApi(){
                 parse_errors: decoder.parseErrors,
                 error: decoderError ? decoderError.message : null
             }
+        },
+        // Latest decoded block index alongside the coin-node's tip so the
+        // decoder→node lag is visible in a single call.
+        async getlatestblock() {
+            let status = decoder.getSyncStatus();
+            return {
+                block_index:      status.last_processed_block,
+                node_block_index: status.node_height,
+                is_synced:        decoder.isSynced()
+            };
         }
     }
 
