@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Several `catch` blocks in `src/XChainDecoder.js` now append the caught error to their `console.log` / `console.error` call instead of logging only a fixed message string. The block-hash retry, network-info retry, invalid-UTF-8 decode, mempool-fetch, and batch-skip paths now carry the error (and its stack) on the message line, so an operator reading logs after an incident can see what actually failed.
 - The P2SH and P2WSH data-extraction paths in `src/XChainDecoder.js` now use the decompiled redeem-script element directly instead of wrapping it in `Buffer.from(decodedRedeemScript[0], "hex")`. The element is already a `Buffer` (guarded one line earlier by `Buffer.isBuffer`), so `Buffer.from` only made a redundant copy and the `"hex"` encoding argument was silently ignored — misleadingly implying the input was a hex string. No functional change; the value is fed straight into the following `Buffer.concat`.
 
+### Fixed
+- `src/XChainBlockDecoder.js` — `blockFromBuffer` now strips the Litecoin MWEB marker+flag from a block's final transaction when the flag is the combined segwit+MWEB value `0x09`, not only the pure-MWEB `0x08`. The single-transaction decode path (`transactionFromHex`) already handled both flag values, but the block-level last-transaction check matched only `0x08`; a Litecoin block whose final (HogEx) transaction carried `0x09` would have been handed unstripped marker bytes and thrown a `Transaction.fromBuffer` parse error, stalling block processing. HogEx extension transactions are observed to use `0x08` in practice, so this is a defensive consistency fix with no behavioural change on current data.
+
 ## [1.11.10] - 2026-05-30
 
 ### Fixed
