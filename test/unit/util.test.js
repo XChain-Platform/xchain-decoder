@@ -81,8 +81,9 @@ describe('util', () => {
 
     describe('#throwError()', () => {
         it('should throw an Error with the given message', () => {
+            // throwError re-throws whatever is passed; pass an Error so .message is set.
             assert.throws(() => {
-                util.throwError('test error')
+                util.throwError(new Error('test error'))
             }, {
                 message: 'test error'
             })

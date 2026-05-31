@@ -240,7 +240,9 @@ describe('BlockchainConnector', () => {
 
         it('[REGRESSION P2] R-RPC-002: should back off longer on -429 work queue depth exceeded', async () => {
             const queueError = new Error('queue full')
-            queueError.response = { status: 429 }
+            // Bitcoin/Litecoin Core signal work-queue exhaustion with HTTP 500 +
+            // a JSON body whose error.code === -429 (NOT an actual HTTP 429 response).
+            queueError.response = { data: { error: { code: -429, message: 'Work queue depth exceeded' } } }
             axiosStub.onCall(0).rejects(queueError)
             axiosStub.onCall(1).resolves({ data: { result: 'txhex' } })
 
