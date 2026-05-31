@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `package.json` — aligned the `mariadb` driver to the `^3.5.2` range used across the platform. The driver was previously pinned to `~3.4.5` (a patch-only range, one minor line behind the `xchain-dashboard` host); the caret range now tracks 3.x minor releases consistently with every other service, removing the version drift and the mix of `~`/`^` range operators across the platform. No source changes.
+
 ### Added
 - `src/api.js` — the `health()` JSON-RPC response now includes a `lag_blocks` field: `max(0, node_height - last_processed_block)`, null-guarded for the pre-first-sync window. Previously the response carried the node tip and last-processed block but no single clamped block-count delta, so an operator (or an alerting threshold) could not read "how far behind" directly during a long initial sync — only derive it. `lag_blocks` gives a non-negative numeric lag operators can threshold an alert on and use to estimate sync ETA.
 - `.env.example` — added a configuration template enumerating every environment variable the decoder reads (coin/network, coin-node RPC, decoder database, API port), with safe regtest/placeholder defaults and inline comments, so operators have a single reference for configuring the service instead of discovering variables by reading the source.
