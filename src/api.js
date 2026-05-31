@@ -75,10 +75,10 @@ async function startApi(){
     // Use Helmet to increase security
     app.use(helmet());
 
-    // Rate limiting
+    // Rate limiting (requests per minute per IP; override with DECODER_RATE_LIMIT_RPM)
     app.use(rateLimit({
         windowMs: 60 * 1000,
-        max: 100,
+        max: parseInt(process.env.DECODER_RATE_LIMIT_RPM, 10) || 100,
         standardHeaders: true,
         legacyHeaders: false
     }));
