@@ -105,6 +105,7 @@ async function startApi(){
                 lastProcessedBlock: syncStatus.last_processed_block,
                 chainTipBlock: syncStatus.node_height,
                 blockLag: syncStatus.lag,
+                lag_blocks: Math.max(0, (decoder.blockchainInfoLastBlock || 0) - (decoder.lastProcessedBlockIndex || 0)),
                 rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors,
                 parse_errors: decoder.parseErrors,
                 error: decoderError ? decoderError.message : null
