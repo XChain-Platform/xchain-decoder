@@ -32,9 +32,12 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(net.pubKeyHash, 0x71)
         })
 
-        it('should return Dogecoin regtest config matching testnet values', () => {
+        it('should return Dogecoin regtest config using Bitcoin-testnet prefixes (dogecoind v1.14 regtest)', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('dogecoin-regtest')
-            assert.strictEqual(net.pubKeyHash, 0x71)
+            // dogecoind v1.14.x in regtest mode uses Bitcoin-testnet prefixes,
+            // NOT Dogecoin-testnet prefixes (0x71). See src/CryptoNetworks.js comment
+            // and commit c70c864 for the verified rationale.
+            assert.strictEqual(net.pubKeyHash, 0x6f)
             assert.strictEqual(net.scriptHash, 0xc4)
         })
 
