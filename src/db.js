@@ -59,7 +59,8 @@ class Database {
             // Connection options
             connectionLimit:  10,
             //connectTimeout: 0,
-            insertIdAsNumber: true
+            insertIdAsNumber: true,
+            queryTimeout:     parseInt(process.env.DB_QUERY_TIMEOUT) || 30000
         };
         // Setup pool of connections
         this.pool = mariadb.createPool(this.connectionPoolParams);

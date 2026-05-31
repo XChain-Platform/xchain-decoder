@@ -351,7 +351,7 @@ class XChainDecoder {
                                             if (!decodedScriptSig || decodedScriptSig.length < 3 || !Buffer.isBuffer(decodedScriptSig[2])) continue
                                             let decodedRedeemScript = bitcoin.script.decompile(decodedScriptSig[2])
                                             if (!decodedRedeemScript || decodedRedeemScript.length < 1 || !Buffer.isBuffer(decodedRedeemScript[0])) continue
-                                            let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
+                                            let decodedData = decodedRedeemScript[0]
                                             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
                                         } catch (e) {
                                             this.rpcErrors++
@@ -370,7 +370,7 @@ class XChainDecoder {
                                             if (!nextInput["witness"] || nextInput["witness"].length < 3 || !Buffer.isBuffer(nextInput["witness"][2])) continue
                                             let decodedRedeemScript = bitcoin.script.decompile(nextInput["witness"][2])
                                             if (!decodedRedeemScript || decodedRedeemScript.length < 1 || !Buffer.isBuffer(decodedRedeemScript[0])) continue
-                                            let decodedData = Buffer.from(decodedRedeemScript[0],"hex")
+                                            let decodedData = decodedRedeemScript[0]
                                             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
                                         } catch (e) {
                                             this.rpcErrors++
