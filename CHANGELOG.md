@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `.env.example` — added a configuration template enumerating every environment variable the decoder reads (coin/network, coin-node RPC, decoder database, API port), with safe regtest/placeholder defaults and inline comments, so operators have a single reference for configuring the service instead of discovering variables by reading the source.
 - `src/db.js` — the MariaDB connection pool now sets `queryTimeout: parseInt(process.env.DB_QUERY_TIMEOUT) || 30000`. Without a query timeout a slow or lock-blocked statement had no upper bound and could hang a pooled connection indefinitely; during a large block storm or schema-lock contention the decoder could stall on the block-processing hot path with no timeout-based recovery. A query now aborts after the configured timeout (30s default, overridable via `DB_QUERY_TIMEOUT`) instead of hanging. Matches the pattern already used by `xchain-hub`.
 
 ### Security
