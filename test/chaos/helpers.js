@@ -71,7 +71,6 @@ function createMockConnector(overrides = {}) {
         getRawMempool: sinon.stub().resolves([]),
         getRawTransaction: sinon.stub().resolves('0'.repeat(100)),
         getRawTransactions: sinon.stub().resolves([]),
-        getMempoolEntry: sinon.stub().resolves({}),
         sleep: (ms) => new Promise(r => setTimeout(r, ms)),
         ...overrides
     }

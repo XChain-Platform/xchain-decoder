@@ -257,47 +257,6 @@ class BlockchainConnector {
         throw new Error("There were problems getting raw mempool.")
     }
 
-    async getMempoolEntry(txid){
-        let tries = 10
-
-        while (tries > 0) {
-            try {
-                const data = {
-                    jsonrpc: '2.0',
-                    method: 'getmempoolentry',
-                    params: [txid],
-                    id: 1
-                }
-
-                // Make the request to the node
-                const response = await axios.post(this.url, data, {
-                    auth: {
-                        username: this.rpcUser,
-                        password: this.rpcPassword,
-                    }
-                })
-
-                // Verify if there is a result and return it
-                if (response.data.result) {
-                    return response.data.result;
-                } else {
-                    throw new Error('Error getting mempool entry');
-                }
-            } catch (error) {
-                if (error.code === 'ECONNABORTED') {
-                    tries = tries - 1
-                    console.log("Getting timeout trying to get mempool entry, trying again...")
-                } else {
-                    this.rpcErrors++
-                    console.error('Error getting mempool entry:', error);
-                    throw error;
-                }
-            }
-        }
-
-        throw new Error("There were problems getting mempool entry.")
-    }
-    
     async getRawTransaction(txid){
         return new Promise(async (resolve, reject) => {
             let maxTries = 10

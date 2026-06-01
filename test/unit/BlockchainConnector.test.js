@@ -323,19 +323,4 @@ describe('BlockchainConnector', () => {
             )
         })
     })
-
-    describe('#getMempoolEntry()', () => {
-        it('should return mempool entry on success', async () => {
-            const entry = { fees: { base: 0.001 } }
-            axiosStub.resolves({ data: { result: entry } })
-
-            const result = await connector.getMempoolEntry('txid')
-            assert.deepStrictEqual(result, entry)
-        })
-
-        it('should throw when response has no result', async () => {
-            axiosStub.resolves({ data: { result: null } })
-            await assert.rejects(() => connector.getMempoolEntry('txid'))
-        })
-    })
 })
