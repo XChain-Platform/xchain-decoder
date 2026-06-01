@@ -203,15 +203,24 @@ class XChainDecoder {
         
         if (output != null){
             let script = output.script
-            //Check if output is a P2SH. If so, 
-            //then the source address will be extracted 
-            //from the output of the first input instead
-            if (
+            //Check if output is a P2SH or P2WSH data-carrying reveal output. If so,
+            //the spent output's own address is the script (commit) address, not the
+            //signer — so walk back one hop to the commit tx's first input and take
+            //THAT prev output's address (the funder/issuer). Without the P2WSH branch
+            //the source of every P2WSH-encoded action resolved to the bech32 script
+            //address (bcrt1q...), which holds no gas → spurious "insufficient funds (FEE)".
+            let isP2sh = (
                 (script.length == 23) //23 bytes for a standard p2sh
                 && (script[0] == 0xa9) //OP_HASH160
                 && (script[1] == 0x14) //PUSH 20 bytes
                 && (script[23 - 1] == 0x87) //OP_EQUAL
-            ){
+            )
+            let isP2wsh = (
+                (script.length == 34) //34 bytes for a standard p2wsh
+                && (script[0] == 0x00) //OP_0 (witness v0)
+                && (script[1] == 0x20) //PUSH 32 bytes
+            )
+            if (isP2sh || isP2wsh){
                 let prevOutputIndex = outputTransaction.ins[0].index
                 let prevTxHash = util.uint8ArrayToHex(outputTransaction.ins[0].hash.reverse())
                 let prevRawTransaction = await this.connector.getRawTransaction(prevTxHash)
