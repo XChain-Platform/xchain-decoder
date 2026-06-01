@@ -78,7 +78,7 @@ async function startApi(){
     // Rate limiting (requests per minute per IP; override with DECODER_RATE_LIMIT_RPM)
     app.use(rateLimit({
         windowMs: 60 * 1000,
-        max: parseInt(process.env.DECODER_RATE_LIMIT_RPM, 10) || 100,
+        limit: parseInt(process.env.DECODER_RATE_LIMIT_RPM, 10) || 100,
         standardHeaders: true,
         legacyHeaders: false
     }));

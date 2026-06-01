@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `src/BlockchainConnector.js` — removed the unused `getMempoolEntry(txid)` method (wrapping the `getmempoolentry` JSON-RPC call) along with its dedicated unit tests and chaos-helper stub. The method had no caller anywhere in the service; leaving an unexercised RPC wrapper on the connector risked silently drifting out of sync with coin-node response shapes (e.g. Bitcoin Core's `fee` → `fees.base` field rename) for any future consumer. Removing it shrinks the connector surface to what the service actually uses.
 
 ### Changed
+- `src/api.js` — migrated the `rateLimit()` configuration from the deprecated `max` option to its canonical `limit` replacement (renamed in `express-rate-limit` v8, which this service already runs). `max` remains a backward-compatible alias today, so this is a behavior-preserving rename that forward-protects against a future major release dropping it.
 - `package.json` — aligned the `mariadb` driver to the `^3.5.2` range used across the platform. The driver was previously pinned to `~3.4.5` (a patch-only range, one minor line behind the `xchain-dashboard` host); the caret range now tracks 3.x minor releases consistently with every other service, removing the version drift and the mix of `~`/`^` range operators across the platform. No source changes.
 
 ### Added
