@@ -567,6 +567,18 @@ class XChainDecoder {
         while (thereAreDifferences){
             let lastBlockIndex = await this.db.getLastBlockIndex()
             let lastBlock = await this.db.getBlockByIndex(lastBlockIndex)
+
+            // Stop the backward walk once the table is exhausted (getLastBlockIndex
+            // returns -1 on an empty table, so getBlockByIndex(-1) yields null) or once
+            // we have retreated past the configured start height. Without this guard a
+            // deep reorg that invalidates every processed block would dereference a null
+            // lastBlock below and crash before the REORG event is written, leaving the
+            // decoder in an inconsistent restart state.
+            if (!lastBlock || lastBlockIndex < this.startBlockIndex){
+                thereAreDifferences = false
+                break
+            }
+
             let blockHashFromNode
             try {
                 blockHashFromNode = await this.connector.getBlockHash(lastBlockIndex)

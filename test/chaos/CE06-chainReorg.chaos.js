@@ -86,6 +86,46 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         assert.ok(retryLogs.length >= 1, 'Should log retry message')
     })
 
+    it('verifyReorg should stop cleanly when every processed block is invalidated', async function () {
+        // Deep reorg: the decoder has processed blocks 0,1,2 and the node has
+        // invalidated all three, so the backward walk exhausts the entire blocks
+        // table. Once the last block is deleted, getLastBlockIndex() returns -1
+        // (MAX over an empty table) and getBlockByIndex(-1) yields no row. Without
+        // the null/min-height guard this dereferenced null and threw an uncaught
+        // TypeError, crashing before the REORG event was written.
+        let blockIndex = 2
+
+        const dbBlocks = {
+            2: { block_hash: 'old_hash_2' },
+            1: { block_hash: 'old_hash_1' },
+            0: { block_hash: 'old_hash_0' }
+            // index -1 intentionally absent → getBlockByIndex(-1) resolves undefined
+        }
+
+        mockDb.getLastBlockIndex = sinon.stub().callsFake(async () => blockIndex)
+        mockDb.getBlockByIndex = sinon.stub().callsFake(async (idx) => dbBlocks[idx])
+        // Every queried hash differs from the DB, so the walk never matches and
+        // must rely on the exhaustion guard to terminate.
+        mockConnector.getBlockHash = sinon.stub().callsFake(async (idx) => 'node_hash_' + idx)
+        mockDb.deleteBlockByIndex = sinon.stub().callsFake(async () => {
+            blockIndex--
+            return true
+        })
+
+        let result
+        await assert.doesNotReject(async () => {
+            result = await decoder.verifyReorg()
+        }, 'verifyReorg must not throw when the blocks table is fully emptied')
+
+        assert.strictEqual(result, true, 'verifyReorg should return normally after exhausting the table')
+        assert.strictEqual(mockDb.deleteBlockByIndex.callCount, 3, 'Should delete all 3 invalidated blocks')
+        assert.strictEqual(blockIndex, -1, 'Walk should retreat to the empty-table sentinel (-1)')
+        assert.ok(!mockConnector.getBlockHash.calledWith(-1), 'Guard must short-circuit before querying the node at index -1')
+        assert.ok(mockDb.insertEvent.calledOnce, 'Should still record the REORG event for the deleted blocks')
+        assert.strictEqual(mockDb.insertEvent.firstCall.args[0], 'REORG')
+        assert.strictEqual(mockDb.insertEvent.firstCall.args[1].length, 3, 'REORG event should contain all 3 deleted blocks')
+    })
+
     it('verifyReorg should not insert event when no reorg found', async function () {
         mockDb.getLastBlockIndex.resolves(5)
         mockDb.getBlockByIndex.resolves({ block_hash: 'same_hash' })
