@@ -166,7 +166,7 @@ class BlockchainConnector {
                 const data = {
                     jsonrpc: '2.0',
                     method: 'getblockheader',
-                    params: [blockhash, !hexFormat],
+                    params: [blockhash, hexFormat ? 0 : 1],
                     id: 1,
                 }
 
@@ -376,7 +376,7 @@ class BlockchainConnector {
                 const data = {
                     jsonrpc: '2.0',
                     method: 'getblock',
-                    params: [blockhash, !hexFormat],
+                    params: [blockhash, hexFormat ? 0 : 1],
                     id: 1,
                 }
 
