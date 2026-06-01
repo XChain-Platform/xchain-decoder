@@ -49,6 +49,13 @@ const P2WSH_BUFFER = Buffer.from("p2wsh")
 const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node need to have to start parsing
 
+// Maximum compiled on-chain ACTION push, in bytes (measured before
+// bitcoin.script.decompile strips the OP_PUSHDATA prefix — see compiledDataLength).
+// This is the protocol arbiter for ACTION size: any tx whose compiled push
+// exceeds this is dropped. Canonical source of truth + the encoder's matching
+// guard: xchain-documentation/protocol/constants.js (MAX_ACTION_DATA_LENGTH) /
+// xchain-encoder validator MAX_COMPILED_ACTION_DATA_LENGTH. Kept equal by the
+// cross-service regression suite.
 const MAX_ACTION_DATA_LENGTH = 8192
 const VALID_ACTION_NAMES = new Set([
     'ADDRESS', 'AIRDROP', 'ATTEST',
@@ -1011,3 +1018,6 @@ class XChainDecoder {
 }
 
 module.exports = XChainDecoder
+// Exported for the cross-service regression suite, which asserts this equals the
+// encoder's compiled-push guard and the canonical protocol constant.
+module.exports.MAX_ACTION_DATA_LENGTH = MAX_ACTION_DATA_LENGTH
