@@ -45,10 +45,13 @@ const DECODER_DB_USER =  process.env.DECODER_DB_USER
 const DB_PASSWORD =  process.env.DECODER_DB_PASS
 const DECODER_API_PORT = process.env.DECODER_API_PORT
 const AUX_POW = process.env.AUX_POW
+// Native-coin protocol fee destination for this coin+network. When set, the decoder also persists
+// outputs paying it to transaction_outputs so the indexer can validate native-coin fee payments.
+const FEE_DESTINATION = process.env.FEE_DESTINATION || null
 
 async function startApi(){
     //Start the indexer
-    const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DECODER_DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD, AUX_POW);
+    const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DECODER_DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD, AUX_POW, FEE_DESTINATION);
     let decoderRunning = true
     let decoderError = null
     decoder.start().catch((err) => {

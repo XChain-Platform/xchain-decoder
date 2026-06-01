@@ -70,9 +70,16 @@ const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many transactions need to be proc
 const LOG_BLOCK_INTERVAL = 1000 //During catch-up sync, only log progress every N blocks
 
 class XChainDecoder {
-    constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword, auxPow) {
+    constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword, auxPow, feeDestination) {
         this.network = CryptoNetworks.getBitcoinJsNetwork(network)
-      
+
+        // Native-coin protocol fee destination address for this coin+network. When set (not the
+        // unset placeholder), the decoder also persists any output paying it to transaction_outputs
+        // so the indexer can validate native-coin fee payments. Null/placeholder disables capture.
+        this.feeDestination = (feeDestination && feeDestination !== 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX')
+            ? feeDestination
+            : null
+
         this.connector = new BlockchainConnector(nodeUrl, nodePort, nodeUser, nodePassword)
         this.dbUrl = dbUrl
         this.dbPort = dbPort
@@ -276,12 +283,50 @@ class XChainDecoder {
         return pushLen >= 2 && pushLen <= 40 && script.length === pushLen + 2
     }
 
+    // For a P2SH/P2WSH reveal, the native-coin fee output lives on the funding (commit) transaction —
+    // the wallet/SDK place the fee output on the first tx they generate, and the reveal (this action's
+    // tx) spends that commit's P2SH outputs. Fetch the funding tx and return any output paying the
+    // protocol FEE_DESTINATION, shaped as a paymentOutput, so the indexer sees it among this action's
+    // transaction_outputs and can validate the native-coin fee. Deterministic (same commit → same
+    // output). Returns [] when no fee destination is configured, the txid is missing, or the lookup
+    // fails (the action then falls back to XCHAIN-balance fee handling, as before).
+    async findFundingFeeOutputs(fundingTxId){
+        let results = []
+        if (!this.feeDestination || !fundingTxId) return results
+        try {
+            let fundingTxHex = await this.connector.getRawTransaction(fundingTxId)
+            if (!fundingTxHex) return results
+            let fundingTx = bitcoin.Transaction.fromHex(fundingTxHex)
+            for (let vout = 0; vout < fundingTx.outs.length; vout++){
+                let output = fundingTx.outs[vout]
+                let outputAddress = null
+                try {
+                    if (!this.isFutureSegwitScript(output.script))
+                        outputAddress = bitcoin.address.fromOutputScript(output.script, this.network)
+                } catch (err){
+                    //the output script has no matching address — skip
+                }
+                if (outputAddress && outputAddress === this.feeDestination){
+                    results.push({ vout: vout, destinationAddress: outputAddress, amount: output.value })
+                }
+            }
+        } catch (err){
+            this.rpcErrors++
+            console.error(`findFundingFeeOutputs: failed to fetch funding tx ${fundingTxId}:`, err.message)
+        }
+        return results
+    }
+
     async parseTransaction(transaction){
         let nextTxId = transaction.getId()
         let firstInputTxId = util.uint8ArrayToHex(transaction.ins[0].hash.reverse())
         let standardInput = ("standard_input" in transaction.ins[0]?transaction.ins[0]["standard_input"]:true)
         let dispenseOutputs = []
         let paymentOutputs = []
+        // For a P2SH/P2WSH reveal, the funding (commit) tx — whose outputs this reveal spends — is the
+        // first input's previous tx. Native-coin fee outputs are placed there (not on the reveal), so we
+        // capture the funding txid to look them up before returning. Null for non-P2SH transactions.
+        let p2shFundingTxId = null
 
         //Ignore coin base transactions
         if ((firstInputTxId != "0000000000000000000000000000000000000000000000000000000000000000") && standardInput){
@@ -351,6 +396,7 @@ class XChainDecoder {
                                 *
                                 */
                                 if (dataWithoutObfuscation.subarray(MAGIC_WORD.length).equals(P2SH_BUFFER)){
+                                    p2shFundingTxId = firstInputTxId // commit tx carrying any native-coin fee output
                                     for (let txInputIndex=0;txInputIndex < transaction.ins.length;txInputIndex++){
                                         let nextInput = transaction.ins[txInputIndex]
                                         try {
@@ -371,6 +417,7 @@ class XChainDecoder {
                                 *
                                 */
                                 } else if (dataWithoutObfuscation.subarray(MAGIC_WORD.length).equals(P2WSH_BUFFER)){
+                                    p2shFundingTxId = firstInputTxId // commit tx carrying any native-coin fee output
                                     for (let txInputIndex=0;txInputIndex < transaction.ins.length;txInputIndex++){
                                         let nextInput = transaction.ins[txInputIndex]
                                         try {
@@ -486,6 +533,15 @@ class XChainDecoder {
                     if (addressId && !(await this.db.hasPubkey(addressId))){
                         await this.db.insertPubkey(addressId, pubkey)
                     }
+                }
+            }
+
+            //For a P2SH/P2WSH reveal, attribute the native-coin fee output (which lives on the funding
+            //commit tx) to this action so the indexer can validate it (see findFundingFeeOutputs).
+            if (p2shFundingTxId){
+                let fundingFeeOutputs = await this.findFundingFeeOutputs(p2shFundingTxId)
+                for (let feeOutput of fundingFeeOutputs){
+                    paymentOutputs.push(feeOutput)
                 }
             }
 
@@ -794,12 +850,19 @@ class XChainDecoder {
                                     }
                                 }
 
-                                //Store payment outputs for actions whose settlement
-                                //is determined by on-chain native-coin outputs (e.g. COINPAY).
-                                //The indexer fans out per-output by LEFT JOIN-ing
-                                //transaction_outputs in getDecoderBlockData.
-                                if (decodedData.startsWith("COINPAY|")){
+                                //Store payment outputs the indexer needs to read:
+                                //  • COINPAY: every native-coin output (settlement is determined
+                                //    per-output; the indexer fans out per-output by LEFT JOIN-ing
+                                //    transaction_outputs in getDecoderBlockData).
+                                //  • Any action: the native-coin fee output paying the protocol
+                                //    FEE_DESTINATION, so the indexer can validate native-coin fee
+                                //    payments (xchain-indexer/src/utility.js detectFeePaymentMode /
+                                //    validateNativeCoinFee). Captured only when feeDestination is set.
+                                let isCoinpay = decodedData.startsWith("COINPAY|")
+                                if (isCoinpay || this.feeDestination){
                                     for (let nextOutput of parseResult["paymentOutputs"]){
+                                        if (!isCoinpay && nextOutput.destinationAddress !== this.feeDestination)
+                                            continue
                                         nextOutput.txIndex = lastProcessedTxIndex
                                         let insertResult = await this.db.insertTransactionOutput(
                                             nextOutput
