@@ -58,7 +58,20 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         assert.ok(mockDb.deleteBlockByIndex.calledWith(4), 'Should delete block 4')
         assert.ok(mockDb.insertEvent.calledOnce, 'Should insert REORG event')
         assert.strictEqual(mockDb.insertEvent.firstCall.args[0], 'REORG')
-        assert.strictEqual(mockDb.insertEvent.firstCall.args[1].length, 2, 'REORG event should contain 2 deleted blocks')
+
+        const deletedBlocks = mockDb.insertEvent.firstCall.args[1]
+        assert.strictEqual(deletedBlocks.length, 2, 'REORG event should contain 2 deleted blocks')
+
+        // The audit log must record the actual rolled-back block hash for every
+        // entry — never null/undefined. Each entry's block_hash must be a
+        // non-empty string carrying the hash that was in the DB.
+        for (const entry of deletedBlocks) {
+            assert.strictEqual(typeof entry.block_hash, 'string', `block_hash for index ${entry.block_index} must be a string, got ${entry.block_hash}`)
+            assert.ok(entry.block_hash.length > 0, `block_hash for index ${entry.block_index} must be non-empty`)
+        }
+        const hashesByIndex = Object.fromEntries(deletedBlocks.map(b => [b.block_index, b.block_hash]))
+        assert.strictEqual(hashesByIndex[5], 'old_hash_5', 'REORG event should record the original hash of block 5')
+        assert.strictEqual(hashesByIndex[4], 'old_hash_4', 'REORG event should record the original hash of block 4')
     })
 
     it('verifyReorg should handle getBlockHash failures during reorg', async function () {

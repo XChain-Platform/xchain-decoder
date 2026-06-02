@@ -601,7 +601,7 @@ class XChainDecoder {
                 try {
                     await this.db.deleteBlockByIndex(lastBlockIndex)
                     
-                    blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["hash"]})
+                    blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["block_hash"]})
                 } catch (err){
                     console.error(`reorg: failed to delete block ${lastBlockIndex} (${lastBlock.block_hash}): `, err)
                     if (++retryCount >= 10) throw new Error('verifyReorg: deleteBlockByIndex failed after 10 attempts, aborting')
