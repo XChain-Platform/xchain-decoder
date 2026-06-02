@@ -130,4 +130,79 @@ describe('Security: Connection Handling', () => {
             assert.deepStrictEqual(order, [1, 2, 3])
         })
     })
+
+    // --- SEC-08: deleteBlockByIndex must not leak the transaction lock on failure ---
+    //
+    // deleteBlockByIndex runs four DELETE queries inside a transaction. If one
+    // of them throws (DB timeout, deadlock, disk full) the error must not escape
+    // with the lock still held — that would permanently deadlock every later
+    // caller waiting on _acquireTransactionLock(), including verifyReorg's own
+    // retry loop, halting all block ingestion until a manual restart.
+
+    describe('deleteBlockByIndex failure handling', () => {
+        // A fake connection whose query() fails on the Nth call, recording
+        // whether the transaction was rolled back and the connection released.
+        function makeFailingConnection(failOnCall = 1) {
+            const state = { rolledBack: false, released: false, committed: false, calls: 0 }
+            const connection = {
+                beginTransaction: async () => {},
+                commit: async () => { state.committed = true },
+                rollback: async () => { state.rolledBack = true },
+                release: async () => { state.released = true },
+                query: async () => {
+                    state.calls += 1
+                    if (state.calls === failOnCall) {
+                        throw new Error('simulated DB failure (timeout/deadlock/disk full)')
+                    }
+                    return []
+                }
+            }
+            return { connection, state }
+        }
+
+        it('[REGRESSION P1] R-BUG-001: releases the transaction lock when a query fails', async () => {
+            const db = new Database('localhost', 3306, 'test_db', 'root', '')
+            const { connection, state } = makeFailingConnection(1)
+            db.getConnection = async () => connection
+
+            await assert.rejects(
+                () => db.deleteBlockByIndex(123),
+                /simulated DB failure/,
+                'deleteBlockByIndex must propagate the query error to the caller'
+            )
+
+            // The lock and connection must be released so the reorg retry path
+            // (and every other transaction) can make progress afterward.
+            assert.strictEqual(db._transactionLock, false, 'transaction lock must be released after a failed delete')
+            assert.strictEqual(db.transactionConnection, null, 'transaction connection must be cleared after a failed delete')
+            assert.strictEqual(db._transactionLockQueue.length, 0, 'no waiters should be left queued')
+            assert.ok(state.rolledBack, 'a failed delete should roll back the open transaction')
+            assert.ok(state.released, 'a failed delete should release the connection')
+        })
+
+        it('[REGRESSION P1] R-BUG-001: a subsequent call does not deadlock after a failure', async () => {
+            const db = new Database('localhost', 3306, 'test_db', 'root', '')
+
+            // First call: every query fails.
+            const failing = makeFailingConnection(1)
+            db.getConnection = async () => failing.connection
+            await assert.rejects(() => db.deleteBlockByIndex(123), /simulated DB failure/)
+
+            // Second call (the verifyReorg retry): a healthy connection. This
+            // must acquire the lock immediately rather than hang forever waiting
+            // on a promise that the failed call never resolved.
+            const healthy = makeFailingConnection(Infinity) // never fails
+            db.getConnection = async () => healthy.connection
+
+            const result = await Promise.race([
+                db.deleteBlockByIndex(123),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('deadlock: retry hung on transaction lock')), 1000))
+            ])
+
+            assert.strictEqual(result, true, 'the retry should complete successfully')
+            assert.ok(healthy.state.committed, 'the retry should commit its transaction')
+            assert.strictEqual(db._transactionLock, false, 'lock should be released after a successful retry')
+            assert.strictEqual(db.transactionConnection, null, 'connection should be cleared after a successful retry')
+        })
+    })
 })

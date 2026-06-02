@@ -328,31 +328,43 @@ class Database {
     async deleteBlockByIndex(blockIndex){
         await this.beginTransaction()
         let connection = await this.getConnection()
-        
-        // Delete child rows first: transaction_outputs and dispensers are
-        // keyed by tx_index, so they must be removed before the parent
-        // transactions rows they reference are deleted. Otherwise the decoder
-        // re-inserts the same block and hits duplicate-key errors, leaving
-        // stale pre-reorg rows that the indexer reads as valid.
-        let query = `
-            DELETE FROM transaction_outputs WHERE tx_index IN (SELECT tx_index FROM transactions WHERE block_index = ?);
-        `;
-        await connection.query(query, [blockIndex])
-        query = `
-            DELETE FROM dispensers WHERE tx_index IN (SELECT tx_index FROM transactions WHERE block_index = ?);
-        `;
-        await connection.query(query, [blockIndex])
-        query = `
-            DELETE FROM transactions WHERE block_index = ?;
-        `;
-        await connection.query(query, [blockIndex])
-        query = `
-            DELETE FROM blocks WHERE block_index = ?;
-        `;
-        await connection.query(query, [blockIndex])
-        await this.commitTransaction()
-        
-        return true
+
+        try {
+            // Delete child rows first: transaction_outputs and dispensers are
+            // keyed by tx_index, so they must be removed before the parent
+            // transactions rows they reference are deleted. Otherwise the decoder
+            // re-inserts the same block and hits duplicate-key errors, leaving
+            // stale pre-reorg rows that the indexer reads as valid.
+            let query = `
+                DELETE FROM transaction_outputs WHERE tx_index IN (SELECT tx_index FROM transactions WHERE block_index = ?);
+            `;
+            await connection.query(query, [blockIndex])
+            query = `
+                DELETE FROM dispensers WHERE tx_index IN (SELECT tx_index FROM transactions WHERE block_index = ?);
+            `;
+            await connection.query(query, [blockIndex])
+            query = `
+                DELETE FROM transactions WHERE block_index = ?;
+            `;
+            await connection.query(query, [blockIndex])
+            query = `
+                DELETE FROM blocks WHERE block_index = ?;
+            `;
+            await connection.query(query, [blockIndex])
+            await this.commitTransaction()
+
+            return true
+        } catch (err) {
+            // A query failure here would otherwise escape with the transaction
+            // lock still held and the connection still open, deadlocking every
+            // later caller that waits on the lock. Roll back and release the
+            // lock before propagating so the reorg retry path can recover.
+            console.error('Error deleting block by index:', err);
+            if (this.transactionConnection){
+                await this.endTransaction()
+            }
+            throw err
+        }
     }
     
     async getLastBlockIndex(){
