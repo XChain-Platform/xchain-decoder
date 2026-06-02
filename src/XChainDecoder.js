@@ -38,6 +38,7 @@ const lenientTextDecoder = new TextDecoder('utf-8')
 bitcoin.initEccLib(ecc);
 
 const CHECK_BLOCK_DELAY_MS = 1000 //1 second to continously ask for new block when all has been parsed
+const BLOCKCHAIN_INFO_REFRESH_MS = 30000 //Re-poll the node tip at least this often during catch-up so reported lag stays accurate
 const MEMPOOL_INTERVAL = 60000 //1 second between mempool checks
 const MEMPOOL_BATCH_SIZE = 1000
 
@@ -647,6 +648,7 @@ class XChainDecoder {
         }
         
         let lastBlockchainInfo = null
+        let lastBlockchainInfoRefreshAt = 0
         this.blockchainInfoLastBlock = -1
         let blocksQuantity = 0
         
@@ -671,8 +673,15 @@ class XChainDecoder {
                 break
             }
             
-            //Getting network info to retrieve the last block index
-            if (!lastBlockchainInfo || (lastProcessedBlockIndex >= this.blockchainInfoLastBlock)){
+            //Getting network info to retrieve the last block index.
+            //Refresh when we have no info yet, when we have caught up to the
+            //previously-seen tip, OR periodically on a wall-clock interval — the
+            //last condition keeps blockchainInfoLastBlock tracking the live chain
+            //during a long catch-up, so the reported lag reflects the true remaining
+            //gap instead of converging to zero against a frozen tip.
+            if (!lastBlockchainInfo
+                || (lastProcessedBlockIndex >= this.blockchainInfoLastBlock)
+                || (Date.now() - lastBlockchainInfoRefreshAt >= BLOCKCHAIN_INFO_REFRESH_MS)){
                 try {
                     lastBlockchainInfo = await this.connector.getBlockchainInfo()
                     
@@ -690,6 +699,7 @@ class XChainDecoder {
                     }
                     
                     this.blockchainInfoLastBlock = lastBlockchainInfo["blocks"]
+                    lastBlockchainInfoRefreshAt = Date.now()
                 } catch (e){
                     console.log(e)
                     console.log("Error trying to get network info from the node. Trying again...", e)
