@@ -601,7 +601,12 @@ class XChainDecoder {
             if (lastBlock["block_hash"] != blockHashFromNode){
                 try {
                     await this.db.deleteBlockByIndex(lastBlockIndex)
-                    
+
+                    // Per-block retry budget: reset after each successful delete so the
+                    // 10-attempt limit applies per block, not cumulatively across the whole
+                    // reorg run. Otherwise a multi-block reorg with one transient failure per
+                    // block could exhaust the budget and abort, leaving orphan blocks behind.
+                    retryCount = 0
                     blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["block_hash"]})
                 } catch (err){
                     console.error(`reorg: failed to delete block ${lastBlockIndex} (${lastBlock.block_hash}): `, err)
