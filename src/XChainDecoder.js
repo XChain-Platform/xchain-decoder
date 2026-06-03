@@ -223,7 +223,7 @@ class XChainDecoder {
             )
             if (isP2sh || isP2wsh){
                 let prevOutputIndex = outputTransaction.ins[0].index
-                let prevTxHash = util.uint8ArrayToHex(outputTransaction.ins[0].hash.reverse())
+                let prevTxHash = util.uint8ArrayToHex(Buffer.from(outputTransaction.ins[0].hash).reverse())
                 let prevRawTransaction = await this.connector.getRawTransaction(prevTxHash)
                 let prevTransaction = bitcoin.Transaction.fromHex(prevRawTransaction)
                 output = prevTransaction.outs[prevOutputIndex]
@@ -329,7 +329,7 @@ class XChainDecoder {
 
     async parseTransaction(transaction){
         let nextTxId = transaction.getId()
-        let firstInputTxId = util.uint8ArrayToHex(transaction.ins[0].hash.reverse())
+        let firstInputTxId = util.uint8ArrayToHex(Buffer.from(transaction.ins[0].hash).reverse())
         let standardInput = ("standard_input" in transaction.ins[0]?transaction.ins[0]["standard_input"]:true)
         let dispenseOutputs = []
         let paymentOutputs = []
@@ -766,7 +766,7 @@ class XChainDecoder {
                 }
                 
                 var block = this.xchainBlockDecoder.blockFromHex(nextBlockHex)
-                let previousBlockHash = util.uint8ArrayToHex(block.prevHash.reverse())
+                let previousBlockHash = util.uint8ArrayToHex(Buffer.from(block.prevHash).reverse())
 
                 //verify if there is an reorg
                 if (nextBlockHeight > this.startBlockIndex){
