@@ -740,9 +740,20 @@ class Database {
         const dropIndexAddressesTable = "DROP TABLE IF EXISTS index_addresses"
         const dropIndexTransactionsTable = "DROP TABLE IF EXISTS index_transactions"
         const dropEventsTable = "DROP TABLE IF EXISTS events"
-        
+        const dropTransactionOutputsTable = "DROP TABLE IF EXISTS transaction_outputs"
+        const dropDispensersTable = "DROP TABLE IF EXISTS dispensers"
+        const dropMempoolTransactionsTable = "DROP TABLE IF EXISTS mempool_transactions"
+        const dropPubkeysTable = "DROP TABLE IF EXISTS pubkeys"
+
         let connection = await this.getConnection()
-        
+
+        // Drop child / referencing tables before their parents. pubkeys carries a
+        // foreign key onto index_addresses, so it must go before index_addresses
+        // below or the DROP would fail with a constraint error.
+        await connection.query(dropTransactionOutputsTable)
+        await connection.query(dropDispensersTable)
+        await connection.query(dropMempoolTransactionsTable)
+        await connection.query(dropPubkeysTable)
         await connection.query(dropTransactionTable)
         await connection.query(dropBlockTable)
         await connection.query(dropIndexAddressesTable)
