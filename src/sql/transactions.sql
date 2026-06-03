@@ -1,10 +1,10 @@
 DROP TABLE IF EXISTS transactions;
 CREATE TABLE transactions (
-    tx_index       INTEGER UNSIGNED PRIMARY KEY,
-    tx_hash_id     INTEGER UNSIGNED,           -- id of record in index_transactions
-    block_index    INTEGER UNSIGNED,
-    source_id      INTEGER UNSIGNED,           -- id of record in index_addresses
-    destination_id INTEGER UNSIGNED,           -- id of record in index_addresses
+    tx_index       BIGINT UNSIGNED PRIMARY KEY,
+    tx_hash_id     BIGINT UNSIGNED,           -- id of record in index_transactions
+    block_index    BIGINT UNSIGNED,
+    source_id      BIGINT UNSIGNED,           -- id of record in index_addresses
+    destination_id BIGINT UNSIGNED,           -- id of record in index_addresses
     amount         BIGINT,                     -- BTC amount sent
     fee            BIGINT,                     -- BTC Fee paid (miners fee)
     data           MEDIUMTEXT,                 -- Decoded action string

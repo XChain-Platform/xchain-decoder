@@ -1,8 +1,8 @@
 DROP TABLE IF EXISTS mempool_transactions;
 CREATE TABLE mempool_transactions (
-    tx_hash_id     INTEGER UNSIGNED, -- id of record in index_transactions
-    source_id      INTEGER UNSIGNED, -- id of record in index_addresses
-    destination_id INTEGER UNSIGNED, -- id of record in index_addresses
+    tx_hash_id     BIGINT UNSIGNED, -- id of record in index_transactions
+    source_id      BIGINT UNSIGNED, -- id of record in index_addresses
+    destination_id BIGINT UNSIGNED, -- id of record in index_addresses
     amount         BIGINT,           -- BTC amount sent
     fee            BIGINT,           -- BTC Fee paid (miners fee)
     data           MEDIUMTEXT        -- Decoded data
