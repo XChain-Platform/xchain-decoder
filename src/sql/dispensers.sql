@@ -1,4 +1,4 @@
-DROP TABLE IF EXISTS dispenser;
+DROP TABLE IF EXISTS dispensers;
 CREATE TABLE dispensers (
     tx_index       INTEGER UNSIGNED,
     address_id     INTEGER UNSIGNED,
