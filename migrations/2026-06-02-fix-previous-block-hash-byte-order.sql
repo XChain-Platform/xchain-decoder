@@ -1,0 +1,55 @@
+-- Migration: correct blocks.previous_block_hash_id byte order
+-- Date: 2026-06-02
+--
+-- WHY
+-- ---
+-- The block loop reversed the raw (wire / little-endian) previous-block hash
+-- buffer twice: once to compute the display-format (big-endian) value used for
+-- reorg detection, and a second time — on the SAME, already-reversed buffer —
+-- when building the insertBlock payload. Buffer.prototype.reverse() mutates in
+-- place, so the second reverse undid the first and the value persisted for
+-- previous_block_hash was little-endian wire bytes instead of the big-endian
+-- display hash. Every block row written since the service was first deployed is
+-- affected. Reorg detection itself was unaffected (it used the correctly-computed
+-- local variable), so the chain was processed correctly; only the stored value
+-- is wrong.
+--
+-- The code fix (reuse the already-computed variable in the insertBlock payload)
+-- stops new corruption. This script corrects the historical rows.
+--
+-- WHAT IT DOES
+-- ------------
+-- blocks.previous_block_hash_id is a foreign key into index_transactions (the
+-- hash string lives in index_transactions.hash; blocks stores only the id). The
+-- correct previous_block_hash for a block is the block_hash of the block one
+-- index lower — which is already stored correctly under that parent block's
+-- block_hash_id (block_hash is taken from getBlockHash, which returns display
+-- format, and is NOT affected by the double-reverse bug).
+--
+-- So rather than rewrite hash strings in place (which would also touch the
+-- corrupt index_transactions rows and any other references to them), this
+-- repoints each block's previous_block_hash_id at the same index_transactions
+-- row the parent block's block_hash_id already uses. The now-unreferenced corrupt
+-- index_transactions rows are left in place — they are harmless and removing them
+-- is out of scope for this fix.
+--
+-- HOW TO RUN
+-- ----------
+--   mysql -u <user> -p <decoder_db> < migrations/2026-06-02-fix-previous-block-hash-byte-order.sql
+--
+-- Take a backup first. Run while the decoder process is stopped. Safe to re-run:
+-- the WHERE guard makes already-corrected rows a no-op. The JOIN to the parent
+-- block naturally excludes the first block in the table (it has no parent row).
+--
+-- VALIDATOR NOTE
+-- --------------
+-- xchain-sync replicates blocks.previous_block_hash_id to validator nodes, so
+-- validator decoder replicas contain the same corrupted values. After the
+-- canonical fix lands, validator operators must either re-sync their decoder
+-- database from a corrected canonical node or run this same migration against
+-- their replica.
+
+UPDATE blocks b
+  JOIN blocks prev ON prev.block_index = b.block_index - 1
+  SET b.previous_block_hash_id = prev.block_hash_id
+  WHERE b.previous_block_hash_id <> prev.block_hash_id;

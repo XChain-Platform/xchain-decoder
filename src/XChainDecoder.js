@@ -800,8 +800,8 @@ class XChainDecoder {
                     {
                         block_index:nextBlockHeight,
                         block_hash:nextBlockHash, 
-                        block_time:block.timestamp, 
-                        previous_block_hash:util.uint8ArrayToHex(block.prevHash.reverse())
+                        block_time:block.timestamp,
+                        previous_block_hash:previousBlockHash
                     }
                 ))){
                     console.log("Error trying to insert a Block to the database")
