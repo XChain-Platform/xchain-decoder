@@ -44,7 +44,7 @@ const DECODER_DB_NAME =  process.env.DECODER_DB_NAME
 const DECODER_DB_USER =  process.env.DECODER_DB_USER
 const DB_PASSWORD =  process.env.DECODER_DB_PASS
 const DECODER_API_PORT = process.env.DECODER_API_PORT
-const AUX_POW = process.env.AUX_POW
+const AUX_POW = process.env.AUX_POW === 'true' || process.env.AUX_POW === '1'
 // Native-coin protocol fee destination for this coin+network. When set, the decoder also persists
 // outputs paying it to transaction_outputs so the indexer can validate native-coin fee payments.
 const FEE_DESTINATION = process.env.FEE_DESTINATION || null
