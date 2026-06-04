@@ -127,7 +127,11 @@ class CryptoNetworks {
             case "dogecoin-mainnet":
                 return 6000000;
             case "dogecoin-testnet":
-                return 19900000;
+                // DOGE testnet mints min-difficulty blocks ~every 20s, so the
+                // chain runs tens of millions of blocks ahead of the other
+                // networks. Anchor near the current tip to avoid indexing ~42M
+                // pre-launch blocks (which bloated the decoder DB to ~13.8GB).
+                return 62500000;
             // All regtest networks start parsing at block 0
             default:
                 return 0;
