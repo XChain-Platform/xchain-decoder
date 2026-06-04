@@ -120,6 +120,11 @@ class BlockchainConnector {
     async getBlockHash(blockindex) {
         let tries = 10
 
+        // getblockhash takes an integer height; a BigInt (BIGINT UNSIGNED columns decode as
+        // BigInt) is never a valid JSON-RPC param and makes axios' JSON.stringify throw
+        // "Do not know how to serialize a BigInt". Coerce defensively at the RPC boundary.
+        blockindex = Number(blockindex)
+
         while (tries > 0) {
             try {
                 const data = {

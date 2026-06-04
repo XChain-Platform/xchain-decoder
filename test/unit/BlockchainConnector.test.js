@@ -99,6 +99,22 @@ describe('BlockchainConnector', () => {
             assert.deepStrictEqual(callData.params, [42])
         })
 
+        // Regression: BIGINT UNSIGNED columns (block_index) decode as JS BigInt. A BigInt
+        // param makes axios' JSON.stringify of the request body throw "Do not know how to
+        // serialize a BigInt", which previously wedged verifyReorg in an infinite retry loop
+        // (decoder never wrote the REORG event → indexer never rolled back). getBlockHash must
+        // coerce the height to a Number so the JSON-RPC params are serializable.
+        it('should coerce a BigInt block index to a Number param (serializable JSON-RPC body)', async () => {
+            axiosStub.resolves({ data: { result: 'hash' } })
+            await connector.getBlockHash(199n)
+
+            const callData = axiosStub.firstCall.args[1]
+            assert.deepStrictEqual(callData.params, [199])
+            assert.strictEqual(typeof callData.params[0], 'number')
+            // The whole body must round-trip through JSON without throwing.
+            assert.doesNotThrow(() => JSON.stringify(callData))
+        })
+
         it('should throw when response has no result', async () => {
             axiosStub.resolves({ data: { result: null } })
 

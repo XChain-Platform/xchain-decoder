@@ -493,7 +493,12 @@ class Database {
                 if (rows[0]["max_height"] == null){
                     return -1
                 } else {
-                    return rows[0]["max_height"]
+                    // block_index is BIGINT UNSIGNED, so the driver returns a JS BigInt.
+                    // Coerce to Number: heights are well within Number.MAX_SAFE_INTEGER, and a
+                    // BigInt breaks both arithmetic (`+1` in the parse loop) and JSON serialization
+                    // — getBlockHash's axios body and insertEvent's JSON.stringify both throw
+                    // "Do not know how to serialize a BigInt", which silently wedges verifyReorg.
+                    return Number(rows[0]["max_height"])
                 }
             } else {
                 return -1   
@@ -521,7 +526,9 @@ class Database {
                 if (rows[0]["max_tx_index"] == null){
                     return -1
                 } else {
-                    return rows[0]["max_tx_index"]
+                    // tx_index is BIGINT UNSIGNED — coerce the BigInt to Number for the same
+                    // reasons as getLastBlockIndex (arithmetic + JSON-RPC/event serialization).
+                    return Number(rows[0]["max_tx_index"])
                 }
             } else {
                 return -1   
