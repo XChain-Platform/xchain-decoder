@@ -59,6 +59,7 @@ describe('XChainDecoder block previous_block_hash byte order', function () {
             createDatabase: async () => true,
             verifyDatabase: async () => true,
             verifyTables: async () => true,
+            runMigrations: async () => ({ applied: [], pending: [] }),
             getLastBlockIndex: async () => -1,
             getLastTxIndex: async () => 0,
             beginTransaction: async () => {},
