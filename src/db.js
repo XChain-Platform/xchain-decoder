@@ -148,8 +148,11 @@ class Database {
         }
         // Loop through SQL files
         for (file of files){
+            // indexOf returns -1 when '.sql' is absent (e.g. the migrations/ subdirectory).
+            // -1 is truthy, so the old `if(isSql)` processed non-.sql entries and tried to
+            // read a directory as a table (EISDIR). Only process actual .sql files.
             var isSql = file.indexOf('.sql');
-            if(isSql){
+            if(isSql !== -1){
                 let table   = file.substring(0, file.indexOf('.sql'));
                 console.log('Verifying ' + table + ' table exists...');
                 try {
