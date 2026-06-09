@@ -1,0 +1,1417 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available —
+// contact legal@dankest.llc.
+
+// Unit tests for Database query methods (no real DB).
+// Covers: all async query methods, getConnection retry/give-up,
+// releaseConnection, beginTransaction, endTransaction, commitTransaction,
+// verifyDatabase, createDatabase, dropDatabase, and related helpers.
+// Uses sinon to inject a fake pool — no proxyquire.
+
+'use strict';
+
+const assert   = require('assert');
+const sinon    = require('sinon');
+const Database = require('../../src/db.js');
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeDb(name = 'xchain_btc_mainnet') {
+    return new Database('127.0.0.1', 3306, name, 'u', 'p');
+}
+
+// Build a fake connection + pool stub that resolves with the given query stub.
+function withConn(queryStub) {
+    const conn = {
+        query:            queryStub || sinon.stub().resolves([]),
+        release:          sinon.stub().resolves(),
+        beginTransaction: sinon.stub().resolves(),
+        commit:           sinon.stub().resolves(),
+        rollback:         sinon.stub().resolves(),
+    };
+    const pool = { getConnection: sinon.stub().resolves(conn) };
+    return { pool, conn };
+}
+
+// Inject a fake pool into db (replaces the one created by mariadbMock).
+function injectPool(db, pool) {
+    db.pool = pool;
+}
+
+// ---------------------------------------------------------------------------
+// getLastBlockIndex
+// ---------------------------------------------------------------------------
+
+describe('Database#getLastBlockIndex()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns Number when rows have a BigInt max_height', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([{ max_height: 42n }]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.getLastBlockIndex();
+        assert.strictEqual(r, 42);
+        assert.ok(typeof r === 'number');
+    });
+
+    it('returns -1 when max_height is null (empty blocks table)', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([{ max_height: null }]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getLastBlockIndex(), -1);
+    });
+
+    it('returns -1 when rows is empty', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getLastBlockIndex(), -1);
+    });
+
+    it('returns false and does not throw on query error', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('boom'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getLastBlockIndex(), false);
+    });
+
+    it('queries MAX(block_index) from blocks', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([{ max_height: 100n }]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.getLastBlockIndex();
+        assert.ok(conn.query.calledOnce);
+        assert.ok(/MAX\(block_index\)/i.test(conn.query.firstCall.args[0]));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// getLastTxIndex
+// ---------------------------------------------------------------------------
+
+describe('Database#getLastTxIndex()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns Number when rows have a BigInt max_tx_index', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([{ max_tx_index: 7n }]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.getLastTxIndex();
+        assert.strictEqual(r, 7);
+        assert.ok(typeof r === 'number');
+    });
+
+    it('returns -1 when max_tx_index is null', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([{ max_tx_index: null }]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getLastTxIndex(), -1);
+    });
+
+    it('returns -1 when rows is empty', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getLastTxIndex(), -1);
+    });
+
+    it('returns false on query error', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('oops'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getLastTxIndex(), false);
+    });
+
+    it('queries MAX(tx_index) from transactions', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([{ max_tx_index: 3n }]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.getLastTxIndex();
+        assert.ok(/MAX\(tx_index\)/i.test(conn.query.firstCall.args[0]));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// getBlockByIndex
+// ---------------------------------------------------------------------------
+
+describe('Database#getBlockByIndex()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns the first row when found', async () => {
+        const block = { block_index: 5, block_hash: 'abc' };
+        const db = makeDb();
+        const q  = sinon.stub().resolves([block]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.getBlockByIndex(5);
+        assert.deepStrictEqual(r, block);
+    });
+
+    it('returns null when no rows found', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getBlockByIndex(99), null);
+    });
+
+    it('returns null on query error', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('fail'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getBlockByIndex(1), null);
+    });
+
+    it('passes blockIndex as param', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([{ block_index: 10 }]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.getBlockByIndex(10);
+        assert.deepStrictEqual(conn.query.firstCall.args[1], [10]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// getTransaction
+// ---------------------------------------------------------------------------
+
+describe('Database#getTransaction()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns the first row when found', async () => {
+        const tx = { tx_index: 1, hash: 'deadbeef' };
+        const db = makeDb();
+        const q  = sinon.stub().resolves([tx]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.deepStrictEqual(await db.getTransaction('deadbeef'), tx);
+    });
+
+    it('returns null when no rows found', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getTransaction('notfound'), null);
+    });
+
+    it('returns false on query error', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('db down'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getTransaction('x'), false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// getTransactionId
+// ---------------------------------------------------------------------------
+
+describe('Database#getTransactionId()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns id when row found', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([{ id: 99 }]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getTransactionId('myhash'), 99);
+    });
+
+    it('returns null when no rows found', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getTransactionId('missing'), null);
+    });
+
+    it('returns null (swallows) on query error', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('bang'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        // error is caught; id stays null
+        assert.strictEqual(await db.getTransactionId('bad'), null);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// createTransaction
+// ---------------------------------------------------------------------------
+
+describe('Database#createTransaction()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns 1 for null hash (sentinel)', async () => {
+        const db = makeDb();
+        assert.strictEqual(await db.createTransaction(null), 1);
+    });
+
+    it('returns 1 for empty-string hash (sentinel)', async () => {
+        const db = makeDb();
+        assert.strictEqual(await db.createTransaction(''), 1);
+    });
+
+    it('returns existing id when record already exists', async () => {
+        const db = makeDb();
+        // getTransactionId called twice — both return 7
+        const q = sinon.stub().resolves([{ id: 7 }]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.createTransaction('abc123'), 7);
+    });
+
+    it('inserts and returns id when record does not exist (first lookup null, then 5)', async () => {
+        const db = makeDb();
+        // First SELECT returns nothing → INSERT → second SELECT returns id 5
+        const q = sinon.stub()
+            .onFirstCall().resolves([])       // getTransactionId returns null
+            .onSecondCall().resolves([])      // INSERT IGNORE
+            .onThirdCall().resolves([{ id: 5 }]); // getTransactionId after insert
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.createTransaction('newhash'), 5);
+    });
+
+    it('does not throw when INSERT errors; returns id from re-fetch', async () => {
+        const db = makeDb();
+        // getTransactionId→null, INSERT throws, re-fetch returns 3
+        const q = sinon.stub()
+            .onFirstCall().resolves([])
+            .onSecondCall().rejects(new Error('insert fail'))
+            .onThirdCall().resolves([{ id: 3 }]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.createTransaction('x'), 3);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// getAddressId
+// ---------------------------------------------------------------------------
+
+describe('Database#getAddressId()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns id when row found', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([{ id: 42 }]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getAddressId('1BitcoinAddr'), 42);
+    });
+
+    it('returns null when no rows found', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getAddressId('nobody'), null);
+    });
+
+    it('swallows query errors and returns null', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('fail'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.getAddressId('x'), null);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// createAddress
+// ---------------------------------------------------------------------------
+
+describe('Database#createAddress()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns 1 for null address', async () => {
+        const db = makeDb();
+        assert.strictEqual(await db.createAddress(null), 1);
+    });
+
+    it('returns 1 for empty string address', async () => {
+        const db = makeDb();
+        assert.strictEqual(await db.createAddress(''), 1);
+    });
+
+    it('returns existing id when address already exists', async () => {
+        const db = makeDb();
+        const q = sinon.stub().resolves([{ id: 10 }]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.createAddress('1BitcoinAddr'), 10);
+    });
+
+    it('inserts and returns id when address does not exist', async () => {
+        const db = makeDb();
+        const q = sinon.stub()
+            .onFirstCall().resolves([])       // getAddressId → null
+            .onSecondCall().resolves([])      // INSERT IGNORE
+            .onThirdCall().resolves([{ id: 8 }]); // getAddressId after insert
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.createAddress('newaddr'), 8);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// hasPubkey
+// ---------------------------------------------------------------------------
+
+describe('Database#hasPubkey()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns true when a row exists', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([{ 1: 1 }]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.hasPubkey(5), true);
+    });
+
+    it('returns false when no rows found', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.hasPubkey(5), false);
+    });
+
+    it('returns false on query error', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('fail'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.hasPubkey(5), false);
+    });
+
+    it('passes addressId to the query', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.hasPubkey(99);
+        assert.deepStrictEqual(conn.query.firstCall.args[1], [99]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// insertPubkey
+// ---------------------------------------------------------------------------
+
+describe('Database#insertPubkey()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns true on success', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertPubkey(3, 'pubkeyHex'), true);
+    });
+
+    it('returns false on error', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('fail'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertPubkey(3, 'pubkeyHex'), false);
+    });
+
+    it('passes addressId and pubkey as params', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.insertPubkey(7, 'mypubkey');
+        assert.deepStrictEqual(conn.query.firstCall.args[1], [7, 'mypubkey']);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// insertEvent
+// ---------------------------------------------------------------------------
+
+describe('Database#insertEvent()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns true on success', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertEvent('NEW_BLOCK', { height: 1 }), true);
+    });
+
+    it('returns DUPLICATED_TRANSACTION (1) on errno 1062', async () => {
+        const db = makeDb();
+        const err = new Error('Duplicate entry');
+        err.errno = 1062;
+        const q  = sinon.stub().rejects(err);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertEvent('X', {}), db.DUPLICATED_TRANSACTION);
+    });
+
+    it('returns false on generic error', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('other'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertEvent('X', {}), false);
+    });
+
+    it('passes code and JSON-stringified data', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.insertEvent('MYCODE', { foo: 'bar' });
+        const args = conn.query.firstCall.args[1];
+        assert.strictEqual(args[1], 'MYCODE');
+        assert.strictEqual(args[2], JSON.stringify({ foo: 'bar' }));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// deleteBlockByIndex
+// ---------------------------------------------------------------------------
+
+describe('Database#deleteBlockByIndex()', () => {
+    afterEach(() => sinon.restore());
+
+    it('executes 4 DELETE queries and returns true on success', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.deleteBlockByIndex(10);
+        assert.strictEqual(r, true);
+        // 4 DELETE queries
+        const calls = conn.query.getCalls().map(c => c.args[0]);
+        const deletes = calls.filter(s => /DELETE/i.test(s));
+        assert.strictEqual(deletes.length, 4);
+    });
+
+    it('throws on query error (propagates after rolling back)', async () => {
+        const db = makeDb();
+        const err = new Error('query failed');
+        const q = sinon.stub()
+            .onFirstCall().rejects(err);  // first DELETE fails
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        await assert.rejects(() => db.deleteBlockByIndex(5), /query failed/);
+    });
+
+    it('passes blockIndex to DELETE queries', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.deleteBlockByIndex(77);
+        // Every parameterized DELETE call should include [77] as params
+        const paramCalls = conn.query.getCalls().filter(c => Array.isArray(c.args[1]) && c.args[1][0] === 77);
+        assert.ok(paramCalls.length >= 4);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// insertBlock
+// ---------------------------------------------------------------------------
+
+describe('Database#insertBlock()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns true on success', async () => {
+        const db = makeDb();
+        // createTransaction calls getTransactionId (SELECT) then maybe INSERT IGNORE
+        // For simplicity, stub createTransaction on the instance
+        sinon.stub(db, 'createTransaction').resolves(5);
+        const q = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.insertBlock({
+            block_hash: 'abc',
+            previous_block_hash: 'def',
+            block_index: 1,
+            block_time: 1234567890
+        });
+        assert.strictEqual(r, true);
+    });
+
+    it('returns false on query error', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        const q = sinon.stub().rejects(new Error('insert fail'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.insertBlock({ block_hash: 'x', previous_block_hash: 'y', block_index: 2, block_time: 1 });
+        assert.strictEqual(r, false);
+    });
+
+    it('calls createTransaction for both block_hash and previous_block_hash', async () => {
+        const db = makeDb();
+        const createTxStub = sinon.stub(db, 'createTransaction').resolves(9);
+        const q = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        await db.insertBlock({ block_hash: 'h1', previous_block_hash: 'h2', block_index: 1, block_time: 0 });
+        assert.ok(createTxStub.calledWith('h1'));
+        assert.ok(createTxStub.calledWith('h2'));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// insertTransaction
+// ---------------------------------------------------------------------------
+
+describe('Database#insertTransaction()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns true on success', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        sinon.stub(db, 'createAddress').resolves(2);
+        const q = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.insertTransaction({
+            index: 0, hash: 'abc', block_index: 1, source: 'src', destination: 'dst',
+            amount: 100, fee: 1, data: null, raw_data: null
+        });
+        assert.strictEqual(r, true);
+    });
+
+    it('returns DUPLICATED_TRANSACTION on errno 1062', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        sinon.stub(db, 'createAddress').resolves(2);
+        const err = new Error('dup'); err.errno = 1062;
+        const q = sinon.stub().rejects(err);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertTransaction({ index: 0, hash: 'x', block_index: 1, source: 's', destination: 'd', amount: 0, fee: 0, data: null }), db.DUPLICATED_TRANSACTION);
+    });
+
+    it('returns false on generic error', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        sinon.stub(db, 'createAddress').resolves(2);
+        const q = sinon.stub().rejects(new Error('fail'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertTransaction({ index: 0, hash: 'x', block_index: 1, source: 's', destination: 'd', amount: 0, fee: 0, data: null }), false);
+    });
+
+    it('passes null raw_data when absent', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        sinon.stub(db, 'createAddress').resolves(2);
+        const q = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.insertTransaction({ index: 0, hash: 'h', block_index: 1, source: 's', destination: 'd', amount: 0, fee: 0, data: null });
+        const params = conn.query.firstCall.args[1];
+        assert.strictEqual(params[8], null); // raw_data
+    });
+});
+
+// ---------------------------------------------------------------------------
+// insertMempoolTransaction
+// ---------------------------------------------------------------------------
+
+describe('Database#insertMempoolTransaction()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns true on success', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        sinon.stub(db, 'createAddress').resolves(2);
+        const q = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.insertMempoolTransaction({
+            hash: 'abc', source: 'src', destination: 'dst', amount: 0, fee: 0, data: null
+        });
+        assert.strictEqual(r, true);
+    });
+
+    it('returns DUPLICATED_TRANSACTION on errno 1062', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        sinon.stub(db, 'createAddress').resolves(2);
+        const err = new Error('dup'); err.errno = 1062;
+        const q = sinon.stub().rejects(err);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertMempoolTransaction({ hash: 'x', source: 's', destination: 'd', amount: 0, fee: 0, data: null }), db.DUPLICATED_TRANSACTION);
+    });
+
+    it('returns false on generic error', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        sinon.stub(db, 'createAddress').resolves(2);
+        const q = sinon.stub().rejects(new Error('nope'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertMempoolTransaction({ hash: 'x', source: 's', destination: 'd', amount: 0, fee: 0, data: null }), false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// insertDispenser
+// ---------------------------------------------------------------------------
+
+describe('Database#insertDispenser()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns true on success', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createAddress').resolves(3);
+        const q = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.insertDispenser({ txIndex: 1, address: 'addr', expiration: 9999 });
+        assert.strictEqual(r, true);
+    });
+
+    it('returns DUPLICATED_TRANSACTION on errno 1062', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createAddress').resolves(3);
+        const err = new Error('dup'); err.errno = 1062;
+        const q = sinon.stub().rejects(err);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertDispenser({ txIndex: 1, address: 'a', expiration: 0 }), db.DUPLICATED_TRANSACTION);
+    });
+
+    it('returns false on generic error', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createAddress').resolves(3);
+        const q = sinon.stub().rejects(new Error('fail'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertDispenser({ txIndex: 1, address: 'a', expiration: 0 }), false);
+    });
+
+    it('passes txIndex, addressId, expiration as params', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createAddress').resolves(7);
+        const q = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.insertDispenser({ txIndex: 42, address: 'addr', expiration: 1234 });
+        const params = conn.query.firstCall.args[1];
+        assert.strictEqual(params[0], 42);
+        assert.strictEqual(params[1], 7);
+        assert.strictEqual(params[2], 1234);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// insertTransactionOutput
+// ---------------------------------------------------------------------------
+
+describe('Database#insertTransactionOutput()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns true on success', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createAddress').resolves(4);
+        const q = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.insertTransactionOutput({ txIndex: 1, vout: 0, destinationAddress: 'addr', amount: 100000000n });
+        assert.strictEqual(r, true);
+    });
+
+    it('returns DUPLICATED_TRANSACTION on errno 1062', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createAddress').resolves(4);
+        const err = new Error('dup'); err.errno = 1062;
+        const q = sinon.stub().rejects(err);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertTransactionOutput({ txIndex: 1, vout: 0, destinationAddress: 'a', amount: 0n }), db.DUPLICATED_TRANSACTION);
+    });
+
+    it('returns false on generic error', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createAddress').resolves(4);
+        const q = sinon.stub().rejects(new Error('fail'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.insertTransactionOutput({ txIndex: 1, vout: 0, destinationAddress: 'a', amount: 0n }), false);
+    });
+
+    it('converts BigInt amount to decimal string via bigIntSatoshiToDecimalsString', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createAddress').resolves(4);
+        const q = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.insertTransactionOutput({ txIndex: 1, vout: 0, destinationAddress: 'addr', amount: 100000000n });
+        const params = conn.query.firstCall.args[1];
+        assert.strictEqual(params[3], '1.00000000');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// isThereADispenserForAddress
+// ---------------------------------------------------------------------------
+
+describe('Database#isThereADispenserForAddress()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns true when dispensers_count > 0', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([{ dispensers_count: 2 }]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.isThereADispenserForAddress('addr'), true);
+    });
+
+    it('returns false when dispensers_count === 0', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([{ dispensers_count: 0 }]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.isThereADispenserForAddress('addr'), false);
+    });
+
+    it('returns false when no rows returned', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.isThereADispenserForAddress('addr'), false);
+    });
+
+    it('returns false on query error', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('fail'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.isThereADispenserForAddress('addr'), false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// deleteOpenDispensers
+// ---------------------------------------------------------------------------
+
+describe('Database#deleteOpenDispensers()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns true on success', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.deleteOpenDispensers(1000), true);
+    });
+
+    it('returns DUPLICATED_TRANSACTION on errno 1062', async () => {
+        const db = makeDb();
+        const err = new Error('dup'); err.errno = 1062;
+        const q  = sinon.stub().rejects(err);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.deleteOpenDispensers(1000), db.DUPLICATED_TRANSACTION);
+    });
+
+    it('returns false on generic error', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('fail'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.deleteOpenDispensers(1000), false);
+    });
+
+    it('passes minExpiration as param', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.deleteOpenDispensers(5555);
+        assert.deepStrictEqual(conn.query.firstCall.args[1], [5555]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// deleteAndCompareTxsNotInList
+// ---------------------------------------------------------------------------
+
+describe('Database#deleteAndCompareTxsNotInList()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns transactionsDeleted=0 when mempool is empty', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.deleteAndCompareTxsNotInList(['tx1', 'tx2']);
+        assert.deepStrictEqual(r, { transactionsDeleted: 0 });
+    });
+
+    it('removes rows not in txidList and returns count', async () => {
+        const db = makeDb();
+        // First call: SELECT returns two rows; second call: DELETE
+        const q = sinon.stub()
+            .onFirstCall().resolves([
+                { hash: 'aaaa', hash_id: 1 },
+                { hash: 'bbbb', hash_id: 2 },
+            ])
+            .onSecondCall().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        // txidList contains 'aaaa' but not 'bbbb' → bbbb is deleted
+        const r = await db.deleteAndCompareTxsNotInList(['aaaa']);
+        assert.strictEqual(r.transactionsDeleted, 1);
+    });
+
+    it('returns transactionsDeleted=0 on query error', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('db error'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.deleteAndCompareTxsNotInList([]);
+        assert.deepStrictEqual(r, { transactionsDeleted: 0 });
+    });
+
+    it('splices matched txids from list (mutates txidList)', async () => {
+        const db = makeDb();
+        const q = sinon.stub()
+            .onFirstCall().resolves([{ hash: 'aaaa', hash_id: 1 }])
+            .onSecondCall().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const list = ['aaaa', 'bbbb'];
+        await db.deleteAndCompareTxsNotInList(list);
+        // 'aaaa' was found in DB and in list → spliced out
+        assert.ok(!list.includes('aaaa'));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// dropDatabase
+// ---------------------------------------------------------------------------
+
+describe('Database#dropDatabase()', () => {
+    afterEach(() => sinon.restore());
+
+    it('executes all DROP TABLE queries without throwing', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.dropDatabase();
+        // Should have called query at least 9 times (9 tables)
+        assert.ok(conn.query.callCount >= 9);
+        const sqls = conn.query.getCalls().map(c => c.args[0]);
+        assert.ok(sqls.some(s => /DROP TABLE IF EXISTS blocks/i.test(s)));
+        assert.ok(sqls.some(s => /DROP TABLE IF EXISTS transactions/i.test(s)));
+        assert.ok(conn.release.calledOnce);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// getConnection — success, retry, and give-up paths
+// ---------------------------------------------------------------------------
+
+describe('Database#getConnection()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns transactionConnection when one is set', async () => {
+        const db = makeDb();
+        const fakeTxConn = { query: sinon.stub(), release: sinon.stub() };
+        db.transactionConnection = fakeTxConn;
+        const conn = await db.getConnection();
+        assert.strictEqual(conn, fakeTxConn);
+    });
+
+    it('succeeds on first pool.getConnection call', async () => {
+        const db = makeDb();
+        const fakeConn = { query: sinon.stub(), release: sinon.stub() };
+        db.pool = { getConnection: sinon.stub().resolves(fakeConn) };
+        const conn = await db.getConnection();
+        assert.strictEqual(conn, fakeConn);
+    });
+
+    it('retries on transient failure and succeeds on second attempt', async () => {
+        const db = makeDb();
+        // Stub util.sleep to avoid actual delays
+        const utilMod = require('../../src/util.js');
+        sinon.stub(utilMod, 'sleep').resolves();
+        const fakeConn = { query: sinon.stub(), release: sinon.stub() };
+        db.pool = {
+            getConnection: sinon.stub()
+                .onFirstCall().rejects(new Error('transient'))
+                .onSecondCall().resolves(fakeConn)
+        };
+        const conn = await db.getConnection();
+        assert.strictEqual(conn, fakeConn);
+    });
+
+    it('throws after maxAttempts (30) consecutive failures', async () => {
+        const db = makeDb();
+        const utilMod = require('../../src/util.js');
+        sinon.stub(utilMod, 'sleep').resolves();
+        db.pool = {
+            getConnection: sinon.stub().rejects(new Error('always fails'))
+        };
+        await assert.rejects(
+            () => db.getConnection(),
+            /Failed to get database connection after 30 attempts/
+        );
+    });
+});
+
+// ---------------------------------------------------------------------------
+// releaseConnection
+// ---------------------------------------------------------------------------
+
+describe('Database#releaseConnection()', () => {
+    afterEach(() => sinon.restore());
+
+    it('releases transactionConnection and sets it to null', async () => {
+        const db = makeDb();
+        const relStub = sinon.stub().resolves();
+        db.transactionConnection = { release: relStub };
+        await db.releaseConnection();
+        assert.ok(relStub.calledOnce);
+        assert.strictEqual(db.transactionConnection, null);
+    });
+
+    it('does nothing when transactionConnection is null', async () => {
+        const db = makeDb();
+        // Should not throw
+        await db.releaseConnection();
+        assert.strictEqual(db.transactionConnection, null);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// beginTransaction
+// ---------------------------------------------------------------------------
+
+describe('Database#beginTransaction()', () => {
+    afterEach(() => sinon.restore());
+
+    it('acquires lock and sets transactionConnection', async () => {
+        const db = makeDb();
+        const fakeConn = {
+            beginTransaction: sinon.stub().resolves(),
+            release: sinon.stub().resolves(),
+            commit: sinon.stub().resolves(),
+            rollback: sinon.stub().resolves(),
+            query: sinon.stub().resolves([]),
+        };
+        db.pool = { getConnection: sinon.stub().resolves(fakeConn) };
+        await db.beginTransaction();
+        assert.strictEqual(db.transactionConnection, fakeConn);
+        assert.ok(fakeConn.beginTransaction.calledOnce);
+    });
+
+    it('releases and re-throws when beginTransaction() on connection throws', async () => {
+        const db = makeDb();
+        const fakeConn = {
+            beginTransaction: sinon.stub().rejects(new Error('btx fail')),
+            release: sinon.stub().resolves(),
+        };
+        db.pool = { getConnection: sinon.stub().resolves(fakeConn) };
+        await assert.rejects(() => db.beginTransaction(), /btx fail/);
+        assert.strictEqual(db.transactionConnection, null);
+        assert.ok(fakeConn.release.calledOnce);
+        // Lock should be released so next caller can proceed
+        assert.strictEqual(db._transactionLock, false);
+    });
+
+    it('rolls back existing transaction if one is open before starting new', async () => {
+        // beginTransaction checks `if (this.transactionConnection != null)` AFTER acquiring the lock
+        // and calls endTransaction() to roll it back. We simulate this by pre-setting
+        // transactionConnection and calling beginTransaction with the lock NOT held
+        // (so _acquireTransactionLock resolves immediately).
+        const db = makeDb();
+        const rollbackStub = sinon.stub().resolves();
+        const oldConn = {
+            rollback: rollbackStub,
+            release: sinon.stub().resolves(),
+        };
+        const newConn = {
+            beginTransaction: sinon.stub().resolves(),
+            release: sinon.stub().resolves(),
+            commit: sinon.stub().resolves(),
+            rollback: sinon.stub().resolves(),
+            query: sinon.stub().resolves([]),
+        };
+        db.pool = { getConnection: sinon.stub().resolves(newConn) };
+
+        // Pre-set transactionConnection to simulate a leaked open transaction.
+        // The lock is NOT held so _acquireTransactionLock resolves immediately.
+        db.transactionConnection = oldConn;
+
+        // beginTransaction should detect transactionConnection != null and call endTransaction
+        await db.beginTransaction();
+        assert.ok(rollbackStub.calledOnce, 'old transaction should have been rolled back');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// endTransaction
+// ---------------------------------------------------------------------------
+
+describe('Database#endTransaction()', () => {
+    afterEach(() => sinon.restore());
+
+    it('rolls back and releases when transactionConnection is set', async () => {
+        const db = makeDb();
+        db._transactionLock = true;
+        const rollbackStub = sinon.stub().resolves();
+        const releaseStub  = sinon.stub().resolves();
+        db.transactionConnection = { rollback: rollbackStub, release: releaseStub };
+        await db.endTransaction();
+        assert.ok(rollbackStub.calledOnce);
+        assert.ok(releaseStub.calledOnce);
+        assert.strictEqual(db.transactionConnection, null);
+    });
+
+    it('releases the transaction lock', async () => {
+        const db = makeDb();
+        db._transactionLock = true;
+        db.transactionConnection = {
+            rollback: sinon.stub().resolves(),
+            release: sinon.stub().resolves()
+        };
+        await db.endTransaction();
+        assert.strictEqual(db._transactionLock, false);
+    });
+
+    it('does nothing when transactionConnection is null', async () => {
+        const db = makeDb();
+        db._transactionLock = true;
+        // Should not throw even with no connection
+        await db.endTransaction();
+        assert.strictEqual(db._transactionLock, false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// commitTransaction
+// ---------------------------------------------------------------------------
+
+describe('Database#commitTransaction()', () => {
+    afterEach(() => sinon.restore());
+
+    it('commits, releases, clears transactionConnection, and returns true', async () => {
+        const db = makeDb();
+        db._transactionLock = true;
+        const commitStub  = sinon.stub().resolves();
+        const releaseStub = sinon.stub().resolves();
+        db.transactionConnection = { commit: commitStub, release: releaseStub };
+        const r = await db.commitTransaction();
+        assert.strictEqual(r, true);
+        assert.ok(commitStub.calledOnce);
+        assert.ok(releaseStub.calledOnce);
+        assert.strictEqual(db.transactionConnection, null);
+    });
+
+    it('returns false when transactionConnection is null', async () => {
+        const db = makeDb();
+        assert.strictEqual(await db.commitTransaction(), false);
+    });
+
+    it('calls endTransaction and returns undefined/falsy on commit error', async () => {
+        const db = makeDb();
+        db._transactionLock = true;
+        const commitStub  = sinon.stub().rejects(new Error('commit fail'));
+        const rollbackStub = sinon.stub().resolves();
+        const releaseStub  = sinon.stub().resolves();
+        db.transactionConnection = { commit: commitStub, rollback: rollbackStub, release: releaseStub };
+        const r = await db.commitTransaction();
+        // After endTransaction, falls through to return false
+        assert.strictEqual(r, false);
+        assert.ok(rollbackStub.calledOnce);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// verifyDatabase
+// ---------------------------------------------------------------------------
+
+describe('Database#verifyDatabase()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns true when schemata row found', async () => {
+        const db = makeDb();
+        const mariadb = require('mariadb');
+        const fakeConn = {
+            query: sinon.stub().resolves([{ schema_name: 'xchain_btc_mainnet' }]),
+            end: sinon.stub().resolves()
+        };
+        sinon.stub(mariadb, 'createConnection').resolves(fakeConn);
+        const r = await db.verifyDatabase();
+        assert.strictEqual(r, true);
+    });
+
+    it('returns false when schemata is empty', async () => {
+        const db = makeDb();
+        const mariadb = require('mariadb');
+        const fakeConn = {
+            query: sinon.stub().resolves([]),
+            end: sinon.stub().resolves()
+        };
+        sinon.stub(mariadb, 'createConnection').resolves(fakeConn);
+        const r = await db.verifyDatabase();
+        assert.strictEqual(r, false);
+    });
+
+    it('retries once on error then succeeds', async () => {
+        const db = makeDb();
+        const mariadb = require('mariadb');
+        const utilMod = require('../../src/util.js');
+        sinon.stub(utilMod, 'sleep').resolves();
+        const goodConn = {
+            query: sinon.stub().resolves([{ schema_name: 'xchain_btc_mainnet' }]),
+            end: sinon.stub().resolves()
+        };
+        sinon.stub(mariadb, 'createConnection')
+            .onFirstCall().rejects(new Error('no db'))
+            .onSecondCall().resolves(goodConn);
+        const r = await db.verifyDatabase();
+        assert.strictEqual(r, true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// createDatabase
+// ---------------------------------------------------------------------------
+
+describe('Database#createDatabase()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns true after creating the database', async () => {
+        const db = makeDb();
+        const mariadb = require('mariadb');
+        const fakeConn = {
+            query: sinon.stub().resolves([]),
+            end: sinon.stub().resolves()
+        };
+        sinon.stub(mariadb, 'createConnection').resolves(fakeConn);
+        const r = await db.createDatabase();
+        assert.strictEqual(r, true);
+    });
+
+    it('retries once on error then succeeds', async () => {
+        const db = makeDb();
+        const mariadb = require('mariadb');
+        const utilMod = require('../../src/util.js');
+        sinon.stub(utilMod, 'sleep').resolves();
+        const goodConn = {
+            query: sinon.stub().resolves([]),
+            end: sinon.stub().resolves()
+        };
+        sinon.stub(mariadb, 'createConnection')
+            .onFirstCall().rejects(new Error('transient'))
+            .onSecondCall().resolves(goodConn);
+        const r = await db.createDatabase();
+        assert.strictEqual(r, true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Additional coverage: error paths when transactionConnection is active
+// These cover the `if (this.transactionConnection)` branches in error handlers
+// ---------------------------------------------------------------------------
+
+describe('Database error-path transactionConnection branches', () => {
+    afterEach(() => sinon.restore());
+
+    // createAddress INSERT error path (line 973)
+    it('createAddress: swallows INSERT error even with active transactionConnection', async () => {
+        const db = makeDb();
+        // Use a fake transactionConnection so getConnection returns it
+        const txConn = {
+            query: sinon.stub()
+                .onFirstCall().resolves([])      // getAddressId → null
+                .onSecondCall().rejects(new Error('insert addr fail'))  // INSERT IGNORE
+                .onThirdCall().resolves([{ id: 11 }]),  // getAddressId after insert
+            release: sinon.stub().resolves(),
+            rollback: sinon.stub().resolves(),
+            commit: sinon.stub().resolves(),
+        };
+        db.transactionConnection = txConn;
+        db._transactionLock = true;
+        // Should not throw; error in INSERT catch is logged and swallowed
+        const id = await db.createAddress('newaddr2');
+        // id may be 11 from re-fetch or null if re-fetch also fails — just assert no throw
+        assert.ok(id === 11 || id === null);
+    });
+
+    // insertEvent: endTransaction called when transactionConnection set (line 1042-1043)
+    it('insertEvent: calls releaseConnection when transactionConnection is active on generic error', async () => {
+        const db = makeDb();
+        const releaseStub = sinon.stub(db, 'releaseConnection').resolves();
+        const txConn = {
+            query: sinon.stub().rejects(new Error('event fail')),
+            release: sinon.stub().resolves(),
+            rollback: sinon.stub().resolves(),
+            commit: sinon.stub().resolves(),
+        };
+        db.transactionConnection = txConn;
+        db._transactionLock = true;
+        const r = await db.insertEvent('CODE', { x: 1 });
+        assert.strictEqual(r, false);
+        assert.ok(releaseStub.calledOnce);
+    });
+
+    // insertDispenser: endTransaction called when transactionConnection set (line 1128-1129)
+    it('insertDispenser: calls endTransaction when transactionConnection is active on generic error', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createAddress').resolves(3);
+        const endTxStub = sinon.stub(db, 'endTransaction').resolves();
+        const txConn = {
+            query: sinon.stub().rejects(new Error('dispenser fail')),
+            release: sinon.stub().resolves(),
+            rollback: sinon.stub().resolves(),
+            commit: sinon.stub().resolves(),
+        };
+        db.transactionConnection = txConn;
+        db._transactionLock = true;
+        const r = await db.insertDispenser({ txIndex: 1, address: 'a', expiration: 0 });
+        assert.strictEqual(r, false);
+        assert.ok(endTxStub.calledOnce);
+    });
+
+    // insertTransactionOutput: endTransaction called when transactionConnection set (line 1171-1172)
+    it('insertTransactionOutput: calls endTransaction when transactionConnection is active on generic error', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createAddress').resolves(4);
+        const endTxStub = sinon.stub(db, 'endTransaction').resolves();
+        const txConn = {
+            query: sinon.stub().rejects(new Error('txout fail')),
+            release: sinon.stub().resolves(),
+            rollback: sinon.stub().resolves(),
+            commit: sinon.stub().resolves(),
+        };
+        db.transactionConnection = txConn;
+        db._transactionLock = true;
+        const r = await db.insertTransactionOutput({ txIndex: 1, vout: 0, destinationAddress: 'a', amount: 0n });
+        assert.strictEqual(r, false);
+        assert.ok(endTxStub.calledOnce);
+    });
+
+    // deleteOpenDispensers: endTransaction called when transactionConnection set (line 1223-1224)
+    it('deleteOpenDispensers: calls endTransaction when transactionConnection is active on generic error', async () => {
+        const db = makeDb();
+        const endTxStub = sinon.stub(db, 'endTransaction').resolves();
+        const txConn = {
+            query: sinon.stub().rejects(new Error('delete fail')),
+            release: sinon.stub().resolves(),
+            rollback: sinon.stub().resolves(),
+            commit: sinon.stub().resolves(),
+        };
+        db.transactionConnection = txConn;
+        db._transactionLock = true;
+        const r = await db.deleteOpenDispensers(1000);
+        assert.strictEqual(r, false);
+        assert.ok(endTxStub.calledOnce);
+    });
+
+    // insertBlock: endTransaction called when transactionConnection set (line 717-718)
+    it('insertBlock: calls endTransaction when transactionConnection is active on generic error', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        const endTxStub = sinon.stub(db, 'endTransaction').resolves();
+        const txConn = {
+            query: sinon.stub().rejects(new Error('block fail')),
+            release: sinon.stub().resolves(),
+            rollback: sinon.stub().resolves(),
+            commit: sinon.stub().resolves(),
+        };
+        db.transactionConnection = txConn;
+        db._transactionLock = true;
+        const r = await db.insertBlock({ block_hash: 'x', previous_block_hash: 'y', block_index: 1, block_time: 0 });
+        assert.strictEqual(r, false);
+        assert.ok(endTxStub.calledOnce);
+    });
+
+    // insertTransaction: endTransaction called when transactionConnection set (line 801-802)
+    it('insertTransaction: calls endTransaction when transactionConnection is active on generic error', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        sinon.stub(db, 'createAddress').resolves(2);
+        const endTxStub = sinon.stub(db, 'endTransaction').resolves();
+        const txConn = {
+            query: sinon.stub().rejects(new Error('tx fail')),
+            release: sinon.stub().resolves(),
+            rollback: sinon.stub().resolves(),
+            commit: sinon.stub().resolves(),
+        };
+        db.transactionConnection = txConn;
+        db._transactionLock = true;
+        const r = await db.insertTransaction({ index: 0, hash: 'x', block_index: 1, source: 's', destination: 'd', amount: 0, fee: 0, data: null });
+        assert.strictEqual(r, false);
+        assert.ok(endTxStub.calledOnce);
+    });
+
+    // insertMempoolTransaction: endTransaction called when transactionConnection set (line 847-848)
+    it('insertMempoolTransaction: calls endTransaction when transactionConnection is active on generic error', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        sinon.stub(db, 'createAddress').resolves(2);
+        const endTxStub = sinon.stub(db, 'endTransaction').resolves();
+        const txConn = {
+            query: sinon.stub().rejects(new Error('mempool fail')),
+            release: sinon.stub().resolves(),
+            rollback: sinon.stub().resolves(),
+            commit: sinon.stub().resolves(),
+        };
+        db.transactionConnection = txConn;
+        db._transactionLock = true;
+        const r = await db.insertMempoolTransaction({ hash: 'x', source: 's', destination: 'd', amount: 0, fee: 0, data: null });
+        assert.strictEqual(r, false);
+        assert.ok(endTxStub.calledOnce);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// _ensureMigrationsLedger — covered cheaply via a fake connection
+// ---------------------------------------------------------------------------
+
+describe('Database#_ensureMigrationsLedger()', () => {
+    afterEach(() => sinon.restore());
+
+    it('calls CREATE TABLE IF NOT EXISTS schema_migrations on the connection', async () => {
+        const db = makeDb();
+        const queryStub = sinon.stub().resolves([]);
+        const conn = { query: queryStub, release: sinon.stub().resolves() };
+        await db._ensureMigrationsLedger(conn);
+        assert.ok(queryStub.calledOnce);
+        assert.ok(/CREATE TABLE IF NOT EXISTS schema_migrations/i.test(queryStub.firstCall.args[0]));
+    });
+});
