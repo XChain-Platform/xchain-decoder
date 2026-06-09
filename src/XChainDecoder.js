@@ -640,6 +640,12 @@ class XChainDecoder {
             let tablesVerified = await this.db.verifyTables();
             if(!tablesVerified)
                 util.throwError("Database " + this.dbName + " tables don't exist!");
+
+            // Apply any pending `auto` schema migrations (additive/idempotent changes the
+            // drift reconciler can't make on its own). Manual/destructive migrations stay
+            // gated for an explicit operator run (`node src/migrate.js`). Recorded in the
+            // schema_migrations ledger, so this is a no-op once applied.
+            await this.db.runMigrations();
         }
     
         console.log("Parsing...")
