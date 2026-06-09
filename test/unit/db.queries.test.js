@@ -1272,10 +1272,14 @@ describe('Database error-path transactionConnection branches', () => {
         assert.ok(id === 11 || id === null);
     });
 
-    // insertEvent: endTransaction called when transactionConnection set (line 1042-1043)
-    it('insertEvent: calls releaseConnection when transactionConnection is active on generic error', async () => {
+    // insertEvent: endTransaction called when transactionConnection set (line 1042-1046).
+    // Regression: insertEvent previously called releaseConnection() here, which leaves
+    // the transaction open on the pooled connection and never frees the transaction lock
+    // (_releaseTransactionLock), deadlocking the next beginTransaction(). It must call
+    // endTransaction() like every sibling insert — rollback + release + free the lock.
+    it('insertEvent: calls endTransaction (rollback + frees lock) when a transaction is active on generic error', async () => {
         const db = makeDb();
-        const releaseStub = sinon.stub(db, 'releaseConnection').resolves();
+        const endTxStub = sinon.stub(db, 'endTransaction').resolves();
         const txConn = {
             query: sinon.stub().rejects(new Error('event fail')),
             release: sinon.stub().resolves(),
@@ -1286,7 +1290,26 @@ describe('Database error-path transactionConnection branches', () => {
         db._transactionLock = true;
         const r = await db.insertEvent('CODE', { x: 1 });
         assert.strictEqual(r, false);
-        assert.ok(releaseStub.calledOnce);
+        assert.ok(endTxStub.calledOnce);
+    });
+
+    // Companion: with the REAL endTransaction (not stubbed), the transaction lock is
+    // actually released so a subsequent beginTransaction would not deadlock.
+    it('insertEvent: a transaction-active error frees the transaction lock (no deadlock)', async () => {
+        const db = makeDb();
+        const txConn = {
+            query: sinon.stub().rejects(new Error('event fail')),
+            release: sinon.stub().resolves(),
+            rollback: sinon.stub().resolves(),
+            commit: sinon.stub().resolves(),
+        };
+        db.transactionConnection = txConn;
+        db._transactionLock = true;
+        const r = await db.insertEvent('CODE', { x: 1 });
+        assert.strictEqual(r, false);
+        assert.ok(txConn.rollback.calledOnce, 'transaction should be rolled back');
+        assert.strictEqual(db.transactionConnection, null, 'transaction connection cleared');
+        assert.strictEqual(db._transactionLock, false, 'transaction lock released');
     });
 
     // insertDispenser: endTransaction called when transactionConnection set (line 1128-1129)

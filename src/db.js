@@ -1039,7 +1039,11 @@ class Database {
             } else {
                 console.error('Error inserting event:', err);
                 if (this.transactionConnection){
-                    await this.releaseConnection()
+                    // Roll back + free the transaction lock, matching every sibling
+                    // insert. releaseConnection() alone leaves the transaction open on
+                    // the pooled connection AND never calls _releaseTransactionLock(),
+                    // so the next beginTransaction() would wait on the lock forever.
+                    await this.endTransaction()
                 }
                 return false;
             }
