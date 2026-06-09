@@ -4,3 +4,7 @@ node_modules/
 /reports
 .stryker-tmp/
 stryker.log
+
+# Coverage output (c8/nyc) — generated, not source
+coverage/
+.nyc_output/
