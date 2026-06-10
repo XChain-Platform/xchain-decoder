@@ -61,6 +61,7 @@ describe('Database.verifyTables() file filtering @regression', function () {
             }),
             releaseConnection: async () => {},
             alterTableForDrift: async (file) => { alterCalls.push(file); },
+            reconcileTableIndexes: async () => {},
             createTable: async (file) => { alterCalls.push('CREATE:' + file); },
         };
 
