@@ -143,37 +143,44 @@ class Database {
         } catch(e){
             console.log('Error listing tables in ' + this.dbName + ': ' + (e && e.sqlMessage ? e.sqlMessage : e));
             util.throwError('Error while listing tables in ' + this.dbName);
-            await this.releaseConnection();
+            try { await db.release(); } catch(_){}
             return false;
         }
         // Loop through SQL files
-        for (file of files){
-            // indexOf returns -1 when '.sql' is absent (e.g. the migrations/ subdirectory).
-            // -1 is truthy, so the old `if(isSql)` processed non-.sql entries and tried to
-            // read a directory as a table (EISDIR). Only process actual .sql files.
-            var isSql = file.indexOf('.sql');
-            if(isSql !== -1){
-                let table   = file.substring(0, file.indexOf('.sql'));
-                console.log('Verifying ' + table + ' table exists...');
-                try {
-                    if(existing.has(table)){
-                        // Existing table — reconcile column drift against the SQL
-                        // source so columns added upstream (e.g. transactions.raw_data)
-                        // are auto-applied on stacks created from an older release,
-                        // instead of surfacing later as a hard "Unknown column" error.
-                        await this.alterTableForDrift(file, db);
-                    } else {
-                        await this.createTable(file);
-                        existing.add(table);
+        try {
+            for (file of files){
+                // indexOf returns -1 when '.sql' is absent (e.g. the migrations/ subdirectory).
+                // -1 is truthy, so the old `if(isSql)` processed non-.sql entries and tried to
+                // read a directory as a table (EISDIR). Only process actual .sql files.
+                var isSql = file.indexOf('.sql');
+                if(isSql !== -1){
+                    let table   = file.substring(0, file.indexOf('.sql'));
+                    console.log('Verifying ' + table + ' table exists...');
+                    try {
+                        if(existing.has(table)){
+                            // Existing table — reconcile column drift against the SQL
+                            // source so columns added upstream (e.g. transactions.raw_data)
+                            // are auto-applied on stacks created from an older release,
+                            // instead of surfacing later as a hard "Unknown column" error.
+                            await this.alterTableForDrift(file, db);
+                        } else {
+                            await this.createTable(file, db);
+                            existing.add(table);
+                        }
+                    } catch(e){
+                        console.log('Error verifying table ' + table + ': ' + e.code);
+                        util.throwError('Error while trying to verify ' + table + ' table exists!');
+                        return false;
                     }
-                } catch(e){
-                    console.log('Error verifying table ' + table + ': ' + e.code);
-                    util.throwError('Error while trying to verify ' + table + ' table exists!');
-                    return false;
                 }
             }
+        } finally {
+            // This is a direct pool lease (transactionConnection is null at startup),
+            // so releaseConnection() — which only releases transactionConnection —
+            // would be a no-op. Release the lease itself, or a fresh-DB boot leaks
+            // one connection per created table plus this one and exhausts the pool.
+            try { await db.release(); } catch(_){}
         }
-        await this.releaseConnection();
         return true;
     }
 
@@ -400,31 +407,42 @@ class Database {
         }
     }
 
-    // Handle creating database tables
-    async createTable(file){
+    // Handle creating database tables. Runs on the caller's connection (same
+    // pattern as alterTableForDrift) — leasing a fresh connection per table here
+    // leaked the entire pool on a fresh-DB boot, because nothing ever released
+    // those leases (releaseConnection() only releases transactionConnection).
+    async createTable(file, db){
         let path    = this.sqlPath;
         let data    = fs.readFileSync(path + '/' + file, "utf8");
         let table   = file.substring(0, file.indexOf('.sql'));
-        let db      = await this.getConnection();
+        let ownLease = false;
+        if(!db){
+            db = await this.getConnection();
+            ownLease = true;
+        }
         let queries = data.split(';');
         let query   = null;
         console.log('Creating ' + table + ' table and indexes...');
-        // Loop through SQL queries
-        for(query of queries){
-            query = query.trim();
-            // Ignore empty queries
-            if(query=='')
-                continue;
-            try {
-                let result = await db.query(query);
-                if(result.length > 0)
+        try {
+            // Loop through SQL queries
+            for(query of queries){
+                query = query.trim();
+                // Ignore empty queries
+                if(query=='')
                     continue;
-            } catch(e){
-                util.throwError('Error while trying to create ' + table + ' table!');
+                try {
+                    let result = await db.query(query);
+                    if(result.length > 0)
+                        continue;
+                } catch(e){
+                    util.throwError('Error while trying to create ' + table + ' table!');
+                }
+            }
+        } finally {
+            if(ownLease){
+                try { await db.release(); } catch(_){}
             }
         }
-        // Dont release connection after each table is created, connection released in verifyTables() after ALL tables created and verified
-        // await this.releaseConnection();
     }
 
     // Handle getting a database Connection (with exponential backoff + jitter).
