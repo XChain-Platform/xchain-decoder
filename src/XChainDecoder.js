@@ -58,7 +58,7 @@ const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node nee
 // cross-service regression suite.
 const MAX_ACTION_DATA_LENGTH = 8192
 const VALID_ACTION_NAMES = new Set([
-    'ADDRESS', 'AIRDROP', 'ATTEST',
+    'ADDRESS', 'AIRDROP', 'ANCHOR', 'ATTEST',
     'BATCH', 'BROADCAST', 'CALLBACK', 'COINPAY', 'COLLECT',
     'DELEGATE', 'DEPLOY', 'DEPOSIT', 'DESTROY', 'DISPENSER',
     'DIVIDEND', 'EXECUTE', 'FILE', 'ISSUE', 'LINK', 'LIST', 'MESSAGE', 'MINT',
