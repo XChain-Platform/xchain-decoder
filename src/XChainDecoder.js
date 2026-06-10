@@ -69,6 +69,14 @@ const VALID_ACTION_NAMES = new Set([
 const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many transactions need to be processed before inserting the data into the database
 const LOG_BLOCK_INTERVAL = 1000 //During catch-up sync, only log progress every N blocks
 
+// How many times a block is re-parsed after a transaction-level parse throw before
+// the offending transaction is quarantined (skipped + PARSE_ERROR event). Throws out
+// of parseTransaction mix transient causes (node RPC, DB) with deterministic ones
+// (poison tx). Retrying first means a transient blip can never make this instance
+// skip a transaction that other decoder instances accept; only a tx that fails every
+// attempt is quarantined, which is deterministic across instances running this code.
+const TX_PARSE_MAX_RETRIES = 3
+
 class XChainDecoder {
     constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword, auxPow, feeDestination) {
         this.network = CryptoNetworks.getBitcoinJsNetwork(network)
@@ -671,7 +679,12 @@ class XChainDecoder {
         
         
         let nodeSyncedProblem = false
-        
+
+        // Transaction-level parse-failure tracking for the block currently being
+        // retried (see TX_PARSE_MAX_RETRIES).
+        let txParseRetryHeight = -1
+        let txParseRetryCount = 0
+
         main_parsing:
         while (true){
             if (this.stopFlag){
@@ -770,8 +783,27 @@ class XChainDecoder {
                     continue
                 }
                 
-                var block = this.xchainBlockDecoder.blockFromHex(nextBlockHex)
-                let previousBlockHash = util.uint8ArrayToHex(Buffer.from(block.prevHash).reverse())
+                // A throw here would otherwise escape start() and permanently stop the
+                // decode loop (api.js only logs the rejection), wedging the pipeline at
+                // this height. Never skip a whole block — a block we cannot decode is a
+                // parser bug, not data to discard — but stay alive and keep retrying so
+                // the process remains visible to health checks and recovers if the
+                // failure was transient (e.g. corrupted RPC response).
+                var block = null
+                let previousBlockHash = null
+                try {
+                    block = this.xchainBlockDecoder.blockFromHex(nextBlockHex)
+                    previousBlockHash = util.uint8ArrayToHex(Buffer.from(block.prevHash).reverse())
+                } catch (e){
+                    this.parseErrors++
+                    console.error(`Failed to decode block ${nextBlockHeight} (${nextBlockHash}), retrying:`, e)
+                    await this.db.endTransaction()
+                    lastProcessedBlockIndex = this.lastProcessedBlockIndex = await this.db.getLastBlockIndex()
+                    lastProcessedTxIndex = await this.db.getLastTxIndex()
+                    blocksQuantity = 0
+                    await this.sleep(3000)
+                    continue
+                }
 
                 //verify if there is an reorg
                 if (nextBlockHeight > this.startBlockIndex){
@@ -823,9 +855,48 @@ class XChainDecoder {
 
                 for (let txIndex=0;txIndex < transactions.length;txIndex++){
                     let nextTransaction = transactions[txIndex]
-                    let nextTransactionHash = nextTransaction.getId()
-                            
-                    let parseResult = await this.parseTransaction(nextTransaction)
+                    let nextTransactionHash = null
+                    let parseResult = null
+                    try {
+                        nextTransactionHash = nextTransaction.getId()
+                        parseResult = await this.parseTransaction(nextTransaction)
+                    } catch (e){
+                        if (txParseRetryHeight != nextBlockHeight){
+                            txParseRetryHeight = nextBlockHeight
+                            txParseRetryCount = 0
+                        }
+                        txParseRetryCount++
+
+                        if (txParseRetryCount <= TX_PARSE_MAX_RETRIES){
+                            // Could be transient (node RPC / DB hiccup inside parseTransaction):
+                            // roll the block back and re-parse it from scratch.
+                            console.error(`parseTransaction failed in block ${nextBlockHeight} (tx position ${txIndex}, attempt ${txParseRetryCount}/${TX_PARSE_MAX_RETRIES}), retrying block:`, e)
+                            await this.db.endTransaction()
+                            lastProcessedBlockIndex = this.lastProcessedBlockIndex = await this.db.getLastBlockIndex()
+                            lastProcessedTxIndex = await this.db.getLastTxIndex()
+                            blocksQuantity = 0
+                            await this.sleep(3000)
+                            continue main_parsing
+                        }
+
+                        // The transaction keeps throwing after whole-block retries: treat it
+                        // as a poison transaction and quarantine it (skip + audit event) so
+                        // one undecodable tx cannot wedge the pipeline at this height forever.
+                        this.parseErrors++
+                        console.error(`Quarantining undecodable tx in block ${nextBlockHeight} (tx position ${txIndex}, hash ${nextTransactionHash}) after ${TX_PARSE_MAX_RETRIES} block retries:`, e)
+                        let eventResult = await this.db.insertEvent("PARSE_ERROR", {
+                            block_index: nextBlockHeight,
+                            tx_position: txIndex,
+                            tx_hash: nextTransactionHash,
+                            error: String((e && e.message) || e)
+                        })
+                        if (eventResult === false){
+                            // insertEvent already rolled the block transaction back
+                            await this.sleep(3000)
+                            continue main_parsing
+                        }
+                        continue
+                    }
                     
                     if (parseResult != null){
                         let dispenseOutputs = parseResult['dispenseOutputs']
@@ -1074,7 +1145,18 @@ class XChainDecoder {
 
                     let nextTransactionHash = nextTx.getId()
 
-                    let parseResult = await this.parseTransaction(nextTx)
+                    let parseResult = null
+                    try {
+                        parseResult = await this.parseTransaction(nextTx)
+                    } catch (err) {
+                        // The surrounding try has no catch (only a finally for the busy
+                        // flag), so a single undecodable mempool tx would abort the whole
+                        // mempool update cycle. Skip just the tx; it is retried on the
+                        // next cycle anyway since it never reaches the database.
+                        this.parseErrors++
+                        console.error(`Mempool: parseTransaction failed for tx ${nextTransactionHash}, skipping:`, err)
+                        continue
+                    }
 
                     if (parseResult == null) {
                         continue
