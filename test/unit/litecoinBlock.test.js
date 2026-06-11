@@ -209,3 +209,31 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
         assert.ok(block.witnessCommit.equals(Buffer.alloc(32, 0xab)), 'witnessCommit hash should match embedded value')
     })
 })
+
+// ─── forged transaction count (varint sanity bound) ──────────────────────────
+
+describe('XChainBlockDecoder litecoin blockFromBuffer — forged tx count', () => {
+    let decoder
+
+    beforeEach(() => {
+        decoder = new XChainBlockDecoder('litecoin-mainnet')
+    })
+
+    it('rejects a varint tx count structurally impossible for the remaining bytes', () => {
+        // Header + varint claiming 200 txns, but only one ~10-byte tx follows.
+        // Before the sanity bound this failed later via an unnamed buffer
+        // over-read inside Transaction.fromBuffer; now it throws a named error
+        // before the loop starts.
+        const header = buildHeader()
+        const oneTx  = buildMinimalTxBuf()
+        const forged = Buffer.concat([header, varint(200), oneTx])
+        assert.throws(() => decoder.blockFromBuffer(forged), /invalid transaction count/)
+    })
+
+    it('still parses an honest single-tx block', () => {
+        const header = buildHeader()
+        const blockBuf = buildBlockBuf(header, [buildMinimalTxBuf()])
+        const block = decoder.blockFromBuffer(blockBuf)
+        assert.strictEqual(block.transactions.length, 1)
+    })
+})

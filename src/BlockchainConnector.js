@@ -319,16 +319,20 @@ class BlockchainConnector {
         })
     }
     
+    // Fetch raw transactions for a list of txids with bounded concurrency.
+    // updateMempool hands this method chunks of up to 1000 txids; firing them
+    // all at once held up to 1000 simultaneous sockets against the operator's
+    // own node — descriptor pressure plus RPC work-queue churn (-429 /
+    // connection drops) on a large mempool, each retried up to 10x. Requests
+    // now run in order-preserving sub-batches; tune via DECODER_RPC_CONCURRENCY.
     async getRawTransactions(txIdArray){
-        let requests = []
-    
-        for (let nextTxIdIndex in txIdArray){
-            let nextTxId = txIdArray[nextTxIdIndex]
-            
-            requests.push(this.getRawTransaction(nextTxId))
+        const concurrency = Math.max(1, parseInt(process.env.DECODER_RPC_CONCURRENCY, 10) || 50)
+        const results = []
+        for (let i = 0; i < txIdArray.length; i += concurrency){
+            const slice = txIdArray.slice(i, i + concurrency)
+            results.push(...await Promise.all(slice.map((txid) => this.getRawTransaction(txid))))
         }
-        
-        return Promise.all(requests)
+        return results
     }
     
     async getBlock(blockhash, hexFormat=true) {
