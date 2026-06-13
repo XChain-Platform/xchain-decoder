@@ -1234,8 +1234,13 @@ class Database {
             tx_index,
             address_id,
             expiration
-        ) VALUES (?, ?, FROM_UNIXTIME(?));
+        ) VALUES (?, ?, ?);
         `;
+        // expiration is a raw unix timestamp (seconds) stored as-is into a BIGINT UNSIGNED
+        // column. It is deliberately NOT wrapped in FROM_UNIXTIME(): FROM_UNIXTIME() caps at
+        // 2147483647 (Y2038) and returns NULL above it, which would silently drop every
+        // expiration in 2038–2106 even though the decoder accepts values up to 4294967295
+        // (XChainDecoder.js DISPENSER parse). Matches xchain-indexer dispensers.expiration.
         
         let connection = await this.getConnection()
         
@@ -1333,9 +1338,14 @@ class Database {
     }
     
     async deleteOpenDispensers(minExpiration) {
+        // minExpiration is a raw unix timestamp (the block header time). expiration is now a
+        // raw unix BIGINT, so compare integers directly. The previous FROM_UNIXTIME(?) form
+        // both capped the comparison at Y2038 AND, combined with the NULLs FROM_UNIXTIME
+        // produced on insert, never matched far-future dispensers (NULL < anything is NULL),
+        // so they were never expired — diverging from the indexer. See insertDispenser.
         const query = `
-            DELETE FROM dispensers 
-            WHERE expiration < FROM_UNIXTIME(?);
+            DELETE FROM dispensers
+            WHERE expiration < ?;
         `;
         
         let connection = await this.getConnection()

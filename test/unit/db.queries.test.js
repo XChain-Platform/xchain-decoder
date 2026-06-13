@@ -730,6 +730,22 @@ describe('Database#insertDispenser()', () => {
         assert.strictEqual(params[1], 7);
         assert.strictEqual(params[2], 1234);
     });
+
+    // Y2038 regression: expiration must be stored as a raw unix integer, NOT routed
+    // through FROM_UNIXTIME() (which caps at 2147483647 and NULLs anything past 2038,
+    // silently dropping expirations the parser accepts up to 4294967295 / year 2106).
+    it('stores expiration as a raw unix value without FROM_UNIXTIME (Y2038 safe)', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createAddress').resolves(7);
+        const q = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        const farFuture = 4102444800; // 2100-01-01 — above the Y2038 FROM_UNIXTIME cap
+        await db.insertDispenser({ txIndex: 1, address: 'addr', expiration: farFuture });
+        const sql = conn.query.firstCall.args[0];
+        assert.ok(!/FROM_UNIXTIME/i.test(sql), 'insertDispenser must not wrap expiration in FROM_UNIXTIME');
+        assert.strictEqual(conn.query.firstCall.args[1][2], farFuture, 'far-future expiration must pass through unmodified');
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -859,6 +875,20 @@ describe('Database#deleteOpenDispensers()', () => {
         injectPool(db, pool);
         await db.deleteOpenDispensers(5555);
         assert.deepStrictEqual(conn.query.firstCall.args[1], [5555]);
+    });
+
+    // Y2038 regression: the expiry sweep must compare the raw unix block time directly
+    // against the raw unix expiration column, NOT through FROM_UNIXTIME() (which caps at
+    // 2038 and never matched the NULLs the old insert path produced for far-future rows).
+    it('compares expiration against the raw unix value without FROM_UNIXTIME (Y2038 safe)', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.deleteOpenDispensers(4102444800); // 2100-01-01, above the Y2038 cap
+        const sql = conn.query.firstCall.args[0];
+        assert.ok(!/FROM_UNIXTIME/i.test(sql), 'deleteOpenDispensers must not wrap the comparison in FROM_UNIXTIME');
+        assert.match(sql, /expiration\s*<\s*\?/i, 'must compare expiration against the raw bound');
     });
 });
 
