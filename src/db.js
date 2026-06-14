@@ -708,6 +708,11 @@ class Database {
                 DELETE FROM blocks WHERE block_index = ?;
             `;
             await connection.query(query, [blockIndex])
+            // index_addresses is intentionally NOT deleted on reorg: it is an append-only,
+            // first-reference (INSERT IGNORE) lookup whose AUTO_INCREMENT id is a purely local
+            // artifact. Downstream consumers resolve it to the canonical address string and never
+            // treat the id as consensus-visible, so an orphan row left by a reorg is harmless. Do
+            // not start feeding a raw lookup id into any consensus/hashed value.
             await this.commitTransaction()
 
             return true
@@ -829,6 +834,12 @@ class Database {
         let previousBlockHashId = await this.createTransaction(block.previous_block_hash)
         
         let connection = await this.getConnection()
+        // Snapshot whether WE acquired this lease. Inside a block transaction
+        // getConnection() returns the shared this.transactionConnection, and the
+        // catch path's endTransaction() releases it and nulls the field — so the
+        // finally must key off this entry-time snapshot, not the mutated field,
+        // or it would release the same pooled socket a second time.
+        const ownLease = (this.transactionConnection == null)
         
         try {
             await connection.query(query, [
@@ -846,7 +857,7 @@ class Database {
             }
             return false;
         } finally {
-            if (this.transactionConnection == null){
+            if (ownLease){
                 await connection.release()
             }
         }
@@ -901,6 +912,12 @@ class Database {
         `;
 
         let connection = await this.getConnection()
+        // Snapshot whether WE acquired this lease. Inside a block transaction
+        // getConnection() returns the shared this.transactionConnection, and the
+        // catch path's endTransaction() releases it and nulls the field — so the
+        // finally must key off this entry-time snapshot, not the mutated field,
+        // or it would release the same pooled socket a second time.
+        const ownLease = (this.transactionConnection == null)
 
         try {
             let txHashId = await this.createTransaction(tx.hash)
@@ -931,7 +948,7 @@ class Database {
                 return false;
             }
         } finally {
-            if (this.transactionConnection == null){
+            if (ownLease){
                 await connection.release()
             }
         }   
@@ -950,6 +967,12 @@ class Database {
         `;
 
         let connection = await this.getConnection()
+        // Snapshot whether WE acquired this lease. Inside a block transaction
+        // getConnection() returns the shared this.transactionConnection, and the
+        // catch path's endTransaction() releases it and nulls the field — so the
+        // finally must key off this entry-time snapshot, not the mutated field,
+        // or it would release the same pooled socket a second time.
+        const ownLease = (this.transactionConnection == null)
 
         try {
             let txHashId = await this.createTransaction(tx.hash)
@@ -977,7 +1000,7 @@ class Database {
                 return false;
             }
         } finally {
-            if (this.transactionConnection == null) {
+            if (ownLease) {
                 await connection.release()
             }
         }
@@ -1149,6 +1172,12 @@ class Database {
         `;
         
         let connection = await this.getConnection()
+        // Snapshot whether WE acquired this lease. Inside a block transaction
+        // getConnection() returns the shared this.transactionConnection, and the
+        // catch path's endTransaction() releases it and nulls the field — so the
+        // finally must key off this entry-time snapshot, not the mutated field,
+        // or it would release the same pooled socket a second time.
+        const ownLease = (this.transactionConnection == null)
         
         try {
             let timeString = new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -1176,7 +1205,7 @@ class Database {
                 return false;
             }
         } finally {
-            if (this.transactionConnection == null){
+            if (ownLease){
                 await connection.release()
             }
         }
@@ -1243,6 +1272,12 @@ class Database {
         // (XChainDecoder.js DISPENSER parse). Matches xchain-indexer dispensers.expiration.
         
         let connection = await this.getConnection()
+        // Snapshot whether WE acquired this lease. Inside a block transaction
+        // getConnection() returns the shared this.transactionConnection, and the
+        // catch path's endTransaction() releases it and nulls the field — so the
+        // finally must key off this entry-time snapshot, not the mutated field,
+        // or it would release the same pooled socket a second time.
+        const ownLease = (this.transactionConnection == null)
         
         try {
             let txIndex = openDispenser.txIndex
@@ -1267,7 +1302,7 @@ class Database {
                 return false;
             }
         } finally {
-            if (this.transactionConnection == null){
+            if (ownLease){
                 await connection.release()
             }
         }   
@@ -1284,6 +1319,12 @@ class Database {
         `
         
         let connection = await this.getConnection()
+        // Snapshot whether WE acquired this lease. Inside a block transaction
+        // getConnection() returns the shared this.transactionConnection, and the
+        // catch path's endTransaction() releases it and nulls the field — so the
+        // finally must key off this entry-time snapshot, not the mutated field,
+        // or it would release the same pooled socket a second time.
+        const ownLease = (this.transactionConnection == null)
         
         try {
             let txIndex = dispenseOutput.txIndex
@@ -1310,7 +1351,7 @@ class Database {
                 return false;
             }
         } finally {
-            if (this.transactionConnection == null){
+            if (ownLease){
                 await connection.release()
             }
         }   
@@ -1378,6 +1419,12 @@ class Database {
         `;
         
         let connection = await this.getConnection()
+        // Snapshot whether WE acquired this lease. Inside a block transaction
+        // getConnection() returns the shared this.transactionConnection, and the
+        // catch path's endTransaction() releases it and nulls the field — so the
+        // finally must key off this entry-time snapshot, not the mutated field,
+        // or it would release the same pooled socket a second time.
+        const ownLease = (this.transactionConnection == null)
         
         try {
             await connection.query(query, [
@@ -1396,7 +1443,7 @@ class Database {
                 return false;
             }
         } finally {
-            if (this.transactionConnection == null){
+            if (ownLease){
                 await connection.release()
             }
         }   
