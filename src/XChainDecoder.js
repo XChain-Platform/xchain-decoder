@@ -66,6 +66,20 @@ const VALID_ACTION_NAMES = new Set([
     'SWEEP', 'UNSTAKE', 'WITHDRAW'
 ])
 
+// Short-form ACTION-name aliases. A spec-following client may encode any of
+// these leading tokens (e.g. the BRC20/SRC20-compatible TRANSFER, or MSG for a
+// shorter MESSAGE) and produce a valid on-chain payload. We expand the alias to
+// its canonical name BEFORE the VALID_ACTION_NAMES gate and rewrite the stored
+// payload to the canonical form, so the decoder DB never holds aliased names and
+// every downstream consumer sees one spelling per action.
+const ACTION_ALIASES = {
+    'TRANSFER': 'SEND',
+    'ADDR': 'ADDRESS',
+    'DROP': 'AIRDROP',
+    'CAST': 'BROADCAST',
+    'MSG': 'MESSAGE'
+}
+
 const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many transactions need to be processed before inserting the data into the database
 const LOG_BLOCK_INTERVAL = 1000 //During catch-up sync, only log progress every N blocks
 
@@ -941,11 +955,19 @@ class XChainDecoder {
                                     console.error(`Tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`, e)
                                 }
 
-                                let actionName = decodedData.split("|")[0]
+                                let actionParts = decodedData.split("|")
+                                let rawActionName = actionParts[0]
+                                let actionName = ACTION_ALIASES[rawActionName] ?? rawActionName
                                 if (!VALID_ACTION_NAMES.has(actionName)) {
                                     this.parseErrors++
-                                    console.error(`Skipping tx ${nextTransactionHash}: unknown ACTION name '${actionName.substring(0, 32)}'`)
+                                    console.error(`Skipping tx ${nextTransactionHash}: unknown ACTION name '${rawActionName.substring(0, 32)}'`)
                                     continue
+                                }
+                                if (actionName !== rawActionName) {
+                                    // Persist the canonical name so the DB is alias-free and
+                                    // identical regardless of which spelling was used on-chain.
+                                    actionParts[0] = actionName
+                                    decodedData = actionParts.join("|")
                                 }
                             }
                             
@@ -1181,13 +1203,37 @@ class XChainDecoder {
                         continue
                     }
 
+                    let mempoolData = parseResult["data"]
+                    if (mempoolData != null && mempoolData.length > 0) {
+                        // Mirror the confirmed-block path: gate mempool entries on the
+                        // ACTION-name allowlist (expanding aliases first) so an alias-named
+                        // tx can't show as pending and then silently vanish when it confirms.
+                        let pipeIndex = mempoolData.indexOf(0x7C) // '|'
+                        let nameEnd = pipeIndex === -1 ? mempoolData.length : pipeIndex
+                        let rawActionName = lenientTextDecoder.decode(mempoolData.subarray(0, nameEnd))
+                        let actionName = ACTION_ALIASES[rawActionName] ?? rawActionName
+                        if (!VALID_ACTION_NAMES.has(actionName)) {
+                            this.parseErrors++
+                            console.error(`Mempool: skipping tx ${nextTransactionHash}: unknown ACTION name '${rawActionName.substring(0, 32)}'`)
+                            continue
+                        }
+                        if (actionName !== rawActionName) {
+                            // Rewrite only the leading name bytes to the canonical spelling;
+                            // splicing at the first '|' preserves any binary payload verbatim.
+                            mempoolData = Buffer.concat([
+                                Buffer.from(actionName, 'ascii'),
+                                Buffer.from(mempoolData.subarray(nameEnd))
+                            ])
+                        }
+                    }
+
                     if (!(await this.db.insertMempoolTransaction({
                         hash: nextTransactionHash,
                         source: parseResult["source"],
                         destination: parseResult["destination"],
                         amount: parseResult["amount"],
                         fee: 0,
-                        data: (parseResult["data"] != null ? util.uint8ArrayToHex(parseResult["data"]) : null)
+                        data: (mempoolData != null ? util.uint8ArrayToHex(mempoolData) : null)
 
                     }))) {
                         await this.sleep(3000)
