@@ -334,7 +334,12 @@ class XChainDecoder {
         return results
     }
 
-    async parseTransaction(transaction){
+    async parseTransaction(transaction, openDispenserAddresses){
+        // openDispenserAddresses is a Set of every open-dispenser address, loaded
+        // once per block by the caller. Membership is tested in JS here instead of
+        // issuing a DB round-trip per output. Defensive fallback to an empty Set
+        // keeps callers that don't pass it (e.g. some unit tests) working.
+        if (!openDispenserAddresses) openDispenserAddresses = new Set()
         let nextTxId = transaction.getId()
         let firstInputTxId = util.uint8ArrayToHex(Buffer.from(transaction.ins[0].hash).reverse())
         let standardInput = ("standard_input" in transaction.ins[0]?transaction.ins[0]["standard_input"]:true)
@@ -366,7 +371,7 @@ class XChainDecoder {
                 }
 
                 if (outputAddress){
-                    let outputIsDispense = await this.db.isThereADispenserForAddress(outputAddress)
+                    let outputIsDispense = openDispenserAddresses.has(outputAddress)
 
                     if (outputIsDispense){
                         let dispenseOutput = {
@@ -848,7 +853,15 @@ class XChainDecoder {
                 
                 //Delete all open dispensers that have expired
                 await this.db.deleteOpenDispensers(block.timestamp)
-                
+
+                // Load the set of open-dispenser addresses once for this block (after
+                // expiring stale ones above) so parseTransaction can test each output
+                // against it in JS instead of issuing one DB query per output — the
+                // per-output lookup was thousands of serialized round-trips per mainnet
+                // block. Kept current within the block by .add()ing any dispenser opened
+                // by a transaction below, matching the previous per-output query timing.
+                let openDispenserAddresses = await this.db.getAllOpenDispenserAddresses()
+
                 //Loop through the transactions and saving only the ones that have valid data
                 var transactions = block.transactions
                 blocksCount = blocksCount + 1
@@ -859,7 +872,7 @@ class XChainDecoder {
                     let parseResult = null
                     try {
                         nextTransactionHash = nextTransaction.getId()
-                        parseResult = await this.parseTransaction(nextTransaction)
+                        parseResult = await this.parseTransaction(nextTransaction, openDispenserAddresses)
                     } catch (e){
                         if (txParseRetryHeight != nextBlockHeight){
                             txParseRetryHeight = nextBlockHeight
@@ -1017,6 +1030,12 @@ class XChainDecoder {
                                                 await this.sleep(3000)
                                                 continue main_parsing
                                             }
+                                            // Keep the in-memory open-dispenser set current so a
+                                            // later transaction in this same block that pays this
+                                            // freshly-opened dispenser is still recognized as a
+                                            // dispense (mirrors the old per-output DB lookup).
+                                            if (parseResult["source"])
+                                                openDispenserAddresses.add(parseResult["source"])
                                         }
                                     }
                                 }

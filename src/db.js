@@ -1336,7 +1336,36 @@ class Database {
         }
         return false;
     }
-    
+
+    // Return the address strings of every currently-open dispenser in a single
+    // query. Callers load this once per block into a Set and test membership in
+    // JS, instead of issuing one isThereADispenserForAddress() round-trip per
+    // transaction output (thousands per mainnet block). Reads through the active
+    // transaction connection when one is open, so it reflects in-transaction
+    // state (e.g. expired dispensers already removed by deleteOpenDispensers).
+    async getAllOpenDispenserAddresses(){
+        let db    = await this.getConnection();
+        let query =
+            `SELECT ia.address AS address
+            FROM dispensers op
+            LEFT JOIN index_addresses ia ON ia.id = op.address_id`
+        let addresses = new Set()
+        try {
+            let rows = await db.query(query);
+            for (let row of rows){
+                if (row["address"] != null)
+                    addresses.add(row["address"])
+            }
+        } catch (err) {
+            console.error('Error loading open dispenser addresses:', err);
+        } finally {
+            if (this.transactionConnection == null){
+                await db.release()
+            }
+        }
+        return addresses;
+    }
+
     async deleteOpenDispensers(minExpiration) {
         // minExpiration is a raw unix timestamp (the block header time). expiration is now a
         // raw unix BIGINT, so compare integers directly. The previous FROM_UNIXTIME(?) form

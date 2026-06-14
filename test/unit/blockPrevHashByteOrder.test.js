@@ -65,6 +65,7 @@ describe('XChainDecoder block previous_block_hash byte order', function () {
             beginTransaction: async () => {},
             commitTransaction: async () => {},
             deleteOpenDispensers: async () => {},
+            getAllOpenDispenserAddresses: async () => new Set(),
             insertBlock: async (block) => {
                 inserted = block
                 // Stop the loop after the first block so start() returns.

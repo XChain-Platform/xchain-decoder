@@ -245,11 +245,23 @@ describe('XChainDecoder#parseTransaction()', () => {
 
     // --- Dispenser output detection ---
 
-    it('should detect dispense outputs when db reports a matching dispenser address', async () => {
-        decoder.db.isThereADispenserForAddress = sinon.stub().resolves(true)
+    // Helper: build the open-dispenser Set the block loop now passes into
+    // parseTransaction, containing every payable output address of `tx`.
+    function dispenserSetForTx(tx) {
+        const set = new Set()
+        for (const out of tx.outs) {
+            try {
+                set.add(bitcoin.address.fromOutputScript(out.script, decoder.network))
+            } catch (err) {
+                // OP_RETURN / non-address outputs have no address — skip
+            }
+        }
+        return set
+    }
 
+    it('should detect dispense outputs when the open-dispenser set contains a matching address', async () => {
         const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
-        const result = await decoder.parseTransaction(tx)
+        const result = await decoder.parseTransaction(tx, dispenserSetForTx(tx))
 
         assert.ok(result)
         assert.ok(result.dispenseOutputs.length > 0)
@@ -258,14 +270,42 @@ describe('XChainDecoder#parseTransaction()', () => {
     })
 
     it('should populate txIndex and vout in dispense outputs', async () => {
-        decoder.db.isThereADispenserForAddress = sinon.stub().resolves(true)
-
         const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
-        const result = await decoder.parseTransaction(tx)
+        const result = await decoder.parseTransaction(tx, dispenserSetForTx(tx))
 
         assert.ok(result.dispenseOutputs.length > 0)
         assert.ok(result.dispenseOutputs[0].txIndex)
         assert.strictEqual(typeof result.dispenseOutputs[0].vout, 'number')
+    })
+
+    // --- N+1 dispenser-lookup regression (per-block set, not per-output query) ---
+
+    it('[REGRESSION] should not issue any per-output DB dispenser lookup', async () => {
+        // The decoder loads the open-dispenser set once per block and tests
+        // membership in JS. parseTransaction must never call the per-output
+        // DB lookup, regardless of how many outputs the transaction carries.
+        decoder.db.isThereADispenserForAddress = sinon.stub().resolves(true)
+        decoder.db.getAllOpenDispenserAddresses = sinon.stub().resolves(new Set())
+
+        const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
+        await decoder.parseTransaction(tx, new Set())
+
+        assert.strictEqual(decoder.db.isThereADispenserForAddress.callCount, 0)
+        assert.strictEqual(decoder.db.getAllOpenDispenserAddresses.callCount, 0)
+    })
+
+    it('[REGRESSION] should resolve dispense membership purely from the passed set', async () => {
+        // A DB stub that would (wrongly) report a dispenser must have no effect:
+        // detection is driven solely by the in-memory set the caller supplies.
+        decoder.db.isThereADispenserForAddress = sinon.stub().resolves(true)
+
+        const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
+        const emptyResult = await decoder.parseTransaction(tx, new Set())
+        assert.strictEqual(emptyResult.dispenseOutputs.length, 0)
+
+        const matchResult = await decoder.parseTransaction(tx, dispenserSetForTx(tx))
+        assert.ok(matchResult.dispenseOutputs.length > 0)
+        assert.strictEqual(decoder.db.isThereADispenserForAddress.callCount, 0)
     })
 
     // --- standard_input field handling ---

@@ -837,6 +837,69 @@ describe('Database#isThereADispenserForAddress()', () => {
 });
 
 // ---------------------------------------------------------------------------
+// getAllOpenDispenserAddresses
+// ---------------------------------------------------------------------------
+
+describe('Database#getAllOpenDispenserAddresses()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns a Set of every open-dispenser address from a single query', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([
+            { address: 'addr1' },
+            { address: 'addr2' },
+        ]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+
+        const set = await db.getAllOpenDispenserAddresses();
+        assert.ok(set instanceof Set);
+        assert.strictEqual(set.size, 2);
+        assert.ok(set.has('addr1'));
+        assert.ok(set.has('addr2'));
+        // The whole point of the method: one query for the entire block, not one per output.
+        assert.strictEqual(q.callCount, 1);
+    });
+
+    it('skips NULL addresses (dispenser row with no matching index_addresses join)', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([
+            { address: 'addr1' },
+            { address: null },
+        ]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+
+        const set = await db.getAllOpenDispenserAddresses();
+        assert.strictEqual(set.size, 1);
+        assert.ok(set.has('addr1'));
+        assert.ok(!set.has(null));
+    });
+
+    it('returns an empty Set when there are no open dispensers', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+
+        const set = await db.getAllOpenDispenserAddresses();
+        assert.ok(set instanceof Set);
+        assert.strictEqual(set.size, 0);
+    });
+
+    it('returns an empty Set on query error', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().rejects(new Error('fail'));
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+
+        const set = await db.getAllOpenDispenserAddresses();
+        assert.ok(set instanceof Set);
+        assert.strictEqual(set.size, 0);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // deleteOpenDispensers
 // ---------------------------------------------------------------------------
 

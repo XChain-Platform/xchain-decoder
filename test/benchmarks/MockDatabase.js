@@ -41,6 +41,7 @@ class MockDatabase {
             createTransaction: 0,
             createAddress: 0,
             isThereADispenserForAddress: 0,
+            getAllOpenDispenserAddresses: 0,
             deleteOpenDispensers: 0,
             deleteAndCompareTxsNotInList: 0,
             getLastBlockIndex: 0,
@@ -126,6 +127,11 @@ class MockDatabase {
     async isThereADispenserForAddress(address) {
         this._track('isThereADispenserForAddress')
         return this._dispenserAddresses.has(address)
+    }
+
+    async getAllOpenDispenserAddresses() {
+        this._track('getAllOpenDispenserAddresses')
+        return new Set(this._dispenserAddresses)
     }
 
     async createTransaction(hash) {
