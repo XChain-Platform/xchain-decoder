@@ -449,10 +449,7 @@ async function waitForMempoolTransaction(txHash, maxWaitMs) {
         const connection = await global.db.pool.getConnection()
         try {
             const rows = await connection.query(
-                `SELECT mpt.*, it.hash AS tx_hash
-                 FROM mempool_transactions mpt
-                 LEFT JOIN index_transactions it ON it.id = mpt.tx_hash_id
-                 WHERE it.hash = ?`,
+                `SELECT * FROM mempool_transactions WHERE tx_hash = ?`,
                 [txHash]
             )
             if (rows.length > 0) return rows[0]

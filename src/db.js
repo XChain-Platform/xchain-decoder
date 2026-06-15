@@ -978,9 +978,9 @@ class Database {
     async insertMempoolTransaction(tx) {
         const query = `
             INSERT INTO mempool_transactions (
-            tx_hash_id,
-            source_id,
-            destination_id,
+            tx_hash,
+            source,
+            destination,
             amount,
             fee,
             data
@@ -996,14 +996,16 @@ class Database {
         const ownLease = (this.transactionConnection == null)
 
         try {
-            let txHashId = await this.createTransaction(tx.hash)
-            let sourceId = await this.createAddress(tx.source)
-            let destinationId = await this.createAddress(tx.destination)
-
+            // Store raw strings here — never allocate index_addresses/index_transactions
+            // ids. Mempool arrival order is node-local and non-deterministic, but those
+            // lookup tables are replicated, so pre-allocating ids during mempool
+            // observation would let two nodes assign different ids to the same
+            // address/hash and silently diverge. Lookup ids are allocated only during
+            // deterministic block-confirmation processing (see insertTransaction).
             await connection.query(query, [
-                txHashId,
-                sourceId,
-                destinationId,
+                tx.hash,
+                tx.source,
+                tx.destination,
                 tx.amount,
                 tx.fee,
                 tx.data
@@ -1233,15 +1235,12 @@ class Database {
     }
 
     async deleteAndCompareTxsNotInList(txidList) {
-        let deletedTxHashIds = []
+        let deletedTxHashes = []
         let db = await this.getConnection();
 
         const query = `
-            SELECT
-                it.hash AS hash,
-                mpt.tx_hash_id AS hash_id
-                FROM mempool_transactions mpt
-                LEFT JOIN index_transactions it ON it.id = mpt.tx_hash_id;
+            SELECT tx_hash AS hash
+                FROM mempool_transactions;
         `;
 
         try {
@@ -1251,23 +1250,22 @@ class Database {
                 let nextRow = rows[nextRowIndex]
 
                 const txid = nextRow["hash"]
-                const txHashId = nextRow["hash_id"]
                 const txidIndex = bs(txidList, txid, function (element, needle) { return needle.localeCompare(element) })
 
                 if (txidIndex < 0) {
-                    deletedTxHashIds.push(txHashId)
+                    deletedTxHashes.push(txid)
                 } else {
                     txidList.splice(txidIndex, 1)
                 }
             }
 
-            if (deletedTxHashIds.length > 0) {
-                let placeholders = deletedTxHashIds.map(() => '?').join(',')
-                let deleteQuery = `DELETE FROM mempool_transactions WHERE tx_hash_id IN (${placeholders})`
-                await db.query(deleteQuery, deletedTxHashIds);
+            if (deletedTxHashes.length > 0) {
+                let placeholders = deletedTxHashes.map(() => '?').join(',')
+                let deleteQuery = `DELETE FROM mempool_transactions WHERE tx_hash IN (${placeholders})`
+                await db.query(deleteQuery, deletedTxHashes);
             }
 
-            return { transactionsDeleted: deletedTxHashIds.length}
+            return { transactionsDeleted: deletedTxHashes.length}
         } catch (err) {
             console.error('Error querying mempool_transactions:', err);
             return { transactionsDeleted: 0 }

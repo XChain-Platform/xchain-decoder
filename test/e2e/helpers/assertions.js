@@ -190,11 +190,7 @@ async function getMempoolTransaction(db, txHash) {
     const connection = await db.pool.getConnection()
     try {
         const rows = await connection.query(
-            `SELECT mpt.*, it.hash AS tx_hash, ia.address AS source
-             FROM mempool_transactions mpt
-             LEFT JOIN index_transactions it ON it.id = mpt.tx_hash_id
-             LEFT JOIN index_addresses ia ON ia.id = mpt.source_id
-             WHERE it.hash = ?`,
+            `SELECT * FROM mempool_transactions WHERE tx_hash = ?`,
             [txHash]
         )
         return rows.length > 0 ? rows[0] : null

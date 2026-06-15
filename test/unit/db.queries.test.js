@@ -675,8 +675,6 @@ describe('Database#insertMempoolTransaction()', () => {
 
     it('returns true on success', async () => {
         const db = makeDb();
-        sinon.stub(db, 'createTransaction').resolves(1);
-        sinon.stub(db, 'createAddress').resolves(2);
         const q = sinon.stub().resolves([]);
         const { pool } = withConn(q);
         injectPool(db, pool);
@@ -686,10 +684,29 @@ describe('Database#insertMempoolTransaction()', () => {
         assert.strictEqual(r, true);
     });
 
+    // Regression guard: mempool ingestion must NEVER allocate index_addresses /
+    // index_transactions rows. Those lookup tables are replicated and their ids are
+    // node-local non-deterministic if assigned in mempool-arrival order — ids are
+    // allocated only during deterministic block-confirmation processing. Mempool rows
+    // store the raw strings verbatim.
+    it('does not allocate index ids and stores raw strings', async () => {
+        const db = makeDb();
+        const createTx = sinon.stub(db, 'createTransaction').resolves(1);
+        const createAddr = sinon.stub(db, 'createAddress').resolves(2);
+        const q = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        await db.insertMempoolTransaction({
+            hash: 'rawhash', source: 'rawsrc', destination: 'rawdst', amount: 7, fee: 0, data: 'd'
+        });
+        assert.ok(createTx.notCalled, 'insertMempoolTransaction must not call createTransaction');
+        assert.ok(createAddr.notCalled, 'insertMempoolTransaction must not call createAddress');
+        const params = q.firstCall.args[1];
+        assert.deepStrictEqual(params, ['rawhash', 'rawsrc', 'rawdst', 7, 0, 'd']);
+    });
+
     it('returns DUPLICATED_TRANSACTION on errno 1062', async () => {
         const db = makeDb();
-        sinon.stub(db, 'createTransaction').resolves(1);
-        sinon.stub(db, 'createAddress').resolves(2);
         const err = new Error('dup'); err.errno = 1062;
         const q = sinon.stub().rejects(err);
         const { pool } = withConn(q);
@@ -699,8 +716,6 @@ describe('Database#insertMempoolTransaction()', () => {
 
     it('returns false on generic error', async () => {
         const db = makeDb();
-        sinon.stub(db, 'createTransaction').resolves(1);
-        sinon.stub(db, 'createAddress').resolves(2);
         const q = sinon.stub().rejects(new Error('nope'));
         const { pool } = withConn(q);
         injectPool(db, pool);

@@ -190,6 +190,26 @@ describe('E2E: Multi-Block Processing', function () {
             // waitForMempoolTransaction has a 90s timeout
             const mempoolTx = await txBuilder.waitForMempoolTransaction(txHash)
             assert.ok(mempoolTx, 'Transaction should appear in mempool_transactions')
+
+            // The mempool row must store the raw tx hash verbatim, not a lookup id.
+            assert.strictEqual(mempoolTx.tx_hash, txHash,
+                'mempool_transactions should store the raw tx hash')
+
+            // Regression guard: observing a tx in the mempool must NOT allocate a row in
+            // the replicated index_transactions lookup table. Lookup ids are node-local
+            // and non-deterministic if assigned in mempool-arrival order; they may only be
+            // allocated during deterministic block-confirmation processing, so two nodes
+            // following the same chain always agree on their ids. Until this tx is mined,
+            // its hash must be absent from index_transactions.
+            const conn = await global.db.pool.getConnection()
+            try {
+                const rows = await conn.query(
+                    'SELECT id FROM index_transactions WHERE hash = ?', [txHash])
+                assert.strictEqual(rows.length, 0,
+                    'Unconfirmed mempool tx must not pre-allocate an index_transactions id')
+            } finally {
+                await conn.release()
+            }
         })
 
         it('C3.2 — mempool tx should be confirmed after mining', async () => {
