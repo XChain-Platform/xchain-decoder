@@ -47,6 +47,10 @@ const P2SH_BUFFER = Buffer.from("p2sh")
 const P2WSH_BUFFER = Buffer.from("p2wsh")
 
 const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
+// Soft-expired dispensers (marked, not deleted, so a reorg can restore them) are
+// hard-purged once this many blocks deep — well past any realistic reorg, and a
+// pure function of canonical height so every node purges identically.
+const DISPENSER_EXPIRE_SAFE_DEPTH = 100
 const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node need to have to start parsing
 
 // Maximum compiled on-chain ACTION push, in bytes (measured before
@@ -595,7 +599,7 @@ class XChainDecoder {
         }
     }
     
-    async verifyReorg(){
+    async verifyReorg(nodeTip){
         let thereAreDifferences = true
         let blocksDeleted = []
         let retryCount = 0
@@ -613,6 +617,28 @@ class XChainDecoder {
             if (!lastBlock || lastBlockIndex < this.startBlockIndex){
                 thereAreDifferences = false
                 break
+            }
+
+            // Blocks stored ABOVE the node's current tip are orphans the node no
+            // longer has — a deep reorg, a node rollback, or a restart onto a
+            // shorter chain. getBlockHash(lastBlockIndex) would throw "Block height
+            // out of range", and the transient-error catch below would retry it
+            // forever instead of deleting it. Detect this with a deterministic
+            // height compare against the tip passed in (no brittle RPC-error-string
+            // matching). nodeTip is undefined for legacy callers (e.g. existing
+            // verifyReorg-only tests) — guard with != null so their behaviour is
+            // unchanged; the live parse loop always passes the freshly-refreshed tip.
+            if (nodeTip != null && lastBlockIndex > nodeTip){
+                try {
+                    await this.db.deleteBlockByIndex(lastBlockIndex)
+                    retryCount = 0
+                    blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["block_hash"]})
+                } catch (err){
+                    console.error(`reorg: failed to delete above-tip block ${lastBlockIndex} (${lastBlock.block_hash}): `, err)
+                    if (++retryCount >= 10) throw new Error('verifyReorg: deleteBlockByIndex failed after 10 attempts, aborting')
+                    await this.sleep(3000)
+                }
+                continue
             }
 
             let blockHashFromNode
@@ -645,9 +671,16 @@ class XChainDecoder {
         }
         
         if (blocksDeleted.length > 0){
-            await this.db.insertEvent("REORG", blocksDeleted)
+            // The REORG event is the only audit record of which blocks were rolled
+            // back. insertEvent returns false on failure (e.g. the payload once
+            // overflowed events.data TEXT — now MEDIUMTEXT) instead of throwing;
+            // never drop it silently. Log loudly so the loss is visible to ops.
+            const eventResult = await this.db.insertEvent("REORG", blocksDeleted)
+            if (eventResult === false){
+                console.error(`reorg: FAILED to persist REORG audit event for ${blocksDeleted.length} rolled-back block(s) — blocks deleted: ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
+            }
         }
-        
+
         return true
     }
     
@@ -751,16 +784,45 @@ class XChainDecoder {
                 
                 if (lastProcessedBlockIndex > this.blockchainInfoLastBlock){
                     if (lastProcessedBlockIndex == this.startBlockIndex - 1){
-                        console.log("Last block from the node ("+this.blockchainInfoLastBlock+") is still behind the starting block ("+this.startBlockIndex+")")    
-                    } else {
-                        console.log("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+")")
+                        // Benign: we have processed nothing yet and the node simply
+                        // hasn't reached our configured start height. Wait, don't reorg.
+                        console.log("Last block from the node ("+this.blockchainInfoLastBlock+") is still behind the starting block ("+this.startBlockIndex+")")
+                        await this.sleep(5000)
+                        continue
                     }
-                    await this.sleep(5000)
+
+                    // The node's tip has dropped BELOW our last-processed height — a deep
+                    // reorg, a node rollback, or a restart onto a shorter/different chain.
+                    // The forward hash-compare reorg path (below) is unreachable in this
+                    // state (it only fires when fetching a block ABOVE our height), so
+                    // without this branch the decoder loops forever logging the gap while
+                    // orphan blocks above the node tip survive — which the indexer then
+                    // inherits (the P0 failure TP-17 exists to prevent). Reconcile now:
+                    // verifyReorg(tip) deletes every stored block above the tip via a
+                    // deterministic height compare, then walks the hash-compare back to
+                    // the fork point. blockchainInfoLastBlock was just refreshed above, so
+                    // the tip is current.
+                    console.log("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+"). Reconciling orphan blocks...")
+                    await this.db.endTransaction()
+                    await this.verifyReorg(this.blockchainInfoLastBlock)
+                    lastProcessedBlockIndex = this.lastProcessedBlockIndex = await this.db.getLastBlockIndex()
+                    lastProcessedTxIndex = await this.db.getLastTxIndex()
+                    blocksQuantity = 0
+                    transactionsCount = 0
+                    validTransactionsCount = 0
+                    outputCount = 0
+                    startTimeStamp = Date.now()
+                    console.log("Blocks were updated after node-tip regression")
                     continue
                 }
             }
             
             //If there is no new block, wait for some seconds to ask again
+            // TODO (residual, TP-17 F-9): an equal-height tip REPLACEMENT (the node
+            // swaps its tip for a different block of the same height) is not detected
+            // here — it surfaces only once the next block arrives and the forward
+            // hash-compare fires. A tip-hash check in this branch would close that
+            // narrow gap; left out for now to keep the synced/mempool path unchanged.
             if (lastProcessedBlockIndex == this.blockchainInfoLastBlock){
                 this.synced = true
                 if (this.mempoolInterval == null){
@@ -828,11 +890,23 @@ class XChainDecoder {
                 if (nextBlockHeight > this.startBlockIndex){
                     let previousBlock = await this.db.getBlockByIndex(nextBlockHeight - 1)
 
+                    // getBlockByIndex returns null both for a genuinely-missing row and
+                    // for a caught DB error. A null here previously dereferenced straight
+                    // into `previousBlock.block_hash` (TypeError), escaped start(), and
+                    // permanently stopped the parse loop (api.js only logs the rejection).
+                    // Treat null as transient — retry this height — matching the
+                    // block-fetch error path above.
+                    if (!previousBlock){
+                        console.error(`Could not load previous block ${nextBlockHeight - 1} for reorg check, retrying...`)
+                        await this.sleep(3000)
+                        continue
+                    }
+
                     //previousBlockHash is not the same, it must be a reorg
                     if (previousBlockHash != previousBlock.block_hash){
                         await this.db.endTransaction()
                         console.log("A reorg has been detected. Cleaning blocks...")
-                        await this.verifyReorg()
+                        await this.verifyReorg(this.blockchainInfoLastBlock)
                         lastProcessedBlockIndex = this.lastProcessedBlockIndex = await this.db.getLastBlockIndex()
                         lastProcessedTxIndex = await this.db.getLastTxIndex()
                         blocksQuantity = 0
@@ -865,8 +939,9 @@ class XChainDecoder {
                     continue main_parsing
                 }
                 
-                //Delete all open dispensers that have expired
-                await this.db.deleteOpenDispensers(block.timestamp)
+                //Soft-expire open dispensers past their expiration (marks them with
+                //this block height instead of deleting, so a reorg can restore them).
+                await this.db.deleteOpenDispensers(nextBlockHeight, block.timestamp)
 
                 // Load the set of open-dispenser addresses once for this block (after
                 // expiring stale ones above) so parseTransaction can test each output
@@ -1081,7 +1156,13 @@ class XChainDecoder {
                         console.log("Inserting data Blocks ("+blocksCount+") Valid Transactions ("+validTransactionsCount+")")
                     }
                     await this.db.commitTransaction()
-                    
+
+                    // Hard-purge dispensers soft-expired at a reorg-safe depth. Runs
+                    // AFTER the block transaction commits (a transient failure here
+                    // must not roll back committed block data) and is deterministic
+                    // across nodes (keyed off canonical height, not wall clock).
+                    await this.db.purgeExpiredDispensers(nextBlockHeight - DISPENSER_EXPIRE_SAFE_DEPTH)
+
                     blocksCount = 0
                     transactionsCount = 0
                     validTransactionsCount = 0

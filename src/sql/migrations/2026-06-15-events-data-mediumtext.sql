@@ -1,0 +1,23 @@
+-- xchain:migration mode=auto
+-- (auto: a lossless column widening — TEXT -> MEDIUMTEXT. Safe to apply on a
+--  running decoder; no data conversion, no backfill.)
+-- Migration: events.data  TEXT (64KB)  ->  MEDIUMTEXT (16MB).
+--
+-- WHY
+-- ---
+-- verifyReorg serializes the list of rolled-back blocks into a single REORG event
+-- row (events.data). Each entry is ~100 bytes, so a reorg deeper than ~650 blocks
+-- (e.g. the node-tip-regression / misconfigured-node walks) overflows a TEXT
+-- column and the INSERT fails — silently losing the only audit record of which
+-- blocks were rolled back. transactions.data and mempool_transactions.data are
+-- already MEDIUMTEXT; this aligns events.data with them. Fresh installs already
+-- get MEDIUMTEXT from src/sql/events.sql, so on those this migration is a no-op.
+--
+-- IDEMPOTENT: re-applying MODIFY ... MEDIUMTEXT on an already-widened column is a
+-- no-op, and the schema_migrations ledger records it once per DB so it never
+-- re-runs regardless. Applies automatically at decoder startup.
+--
+-- Validator note: xchain-sync replicates the decoder DB to validators; followers
+-- run the same auto migration on startup, so the column self-heals fleet-wide.
+
+ALTER TABLE events MODIFY COLUMN data MEDIUMTEXT;

@@ -72,6 +72,7 @@ describe('XChainDecoder parse-loop quarantine', function () {
                 return true
             },
             deleteOpenDispensers: async () => {},
+            purgeExpiredDispensers: async () => {},
             getAllOpenDispenserAddresses: async () => new Set(),
             insertEvent: async (code, data) => {
                 calls.insertEvent.push({ code, data })

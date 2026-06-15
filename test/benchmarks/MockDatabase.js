@@ -119,8 +119,13 @@ class MockDatabase {
         return true
     }
 
-    async deleteOpenDispensers(minExpiration) {
+    async deleteOpenDispensers(blockIndex, minExpiration) {
         this._track('deleteOpenDispensers')
+        return true
+    }
+
+    async purgeExpiredDispensers(safeHeight) {
+        this._track('purgeExpiredDispensers')
         return true
     }
 

@@ -79,12 +79,29 @@ describe('Database#getLastBlockIndex()', () => {
         assert.strictEqual(await db.getLastBlockIndex(), -1);
     });
 
-    it('returns false and does not throw on query error', async () => {
+    it('[REGRESSION P1] throws (never returns false) after retries on persistent query error', async () => {
+        // A `false` return was silently coerced to a height (false + 1 === 1),
+        // colliding block 1 and wedging the parse loop. The getter must surface a
+        // real number or throw — never a non-numeric sentinel. (sleep is stubbed so
+        // the bounded retry loop doesn't take real wall-clock time.)
         const db = makeDb();
         const q  = sinon.stub().rejects(new Error('boom'));
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        sinon.stub(db, 'sleep').resolves();
+        await assert.rejects(() => db.getLastBlockIndex(), /getLastBlockIndex failed after/);
+        assert.ok(conn.query.callCount >= 2, 'should retry before giving up');
+    });
+
+    it('recovers and returns the height when a transient error clears on retry', async () => {
+        const db = makeDb();
+        const q  = sinon.stub();
+        q.onFirstCall().rejects(new Error('transient'));
+        q.onSecondCall().resolves([{ max_height: 9n }]);
         const { pool } = withConn(q);
         injectPool(db, pool);
-        assert.strictEqual(await db.getLastBlockIndex(), false);
+        sinon.stub(db, 'sleep').resolves();
+        assert.strictEqual(await db.getLastBlockIndex(), 9);
     });
 
     it('queries MAX(block_index) from blocks', async () => {
@@ -131,12 +148,14 @@ describe('Database#getLastTxIndex()', () => {
         assert.strictEqual(await db.getLastTxIndex(), -1);
     });
 
-    it('returns false on query error', async () => {
+    it('[REGRESSION P1] throws (never returns false) after retries on persistent query error', async () => {
         const db = makeDb();
         const q  = sinon.stub().rejects(new Error('oops'));
-        const { pool } = withConn(q);
+        const { pool, conn } = withConn(q);
         injectPool(db, pool);
-        assert.strictEqual(await db.getLastTxIndex(), false);
+        sinon.stub(db, 'sleep').resolves();
+        await assert.rejects(() => db.getLastTxIndex(), /getLastTxIndex failed after/);
+        assert.ok(conn.query.callCount >= 2, 'should retry before giving up');
     });
 
     it('queries MAX(tx_index) from transactions', async () => {
@@ -511,17 +530,24 @@ describe('Database#deleteBlockByIndex()', () => {
         injectPool(db, pool);
         const r = await db.deleteBlockByIndex(10);
         assert.strictEqual(r, true);
-        // 4 DELETE queries
         const calls = conn.query.getCalls().map(c => c.args[0]);
+        // 4 DELETE queries (transaction_outputs, dispensers, transactions, blocks)
         const deletes = calls.filter(s => /DELETE/i.test(s));
         assert.strictEqual(deletes.length, 4);
+        // [REGRESSION P0] TP-17 F-7: a resurrect UPDATE (clear expiry marks left by
+        // this now-orphaned block) must run BEFORE the dispenser row-delete, so a
+        // dispenser expired by this block is restored on reorg.
+        const resurrectIdx = calls.findIndex(s => /UPDATE\s+dispensers\s+SET\s+expired_block_index\s*=\s*NULL/i.test(s));
+        const dispDeleteIdx = calls.findIndex(s => /DELETE\s+FROM\s+dispensers/i.test(s));
+        assert.ok(resurrectIdx >= 0, 'must clear soft-expiry marks for the orphaned block');
+        assert.ok(resurrectIdx < dispDeleteIdx, 'resurrect UPDATE must precede the dispenser DELETE');
     });
 
     it('throws on query error (propagates after rolling back)', async () => {
         const db = makeDb();
         const err = new Error('query failed');
         const q = sinon.stub()
-            .onFirstCall().rejects(err);  // first DELETE fails
+            .onFirstCall().rejects(err);  // first query fails
         const { pool } = withConn(q);
         injectPool(db, pool);
         await assert.rejects(() => db.deleteBlockByIndex(5), /query failed/);
@@ -911,7 +937,7 @@ describe('Database#deleteOpenDispensers()', () => {
         const q  = sinon.stub().resolves([]);
         const { pool } = withConn(q);
         injectPool(db, pool);
-        assert.strictEqual(await db.deleteOpenDispensers(1000), true);
+        assert.strictEqual(await db.deleteOpenDispensers(5, 1000), true);
     });
 
     it('returns DUPLICATED_TRANSACTION on errno 1062', async () => {
@@ -920,7 +946,7 @@ describe('Database#deleteOpenDispensers()', () => {
         const q  = sinon.stub().rejects(err);
         const { pool } = withConn(q);
         injectPool(db, pool);
-        assert.strictEqual(await db.deleteOpenDispensers(1000), db.DUPLICATED_TRANSACTION);
+        assert.strictEqual(await db.deleteOpenDispensers(5, 1000), db.DUPLICATED_TRANSACTION);
     });
 
     it('returns false on generic error', async () => {
@@ -928,30 +954,71 @@ describe('Database#deleteOpenDispensers()', () => {
         const q  = sinon.stub().rejects(new Error('fail'));
         const { pool } = withConn(q);
         injectPool(db, pool);
-        assert.strictEqual(await db.deleteOpenDispensers(1000), false);
+        assert.strictEqual(await db.deleteOpenDispensers(5, 1000), false);
     });
 
-    it('passes minExpiration as param', async () => {
+    // [REGRESSION P0] TP-17 F-7: the expiry sweep must SOFT-expire (stamp the block
+    // height into expired_block_index) rather than hard-DELETE, so a reorg's
+    // deleteBlockByIndex can restore a dispenser an orphaned block's non-monotonic
+    // timestamp expired. It must also be idempotent on replay (IS NULL guard).
+    it('soft-expires (UPDATE ... SET expired_block_index, guarded IS NULL) — not a DELETE', async () => {
         const db = makeDb();
         const q  = sinon.stub().resolves([]);
         const { pool, conn } = withConn(q);
         injectPool(db, pool);
-        await db.deleteOpenDispensers(5555);
-        assert.deepStrictEqual(conn.query.firstCall.args[1], [5555]);
+        await db.deleteOpenDispensers(42, 5555);
+        const sql = conn.query.firstCall.args[0];
+        assert.match(sql, /UPDATE\s+dispensers/i, 'must be an UPDATE');
+        assert.match(sql, /SET\s+expired_block_index\s*=\s*\?/i, 'must stamp the expiring block height');
+        assert.match(sql, /expired_block_index\s+IS\s+NULL/i, 'must guard already-expired rows (idempotent replay)');
+        assert.ok(!/DELETE\s+FROM/i.test(sql), 'must NOT hard-delete');
+        // params: [blockIndex, minExpiration]
+        assert.deepStrictEqual(conn.query.firstCall.args[1], [42, 5555]);
     });
 
-    // Y2038 regression: the expiry sweep must compare the raw unix block time directly
-    // against the raw unix expiration column, NOT through FROM_UNIXTIME() (which caps at
-    // 2038 and never matched the NULLs the old insert path produced for far-future rows).
+    // Y2038 regression: compare the raw unix block time directly against the raw
+    // unix expiration column, NOT through FROM_UNIXTIME() (which caps at 2038).
     it('compares expiration against the raw unix value without FROM_UNIXTIME (Y2038 safe)', async () => {
         const db = makeDb();
         const q  = sinon.stub().resolves([]);
         const { pool, conn } = withConn(q);
         injectPool(db, pool);
-        await db.deleteOpenDispensers(4102444800); // 2100-01-01, above the Y2038 cap
+        await db.deleteOpenDispensers(7, 4102444800); // 2100-01-01, above the Y2038 cap
         const sql = conn.query.firstCall.args[0];
         assert.ok(!/FROM_UNIXTIME/i.test(sql), 'deleteOpenDispensers must not wrap the comparison in FROM_UNIXTIME');
         assert.match(sql, /expiration\s*<\s*\?/i, 'must compare expiration against the raw bound');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// purgeExpiredDispensers
+// ---------------------------------------------------------------------------
+
+describe('Database#purgeExpiredDispensers()', () => {
+    afterEach(() => sinon.restore());
+
+    it('hard-deletes soft-expired rows at or below the safe height', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        const r = await db.purgeExpiredDispensers(900);
+        assert.strictEqual(r, true);
+        const sql = conn.query.firstCall.args[0];
+        assert.match(sql, /DELETE\s+FROM\s+dispensers/i);
+        assert.match(sql, /expired_block_index\s+IS\s+NOT\s+NULL/i, 'must only touch soft-expired rows');
+        assert.match(sql, /expired_block_index\s*<=\s*\?/i);
+        assert.deepStrictEqual(conn.query.firstCall.args[1], [900]);
+    });
+
+    it('is a no-op before any reorg-safe depth (negative/undefined height)', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.purgeExpiredDispensers(-5), true);
+        assert.strictEqual(await db.purgeExpiredDispensers(undefined), true);
+        assert.ok(conn.query.notCalled, 'must not issue a DELETE when nothing is reorg-safe yet');
     });
 });
 

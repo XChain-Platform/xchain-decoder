@@ -530,7 +530,12 @@ class Database {
             db = await this.getConnection();
             ownLease = true;
         }
-        let queries = data.split(';');
+        // Strip `--` line comments BEFORE splitting on ';' (same as runMigrations):
+        // a column comment may legitimately contain a ';' (e.g. "raw seconds; matches
+        // …"), which would otherwise split the CREATE TABLE mid-statement and break a
+        // fresh install. Existing DBs never hit this (verifyTables skips createTable
+        // when the table already exists), so it was a latent fresh-install-only bug.
+        let queries = this.stripSqlLineComments(data).split(';');
         let query   = null;
         console.log('Creating ' + table + ' table and indexes...');
         try {
@@ -687,12 +692,21 @@ class Database {
         let connection = await this.getConnection()
 
         try {
+            // Resurrect any dispenser that THIS (now-orphaned) block soft-expired:
+            // clear the expiry mark so it is open again. Must run before the
+            // dispenser row-delete below — a dispenser both OPENED and expired in
+            // this same orphaned block is hard-deleted by tx_index there, while one
+            // opened in an EARLIER block but expired by this block is restored here.
+            let query = `
+                UPDATE dispensers SET expired_block_index = NULL WHERE expired_block_index = ?;
+            `;
+            await connection.query(query, [blockIndex])
             // Delete child rows first: transaction_outputs and dispensers are
             // keyed by tx_index, so they must be removed before the parent
             // transactions rows they reference are deleted. Otherwise the decoder
             // re-inserts the same block and hits duplicate-key errors, leaving
             // stale pre-reorg rows that the indexer reads as valid.
-            let query = `
+            query = `
                 DELETE FROM transaction_outputs WHERE tx_index IN (SELECT tx_index FROM transactions WHERE block_index = ?);
             `;
             await connection.query(query, [blockIndex])
@@ -733,16 +747,21 @@ class Database {
         const query = `
             SELECT MAX(block_index) AS max_height FROM blocks ;
         `;
-        
-        let connection = await this.getConnection()
-        
-        try {
-            const rows = await connection.query(query)
-            //await connection.release()
-            if (rows.length > 0){
-                if (rows[0]["max_height"] == null){
-                    return -1
-                } else {
+        // Retry a transient DB error a few times, then THROW. Never return a
+        // non-numeric sentinel: the old `return false` was silently coerced to a
+        // height (`false + 1 === 1`), which collided block 1 and wedged the parse
+        // loop in an insert/rollback spin, and in verifyReorg turned
+        // getBlockByIndex(false) into a null row that ended the walk early and
+        // emitted a REORG event for a partial deletion. start() has no retry
+        // wrapper, so a throw here surfaces loud (process visible to health checks)
+        // instead of corrupting height math silently.
+        const MAX_ATTEMPTS = 5
+        let lastErr = null
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++){
+            let connection = await this.getConnection()
+            try {
+                const rows = await connection.query(query)
+                if (rows.length > 0 && rows[0]["max_height"] != null){
                     // block_index is BIGINT UNSIGNED, so the driver returns a JS BigInt.
                     // Coerce to Number: heights are well within Number.MAX_SAFE_INTEGER, and a
                     // BigInt breaks both arithmetic (`+1` in the parse loop) and JSON serialization
@@ -750,47 +769,49 @@ class Database {
                     // "Do not know how to serialize a BigInt", which silently wedges verifyReorg.
                     return Number(rows[0]["max_height"])
                 }
-            } else {
-                return -1   
+                return -1
+            } catch (err) {
+                lastErr = err
+                console.error(`Error selecting max block height (attempt ${attempt}/${MAX_ATTEMPTS}):`, err);
+            } finally {
+                if (this.transactionConnection == null){
+                    await connection.release()
+                }
             }
-        } catch (err) {
-            console.error('Error selecting max block height:', err);
-            return false;
-        } finally {
-            if (this.transactionConnection == null){
-                await connection.release()
-            }
+            if (attempt < MAX_ATTEMPTS) await this.sleep(1000)
         }
+        throw new Error('getLastBlockIndex failed after ' + MAX_ATTEMPTS + ' attempts: ' + (lastErr && lastErr.message))
     }
     
     async getLastTxIndex(){
         const query = `
             SELECT MAX(tx_index) AS max_tx_index FROM transactions;
         `;
-        
-        let connection = await this.getConnection()
-        
-        try {
-            const rows = await connection.query(query)
-            if (rows.length > 0){
-                if (rows[0]["max_tx_index"] == null){
-                    return -1
-                } else {
+        // Retry-then-throw, same rationale as getLastBlockIndex: a `return false`
+        // reset the tx counter to 1 on any DB error, colliding tx_index 1.
+        const MAX_ATTEMPTS = 5
+        let lastErr = null
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++){
+            let connection = await this.getConnection()
+            try {
+                const rows = await connection.query(query)
+                if (rows.length > 0 && rows[0]["max_tx_index"] != null){
                     // tx_index is BIGINT UNSIGNED — coerce the BigInt to Number for the same
                     // reasons as getLastBlockIndex (arithmetic + JSON-RPC/event serialization).
                     return Number(rows[0]["max_tx_index"])
                 }
-            } else {
-                return -1   
+                return -1
+            } catch (err) {
+                lastErr = err
+                console.error(`Error selecting max tx index (attempt ${attempt}/${MAX_ATTEMPTS}):`, err);
+            } finally {
+                if (this.transactionConnection == null){
+                    await connection.release()
+                }
             }
-        } catch (err) {
-            console.error('Error selecting max tx index:', err);
-            return false;
-        } finally {
-            if (this.transactionConnection == null){
-                await connection.release()
-            }
+            if (attempt < MAX_ATTEMPTS) await this.sleep(1000)
         }
+        throw new Error('getLastTxIndex failed after ' + MAX_ATTEMPTS + ' attempts: ' + (lastErr && lastErr.message))
     }
     
     async getBlockByIndex(blockIndex){
@@ -1361,9 +1382,10 @@ class Database {
         let db    = await this.getConnection();
         let query = 
             `SELECT COUNT(*) AS dispensers_count
-            FROM dispensers op 
+            FROM dispensers op
             LEFT JOIN index_addresses ia ON ia.id = op.address_id
-            WHERE ia.address = ?`
+            WHERE ia.address = ?
+              AND op.expired_block_index IS NULL`
         try {
             let rows = await db.query(query, [address]);
             if(rows.length > 0)
@@ -1383,13 +1405,16 @@ class Database {
     // JS, instead of issuing one isThereADispenserForAddress() round-trip per
     // transaction output (thousands per mainnet block). Reads through the active
     // transaction connection when one is open, so it reflects in-transaction
-    // state (e.g. expired dispensers already removed by deleteOpenDispensers).
+    // state (e.g. dispensers just soft-expired by deleteOpenDispensers, which sets
+    // expired_block_index — filtered out here so an expired dispenser stops
+    // capturing payment outputs exactly as the old hard-delete did).
     async getAllOpenDispenserAddresses(){
         let db    = await this.getConnection();
         let query =
             `SELECT ia.address AS address
             FROM dispensers op
-            LEFT JOIN index_addresses ia ON ia.id = op.address_id`
+            LEFT JOIN index_addresses ia ON ia.id = op.address_id
+            WHERE op.expired_block_index IS NULL`
         let addresses = new Set()
         try {
             let rows = await db.query(query);
@@ -1407,17 +1432,22 @@ class Database {
         return addresses;
     }
 
-    async deleteOpenDispensers(minExpiration) {
-        // minExpiration is a raw unix timestamp (the block header time). expiration is now a
-        // raw unix BIGINT, so compare integers directly. The previous FROM_UNIXTIME(?) form
-        // both capped the comparison at Y2038 AND, combined with the NULLs FROM_UNIXTIME
-        // produced on insert, never matched far-future dispensers (NULL < anything is NULL),
-        // so they were never expired — diverging from the indexer. See insertDispenser.
+    async deleteOpenDispensers(blockIndex, minExpiration) {
+        // SOFT-EXPIRE, don't hard-delete. minExpiration is a raw unix timestamp
+        // (the block header time); expiration is a raw unix BIGINT, so compare
+        // integers directly. We stamp the expiring block height into
+        // expired_block_index instead of deleting the row, so that a reorg's
+        // deleteBlockByIndex can clear the mark (resurrecting a dispenser that an
+        // orphaned block's non-monotonic timestamp expired). The `IS NULL` guard
+        // makes a re-processed block idempotent, and the mark is a pure function of
+        // canonical block height, so two honest nodes write byte-identical rows.
         const query = `
-            DELETE FROM dispensers
-            WHERE expiration < ?;
+            UPDATE dispensers
+            SET expired_block_index = ?
+            WHERE expiration < ?
+              AND expired_block_index IS NULL;
         `;
-        
+
         let connection = await this.getConnection()
         // Snapshot whether WE acquired this lease. Inside a block transaction
         // getConnection() returns the shared this.transactionConnection, and the
@@ -1425,18 +1455,19 @@ class Database {
         // finally must key off this entry-time snapshot, not the mutated field,
         // or it would release the same pooled socket a second time.
         const ownLease = (this.transactionConnection == null)
-        
+
         try {
             await connection.query(query, [
+                blockIndex,
                 minExpiration
             ])
-            
+
             return true
         } catch (err) {
             if (err.errno == 1062){
                 return this.DUPLICATED_TRANSACTION
             } else {
-                console.error('Error inserting transaction:', err);
+                console.error('Error soft-expiring dispensers:', err);
                 if (this.transactionConnection){
                     await this.endTransaction()
                 }
@@ -1446,7 +1477,38 @@ class Database {
             if (ownLease){
                 await connection.release()
             }
-        }   
+        }
+    }
+
+    // Hard-delete dispensers that were soft-expired at or before a reorg-safe
+    // depth. Run OUTSIDE the per-block transaction (a transient failure here must
+    // never roll back committed block data — at worst soft-expired rows linger a
+    // little longer). Deterministic across nodes: keyed off canonical block height,
+    // never wall clock. Bounds dispensers table growth (the reason streamed
+    // dispenser replication was disabled, see xchain-sync replicatedTables.js).
+    async purgeExpiredDispensers(safeHeight) {
+        if (safeHeight == null || safeHeight < 0) return true   // nothing reorg-safe yet (initial sync)
+        const query = `
+            DELETE FROM dispensers
+            WHERE expired_block_index IS NOT NULL
+              AND expired_block_index <= ?;
+        `;
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            await connection.query(query, [safeHeight])
+            return true
+        } catch (err) {
+            console.error('Error purging expired dispensers:', err);
+            if (this.transactionConnection){
+                await this.endTransaction()
+            }
+            return false;
+        } finally {
+            if (ownLease){
+                await connection.release()
+            }
+        }
     }
 }
 
