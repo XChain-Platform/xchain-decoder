@@ -727,7 +727,8 @@ class Database {
             // artifact. Downstream consumers resolve it to the canonical address string and never
             // treat the id as consensus-visible, so an orphan row left by a reorg is harmless. Do
             // not start feeding a raw lookup id into any consensus/hashed value.
-            await this.commitTransaction()
+            const committed = await this.commitTransaction()
+            if (!committed) throw new Error('deleteBlockByIndex: commit failed for block ' + blockIndex)
 
             return true
         } catch (err) {
