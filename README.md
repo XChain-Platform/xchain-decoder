@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- Copyright © 2025–2026 Dankest, LLC -->
+<!-- Copyright © 2025-2026 Dankest, LLC -->
 
 # XChain Platform Decoder
 
@@ -26,7 +26,7 @@ Transaction extraction service for the XChain Platform. Polls cryptocurrency nod
 - **DISPENSER protocol** — tracks active dispensers with expiration, detects incoming payments
 - **Mempool tracking** — indexes unconfirmed transactions every 60 seconds when synced
 - **Normalized storage** — addresses and hashes stored as integer IDs for join efficiency
-- **ACTION validation** — 19-name whitelist enforced before database writes
+- **ACTION validation** — 33-name whitelist enforced before database writes
 - **Graceful shutdown** — SIGTERM/SIGINT handlers complete in-flight work
 - **500+ tests** — unit, integration, e2e, boundary, security, fuzz, chaos, regression, benchmarks, mutation
 
@@ -111,7 +111,7 @@ npm run api
 
 ---
 
-**Copyright &copy; 2025–2026 Dankest, LLC**
+**Copyright &copy; 2025-2026 Dankest, LLC**
 
 **Based on XChain Platform by Dankest, LLC &ndash; https://dankest.llc**
 
@@ -126,9 +126,9 @@ See the [licensing overview](https://docs.xchain.io/legal/licensing).
 
 XChain Platform is **open source**, dual-licensed under:
 
-- the **[GNU Affero General Public License v3.0](./LICENSE.md)** (`AGPL-3.0-or-later`) — free for everyone, and
+- the **[GNU Affero General Public License v3.0](./LICENSE.md)** (`AGPL-3.0-or-later`), free for everyone, and
 - a **[commercial license](https://docs.xchain.io/legal/commercial-license)** for companies that need to keep modifications private.
 
-See the **[licensing overview](https://docs.xchain.io/legal/licensing)** for which one applies to you. "XChain" is a trademark of Dankest, LLC — see the **[Trademark Policy](https://docs.xchain.io/legal/trademark)**.
+See the **[licensing overview](https://docs.xchain.io/legal/licensing)** for which one applies to you. "XChain" is a trademark of Dankest, LLC. See the **[Trademark Policy](https://docs.xchain.io/legal/trademark)**.
 
-Copyright © 2025–2026 Dankest, LLC.
+Copyright © 2025-2026 Dankest, LLC.
