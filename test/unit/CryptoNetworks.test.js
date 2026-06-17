@@ -67,9 +67,11 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(net.bech32, 'rltc')
         })
 
-        it('[REGRESSION P2] R-NET-001: should return undefined for an unknown network', () => {
-            const net = CryptoNetworks.getBitcoinJsNetwork('ethereum-mainnet')
-            assert.strictEqual(net, undefined)
+        it('[REGRESSION P2] R-NET-001: should throw a TypeError for an unknown network (fail fast, no silent mainnet default)', () => {
+            assert.throws(
+                () => CryptoNetworks.getBitcoinJsNetwork('ethereum-mainnet'),
+                /Unknown network: "ethereum-mainnet"/
+            )
         })
 
         it('should include messagePrefix for all Dogecoin networks', () => {

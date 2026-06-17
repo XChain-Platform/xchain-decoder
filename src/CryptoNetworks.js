@@ -109,10 +109,10 @@ class CryptoNetworks {
                     "dustThreshold": 5460
                 }
             default:
-                return undefined;
+                throw new TypeError(`Unknown network: "${networkName}". Supported: bitcoin-mainnet, bitcoin-testnet, bitcoin-regtest, dogecoin-mainnet, dogecoin-testnet, dogecoin-regtest, litecoin-mainnet, litecoin-testnet, litecoin-regtest`)
         }
     }
-    
+
     // Handle getting first block for a given network
     // TODO: this config data should come from xchain-hub (https://github.com/XChain-platform/xchain-hub/issues/1)
     static getFirstBlock(networkName){
