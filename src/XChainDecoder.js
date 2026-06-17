@@ -38,7 +38,7 @@ bitcoin.initEccLib(ecc);
 
 const CHECK_BLOCK_DELAY_MS = 1000 //1 second to continously ask for new block when all has been parsed
 const BLOCKCHAIN_INFO_REFRESH_MS = 30000 //Re-poll the node tip at least this often during catch-up so reported lag stays accurate
-const MEMPOOL_INTERVAL = 60000 //1 second between mempool checks
+const MEMPOOL_INTERVAL = 60000 //60 seconds between mempool checks
 const MEMPOOL_BATCH_SIZE = 1000
 
 const MAGIC_WORD = "XCHN"
@@ -84,7 +84,7 @@ const ACTION_ALIASES = {
     'MSG': 'MESSAGE'
 }
 
-const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many transactions need to be processed before inserting the data into the database
+const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many blocks need to be processed before inserting the data into the database
 const LOG_BLOCK_INTERVAL = 1000 //During catch-up sync, only log progress every N blocks
 
 // How many times a block is re-parsed after a transaction-level parse throw before
@@ -836,11 +836,6 @@ class XChainDecoder {
             }
             
             //If there is no new block, wait for some seconds to ask again
-            // TODO (residual, TP-17 F-9): an equal-height tip REPLACEMENT (the node
-            // swaps its tip for a different block of the same height) is not detected
-            // here; it surfaces only once the next block arrives and the forward
-            // hash-compare fires. A tip-hash check in this branch would close that
-            // narrow gap; left out for now to keep the synced/mempool path unchanged.
             if (lastProcessedBlockIndex == this.blockchainInfoLastBlock){
                 this.synced = true
                 if (this.mempoolInterval == null){
