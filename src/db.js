@@ -158,7 +158,7 @@ class Database {
                     console.log('Verifying ' + table + ' table exists...');
                     try {
                         if(existing.has(table)){
-                            // Existing table — reconcile column drift against the SQL
+                            // Existing table: reconcile column drift against the SQL
                             // source so columns added upstream (e.g. transactions.raw_data)
                             // are auto-applied on stacks created from an older release,
                             // instead of surfacing later as a hard "Unknown column" error.
@@ -182,7 +182,7 @@ class Database {
             }
         } finally {
             // This is a direct pool lease (transactionConnection is null at startup),
-            // so releaseConnection() — which only releases transactionConnection —
+            // so releaseConnection() (which only releases transactionConnection)
             // would be a no-op. Release the lease itself, or a fresh-DB boot leaks
             // one connection per created table plus this one and exhausts the pool.
             try { await db.release(); } catch(_){}
@@ -190,7 +190,7 @@ class Database {
         return true;
     }
 
-    // Apply tracked, ordered schema migrations from src/sql/migrations/ — the changes
+    // Apply tracked, ordered schema migrations from src/sql/migrations/. The changes
     // the startup drift reconciler deliberately can't/won't make on its own: data
     // backfills, destructive index/column changes, dedup-then-unique, type changes.
     // (Additive column/index drift is already auto-reconciled by verifyTables; this is
@@ -201,12 +201,12 @@ class Database {
     // first lines:
     //   -- xchain:migration mode=auto     → applied automatically at startup
     //   -- xchain:migration mode=manual   → applied only by an explicit operator run
-    // A file with NO tag is treated as `manual` — unknown DDL never auto-runs. `auto`
+    // A file with NO tag is treated as `manual` (unknown DDL never auto-runs). `auto`
     // migrations must be additive + idempotent (guard with IF [NOT] EXISTS); anything
     // that can fail on existing data must be `manual`.
     //
-    // opts.includeManual=true also applies pending `manual` migrations — the operator
-    // path (`node src/migrate.js`). The whole run holds a DB-scoped advisory lock so
+    // opts.includeManual=true also applies pending `manual` migrations (the operator
+    // path: node src/migrate.js). The whole run holds a DB-scoped advisory lock so
     // concurrent processes can't apply the same file twice. Returns { applied, pending }.
     async runMigrations(opts = {}){
         const crypto        = require('crypto');
@@ -238,14 +238,14 @@ class Database {
 
                     if(appliedByName.has(file)){
                         if(appliedByName.get(file) !== checksum){
-                            console.warn('runMigrations: ' + file + ' was already applied but its content CHANGED (checksum mismatch). Migrations are immutable once applied — review manually.');
+                            console.warn('runMigrations: ' + file + ' was already applied but its content CHANGED (checksum mismatch). Migrations are immutable once applied; review manually.');
                         }
                         continue;
                     }
 
                     const mode = this._migrationMode(raw);
                     if(mode !== 'auto' && !includeManual){
-                        console.log('runMigrations: PENDING (gated, mode=' + mode + '): ' + file + ' — apply with `node src/migrate.js`.');
+                        console.log('runMigrations: PENDING (gated, mode=' + mode + '): ' + file + '; apply with `node src/migrate.js`.');
                         result.pending.push(file);
                         continue;
                     }
@@ -256,7 +256,7 @@ class Database {
                         for(const stmt of statements){ await conn.query(stmt); }
                     } catch(err){
                         console.error('runMigrations: FAILED applying ' + file + ': ' + (err && err.message));
-                        throw err;   // schema is in an unknown state — block startup
+                        throw err;   // schema is in an unknown state; block startup
                     }
                     await conn.query(
                         'INSERT INTO schema_migrations (name, checksum, mode, applied_at) VALUES (?, ?, ?, NOW())',
@@ -273,12 +273,50 @@ class Database {
         }
 
         if(result.applied.length) console.log('runMigrations: ' + result.applied.length + ' migration(s) applied to ' + this.dbName + '.');
-        if(result.pending.length) console.log('runMigrations: ' + result.pending.length + ' manual migration(s) pending for ' + this.dbName + ' — run `node src/migrate.js` to apply.');
+        if(result.pending.length) console.log('runMigrations: ' + result.pending.length + ' manual migration(s) pending for ' + this.dbName + '; run `node src/migrate.js` to apply.');
+
+        // Schema-contract assertion: dispensers.expiration must be an integer type.
+        // The fresh-install DDL declares it BIGINT UNSIGNED. An upgrade from an older
+        // schema requires a manual migration (2026-06-13-dispensers-expiration-bigint.sql).
+        // If that migration was skipped, the column stays DATETIME and code that stores
+        // raw unix integers into it will error or silently corrupt data under strict mode.
+        // Fail closed here so a missed migration is loud at startup, not silent at runtime.
+        await this._assertDispenserExpirationIsInteger();
+
         return result;
     }
 
+    // Assert that dispensers.expiration is an integer-family column. Throws when the
+    // column exists but has a non-integer type (e.g. DATETIME from a pre-migration schema)
+    // so the decoder fails fast at startup rather than silently corrupting dispenser rows.
+    // Skips silently when the table is absent (fresh installs create it via verifyTables
+    // before runMigrations is called, but this guard is defensive against call-order drift).
+    async _assertDispenserExpirationIsInteger(){
+        let conn;
+        try {
+            conn = await this.getConnection();
+            const rows = await conn.query(
+                "SELECT DATA_TYPE FROM information_schema.columns WHERE table_schema = ? AND table_name = 'dispensers' AND column_name = 'expiration'",
+                [this.dbName]
+            );
+            if(!rows.length) return;  // column absent: table may not exist yet
+            const dataType = String(rows[0].DATA_TYPE || '').toLowerCase();
+            const isInt = /^(tinyint|smallint|mediumint|int|bigint)$/.test(dataType);
+            if(!isInt){
+                throw new Error(
+                    'dispensers.expiration has type ' + dataType.toUpperCase() + ' but BIGINT UNSIGNED is required. ' +
+                    'Run the pending migration: node src/migrate.js'
+                );
+            }
+        } finally {
+            if(conn && this.transactionConnection == null){
+                try { await conn.release(); } catch(_){}
+            }
+        }
+    }
+
     // Read a migration file's `-- xchain:migration mode=auto|manual` header tag.
-    // Defaults to 'manual' when absent (conservative — unknown DDL never auto-runs).
+    // Defaults to 'manual' when absent (conservative: unknown DDL never auto-runs).
     _migrationMode(raw){
         const m = String(raw).match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im);
         return m ? m[1].toLowerCase() : 'manual';
@@ -326,12 +364,12 @@ class Database {
         return out;
     }
 
-    // Parse a CREATE TABLE statement to extract expected columns. Conservative —
+    // Parse a CREATE TABLE statement to extract expected columns. Conservative:
     // only used for drift detection, not full schema management. Returns array of
     // {name, nullable, definition, notNull, hasDefault} or null when the file has
     // no recognizable CREATE TABLE block.
     parseExpectedColumns(sqlData){
-        // Strip `--` line comments BEFORE any structural parsing — inline comments
+        // Strip `--` line comments BEFORE any structural parsing; inline comments
         // routinely carry commas/parens that would otherwise fool the comma split.
         sqlData = this.stripSqlLineComments(sqlData);
         // Match the column block up to the table's closing paren, tolerating the
@@ -345,7 +383,7 @@ class Database {
         for(let raw of parts){
             let line = raw.replace(/--[^\n\r]*/g, '').trim();
             if(!line) continue;
-            // Skip constraint/index/key lines — column definitions only
+            // Skip constraint/index/key lines (column) definitions only
             if(/^(PRIMARY|UNIQUE|INDEX|KEY|CHECK|CONSTRAINT|FOREIGN)\b/i.test(line)) continue;
             const tokens = line.split(/\s+/);
             if(tokens.length < 2) continue;
@@ -357,7 +395,7 @@ class Database {
             const notNull    = !nullable;
             const hasDefault = /\bDEFAULT\b/i.test(line);
             // Keep the full (comment-stripped) definition so a missing column can
-            // be re-added verbatim — preserving its DEFAULT clause, which is what
+            // be re-added verbatim, preserving its DEFAULT clause, which is what
             // backfills existing rows when the column is NOT NULL.
             cols.push({ name, nullable, definition: line, notNull, hasDefault });
         }
@@ -366,12 +404,12 @@ class Database {
 
     // Detect schema drift between the live table and its SQL source, and fix it
     // by ALTER. Two kinds of drift are handled:
-    //   1. Missing columns — a column declared in the SQL source but absent from
+    //   1. Missing columns: a column declared in the SQL source but absent from
     //      the live table is added with ADD COLUMN, reusing the source definition
     //      verbatim so its DEFAULT clause backfills existing rows. (A NOT NULL
     //      column with no DEFAULT can't be backfilled safely, so it's skipped
     //      with a loud warning rather than aborting startup.)
-    //   2. Nullability — only relaxes NOT NULL -> NULL (the safe direction; never
+    //   2. Nullability: only relaxes NOT NULL -> NULL (the safe direction; never
     //      strengthens to NOT NULL since live rows might hold NULLs that would
     //      block the ALTER).
     // Doesn't touch types, defaults of existing columns, or indexes. Each applied
@@ -386,11 +424,11 @@ class Database {
             // That silently disables ALL column-drift reconciliation for this table.
             // Make it loud so a malformed source file can't hide. (Non-fatal: the
             // parse-coverage unit test is the hard guardrail.)
-            console.warn('Schema drift check SKIPPED for `' + table + '`: could not parse columns from ' + file + ' — expected a `CREATE TABLE ... ) ENGINE ...` definition. Additive column/nullability drift will NOT auto-reconcile for this table until the SQL source is fixed.');
+            console.warn('Schema drift check SKIPPED for `' + table + '`: could not parse columns from ' + file + ': expected a `CREATE TABLE ... ) ENGINE ...` definition. Additive column/nullability drift will NOT auto-reconcile for this table until the SQL source is fixed.');
             return;
         }
         const live = await db.query(
-            "SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE FROM information_schema.columns WHERE table_schema = ? AND table_name = ?",
+            "SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE, COLUMN_KEY, EXTRA FROM information_schema.columns WHERE table_schema = ? AND table_name = ?",
             [this.dbName, table]
         );
         const liveByName = new Map(live.map(c => [c.COLUMN_NAME.toLowerCase(), c]));
@@ -398,7 +436,7 @@ class Database {
             const cur = liveByName.get(exp.name.toLowerCase());
             if(!cur){
                 if(exp.notNull && !exp.hasDefault){
-                    console.log('Schema drift on ' + table + '.' + exp.name + ': column missing live, source is NOT NULL with no DEFAULT — cannot backfill existing rows safely. Skipping; add manually.');
+                    console.log('Schema drift on ' + table + '.' + exp.name + ': column missing live, source is NOT NULL with no DEFAULT; cannot backfill existing rows safely. Skipping; add manually.');
                     continue;
                 }
                 console.log('Schema drift on ' + table + '.' + exp.name + ': column missing live. Adding column from SQL source.');
@@ -407,6 +445,16 @@ class Database {
             }
             const liveIsNullable = cur.IS_NULLABLE === 'YES';
             if(!liveIsNullable && exp.nullable){
+                // NEVER relax a primary-key or auto-increment column: a PK can't be
+                // NULL anyway, and a bare `MODIFY <type> NULL` silently strips the
+                // AUTO_INCREMENT attribute (mirror-cursor corruption). parseExpectedColumns
+                // already treats such sources as NOT NULL; this guards against any parse gap.
+                const isPk      = String(cur.COLUMN_KEY || '').toUpperCase() === 'PRI';
+                const isAutoInc = /auto_increment/i.test(String(cur.EXTRA || ''));
+                if(isPk || isAutoInc){
+                    console.log('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL - SKIPPING relax (' + (isPk ? 'PRIMARY KEY' : 'AUTO_INCREMENT') + ' column; a bare MODIFY would strip attributes).');
+                    continue;
+                }
                 console.log('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL. Relaxing constraint.');
                 await db.query('ALTER TABLE `' + table + '` MODIFY `' + exp.name + '` ' + cur.COLUMN_TYPE + ' NULL');
             }
@@ -436,8 +484,8 @@ class Database {
     // Reconcile declared indexes against the live table. Adds any index named in the
     // SQL source that is absent live (matched by column set, so a renamed-but-equivalent
     // index is treated as present). For a UNIQUE index blocked by pre-existing duplicate
-    // rows, dedupes first (see dedupeForUniqueIndex) then retries. Never throws — a
-    // failure is logged and startup continues. On a table that already has every declared
+    // rows, dedupes first (see dedupeForUniqueIndex) then retries. Never throws (a
+    // failure is logged and startup continues). On a table that already has every declared
     // index (the normal case) this is a single information_schema read and a no-op.
     async reconcileTableIndexes(file, db){
         try {
@@ -465,7 +513,7 @@ class Database {
                 const key  = idx.columns.map(c => c.toLowerCase()).join(',');
                 const live = liveByCols.get(key);
                 if(live && (!idx.unique || live.unique)) continue;          // already satisfied
-                if(liveNames.has(idx.name.toLowerCase())) continue;          // name taken by a different index — leave alone
+                if(liveNames.has(idx.name.toLowerCase())) continue;          // name taken by a different index; leave alone
                 const colList = idx.columns.map(c => '`' + c + '`').join(', ');
 
                 if(!idx.unique){
@@ -479,13 +527,13 @@ class Database {
                 } catch(e){
                     const dup = e && (Number(e.errno) === 1062 || /duplicate entry/i.test(e.message || ''));
                     if(!dup){ console.log('  could not add UNIQUE index ' + idx.name + ' on ' + table + ': ' + (e && e.message)); continue; }
-                    console.log('  ' + table + '.' + idx.name + ': duplicate rows block the UNIQUE index — deduping (keep newest id per ' + key + ') then retrying.');
+                    console.log('  ' + table + '.' + idx.name + ': duplicate rows block the UNIQUE index; deduping (keep newest id per ' + key + ') then retrying.');
                     if(!(await this.dedupeForUniqueIndex(db, table, idx.columns))) continue;
                     try {
                         await db.query('ALTER TABLE `' + table + '` ADD UNIQUE INDEX `' + idx.name + '` (' + colList + ')');
                         console.log('  added ' + idx.name + ' after dedupe.');
                     } catch(e2){
-                        console.log('  ' + table + '.' + idx.name + ' still failing after dedupe — leaving as-is: ' + (e2 && e2.message));
+                        console.log('  ' + table + '.' + idx.name + ' still failing after dedupe; leaving as-is: ' + (e2 && e2.message));
                     }
                 }
             }
@@ -496,9 +544,9 @@ class Database {
     }
 
     // Collapse duplicate rows on `columns` so a UNIQUE index can be added, keeping the
-    // row with the highest `id` in each group. For the failure this repairs — an
+    // row with the highest `id` in each group. For the failure this repairs: an
     // INSERT ... ON DUPLICATE KEY UPDATE upsert that degraded to plain INSERT because the
-    // unique index was missing — each change appended a fresh row with the current
+    // unique index was missing. Each change appended a fresh row with the current
     // value, so the highest id is the live (correct) value and the older rows are stale.
     // Uses `=` (not `<=>`) so NULL tuples are left intact, matching UNIQUE semantics (a
     // UNIQUE index permits multiple NULLs). Requires a single `id` column to pick a
@@ -508,7 +556,7 @@ class Database {
             "SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema = ? AND table_name = ? AND COLUMN_NAME = 'id'",
             [this.dbName, table])).length > 0;
         if(!hasId){
-            console.log('  cannot dedupe ' + table + ' (no `id` column to pick a surviving row) — skipping unique-index add.');
+            console.log('  cannot dedupe ' + table + ' (no `id` column to pick a surviving row); skipping unique-index add.');
             return false;
         }
         const on  = columns.map(c => 't1.`' + c + '` = t2.`' + c + '`').join(' AND ');
@@ -518,7 +566,7 @@ class Database {
     }
 
     // Handle creating database tables. Runs on the caller's connection (same
-    // pattern as alterTableForDrift) — leasing a fresh connection per table here
+    // pattern as alterTableForDrift): leasing a fresh connection per table here
     // leaked the entire pool on a fresh-DB boot, because nothing ever released
     // those leases (releaseConnection() only releases transactionConnection).
     async createTable(file, db){
@@ -694,7 +742,7 @@ class Database {
         try {
             // Resurrect any dispenser that THIS (now-orphaned) block soft-expired:
             // clear the expiry mark so it is open again. Must run before the
-            // dispenser row-delete below — a dispenser both OPENED and expired in
+            // dispenser row-delete below (a dispenser both OPENED and expired in
             // this same orphaned block is hard-deleted by tx_index there, while one
             // opened in an EARLIER block but expired by this block is restored here.
             let query = `
@@ -766,7 +814,7 @@ class Database {
                     // block_index is BIGINT UNSIGNED, so the driver returns a JS BigInt.
                     // Coerce to Number: heights are well within Number.MAX_SAFE_INTEGER, and a
                     // BigInt breaks both arithmetic (`+1` in the parse loop) and JSON serialization
-                    // — getBlockHash's axios body and insertEvent's JSON.stringify both throw
+                    // Note: getBlockHash's axios body and insertEvent's JSON.stringify both throw
                     // "Do not know how to serialize a BigInt", which silently wedges verifyReorg.
                     return Number(rows[0]["max_height"])
                 }
@@ -797,7 +845,7 @@ class Database {
             try {
                 const rows = await connection.query(query)
                 if (rows.length > 0 && rows[0]["max_tx_index"] != null){
-                    // tx_index is BIGINT UNSIGNED — coerce the BigInt to Number for the same
+                    // tx_index is BIGINT UNSIGNED: coerce the BigInt to Number for the same
                     // reasons as getLastBlockIndex (arithmetic + JSON-RPC/event serialization).
                     return Number(rows[0]["max_tx_index"])
                 }
@@ -858,7 +906,7 @@ class Database {
         let connection = await this.getConnection()
         // Snapshot whether WE acquired this lease. Inside a block transaction
         // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field — so the
+        // catch path's endTransaction() releases it and nulls the field, so the
         // finally must key off this entry-time snapshot, not the mutated field,
         // or it would release the same pooled socket a second time.
         const ownLease = (this.transactionConnection == null)
@@ -936,7 +984,7 @@ class Database {
         let connection = await this.getConnection()
         // Snapshot whether WE acquired this lease. Inside a block transaction
         // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field — so the
+        // catch path's endTransaction() releases it and nulls the field, so the
         // finally must key off this entry-time snapshot, not the mutated field,
         // or it would release the same pooled socket a second time.
         const ownLease = (this.transactionConnection == null)
@@ -991,13 +1039,13 @@ class Database {
         let connection = await this.getConnection()
         // Snapshot whether WE acquired this lease. Inside a block transaction
         // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field — so the
+        // catch path's endTransaction() releases it and nulls the field, so the
         // finally must key off this entry-time snapshot, not the mutated field,
         // or it would release the same pooled socket a second time.
         const ownLease = (this.transactionConnection == null)
 
         try {
-            // Store raw strings here — never allocate index_addresses/index_transactions
+            // Store raw strings here; never allocate index_addresses/index_transactions
             // ids. Mempool arrival order is node-local and non-deterministic, but those
             // lookup tables are replicated, so pre-allocating ids during mempool
             // observation would let two nodes assign different ids to the same
@@ -1093,7 +1141,7 @@ class Database {
             // INSERT IGNORE + refetch is race-safe against the UNIQUE index: if a
             // concurrent caller inserted the same hash between our lookup and here,
             // the IGNORE skips the duplicate and the refetch below resolves to the
-            // canonical row id — so two callers can never create duplicate rows.
+            // canonical row id, so two callers can never create duplicate rows.
             let query = "INSERT IGNORE INTO index_transactions (`hash`) values (?)"
             try {
                 await db.query(query, [hash]);
@@ -1140,7 +1188,7 @@ class Database {
             // INSERT IGNORE + refetch is race-safe against the UNIQUE index: if a
             // concurrent caller inserted the same address between our lookup and here,
             // the IGNORE skips the duplicate and the refetch below resolves to the
-            // canonical row id — so two callers can never create duplicate rows.
+            // canonical row id, so two callers can never create duplicate rows.
             let query = "INSERT IGNORE INTO index_addresses (`address`) values (?)"
             try {
                 await db.query(query, [address]);
@@ -1186,7 +1234,12 @@ class Database {
         }
     }
 
-    async insertEvent(code, data){
+    // blockTime is a unix timestamp (seconds) from the block header. When provided,
+    // PARSE_ERROR rows use the block timestamp so replicas that process the same
+    // deterministic error at different wall-clock times produce byte-identical rows.
+    // REORG events are operator-local by nature (each node's reorg exposure differs)
+    // and may omit blockTime; they fall back to the current wall clock.
+    async insertEvent(code, data, blockTime){
         const query = `
             INSERT INTO events (
             time,
@@ -1194,17 +1247,19 @@ class Database {
             data
         ) VALUES (?, ?, ?);
         `;
-        
+
         let connection = await this.getConnection()
         // Snapshot whether WE acquired this lease. Inside a block transaction
         // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field — so the
+        // catch path's endTransaction() releases it and nulls the field, so the
         // finally must key off this entry-time snapshot, not the mutated field,
         // or it would release the same pooled socket a second time.
         const ownLease = (this.transactionConnection == null)
-        
+
         try {
-            let timeString = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            let timeString = blockTime != null
+                ? new Date(blockTime * 1000).toISOString().slice(0, 19).replace('T', ' ')
+                : new Date().toISOString().slice(0, 19).replace('T', ' ');
             let dataString = JSON.stringify(data)
         
             await connection.query(query, [
@@ -1294,7 +1349,7 @@ class Database {
         let connection = await this.getConnection()
         // Snapshot whether WE acquired this lease. Inside a block transaction
         // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field — so the
+        // catch path's endTransaction() releases it and nulls the field, so the
         // finally must key off this entry-time snapshot, not the mutated field,
         // or it would release the same pooled socket a second time.
         const ownLease = (this.transactionConnection == null)
@@ -1341,7 +1396,7 @@ class Database {
         let connection = await this.getConnection()
         // Snapshot whether WE acquired this lease. Inside a block transaction
         // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field — so the
+        // catch path's endTransaction() releases it and nulls the field, so the
         // finally must key off this entry-time snapshot, not the mutated field,
         // or it would release the same pooled socket a second time.
         const ownLease = (this.transactionConnection == null)
@@ -1405,7 +1460,7 @@ class Database {
     // transaction output (thousands per mainnet block). Reads through the active
     // transaction connection when one is open, so it reflects in-transaction
     // state (e.g. dispensers just soft-expired by deleteOpenDispensers, which sets
-    // expired_block_index — filtered out here so an expired dispenser stops
+    // expired_block_index; filtered out here so an expired dispenser stops
     // capturing payment outputs exactly as the old hard-delete did).
     async getAllOpenDispenserAddresses(){
         let db    = await this.getConnection();
@@ -1450,7 +1505,7 @@ class Database {
         let connection = await this.getConnection()
         // Snapshot whether WE acquired this lease. Inside a block transaction
         // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field — so the
+        // catch path's endTransaction() releases it and nulls the field, so the
         // finally must key off this entry-time snapshot, not the mutated field,
         // or it would release the same pooled socket a second time.
         const ownLease = (this.transactionConnection == null)
@@ -1481,7 +1536,7 @@ class Database {
 
     // Hard-delete dispensers that were soft-expired at or before a reorg-safe
     // depth. Run OUTSIDE the per-block transaction (a transient failure here must
-    // never roll back committed block data — at worst soft-expired rows linger a
+    // never roll back committed block data. At worst soft-expired rows linger a
     // little longer). Deterministic across nodes: keyed off canonical block height,
     // never wall clock. Bounds dispensers table growth (the reason streamed
     // dispenser replication was disabled, see xchain-sync replicatedTables.js).

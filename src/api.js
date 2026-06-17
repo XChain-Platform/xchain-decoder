@@ -97,11 +97,33 @@ async function startApi(){
         async ping() {
             return {status:"success"};
         },
-        // Health check that reports actual decoder state
+        // Health check that reports actual decoder state.
+        // When the decoder is wedged waiting for MariaDB (verifyDatabase loops
+        // forever), decoder.db is null or a SELECT 1 times out. In either case
+        // we report phase "starting" and status "unhealthy" so monitoring can
+        // distinguish "process up, DB unreachable" from "parse loop running".
         async health() {
             const syncStatus = decoder.getSyncStatus();
+
+            // Live DB reachability probe (2 s timeout). decoder.db is null until
+            // start() creates the Database instance, so a null db means we are
+            // still before the DB-connect phase.
+            let dbOk = false
+            let dbPhase = 'starting'
+            if(decoder.db){
+                try {
+                    const conn = await decoder.db.getConnection()
+                    try { await conn.query('SELECT 1'); dbOk = true; dbPhase = 'running' }
+                    finally { try { await conn.release() } catch(_){} }
+                } catch(_) {
+                    dbPhase = 'db-unreachable'
+                }
+            }
+
+            const healthy = decoderRunning && dbOk
             return {
-                status: decoderRunning ? "healthy" : "unhealthy",
+                status: healthy ? "healthy" : "unhealthy",
+                phase: dbPhase,
                 synced: decoder.isSynced(),
                 ...syncStatus,
                 lastProcessedBlock: syncStatus.last_processed_block,

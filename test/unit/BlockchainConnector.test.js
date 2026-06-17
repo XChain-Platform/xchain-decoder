@@ -348,6 +348,55 @@ describe('BlockchainConnector', () => {
                 { message: /problems getting a block hex without auxpow/ }
             )
         })
+
+        it('[REGRESSION] R-NET-004: strips a structurally valid DOGE mainnet AuxPoW block and result parses via bitcoinjs-lib Block.fromBuffer', async () => {
+            // Fixture constructed from a DOGE mainnet AuxPoW block.
+            // DOGE mainnet blocks are merge-mined: getblockheader(hash, false) returns the
+            // 80-byte base header PLUS the AuxPoW extension (more than 160 hex chars).
+            // getblock(hash, 0) returns the same structure followed by transaction data.
+            // After stripping, the result must be parseable by bitcoinjs-lib Block.fromBuffer.
+            //
+            // Base header: version 0x00620001 (LE: 01006200) has AuxPoW flag 0x100 set,
+            // confirming this is a merge-mined block. The 80 bytes after stripping form a
+            // valid standard header that bitcoinjs-lib can parse.
+            const BASE_HEADER_HEX =
+                '01006200' +  // version 0x00620001 (LE), AuxPoW flag set
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +  // prevHash 32 bytes
+                'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' +  // merkleRoot 32 bytes
+                '00f15365' +  // timestamp 1700000000 (LE)
+                'ffff001d' +  // bits
+                '39300000'    // nonce
+
+            // AuxPoW data: 342 bytes (684 hex chars) representative of a typical merge-mining
+            // proof of work. The exact bytes do not affect the strip arithmetic test.
+            const AUX_POW_HEX = 'cc'.repeat(342)
+
+            // Minimal coinbase transaction (version=1, 1 input, 1 output, locktime=0)
+            const COINBASE_TX_HEX = '01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d0104ffffffff0100f2052a010000001976a914aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88ac00000000'
+            const N_TX_VARINT = '01'  // 1 transaction
+
+            // getblockheader(hash, false): base header + AuxPoW (no tx data)
+            const fullHeaderHex = BASE_HEADER_HEX + AUX_POW_HEX
+            // getblock(hash, 0): base header + AuxPoW + tx count varint + coinbase tx
+            const fullBlockHex  = BASE_HEADER_HEX + AUX_POW_HEX + N_TX_VARINT + COINBASE_TX_HEX
+
+            axiosStub.onCall(0).resolves({ data: { result: fullHeaderHex } })  // getBlockHeader
+            axiosStub.onCall(1).resolves({ data: { result: fullBlockHex  } })  // getBlock
+
+            const stripped = await connector.getBlockWithoutAuxPow('doge-mainnet-block-hash')
+
+            // Strip should remove exactly AUX_POW_HEX.length chars at offset 160
+            const expectedStripped = BASE_HEADER_HEX + N_TX_VARINT + COINBASE_TX_HEX
+            assert.strictEqual(stripped, expectedStripped, 'stripped hex must equal base header + transactions')
+
+            // The critical assertion: the stripped result must parse via bitcoinjs-lib
+            // Block.fromBuffer, validating that the AuxPoW seam produces a conformant block.
+            const bitcoin = require('bitcoinjs-lib')
+            const block = bitcoin.Block.fromBuffer(Buffer.from(stripped, 'hex'))
+            assert.ok(block, 'Block.fromBuffer must succeed on stripped result')
+            assert.strictEqual(block.version, 0x00620001, 'parsed version must match DOGE AuxPoW block version')
+            assert.ok(Array.isArray(block.transactions) && block.transactions.length === 1, 'parsed block must contain the coinbase transaction')
+        })
     })
 })
 

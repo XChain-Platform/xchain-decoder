@@ -48,13 +48,13 @@ const P2WSH_BUFFER = Buffer.from("p2wsh")
 
 const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // Soft-expired dispensers (marked, not deleted, so a reorg can restore them) are
-// hard-purged once this many blocks deep — well past any realistic reorg, and a
+// hard-purged once this many blocks deep (well past any realistic reorg), and a
 // pure function of canonical height so every node purges identically.
 const DISPENSER_EXPIRE_SAFE_DEPTH = 100
 const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node need to have to start parsing
 
 // Maximum compiled on-chain ACTION push, in bytes (measured before
-// bitcoin.script.decompile strips the OP_PUSHDATA prefix — see compiledDataLength).
+// bitcoin.script.decompile strips the OP_PUSHDATA prefix (see compiledDataLength).
 // This is the protocol arbiter for ACTION size: any tx whose compiled push
 // exceeds this is dropped. Canonical source of truth + the encoder's matching
 // guard: xchain-documentation/protocol/constants.js (MAX_ACTION_DATA_LENGTH) /
@@ -231,7 +231,7 @@ class XChainDecoder {
             let script = output.script
             //Check if output is a P2SH or P2WSH data-carrying reveal output. If so,
             //the spent output's own address is the script (commit) address, not the
-            //signer — so walk back one hop to the commit tx's first input and take
+            //signer; walk back one hop to the commit tx's first input and take
             //THAT prev output's address (the funder/issuer). Without the P2WSH branch
             //the source of every P2WSH-encoded action resolved to the bech32 script
             //address (bcrt1q...), which holds no gas → spurious "insufficient funds (FEE)".
@@ -318,7 +318,7 @@ class XChainDecoder {
         return pushLen >= 2 && pushLen <= 40 && script.length === pushLen + 2
     }
 
-    // For a P2SH/P2WSH reveal, the native-coin fee output lives on the funding (commit) transaction —
+    // For a P2SH/P2WSH reveal, the native-coin fee output lives on the funding (commit) transaction:
     // the wallet/SDK place the fee output on the first tx they generate, and the reveal (this action's
     // tx) spends that commit's P2SH outputs. Fetch the funding tx and return any output paying the
     // protocol FEE_DESTINATION, shaped as a paymentOutput, so the indexer sees it among this action's
@@ -339,7 +339,7 @@ class XChainDecoder {
                     if (!this.isFutureSegwitScript(output.script))
                         outputAddress = bitcoin.address.fromOutputScript(output.script, this.network)
                 } catch (err){
-                    //the output script has no matching address — skip
+                    //the output script has no matching address; skip
                 }
                 if (outputAddress && outputAddress === this.feeDestination){
                     results.push({ vout: vout, destinationAddress: outputAddress, amount: output.value })
@@ -363,7 +363,7 @@ class XChainDecoder {
         let standardInput = ("standard_input" in transaction.ins[0]?transaction.ins[0]["standard_input"]:true)
         let dispenseOutputs = []
         let paymentOutputs = []
-        // For a P2SH/P2WSH reveal, the funding (commit) tx — whose outputs this reveal spends — is the
+        // For a P2SH/P2WSH reveal, the funding (commit) tx (whose outputs this reveal spends) is the
         // first input's previous tx. Native-coin fee outputs are placed there (not on the reveal), so we
         // capture the funding txid to look them up before returning. Null for non-P2SH transactions.
         let p2shFundingTxId = null
@@ -528,9 +528,12 @@ class XChainDecoder {
                 }
             }
             
-            // Capture compiled byte length before decompile strips OP_PUSHDATA2's 3-byte overhead.
-            // The MAX_ACTION_DATA_LENGTH guard downstream must measure the on-chain payload size,
-            // not the decompiled-and-shortened buffer.
+            // compiledDataLength starts as the raw accumulated byte count.
+            // For P2SH/P2WSH/OP_RETURN this equals the compiled push size (the
+            // script already carries the OP_PUSHDATA prefix). For MULTISIGN the
+            // slots are zero-padded to 64 bytes each, so this value is inflated
+            // by up to 59 bytes of pad on the final chunk. We re-measure below
+            // once the decompile result is available.
             let compiledDataLength = dataBuffer.length
 
             if (dataBuffer.length > 0){
@@ -549,6 +552,14 @@ class XChainDecoder {
                         dataBuffer = Buffer.allocUnsafe(0)
                     } else {
                         dataBuffer = decompiledData[0]
+                        // Re-measure compiledDataLength from the decompiled buffer so MULTISIGN
+                        // zero-pad inflation does not cause valid payloads in [8161, 8192] bytes
+                        // to trip the MAX_ACTION_DATA_LENGTH guard. For P2SH/P2WSH/OP_RETURN the
+                        // result is identical to the pre-decompile measurement: the push overhead
+                        // (1 byte direct, 2 bytes OP_PUSHDATA1, 3 bytes OP_PUSHDATA2) is added
+                        // back, matching exactly what the encoder's compiled script measured.
+                        const dl = dataBuffer.length
+                        compiledDataLength = dl <= 75 ? dl + 1 : dl <= 255 ? dl + 2 : dl + 3
                         if (decompiledData.length > 1){
                             rawData = decompiledData[1]
                         }
@@ -620,14 +631,14 @@ class XChainDecoder {
             }
 
             // Blocks stored ABOVE the node's current tip are orphans the node no
-            // longer has — a deep reorg, a node rollback, or a restart onto a
-            // shorter chain. getBlockHash(lastBlockIndex) would throw "Block height
-            // out of range", and the transient-error catch below would retry it
-            // forever instead of deleting it. Detect this with a deterministic
-            // height compare against the tip passed in (no brittle RPC-error-string
-            // matching). nodeTip is undefined for legacy callers (e.g. existing
-            // verifyReorg-only tests) — guard with != null so their behaviour is
-            // unchanged; the live parse loop always passes the freshly-refreshed tip.
+            // longer has (deep reorg, node rollback, or restart onto a shorter chain).
+            // getBlockHash(lastBlockIndex) would throw "Block height out of range",
+            // and the transient-error catch below would retry it forever instead of
+            // deleting it. Detect this with a deterministic height compare against
+            // the tip passed in (no brittle RPC-error-string matching). nodeTip is
+            // undefined for legacy callers (e.g. existing verifyReorg-only tests);
+            // guard with != null so their behaviour is unchanged. The live parse loop
+            // always passes the freshly-refreshed tip.
             if (nodeTip != null && lastBlockIndex > nodeTip){
                 try {
                     await this.db.deleteBlockByIndex(lastBlockIndex)
@@ -673,11 +684,11 @@ class XChainDecoder {
         if (blocksDeleted.length > 0){
             // The REORG event is the only audit record of which blocks were rolled
             // back. insertEvent returns false on failure (e.g. the payload once
-            // overflowed events.data TEXT — now MEDIUMTEXT) instead of throwing;
+            // overflowed events.data TEXT (now MEDIUMTEXT) instead of throwing;
             // never drop it silently. Log loudly so the loss is visible to ops.
             const eventResult = await this.db.insertEvent("REORG", blocksDeleted)
             if (eventResult === false){
-                console.error(`reorg: FAILED to persist REORG audit event for ${blocksDeleted.length} rolled-back block(s) — blocks deleted: ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
+                console.error(`reorg: FAILED to persist REORG audit event for ${blocksDeleted.length} rolled-back block(s), blocks deleted: ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
             }
         }
 
@@ -719,6 +730,10 @@ class XChainDecoder {
         
         let lastBlockchainInfo = null
         let lastBlockchainInfoRefreshAt = 0
+        // Tracks which blockchain-info refresh cycle the equal-height tip-hash
+        // check last ran on, so it fires at most once per refresh (not every
+        // 1-second sleep tick) to avoid a constant RPC + DB round-trip.
+        let tipHashCheckedAt = 0
         this.blockchainInfoLastBlock = -1
         let blocksQuantity = 0
         
@@ -750,7 +765,7 @@ class XChainDecoder {
             
             //Getting network info to retrieve the last block index.
             //Refresh when we have no info yet, when we have caught up to the
-            //previously-seen tip, OR periodically on a wall-clock interval — the
+            //previously-seen tip, OR periodically on a wall-clock interval; the
             //last condition keeps blockchainInfoLastBlock tracking the live chain
             //during a long catch-up, so the reported lag reflects the true remaining
             //gap instead of converging to zero against a frozen tip.
@@ -791,12 +806,12 @@ class XChainDecoder {
                         continue
                     }
 
-                    // The node's tip has dropped BELOW our last-processed height — a deep
-                    // reorg, a node rollback, or a restart onto a shorter/different chain.
+                    // The node's tip has dropped BELOW our last-processed height (deep
+                    // reorg, node rollback, or restart onto a shorter/different chain).
                     // The forward hash-compare reorg path (below) is unreachable in this
                     // state (it only fires when fetching a block ABOVE our height), so
                     // without this branch the decoder loops forever logging the gap while
-                    // orphan blocks above the node tip survive — which the indexer then
+                    // orphan blocks above the node tip survive, which the indexer then
                     // inherits (the P0 failure TP-17 exists to prevent). Reconcile now:
                     // verifyReorg(tip) deletes every stored block above the tip via a
                     // deterministic height compare, then walks the hash-compare back to
@@ -805,7 +820,10 @@ class XChainDecoder {
                     console.log("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+"). Reconciling orphan blocks...")
                     await this.db.endTransaction()
                     await this.verifyReorg(this.blockchainInfoLastBlock)
-                    lastProcessedBlockIndex = this.lastProcessedBlockIndex = await this.db.getLastBlockIndex()
+                    // Re-clamp: a deep reorg can empty the blocks table, causing
+                    // getLastBlockIndex() to return -1 and nextBlockHeight to become 0
+                    // on a nonzero-start network. Clamp here, the same as the pre-loop guard.
+                    lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
                     lastProcessedTxIndex = await this.db.getLastTxIndex()
                     blocksQuantity = 0
                     transactionsCount = 0
@@ -820,7 +838,7 @@ class XChainDecoder {
             //If there is no new block, wait for some seconds to ask again
             // TODO (residual, TP-17 F-9): an equal-height tip REPLACEMENT (the node
             // swaps its tip for a different block of the same height) is not detected
-            // here — it surfaces only once the next block arrives and the forward
+            // here; it surfaces only once the next block arrives and the forward
             // hash-compare fires. A tip-hash check in this branch would close that
             // narrow gap; left out for now to keep the synced/mempool path unchanged.
             if (lastProcessedBlockIndex == this.blockchainInfoLastBlock){
@@ -832,7 +850,32 @@ class XChainDecoder {
                         this.updateMempool().catch(err => console.error('[updateMempool] unhandled error:', err))
                     }, MEMPOOL_INTERVAL)
                 }
-                
+
+                // Equal-height tip-replacement check: if the node swapped its tip
+                // for a different block at the same height (rare but possible), the
+                // forward hash-compare below never fires until the NEXT block arrives.
+                // Compare the node's current tip hash against the stored one on each
+                // blockchain-info refresh (throttled so we add at most one RPC + one
+                // DB query per 30-second refresh cycle, not every 1-second sleep tick).
+                if (lastBlockchainInfoRefreshAt > tipHashCheckedAt && lastProcessedBlockIndex >= this.startBlockIndex){
+                    tipHashCheckedAt = lastBlockchainInfoRefreshAt
+                    try {
+                        const nodeHash = await this.connector.getBlockHash(lastProcessedBlockIndex)
+                        const storedBlock = await this.db.getBlockByIndex(lastProcessedBlockIndex)
+                        if (storedBlock && nodeHash && storedBlock.block_hash !== nodeHash){
+                            console.log("Equal-height tip replacement detected at height " + lastProcessedBlockIndex + ". Reconciling...")
+                            await this.db.endTransaction()
+                            await this.verifyReorg(this.blockchainInfoLastBlock)
+                            lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
+                            lastProcessedTxIndex = await this.db.getLastTxIndex()
+                            blocksQuantity = 0
+                            continue
+                        }
+                    } catch (e){
+                        console.error('Error during equal-height tip-hash check, skipping:', e)
+                    }
+                }
+
                 await this.sleep(CHECK_BLOCK_DELAY_MS)
             } else { //If there is a new block, parse it
                 //Put the flag synced false if there are too many blocks behind
@@ -866,8 +909,8 @@ class XChainDecoder {
                 
                 // A throw here would otherwise escape start() and permanently stop the
                 // decode loop (api.js only logs the rejection), wedging the pipeline at
-                // this height. Never skip a whole block — a block we cannot decode is a
-                // parser bug, not data to discard — but stay alive and keep retrying so
+                // this height. Never skip a whole block: a block we cannot decode is a
+                // parser bug, not data to discard. Stay alive and keep retrying so
                 // the process remains visible to health checks and recovers if the
                 // failure was transient (e.g. corrupted RPC response).
                 var block = null
@@ -879,7 +922,7 @@ class XChainDecoder {
                     this.parseErrors++
                     console.error(`Failed to decode block ${nextBlockHeight} (${nextBlockHash}), retrying:`, e)
                     await this.db.endTransaction()
-                    lastProcessedBlockIndex = this.lastProcessedBlockIndex = await this.db.getLastBlockIndex()
+                    lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
                     lastProcessedTxIndex = await this.db.getLastTxIndex()
                     blocksQuantity = 0
                     await this.sleep(3000)
@@ -894,7 +937,7 @@ class XChainDecoder {
                     // for a caught DB error. A null here previously dereferenced straight
                     // into `previousBlock.block_hash` (TypeError), escaped start(), and
                     // permanently stopped the parse loop (api.js only logs the rejection).
-                    // Treat null as transient — retry this height — matching the
+                    // Treat null as transient and retry this height, matching the
                     // block-fetch error path above.
                     if (!previousBlock){
                         console.error(`Could not load previous block ${nextBlockHeight - 1} for reorg check, retrying...`)
@@ -907,7 +950,8 @@ class XChainDecoder {
                         await this.db.endTransaction()
                         console.log("A reorg has been detected. Cleaning blocks...")
                         await this.verifyReorg(this.blockchainInfoLastBlock)
-                        lastProcessedBlockIndex = this.lastProcessedBlockIndex = await this.db.getLastBlockIndex()
+                        // Re-clamp: same as the pre-loop guard and the node-tip regression path.
+                        lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
                         lastProcessedTxIndex = await this.db.getLastTxIndex()
                         blocksQuantity = 0
                         transactionsCount = 0
@@ -945,7 +989,7 @@ class XChainDecoder {
 
                 // Load the set of open-dispenser addresses once for this block (after
                 // expiring stale ones above) so parseTransaction can test each output
-                // against it in JS instead of issuing one DB query per output — the
+                // against it in JS instead of issuing one DB query per output; the
                 // per-output lookup was thousands of serialized round-trips per mainnet
                 // block. Kept current within the block by .add()ing any dispenser opened
                 // by a transaction below, matching the previous per-output query timing.
@@ -991,7 +1035,7 @@ class XChainDecoder {
                             tx_position: txIndex,
                             tx_hash: nextTransactionHash,
                             error: String((e && e.message) || e)
-                        })
+                        }, block.timestamp)
                         if (eventResult === false){
                             // insertEvent already rolled the block transaction back
                             await this.sleep(3000)
@@ -1068,7 +1112,7 @@ class XChainDecoder {
                                         nextOutput
                                     )
                                     if (insertResult === this.db.DUPLICATED_TRANSACTION){
-                                        console.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${lastProcessedTxIndex}, vout=${nextOutput.vout}) — possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
+                                        console.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${lastProcessedTxIndex}, vout=${nextOutput.vout}); possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
                                     }
                                 }
 
@@ -1090,7 +1134,7 @@ class XChainDecoder {
                                             nextOutput
                                         )
                                         if (insertResult === this.db.DUPLICATED_TRANSACTION){
-                                            console.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${lastProcessedTxIndex}, vout=${nextOutput.vout}) — possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
+                                            console.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${lastProcessedTxIndex}, vout=${nextOutput.vout}); possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
                                         }
                                     }
                                 }
@@ -1099,7 +1143,7 @@ class XChainDecoder {
                                 //the list of possible dispenses.
                                 //
                                 //v0 wire format (must stay in sync with the
-                                //indexer — see xchain-indexer/src/actions/dispenser.js):
+                                //indexer (see xchain-indexer/src/actions/dispenser.js):
                                 //  DISPENSER|0|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT
                                 //    |GIVE_OWNERSHIP|GIVE_ESCROW
                                 //    |GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS
@@ -1286,9 +1330,19 @@ class XChainDecoder {
 
                     let mempoolData = parseResult["data"]
                     if (mempoolData != null && mempoolData.length > 0) {
-                        // Mirror the confirmed-block path: gate mempool entries on the
-                        // ACTION-name allowlist (expanding aliases first) so an alias-named
-                        // tx can't show as pending and then silently vanish when it confirms.
+                        // Mirror the confirmed-block path: apply the same two guards so a
+                        // pending tx never shows as valid and then silently vanishes on confirm.
+
+                        // Guard 1: oversized payloads. An oversized mempool tx would be
+                        // skipped at confirmation, so skip it here too for a consistent view.
+                        if (parseResult["compiledDataLength"] > MAX_ACTION_DATA_LENGTH) {
+                            this.parseErrors++
+                            console.error(`Mempool: skipping tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${MAX_ACTION_DATA_LENGTH})`)
+                            continue
+                        }
+
+                        // Guard 2: unknown ACTION names (expand aliases first so an
+                        // alias-named tx doesn't show as pending and then silently vanish).
                         let pipeIndex = mempoolData.indexOf(0x7C) // '|'
                         let nameEnd = pipeIndex === -1 ? mempoolData.length : pipeIndex
                         let rawActionName = lenientTextDecoder.decode(mempoolData.subarray(0, nameEnd))
