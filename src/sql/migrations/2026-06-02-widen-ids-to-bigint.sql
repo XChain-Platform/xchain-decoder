@@ -102,11 +102,4 @@ ALTER TABLE transaction_outputs MODIFY tx_index              BIGINT UNSIGNED NOT
 ALTER TABLE transaction_outputs MODIFY vout                  BIGINT UNSIGNED NOT NULL;
 ALTER TABLE transaction_outputs MODIFY destination_id        BIGINT UNSIGNED;
 
--- ============================================================================
--- mempool_transactions
--- ============================================================================
-ALTER TABLE mempool_transactions MODIFY tx_hash_id           BIGINT UNSIGNED;
-ALTER TABLE mempool_transactions MODIFY source_id            BIGINT UNSIGNED;
-ALTER TABLE mempool_transactions MODIFY destination_id       BIGINT UNSIGNED;
-
 SET FOREIGN_KEY_CHECKS = 1;

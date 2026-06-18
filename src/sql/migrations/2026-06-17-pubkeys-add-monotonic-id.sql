@@ -1,0 +1,44 @@
+-- xchain:migration mode=auto
+-- (auto: a purely additive column + unique index. No data conversion, no
+--  backfill of existing semantics, no destructive change. Safe to apply on a
+--  running decoder; idempotent via ADD COLUMN IF NOT EXISTS.)
+--
+-- Migration: pubkeys  ADD  id BIGINT UNSIGNED AUTO_INCREMENT UNIQUE
+--            (monotonic surrogate paging cursor; replication-local only).
+--
+-- WHY
+-- ---
+-- xchain-sync pages the decoder `pubkeys` table by a cursor column
+-- (replicatedTables.lookupCursorColumn / SnapshotBuilder.streamTableRowsById /
+-- ClientSync._syncLookupTablesPaged, which resumes from SELECT MAX(<cursor>)).
+-- It previously paged by `address_id`, but address_id is NOT monotonic with
+-- respect to INSERT order: a pubkeys row is inserted at first-SPEND, while its
+-- address_id was assigned earlier at first-SEEN. A newly inserted pubkeys row can
+-- therefore carry an address_id BELOW the replica's current high-water and be
+-- PERMANENTLY SKIPPED on the incremental / catch-up paging path. The indexer
+-- consumes pubkeys via getDecoderBlockData() LEFT JOIN, so a truncated/paged
+-- decoder replica that skips rows yields source_pubkey=NULL and consensus
+-- divergence on a decoder-fed indexer. (HIGH, consensus-relevant: #4413.)
+--
+-- The fix adds a monotonic AUTO_INCREMENT surrogate `id` that increases with
+-- insert (first-spend) order, making it a correct stable paging cursor.
+-- xchain-sync now pages pubkeys by `id`.
+--
+-- CONSENSUS NOTE
+-- -------------
+-- `id` is a LOCAL REPLICATION CURSOR ONLY. It never enters any consensus hash
+-- preimage: the indexer hashes the resolved pubkey/address strings, not these
+-- surrogate ids. address_id semantics and the indexer LEFT JOIN are unchanged.
+-- On an existing populated table the new AUTO_INCREMENT backfills ids in current
+-- physical/PK order; that is fine because only forward monotonicity of newly
+-- inserted rows matters for the cursor, and the column is not consensus state.
+--
+-- IDEMPOTENT: ADD COLUMN IF NOT EXISTS is a no-op once the column exists, and the
+-- schema_migrations ledger records this file once per DB so it never re-runs.
+-- Fresh installs already get the column from src/sql/pubkeys.sql, so on those
+-- this migration is a no-op. Applies automatically at decoder startup.
+--
+-- Validator note: xchain-sync replicates the decoder DB to validators; followers
+-- run the same auto migration on startup, so the column self-heals fleet-wide.
+
+ALTER TABLE pubkeys ADD COLUMN IF NOT EXISTS id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT UNIQUE;

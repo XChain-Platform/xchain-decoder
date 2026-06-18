@@ -211,6 +211,27 @@ class BlockchainConnector {
 
 		let dataToRemove = blockHeaderHex.length - 160 //80 bytes of bitcoin block header
 
+            // Sanity guard: the block version is the first 4 bytes of blockHex
+            // (little-endian). Dogecoin sets bit 8 (0x100) on merge-mined blocks.
+            // If that bit is set but getblockheader returned exactly 160 hex chars
+            // (80 bytes, no AuxPoW), the assumption that getblockheader includes
+            // AuxPoW has been violated; parsing the unstripped block would corrupt
+            // every txid in this block. Fail loud so the retry loop catches it
+            // rather than silently passing a corrupt block into the indexer DB.
+            if (dataToRemove === 0 && blockHex.length >= 8) {
+                const versionLE = parseInt(blockHex.substring(0, 8), 16)
+                const version = ((versionLE & 0xFF) << 24) | (((versionLE >> 8) & 0xFF) << 16) |
+                                (((versionLE >> 16) & 0xFF) << 8) | ((versionLE >> 24) & 0xFF)
+                if (version & 0x100) {
+                    throw new Error(
+                        'AuxPoW strip invariant violated for block ' + blockhash +
+                        ': version 0x' + version.toString(16) + ' has AuxPoW bit set but ' +
+                        'getblockheader returned only 160 hex chars (no AuxPoW bytes). ' +
+                        'Re-verify the getblockheader serialization for this dogecoind version.'
+                    )
+                }
+            }
+
             if (dataToRemove > 0) {
                 blockHex = blockHex.substring(0,160)+blockHex.substring(160+dataToRemove)
             }
@@ -289,7 +310,7 @@ class BlockchainConnector {
                         break
                     } else {
                         // Tx no longer retrievable (mined/evicted between getRawMempool and this
-                        // call, or an empty RPC result) — resolve null so a single missing tx does
+                        // call, or an empty RPC result): resolve null so a single missing tx does
                         // not fail the whole Promise.all batch. Callers filter nulls.
                         console.log(`getRawTransaction: no result for txid ${txid} (evicted/confirmed?)`)
                         resolve(null);
@@ -322,7 +343,7 @@ class BlockchainConnector {
     // Fetch raw transactions for a list of txids with bounded concurrency.
     // updateMempool hands this method chunks of up to 1000 txids; firing them
     // all at once held up to 1000 simultaneous sockets against the operator's
-    // own node — descriptor pressure plus RPC work-queue churn (-429 /
+    // own node: descriptor pressure plus RPC work-queue churn (-429 /
     // connection drops) on a large mempool, each retried up to 10x. Requests
     // now run in order-preserving sub-batches; tune via DECODER_RPC_CONCURRENCY.
     async getRawTransactions(txIdArray){
