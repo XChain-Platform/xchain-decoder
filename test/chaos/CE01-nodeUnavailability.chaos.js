@@ -92,7 +92,7 @@ describe('CE-01: Node Unavailability and Recovery', function () {
             if (blockHashCalls <= 2) {
                 throw new Error('Node timeout')
             }
-            // On 3rd call, succeed — getBlock will also throw, loop restarts, stop check triggers
+            // On 3rd call, succeed. getBlock will also throw, loop restarts, stop check triggers.
             decoder.stop()
             return 'abc123'
         })

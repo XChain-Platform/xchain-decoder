@@ -17,7 +17,7 @@ const SMOKE_DB = process.env.SMOKE_DB
 const describeOrSkip = SMOKE_DB ? describe : describe.skip
 
 describeOrSkip('Smoke: Database Initialization', () => {
-    // Use real mariadb — bypass the unit test mock by loading directly
+    // Use real mariadb (bypass the unit test mock by loading directly)
     let mariadb
     let Database
     let db

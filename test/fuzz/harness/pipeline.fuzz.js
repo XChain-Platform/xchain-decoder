@@ -82,7 +82,7 @@ describe('Fuzz: Full Pipeline', function () {
     after(() => {
         reporter.printSummary()
         const s = reporter.getSummary()
-        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found — check test/fuzz/crashes/pipeline/`)
+        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found; see test/fuzz/crashes/pipeline/`)
         assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
         assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
     })

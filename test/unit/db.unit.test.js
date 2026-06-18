@@ -364,8 +364,8 @@ describe('Database#parseExpectedColumns()', () => {
             );
         `
         const cols = db.parseExpectedColumns(sql)
-        // Either parses successfully ignoring the empty entry, or returns null —
-        // the key is that it doesn't throw.
+        // Either parses successfully ignoring the empty entry, or returns null.
+        // The key is that it doesn't throw.
         // If both id and name are parsed, we got 2 columns.
         if (cols) {
             assert.ok(cols.length >= 1)
@@ -420,16 +420,16 @@ describe('Database transaction lock queue', () => {
         await db._acquireTransactionLock()
         assert.strictEqual(db._transactionLock, true)
 
-        // Start a second acquire — it will block until released
+        // Start a second acquire (it will block until released)
         let secondAcquired = false
         const secondPromise = db._acquireTransactionLock().then(() => {
             secondAcquired = true
         })
 
-        // Not yet — still held by first
+        // Not yet (still held by first)
         assert.strictEqual(secondAcquired, false)
 
-        // Release first — second should now resolve
+        // Release first; second should now resolve
         db._releaseTransactionLock()
 
         await secondPromise

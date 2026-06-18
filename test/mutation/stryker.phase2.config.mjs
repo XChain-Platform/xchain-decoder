@@ -25,7 +25,7 @@ export default {
 
   testRunner: 'mocha',
   mochaOptions: {
-    // test/unit/setup.js is sufficient for BOTH unit and security tests —
+    // test/unit/setup.js is sufficient for BOTH unit and security tests;
     // both setup files install the same Module._resolveFilename patch.
     require: ['../../test/unit/setup.js'],
     spec: [

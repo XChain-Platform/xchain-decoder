@@ -15,7 +15,7 @@ const XChainDecoder = require('../../src/XChainDecoder')
 //
 // Bug: blockFromHex (block level) and parseTransaction (tx level) were called
 // unguarded inside the main_parsing loop. A single throw escaped start(),
-// whose rejection api.js only logs — so one undecodable block or transaction
+// whose rejection api.js only logs, so one undecodable block or transaction
 // permanently stopped the decode pipeline at that height (and a restart
 // re-fetched the same block and died again).
 //

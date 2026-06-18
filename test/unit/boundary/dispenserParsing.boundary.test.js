@@ -99,7 +99,7 @@ describe('Boundary: ACTION String Parsing (A-1 through A-12)', () => {
         const result = await decoder.parseTransaction(tx)
         assert.ok(result)
         // Empty string compiles to a script with OP_0, which decompiles to
-        // a Buffer — the data field will be a Buffer (possibly empty or a zero-push)
+        // a Buffer: the data field will be a Buffer (possibly empty or a zero-push)
     })
 
     // A-2: Single character
@@ -154,8 +154,8 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
     // These test the DISPENSER parsing logic patterns in isolation,
     // since the actual parsing happens in the block-processing loop.
 
-    // A-4: DISPENSER with only 2 fields — now rejected by field-count check
-    it('[REGRESSION P1] R-DSP-001 A-4: short DISPENSER string "DISPENSER|0" — rejected (< 13 fields)', () => {
+    // A-4: DISPENSER with only 2 fields: now rejected by field-count check
+    it('[REGRESSION P1] R-DSP-001 A-4: short DISPENSER string "DISPENSER|0": rejected for having fewer than 13 fields', () => {
         const decodedData = 'DISPENSER|0'
         const decodedDataSplit = decodedData.split('|')
 
@@ -168,7 +168,7 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
     })
 
     // A-7: DISPENSER version non-numeric
-    it('[REGRESSION P1] R-DSP-002 A-7: DISPENSER with version "abc" — parseInt returns NaN, not == 0', () => {
+    it('[REGRESSION P1] R-DSP-002 A-7: DISPENSER with version "abc": parseInt returns NaN (not equal to 0)', () => {
         const decodedData = 'DISPENSER|abc|BTC|||LTC||||addr|||3600'
         const decodedDataSplit = decodedData.split('|')
         const commandVersion = decodedDataSplit[1]
@@ -179,7 +179,7 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
     })
 
     // A-8: DISPENSER version negative
-    it('A-8: DISPENSER with version "-1" — parseInt returns -1, not == 0', () => {
+    it('A-8: DISPENSER with version "-1": parseInt returns -1 (not equal to 0)', () => {
         const decodedData = 'DISPENSER|-1|BTC|||LTC||||addr|||3600'
         const decodedDataSplit = decodedData.split('|')
         const commandVersion = decodedDataSplit[1]
@@ -189,7 +189,7 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
     })
 
     // A-9: DISPENSER version as float "0.5"
-    it('A-9: DISPENSER with version "0.5" — parseInt returns 0, treated as v0', () => {
+    it('A-9: DISPENSER with version "0.5": parseInt returns 0, treated as v0', () => {
         const decodedData = 'DISPENSER|0.5|BTC|||LTC||||addr|||3600'
         const decodedDataSplit = decodedData.split('|')
         const commandVersion = decodedDataSplit[1]
@@ -199,8 +199,8 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         // This means the dispenser creation branch is entered
     })
 
-    // A-10/A-11: MEDIUMTEXT limits — these are DB-level constraints, tested as assertions
-    it('A-10: ACTION string near MEDIUMTEXT limit (16,777,215 bytes) — large string creates correctly', () => {
+    // A-10/A-11: MEDIUMTEXT limits are DB-level constraints, tested as assertions
+    it('A-10: ACTION string near MEDIUMTEXT limit (16,777,215 bytes): large string creates correctly', () => {
         // Just verify the logic handles large strings without JS-level issues
         const largeAction = 'SEND|0|' + 'X'.repeat(16777200)
         assert.ok(largeAction.startsWith('SEND'))
@@ -208,8 +208,8 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         // No DISPENSER parsing triggered for non-DISPENSER actions
     })
 
-    // DISPENSER with both giveCoin and getCoin empty — should NOT create dispenser
-    it('DISPENSER with both coins empty — skip dispenser creation', () => {
+    // DISPENSER with both giveCoin and getCoin empty: should not create dispenser
+    it('DISPENSER with both coins empty: skip dispenser creation', () => {
         const decodedData = 'DISPENSER|0||||||||||||||'
         const decodedDataSplit = decodedData.split('|')
         const commandVersion = decodedDataSplit[1]
@@ -219,14 +219,14 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         assert.strictEqual(parseInt(commandVersion), 0)
         assert.strictEqual(giveCoin, '')
         assert.strictEqual(getCoin, '')
-        // (getCoin != "") || (giveCoin != "") → false — dispenser NOT created
+        // (getCoin != "") || (giveCoin != "") → false: dispenser NOT created
         assert.ok(!(getCoin != '' || giveCoin != ''))
     })
 
     // DISPENSER with giveCoin empty but getCoin present
     // Fields: 0=ACTION, 1=version, 2=giveCoin, 3=giveAsset, 4=giveAmount, 5=giveMultiplier,
     //         6=getCoin, 7=getAsset, 8=getAmount, 9=getAddress, 10=?, 11=?, 12=expiration
-    it('DISPENSER with only getCoin — should create dispenser', () => {
+    it('DISPENSER with only getCoin: should create dispenser', () => {
         const decodedData = 'DISPENSER|0|||||LTC|||addr|||3600||'
         const decodedDataSplit = decodedData.split('|')
         const giveCoin = decodedDataSplit[2]
@@ -238,7 +238,7 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
     })
 
     // Case sensitivity: "dispenser" (lowercase)
-    it('lowercase "dispenser" — startsWith("DISPENSER") is false', () => {
+    it('lowercase "dispenser": startsWith("DISPENSER") returns false', () => {
         assert.ok(!'dispenser|0|BTC|...'.startsWith('DISPENSER'))
     })
 })
@@ -248,7 +248,7 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
     // The actual SQL execution requires a DB, but we test the JS-side handling.
 
     // E-1: Unix epoch
-    it('[REGRESSION P1] R-DSP-002 E-1: expiration "0" — valid timestamp, FROM_UNIXTIME(0) = 1970-01-01', () => {
+    it('[REGRESSION P1] R-DSP-002 E-1: expiration "0": valid timestamp, FROM_UNIXTIME(0) = 1970-01-01', () => {
         const expiration = '0'
         // This is a valid value that the decoder passes directly to the SQL query
         assert.strictEqual(parseInt(expiration), 0)
@@ -256,13 +256,13 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
     })
 
     // E-2: 32-bit max
-    it('E-2: expiration "2147483647" — max 32-bit, valid FROM_UNIXTIME', () => {
+    it('E-2: expiration "2147483647": max 32-bit value, valid FROM_UNIXTIME', () => {
         const expiration = '2147483647'
         assert.strictEqual(parseInt(expiration), 2147483647)
     })
 
-    // E-3: Beyond 32-bit — FROM_UNIXTIME returns NULL on some MariaDB versions
-    it('E-3: expiration "2147483648" — beyond 32-bit boundary', () => {
+    // E-3: Beyond 32-bit range. FROM_UNIXTIME returns NULL on some MariaDB versions
+    it('E-3: expiration "2147483648": beyond 32-bit boundary', () => {
         const expiration = '2147483648'
         assert.strictEqual(parseInt(expiration), 2147483648)
         // BOUNDARY FINDING: This gets passed to FROM_UNIXTIME() which may return NULL
@@ -270,28 +270,28 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
     })
 
     // E-4: Negative timestamp
-    it('E-4: expiration "-1" — negative, FROM_UNIXTIME(-1) = NULL', () => {
+    it('E-4: expiration "-1": negative value, FROM_UNIXTIME(-1) = NULL', () => {
         const expiration = '-1'
         assert.strictEqual(parseInt(expiration), -1)
         // BOUNDARY FINDING: FROM_UNIXTIME(-1) = NULL on most MariaDB versions
     })
 
     // E-5: Non-numeric
-    it('E-5: expiration "abc" — parseInt returns NaN', () => {
+    it('E-5: expiration "abc": parseInt returns NaN', () => {
         const expiration = 'abc'
         assert.ok(isNaN(parseInt(expiration)))
-        // Passed as NaN to SQL — MariaDB may coerce to 0 or NULL
+        // Passed as NaN to SQL: MariaDB may coerce to 0 or NULL
     })
 
     // E-6: Empty string
-    it('E-6: expiration "" — parseInt returns NaN', () => {
+    it('E-6: expiration "": parseInt returns NaN', () => {
         const expiration = ''
         assert.ok(isNaN(parseInt(expiration)))
         // FROM_UNIXTIME("") in MariaDB may coerce to FROM_UNIXTIME(0) = 1970-01-01
     })
 
     // E-7: Undefined (field missing from short ACTION string)
-    it('E-7: expiration undefined — from short action string', () => {
+    it('E-7: expiration undefined: from short action string', () => {
         const decodedDataSplit = 'DISPENSER|0'.split('|')
         const expiration = decodedDataSplit[12]
 
@@ -302,7 +302,7 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
     })
 
     // Additional: very large timestamp
-    it('expiration "99999999999" — year 5138, beyond MariaDB DATETIME range', () => {
+    it('expiration "99999999999": year 5138, beyond MariaDB DATETIME range', () => {
         const expiration = '99999999999'
         assert.strictEqual(parseInt(expiration), 99999999999)
         // FROM_UNIXTIME(99999999999) is beyond DATETIME max (9999-12-31), returns NULL
@@ -321,7 +321,7 @@ describe('Boundary: Combinatorial DISPENSER Scenarios', () => {
     })
 
     // Combo 4: DISPENSER data + source address resolution failure
-    it('DISPENSER payload but getSourceFromOutput returns null — tx skipped', async () => {
+    it('DISPENSER payload but getSourceFromOutput returns null: tx skipped', async () => {
         decoder.connector.getRawTransaction = sinon.stub().rejects(new Error('not found'))
 
         const action = 'DISPENSER|0|BTC|JDOG|1|10|LTC||0.01|addr|||3600|||'
@@ -333,12 +333,12 @@ describe('Boundary: Combinatorial DISPENSER Scenarios', () => {
         // source is null because getSourceFromOutput failed
         assert.strictEqual(result.source, null)
         // In the block-processing loop, this would be skipped at line 620-622:
-        // (data.length > 0 && source != null) — source is null, so it's skipped
+        // (data.length > 0 && source != null): source is null, so it's skipped
         // The DISPENSER is NOT created. This is correct behavior.
     })
 
     // Combo 5: BATCH string with DISPENSER as non-first command
-    it('BATCH with DISPENSER as second command — decoder does NOT parse it', async () => {
+    it('BATCH with DISPENSER as second command: decoder does not parse it', async () => {
         const action = 'SEND|0|BTC|100;DISPENSER|0|BTC|||LTC||||addr|||3600|||'
         const tx = buildActionTx(action)
         const result = await decoder.parseTransaction(tx)
@@ -353,7 +353,7 @@ describe('Boundary: Combinatorial DISPENSER Scenarios', () => {
     })
 
     // Combo: DISPENSER as first command in a BATCH (should be caught)
-    it('BATCH with DISPENSER as first command — decoder DOES parse it', async () => {
+    it('BATCH with DISPENSER as first command: decoder does parse it', async () => {
         const action = 'DISPENSER|0|BTC|||LTC||||addr|||3600|||;SEND|0|BTC|100'
         const tx = buildActionTx(action)
         const result = await decoder.parseTransaction(tx)

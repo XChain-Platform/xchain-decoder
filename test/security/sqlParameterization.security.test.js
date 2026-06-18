@@ -81,7 +81,7 @@ describe('Security: SQL Parameterization', () => {
 
     describe('deleteAndCompareTxsNotInList parameterization', () => {
         it('[REGRESSION P0] R-SEC-001: should use parameterized placeholders instead of string concatenation', () => {
-            // Verify by reading the source code — the fix replaces .join(",") with placeholders
+            // Verify by reading the source code: the fix replaces .join(",") with placeholders
             const fs = require('fs')
             const dbSource = fs.readFileSync(require.resolve('../../src/db.js'), 'utf-8')
 

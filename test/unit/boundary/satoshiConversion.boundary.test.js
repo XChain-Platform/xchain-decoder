@@ -29,7 +29,7 @@ describe('Boundary: bigIntSatoshiToDecimalsString (DB-6 through DB-8)', () => {
         assert.strictEqual(result, '0.00000000')
     })
 
-    // DB-7: Negative values — now correctly handled
+    // DB-7: Negative values (now correctly handled)
     it('DB-7: -100 → "-0.00000100"', () => {
         const result = db.bigIntSatoshiToDecimalsString(-100)
         assert.strictEqual(result, '-0.00000100')

@@ -253,7 +253,7 @@ describe('XChainDecoder#parseTransaction()', () => {
             try {
                 set.add(bitcoin.address.fromOutputScript(out.script, decoder.network))
             } catch (err) {
-                // OP_RETURN / non-address outputs have no address — skip
+                // OP_RETURN / non-address outputs have no address; skip
             }
         }
         return set

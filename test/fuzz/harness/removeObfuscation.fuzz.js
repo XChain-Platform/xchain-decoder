@@ -52,7 +52,7 @@ describe('Fuzz: removeObfuscation', function () {
     after(() => {
         reporter.printSummary()
         const s = reporter.getSummary()
-        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found — check test/fuzz/crashes/removeObfuscation/`)
+        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found; check test/fuzz/crashes/removeObfuscation/`)
         assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
         assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
     })
@@ -84,7 +84,7 @@ describe('Fuzz: removeObfuscation', function () {
                     } else {
                         reporter.recordCrash({ data: data.toString('hex'), txid }, err, 'short_txid')
                     }
-                    // Don't re-throw — we want to continue fuzzing and report at the end
+                    // Don't re-throw; we want to continue fuzzing and report at the end
                 }
             })
         }

@@ -52,7 +52,7 @@ function createDecoder() {
 }
 
 // Errors thrown by bitcoinjs-lib during Transaction.fromHex/fromBuffer are expected
-// when we feed it corrupted hex — these are not decoder bugs.
+// when we feed it corrupted hex. These are not decoder bugs.
 function isBitcoinjsParseError(err) {
     const msg = err.message || ''
     return msg.includes('Cannot read slice out of bounds') ||
@@ -105,7 +105,7 @@ describe('Fuzz: parseTransaction', function () {
     after(() => {
         reporter.printSummary()
         const s = reporter.getSummary()
-        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found — check test/fuzz/crashes/parseTransaction/`)
+        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found; see test/fuzz/crashes/parseTransaction/`)
         assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
         assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
     })
@@ -202,7 +202,7 @@ describe('Fuzz: parseTransaction', function () {
                     tx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
                     await fuzzOne(decoder, reporter, tx, 'tiny_pubkey_multisig')
                 } catch (err) {
-                    // script.compile may reject invalid sizes — that's fine
+                    // script.compile may reject invalid sizes (acceptable)
                     reporter.recordSuccess()
                 }
             })
@@ -285,7 +285,7 @@ describe('Fuzz: parseTransaction', function () {
             const tx = new bitcoin.Transaction()
             tx.version = 2
             tx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
-            // tx.ins is empty — parseTransaction accesses ins[0].hash
+            // tx.ins is empty; parseTransaction accesses ins[0].hash
 
             try {
                 const result = await withTimeout(() => decoder.parseTransaction(tx), 5000)

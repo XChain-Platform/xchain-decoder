@@ -38,7 +38,7 @@ const network = bitcoin.networks.regtest
 
 const MNEMONIC = 'erase average powder march guess lemon basic eight arena world once puzzle'
 
-// Derivation counter — incremented to get fresh addresses per test
+// Derivation counter, incremented to get fresh addresses per test
 let derivationIndex = 200 // offset from integration tests to avoid collisions
 
 function getNextDerivation() {

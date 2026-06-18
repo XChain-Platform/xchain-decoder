@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Fuzz crash reporter — logs failing inputs to disk and provides summaries.
+ * Fuzz crash reporter: logs failing inputs to disk and provides summaries.
  */
 
 const fs = require('fs')

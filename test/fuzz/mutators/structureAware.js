@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Structure-aware mutators — understand the XChain protocol format
+ * Structure-aware mutators: understand the XChain protocol format
  * to produce inputs that exercise deeper code paths.
  */
 

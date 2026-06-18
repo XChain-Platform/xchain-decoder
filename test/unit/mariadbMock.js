@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Minimal mariadb mock for unit tests — prevents ESM import errors.
+// Minimal mariadb mock for unit tests (prevents ESM import errors).
 module.exports = {
     createPool: function () {
         return {

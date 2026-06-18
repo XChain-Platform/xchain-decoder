@@ -62,11 +62,11 @@ describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
         assert.strictEqual(result.subarray(4).length, 0)
     })
 
-    // D-4: Truncated txid (< 32 chars) — key/IV extraction gets short strings
+    // D-4: Truncated txid (< 32 chars): key/IV extraction gets short strings
     it('D-4: should handle truncated txid (4 chars) without crashing', async () => {
         const data = Buffer.from([0x01, 0x02, 0x03, 0x04])
         // createDecipheriv with a 4-char key should throw ERR_CRYPTO_INVALID_IV
-        // or similar — the try/catch should handle it
+        // or similar; the try/catch should handle it
         let threw = false
         try {
             const result = await decoder.removeObfuscation(data, 'abcd')
@@ -80,7 +80,7 @@ describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
         // Either way, no unhandled crash
     })
 
-    // D-5: Empty txid — both key and IV are empty strings
+    // D-5: Empty txid (both key and IV are empty strings)
     it('D-5: should handle empty txid without crashing', async () => {
         const data = Buffer.from([0x01, 0x02, 0x03, 0x04])
         let result
@@ -95,7 +95,7 @@ describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
         // Either null is returned or the error is re-thrown (both acceptable)
     })
 
-    // D-6: All-zero key and IV — valid AES operation
+    // D-6: All-zero key and IV (valid AES operation)
     it('[REGRESSION P0] R-DEC-005 D-6: should decrypt with all-zero txid (valid AES key/IV)', async () => {
         const zeroTxid = '0'.repeat(64)
         const plaintext = 'XCHNtest with zero key'
@@ -106,7 +106,7 @@ describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
         assert.strictEqual(result.toString('utf-8'), plaintext)
     })
 
-    // D-7: All-f key and IV — valid AES operation
+    // D-7: All-f key and IV (valid AES operation)
     it('[REGRESSION P0] R-DEC-005 D-7: should decrypt with all-f txid (valid AES key/IV)', async () => {
         const fTxid = 'f'.repeat(64)
         const plaintext = 'XCHNtest with ff key'

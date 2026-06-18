@@ -37,7 +37,7 @@ describe('Multisig Integration', () => {
 
     it('should strip trailing zeros from multisig payload', async () => {
         const funded = await txBuilder.createFundedLegacyAddress()
-        // Short action string — will have many trailing zeros in the 64-byte multisig space
+        // Short action string; will have many trailing zeros in the 64-byte multisig space
         const action = 'SEND|0|X|1||'
         const { txHash, blockIndex } = await txBuilder.broadcastMultisig(funded, action)
         await txBuilder.waitForDecoder(blockIndex)

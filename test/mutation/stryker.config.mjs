@@ -31,7 +31,7 @@ export default {
   mochaOptions: {
     // CRITICAL: setup.js installs a Module._resolveFilename patch that redirects
     // require('mariadb') to a mock. Stryker workers are fresh Node.js forks that
-    // do NOT inherit the parent's module state — this require entry re-installs
+    // do NOT inherit the parent's module state; this require entry re-installs
     // the patch in each worker before any source file is loaded.
     require: ['../../test/unit/setup.js'],
     spec: ['../../test/unit/**/*.test.js'],

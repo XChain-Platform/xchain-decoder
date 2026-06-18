@@ -13,7 +13,7 @@ const XChainDecoder = require('../../src/XChainDecoder')
 
 // Unit test for the constructor's fee-destination normalization (the gate the storage path uses
 // to decide whether to persist a fee-destination output to transaction_outputs). No DB / node
-// connection is exercised — only the constructor's handling of the feeDestination argument.
+// connection is exercised. Only the constructor's handling of the feeDestination argument is tested.
 const PLACEHOLDER = 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
 const REAL_ADDR   = 'mfeeDestinationRegtestAddr1111111111'
 

@@ -66,7 +66,7 @@ describe('Fuzz: DISPENSER parsing', function () {
     after(() => {
         reporter.printSummary()
         const s = reporter.getSummary()
-        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found — check test/fuzz/crashes/dispenserParsing/`)
+        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found; see test/fuzz/crashes/dispenserParsing/`)
         assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
         assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
     })
@@ -104,7 +104,7 @@ describe('Fuzz: DISPENSER parsing', function () {
             'DISPENSER|0|',
             'DISPENSER|0||',
             'DISPENSER|0|||||||||||',   // 11 pipes (12 fields)
-            'DISPENSER|0||||||||||||',  // 12 pipes (13 fields) — minimum valid
+            'DISPENSER|0||||||||||||',  // 12 pipes (13 fields): minimum valid
             'DISPENSER|0|||||||||||||', // 13 pipes (14 fields)
             'DISPENSER|0||||||||||||||||||||||', // many empty fields
             'DISPENSER|0|a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p', // all populated
@@ -203,12 +203,12 @@ describe('Fuzz: DISPENSER parsing', function () {
 
     // --- Non-DISPENSER prefixes that are close ---
     describe('near-miss DISPENSER prefixes', () => {
-        // These do NOT start with 'DISPENSER' — should never trigger insert
+        // These do NOT start with 'DISPENSER', so insert should never trigger
         const nonMatching = [
             'DISPENSAR', 'DISPENSE', 'dispenser',
             'Dispenser', ' DISPENSER', 'XDISPENSER', 'DISPENSEr'
         ]
-        // These DO start with 'DISPENSER' — may or may not insert depending on fields
+        // These DO start with 'DISPENSER'; insert behavior depends on field contents
         const matching = [
             'DISPENSERR', 'DISPENSER\x00', 'DISPENSER '
         ]

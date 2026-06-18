@@ -13,8 +13,8 @@
  **********************************************************************
  * Fuzz harness for XChainBlockDecoder
  *
- * Targets: blockFromBuffer, blockFromHex, transactionFromHex — especially
- * Litecoin HogEx flag stripping and buffer manipulation.
+ * Targets: blockFromBuffer, blockFromHex, transactionFromHex (especially
+ * Litecoin HogEx flag stripping and buffer manipulation).
  */
 
 const assert = require('assert')
@@ -43,7 +43,7 @@ describe('Fuzz: XChainBlockDecoder', function () {
     after(() => {
         reporter.printSummary()
         const s = reporter.getSummary()
-        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found — check test/fuzz/crashes/blockDecoder/`)
+        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found; see test/fuzz/crashes/blockDecoder/`)
         assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
         assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
     })
@@ -64,7 +64,7 @@ describe('Fuzz: XChainBlockDecoder', function () {
                         reporter.recordSuccess()
                     }
                 } catch (err) {
-                    // Expected: "Buffer too small", parsing errors — these are handled
+                    // Expected: "Buffer too small", parsing errors (all handled gracefully)
                     reporter.recordSuccess()
                 }
             }

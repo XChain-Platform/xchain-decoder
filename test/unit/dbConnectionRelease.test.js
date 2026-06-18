@@ -21,7 +21,7 @@
 // single physical socket is returned to the pool exactly once on every path.
 //
 // Tests use the mariadbMock (loaded via setup.js) plus a per-test tracked
-// connection that counts release() calls — no real DB needed.
+// connection that counts release() calls (no real DB needed).
 
 const assert = require('assert')
 const Database = require('../../src/db.js')
@@ -31,7 +31,7 @@ function makeDb(name = 'test_db') {
 }
 
 // A leased connection whose release() calls are counted. query() throws an
-// error (errno 1452 — a non-duplicate failure, so it takes the real error
+// error (errno 1452, a non-duplicate failure, so it takes the real error
 // branch rather than the 1062 short-circuit) whenever the SQL matches `throwOn`.
 function makeTrackedConn(throwOn = null) {
     return {
@@ -72,7 +72,7 @@ describe('Database connection release accounting (transactional inserts)', () =>
         assert.strictEqual(result, false, 'insert reports failure')
         assert.strictEqual(conn.rollbackCount, 1, 'endTransaction rolled back once')
         assert.strictEqual(conn.releaseCount, 1,
-            'connection released exactly once (endTransaction) — NOT a second time in finally')
+            'connection released exactly once via endTransaction, NOT a second time in finally')
         assert.strictEqual(db.transactionConnection, null, 'transaction connection cleared')
     })
 

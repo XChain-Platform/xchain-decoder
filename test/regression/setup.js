@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Regression test setup — reuses the unit test mariadb mock.
+// Regression test setup: reuses the unit test mariadb mock.
 // This prevents ESM import errors when loading source files that require mariadb.
 const Module = require('module')
 const originalResolveFilename = Module._resolveFilename

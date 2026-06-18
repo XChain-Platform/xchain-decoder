@@ -185,12 +185,12 @@ describe('XChainBlockDecoder', () => {
             const txHex = '02000000' + '00' + '03' + '00' + '00' + '00000000'
             // flag 0x03 doesn't match the strip condition, so it stays as-is
             // bitcoinjs-lib will try to parse it in non-strict mode
-            // This may throw depending on the content, which is fine — the point is
+            // This may throw depending on the content, which is fine: the point is
             // the strip logic did NOT activate
             try {
                 ltcDecoder.transactionFromHex(txHex)
             } catch (e) {
-                // Expected — the raw bytes aren't a valid tx, but the strip didn't happen
+                // Expected: the raw bytes aren't a valid tx, but the strip didn't happen
             }
             // Verify the strip condition: only 0x08 and 0x09 are stripped
             // Build a valid simple tx and confirm flag=0x03 doesn't get stripped
@@ -198,7 +198,7 @@ describe('XChainBlockDecoder', () => {
             try {
                 ltcDecoder.transactionFromHex(simpleTxHex)
             } catch (e) {
-                // Fine — just testing the strip logic
+                // Fine; just testing the strip logic
             }
             assert.ok(true, 'Non-MWEB flags are not stripped')
         })
@@ -221,7 +221,7 @@ describe('XChainBlockDecoder', () => {
             // A block where the last transaction does NOT have the HogEx marker+flag
             // should parse normally without error
             const ltcDecoder = new XChainBlockDecoder('litecoin-regtest')
-            // Header-only is safe — no transactions means no HogEx check
+            // Header-only is safe: no transactions means no HogEx check
             const block = ltcDecoder.blockFromHex(HEADER_HEX)
             assert.ok(block)
         })

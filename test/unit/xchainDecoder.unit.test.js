@@ -210,7 +210,7 @@ describe('XChainDecoder#extractPubkeyFromInput()', () => {
 
     it('should return null when witness second element is wrong length', () => {
         const input = {
-            witness: [Buffer.alloc(71, 0x30), Buffer.alloc(10, 0x02)], // 10 bytes — not 33 or 65
+            witness: [Buffer.alloc(71, 0x30), Buffer.alloc(10, 0x02)], // 10 bytes (not 33 or 65)
             script: Buffer.alloc(0)
         }
         const result = decoder.extractPubkeyFromInput(input)
@@ -304,7 +304,7 @@ describe('XChainDecoder#verifyReorg() edge cases', () => {
 
         const result = await decoder.verifyReorg()
         assert.strictEqual(result, true)
-        // insertEvent must NOT be called — nothing was deleted
+        // insertEvent must NOT be called (nothing was deleted)
         assert.strictEqual(decoder.db.insertEvent.called, false)
     })
 
@@ -322,7 +322,7 @@ describe('XChainDecoder#verifyReorg() edge cases', () => {
 
         const result = await decoder.verifyReorg()
         assert.strictEqual(result, true)
-        // No blocks deleted — insertEvent should NOT be called
+        // No blocks deleted; insertEvent should NOT be called
         assert.strictEqual(decoder.db.insertEvent.called, false)
     })
 

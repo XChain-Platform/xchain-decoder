@@ -134,7 +134,7 @@ describe('CE-07: Concurrent Instance Behavior', function () {
 
         // db2 should be independently unlocked
         assert.strictEqual(db2._transactionLock, false,
-            'Transaction lock should not be shared across instances — no cross-instance locking exists')
+            'Transaction lock should not be shared across instances (no cross-instance locking exists)')
 
         db1._transactionLock = false
     })

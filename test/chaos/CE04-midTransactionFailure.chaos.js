@@ -14,7 +14,7 @@
  * CE-04: Mid-Transaction Database Failure
  *
  * Tests that the decoder handles database failures during block
- * processing transactions correctly — verifying rollback behavior
+ * processing transactions correctly, verifying rollback behavior
  * and that partial state is never committed.
  */
 const assert = require('assert')

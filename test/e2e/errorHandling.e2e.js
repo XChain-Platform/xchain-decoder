@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E tests: Category D — Error Handling & Malformed Data.
+ * E2E tests: Category D:Error Handling & Malformed Data.
  *
  * Validates that the decoder correctly rejects non-XCHN transactions,
  * handles corrupted payloads gracefully, and continues processing after
@@ -35,7 +35,7 @@ describe('E2E: Error Handling', function () {
     // ---------------------------------------------------------------
     describe('non-XCHN transaction rejection', () => {
 
-        it('D1.1 — should not store a plain BTC transfer (no OP_RETURN)', async () => {
+        it('D1.1:should not store a plain BTC transfer (no OP_RETURN)', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const { txHash, blockIndex } = await txBuilder.broadcastPlainTransaction(funded)
             await txBuilder.waitForDecoder(blockIndex)
@@ -47,7 +47,7 @@ describe('E2E: Error Handling', function () {
             assert.strictEqual(tx, null, 'Plain BTC transfer should not be in decoder DB')
         })
 
-        it('D1.2 — should not store a transaction with random OP_RETURN bytes', async () => {
+        it('D1.2:should not store a transaction with random OP_RETURN bytes', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const { txHash, blockIndex } = await txBuilder.broadcastNonXchnOpReturn(funded)
             await txBuilder.waitForDecoder(blockIndex)
@@ -56,7 +56,7 @@ describe('E2E: Error Handling', function () {
             await assertNoTransaction(global.db, txHash)
         })
 
-        it('D1.3 — should not store a transaction with text OP_RETURN', async () => {
+        it('D1.3:should not store a transaction with text OP_RETURN', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const textData = Buffer.from('HELLO WORLD THIS IS NOT XCHN DATA', 'utf-8')
             const { txHash, blockIndex } = await txBuilder.broadcastNonXchnOpReturn(funded, textData)
@@ -66,7 +66,7 @@ describe('E2E: Error Handling', function () {
             await assertNoTransaction(global.db, txHash)
         })
 
-        it('D1.4 — should not store OP_RETURN starting with "XCHN" but not obfuscated', async () => {
+        it('D1.4:should not store OP_RETURN starting with "XCHN" but not obfuscated', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             // Raw "XCHN" prefix without proper AES encryption won't deobfuscate correctly
             const fakeXchn = Buffer.from('XCHNthis_is_fake_data_not_encrypted')
@@ -79,12 +79,12 @@ describe('E2E: Error Handling', function () {
             assert.strictEqual(tx, null, 'Fake XCHN data should not be stored')
         })
 
-        it('D1.5 — should skip coinbase transactions', async () => {
+        it('D1.5:should skip coinbase transactions', async () => {
             // Mine a block with only a coinbase (no user transactions)
             const height = await txBuilder.mineBlocks(1)
             await txBuilder.waitForDecoder(height)
 
-            // Query the block — it should have no XCHN transactions
+            // Query the block:it should have no XCHN transactions
             const rows = await getDecoderBlockData(global.db, height)
             assert.strictEqual(rows.length, 0, 'Coinbase-only block should have no XCHN rows')
         })
@@ -95,7 +95,7 @@ describe('E2E: Error Handling', function () {
     // ---------------------------------------------------------------
     describe('corrupted XCHN payloads', () => {
 
-        it('D2.1 — truncated payload should not crash decoder', async () => {
+        it('D2.1:truncated payload should not crash decoder', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
 
             // Create a valid XCHN prefix but truncate the payload
@@ -108,7 +108,7 @@ describe('E2E: Error Handling', function () {
             await txBuilder.waitForDecoder(blockIndex)
             await new Promise(r => setTimeout(r, 2000))
 
-            // Decoder should not crash — verify by processing the next transaction
+            // Decoder should not crash:verify by processing the next transaction
             const funded2 = await txBuilder.createFundedLegacyAddress()
             const action = 'SEND|0|AFTERTRUNC|1|' + global.mainTestAddress + '|'
             const { txHash: hash2, blockIndex: bi2 } = await txBuilder.broadcastOpReturn(funded2, action)
@@ -118,7 +118,7 @@ describe('E2E: Error Handling', function () {
             assert.strictEqual(tx2.data, action, 'Decoder should still work after truncated payload')
         })
 
-        it('D2.2 — binary garbage after XCHN prefix should not crash decoder', async () => {
+        it('D2.2:binary garbage after XCHN prefix should not crash decoder', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
 
             // Valid XCHN prefix + random garbage
@@ -132,7 +132,7 @@ describe('E2E: Error Handling', function () {
             await txBuilder.waitForDecoder(blockIndex)
             await new Promise(r => setTimeout(r, 2000))
 
-            // Decoder should continue — verify with next valid tx
+            // Decoder should continue:verify with next valid tx
             const funded2 = await txBuilder.createFundedLegacyAddress()
             const action = 'SEND|0|AFTERGARBAGE|1|' + global.mainTestAddress + '|'
             const { txHash: hash2, blockIndex: bi2 } = await txBuilder.broadcastOpReturn(funded2, action)
@@ -148,7 +148,7 @@ describe('E2E: Error Handling', function () {
     // ---------------------------------------------------------------
     describe('decoder stability', () => {
 
-        it('D3.1 — should process valid tx after a block with only invalid data', async () => {
+        it('D3.1:should process valid tx after a block with only invalid data', async () => {
             // Send 3 invalid transactions in sequence
             for (let i = 0; i < 3; i++) {
                 const funded = await txBuilder.createFundedLegacyAddress()
@@ -169,7 +169,7 @@ describe('E2E: Error Handling', function () {
             assert.strictEqual(tx.source, funded.address)
         })
 
-        it('D3.2 — should store only valid tx from mixed valid+invalid sequence', async () => {
+        it('D3.2:should store only valid tx from mixed valid+invalid sequence', async () => {
             // Alternate invalid and valid transactions
             const invalidFunded1 = await txBuilder.createFundedLegacyAddress()
             const { txHash: invalidHash1, blockIndex: bi1 } = await txBuilder.broadcastPlainTransaction(invalidFunded1)
@@ -191,7 +191,7 @@ describe('E2E: Error Handling', function () {
             await assertNoTransaction(global.db, invalidHash2)
         })
 
-        it('D3.3 — should handle empty blocks gracefully', async () => {
+        it('D3.3:should handle empty blocks gracefully', async () => {
             // Mine blocks with no user transactions (just coinbase)
             const startBlock = await global.db.getLastBlockIndex()
             const newHeight = await txBuilder.mineBlocks(5)
@@ -208,7 +208,7 @@ describe('E2E: Error Handling', function () {
             }
         })
 
-        it('D3.4 — decoder should be synced after processing all test blocks', async () => {
+        it('D3.4:decoder should be synced after processing all test blocks', async () => {
             const info = await global.nodeClientTest.getBlockchainInfo()
             await txBuilder.waitForDecoder(info.blocks)
 

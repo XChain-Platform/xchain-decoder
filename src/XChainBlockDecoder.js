@@ -83,13 +83,13 @@ class XChainBlockDecoder {
                 // over 10 bytes, so a varint claiming more than remaining/10
                 // transactions is structurally impossible. Without this, a forged
                 // count only failed later via a buffer over-read inside
-                // Transaction.fromBuffer — an unguarded loop with an incidental,
+                // Transaction.fromBuffer, which has an unguarded loop with an incidental
                 // unnamed exit. (Block bytes come from the trusted node, so this
                 // is defense-in-depth, not a reachable DoS.)
                 const remainingBytes = bufferReader.buffer.length - bufferReader.offset;
                 if (nTransactions > remainingBytes / 10) {
                     throw new Error('Block declares ' + nTransactions + ' transactions but only ' +
-                        remainingBytes + ' bytes remain — invalid transaction count');
+                        remainingBytes + ' bytes remain (invalid transaction count)');
                 }
                 block.transactions = [];
                 for (let i = 0; i < nTransactions; ++i) {

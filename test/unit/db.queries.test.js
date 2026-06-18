@@ -12,7 +12,7 @@
 // Covers: all async query methods, getConnection retry/give-up,
 // releaseConnection, beginTransaction, endTransaction, commitTransaction,
 // verifyDatabase, createDatabase, dropDatabase, and related helpers.
-// Uses sinon to inject a fake pool — no proxyquire.
+// Uses sinon to inject a fake pool (no proxyquire).
 
 'use strict';
 
@@ -82,7 +82,7 @@ describe('Database#getLastBlockIndex()', () => {
     it('[REGRESSION P1] throws (never returns false) after retries on persistent query error', async () => {
         // A `false` return was silently coerced to a height (false + 1 === 1),
         // colliding block 1 and wedging the parse loop. The getter must surface a
-        // real number or throw — never a non-numeric sentinel. (sleep is stubbed so
+        // real number or throw. Never a non-numeric sentinel. (sleep is stubbed so
         // the bounded retry loop doesn't take real wall-clock time.)
         const db = makeDb();
         const q  = sinon.stub().rejects(new Error('boom'));
@@ -296,7 +296,7 @@ describe('Database#createTransaction()', () => {
 
     it('returns existing id when record already exists', async () => {
         const db = makeDb();
-        // getTransactionId called twice — both return 7
+        // getTransactionId called twice; both return 7
         const q = sinon.stub().resolves([{ id: 7 }]);
         const { pool } = withConn(q);
         injectPool(db, pool);
@@ -686,7 +686,7 @@ describe('Database#insertMempoolTransaction()', () => {
 
     // Regression guard: mempool ingestion must NEVER allocate index_addresses /
     // index_transactions rows. Those lookup tables are replicated and their ids are
-    // node-local non-deterministic if assigned in mempool-arrival order — ids are
+    // node-local non-deterministic if assigned in mempool-arrival order; ids are
     // allocated only during deterministic block-confirmation processing. Mempool rows
     // store the raw strings verbatim.
     it('does not allocate index ids and stores raw strings', async () => {
@@ -781,7 +781,7 @@ describe('Database#insertDispenser()', () => {
         const q = sinon.stub().resolves([]);
         const { pool, conn } = withConn(q);
         injectPool(db, pool);
-        const farFuture = 4102444800; // 2100-01-01 — above the Y2038 FROM_UNIXTIME cap
+        const farFuture = 4102444800; // 2100-01-01, above the Y2038 FROM_UNIXTIME cap
         await db.insertDispenser({ txIndex: 1, address: 'addr', expiration: farFuture });
         const sql = conn.query.firstCall.args[0];
         assert.ok(!/FROM_UNIXTIME/i.test(sql), 'insertDispenser must not wrap expiration in FROM_UNIXTIME');
@@ -976,7 +976,7 @@ describe('Database#deleteOpenDispensers()', () => {
     // height into expired_block_index) rather than hard-DELETE, so a reorg's
     // deleteBlockByIndex can restore a dispenser an orphaned block's non-monotonic
     // timestamp expired. It must also be idempotent on replay (IS NULL guard).
-    it('soft-expires (UPDATE ... SET expired_block_index, guarded IS NULL) — not a DELETE', async () => {
+    it('soft-expires (UPDATE ... SET expired_block_index, guarded IS NULL): not a DELETE', async () => {
         const db = makeDb();
         const q  = sinon.stub().resolves([]);
         const { pool, conn } = withConn(q);
@@ -1115,7 +1115,7 @@ describe('Database#dropDatabase()', () => {
 });
 
 // ---------------------------------------------------------------------------
-// getConnection — success, retry, and give-up paths
+// getConnection: success, retry, and give-up paths
 // ---------------------------------------------------------------------------
 
 describe('Database#getConnection()', () => {
@@ -1443,7 +1443,7 @@ describe('Database error-path transactionConnection branches', () => {
         db._transactionLock = true;
         // Should not throw; error in INSERT catch is logged and swallowed
         const id = await db.createAddress('newaddr2');
-        // id may be 11 from re-fetch or null if re-fetch also fails — just assert no throw
+        // id may be 11 from re-fetch or null if re-fetch also fails; just assert no throw
         assert.ok(id === 11 || id === null);
     });
 
@@ -1451,7 +1451,7 @@ describe('Database error-path transactionConnection branches', () => {
     // Regression: insertEvent previously called releaseConnection() here, which leaves
     // the transaction open on the pooled connection and never frees the transaction lock
     // (_releaseTransactionLock), deadlocking the next beginTransaction(). It must call
-    // endTransaction() like every sibling insert — rollback + release + free the lock.
+    // endTransaction() like every sibling insert: rollback + release + free the lock.
     it('insertEvent: calls endTransaction (rollback + frees lock) when a transaction is active on generic error', async () => {
         const db = makeDb();
         const endTxStub = sinon.stub(db, 'endTransaction').resolves();
@@ -1598,7 +1598,7 @@ describe('Database error-path transactionConnection branches', () => {
 });
 
 // ---------------------------------------------------------------------------
-// _ensureMigrationsLedger — covered cheaply via a fake connection
+// _ensureMigrationsLedger: covered cheaply via a fake connection
 // ---------------------------------------------------------------------------
 
 describe('Database#_ensureMigrationsLedger()', () => {

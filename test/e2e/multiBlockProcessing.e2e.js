@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E tests: Category C — Multi-Block Processing.
+ * E2E tests: Category C - Multi-Block Processing.
  *
  * Validates sequential block processing, bulk catch-up after decoder restart,
  * mempool processing, and chain reorganization detection/recovery.
@@ -39,7 +39,7 @@ describe('E2E: Multi-Block Processing', function () {
     // ---------------------------------------------------------------
     describe('sequential block processing', () => {
 
-        it('C1.1 — should process 10 sequential blocks with distinct ACTIONs', async () => {
+        it('C1.1: should process 10 sequential blocks with distinct ACTIONs', async () => {
             const txHashes = []
             const blockIndices = []
 
@@ -69,7 +69,7 @@ describe('E2E: Multi-Block Processing', function () {
             }
         })
 
-        it('C1.2 — blocks table should have no gaps across sequential blocks', async () => {
+        it('C1.2: blocks table should have no gaps across sequential blocks', async () => {
             const startBlock = await global.db.getLastBlockIndex()
 
             // Mine 5 blocks with transactions
@@ -96,7 +96,7 @@ describe('E2E: Multi-Block Processing', function () {
             }
         })
 
-        it('C1.3 — getDecoderBlockData returns correct data per block', async () => {
+        it('C1.3: getDecoderBlockData returns correct data per block', async () => {
             const funded1 = await txBuilder.createFundedLegacyAddress()
             const action1 = 'SEND|0|BLK1|100|' + global.mainTestAddress + '|'
             const { txHash: hash1, blockIndex: bi1 } = await txBuilder.broadcastOpReturn(funded1, action1)
@@ -126,7 +126,7 @@ describe('E2E: Multi-Block Processing', function () {
     // ---------------------------------------------------------------
     describe('bulk catch-up processing', () => {
 
-        it('C2.1 — decoder should catch up after being stopped and restarted', async () => {
+        it('C2.1: decoder should catch up after being stopped and restarted', async () => {
             // Record state before stop
             const preStopBlock = await global.db.getLastBlockIndex()
 
@@ -176,7 +176,7 @@ describe('E2E: Multi-Block Processing', function () {
     // ---------------------------------------------------------------
     describe('mempool processing', () => {
 
-        it('C3.1 — should detect XCHN transaction in mempool', async () => {
+        it('C3.1: should detect XCHN transaction in mempool', async () => {
             // Ensure decoder is synced
             const info = await global.nodeClientTest.getBlockchainInfo()
             await txBuilder.waitForDecoder(info.blocks)
@@ -212,7 +212,7 @@ describe('E2E: Multi-Block Processing', function () {
             }
         })
 
-        it('C3.2 — mempool tx should be confirmed after mining', async () => {
+        it('C3.2: mempool tx should be confirmed after mining', async () => {
             // Broadcast without mining
             const funded = await txBuilder.createFundedLegacyAddress()
             const action = 'SEND|0|MEMCONF|50|' + global.mainTestAddress + '|confirm me'
@@ -237,7 +237,7 @@ describe('E2E: Multi-Block Processing', function () {
     // ---------------------------------------------------------------
     describe('chain reorganization', () => {
 
-        it('C4.1 — should detect and handle a chain reorg', async () => {
+        it('C4.1: should detect and handle a chain reorg', async () => {
             // Record initial reorg event count
             const initialReorgEvents = await getReorgEvents(global.db)
             const initialReorgCount = initialReorgEvents.length
@@ -277,7 +277,7 @@ describe('E2E: Multi-Block Processing', function () {
             assert.ok(lastBlock >= info.blocks, 'Decoder should be at or past the new chain tip')
         })
 
-        it('C4.2 — blocks table should be consistent after reorg', async () => {
+        it('C4.2: blocks table should be consistent after reorg', async () => {
             // After the previous reorg test, verify no gaps in blocks table
             const lastBlock = await global.db.getLastBlockIndex()
             const info = await global.nodeClientTest.getBlockchainInfo()

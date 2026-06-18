@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E tests: Category B — DISPENSER Lifecycle.
+ * E2E tests: Category B - DISPENSER Lifecycle.
  *
  * Validates the full dispenser lifecycle: creation, trigger payments,
  * expiration cleanup, and edge cases. Verifies both the `dispensers` table
@@ -37,7 +37,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
     // ---------------------------------------------------------------
     describe('full dispenser flow', () => {
 
-        it('B1.1 — should create dispenser record from DISPENSER|0 action', async () => {
+        it('B1.1: should create dispenser record from DISPENSER|0 action', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
             const action = `DISPENSER|0|GIVE_E2E||1000||GET_E2E||500||||${expiration}|||`
@@ -53,7 +53,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
             assert.ok(dispensers.length >= 1)
         })
 
-        it('B1.2 — should record transaction_output when payment sent to dispenser address', async () => {
+        it('B1.2: should record transaction_output when payment sent to dispenser address', async () => {
             // Step 1: Create a dispenser
             const dispenserFunded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
@@ -77,7 +77,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
             assert.strictEqual(payRow.data, payAction)
         })
 
-        it('B1.3 — dispenser data should appear in indexer contract query', async () => {
+        it('B1.3: dispenser data should appear in indexer contract query', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
             const action = `DISPENSER|0|CQUERY||200||CGET||100||||${expiration}|||`
@@ -99,7 +99,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
     // ---------------------------------------------------------------
     describe('dispenser expiration', () => {
 
-        it('B2.1 — should delete expired dispensers when a new block is processed', async () => {
+        it('B2.1: should delete expired dispensers when a new block is processed', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             // Set expiration to a timestamp in the past relative to the next block
             // Block timestamps on regtest are based on system time, so use a past time
@@ -116,7 +116,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
             assert.strictEqual(dispensers.length, 0, 'Expired dispenser should have been cleaned up')
         })
 
-        it('B2.2 — should keep dispenser alive when expiration is in the future', async () => {
+        it('B2.2: should keep dispenser alive when expiration is in the future', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400 // 24 hours from now
             const action = `DISPENSER|0|ALIVE_GIVE||100||ALIVE_GET||50||||${expiration}|||`
@@ -124,7 +124,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
             await txBuilder.waitForDecoder(blockIndex)
             await txBuilder.waitForTransaction(txHash)
 
-            // Mine additional blocks — dispenser should still be alive
+            // Mine additional blocks; dispenser should still be alive
             const newHeight = await txBuilder.mineBlocks(3)
             await txBuilder.waitForDecoder(newHeight)
 
@@ -137,7 +137,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
     // ---------------------------------------------------------------
     describe('dispenser edge cases', () => {
 
-        it('B3.1 — should NOT create dispenser for version != 0', async () => {
+        it('B3.1: should NOT create dispenser for version != 0', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
             const action = `DISPENSER|1|GIVE||100||GET||50||||${expiration}|||`
@@ -149,7 +149,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
             await assertDispenserNotExists(global.db, funded.address)
         })
 
-        it('B3.2 — should NOT create dispenser when both giveCoin and getCoin are empty', async () => {
+        it('B3.2: should NOT create dispenser when both giveCoin and getCoin are empty', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
             const action = `DISPENSER|0|||100||||50||||${expiration}|||`
@@ -160,7 +160,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
             await assertDispenserNotExists(global.db, funded.address)
         })
 
-        it('B3.3 — should create dispenser when only giveCoin is set', async () => {
+        it('B3.3: should create dispenser when only giveCoin is set', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
             const action = `DISPENSER|0|ONLY_GIVE||100||||50||||${expiration}|||`
@@ -171,7 +171,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
             await assertDispenserExists(global.db, funded.address)
         })
 
-        it('B3.4 — should create dispenser when only getCoin is set', async () => {
+        it('B3.4: should create dispenser when only getCoin is set', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
             const action = `DISPENSER|0|||100||ONLY_GET||50||||${expiration}|||`

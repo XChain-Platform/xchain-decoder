@@ -24,7 +24,7 @@ const assert = require('assert')
 function checkParseTransactionResult(result, input) {
     const violations = []
 
-    // parseTransaction may return null (for coinbase/non-standard) — that's valid
+    // parseTransaction may return null (for coinbase/non-standard); that's valid
     if (result === null) return { ok: true, violations: [] }
 
     // Must be an object
@@ -137,7 +137,7 @@ function checkDispenserParse(decodedData) {
 
     // The decoder requires length >= 13 and version == 0
     if (parts.length < 13) {
-        // Decoder should skip this — no violation
+        // Decoder should skip this (no violation)
         return { ok: true, violations: [] }
     }
 
@@ -146,7 +146,7 @@ function checkDispenserParse(decodedData) {
         return { ok: true, violations: [] }
     }
 
-    // If we get here, the decoder would process it — check field access safety
+    // If we get here, the decoder would process it; check field access safety
     if (parts[2] === undefined) violations.push('giveCoin (parts[2]) is undefined')
     if (parts[6] === undefined) violations.push('getCoin (parts[6]) is undefined')
     if (parts[9] === undefined) violations.push('getAddress (parts[9]) is undefined')

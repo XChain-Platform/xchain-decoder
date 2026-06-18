@@ -101,7 +101,7 @@ describe('Malformed Data Integration', () => {
             const { blockIndex: bi1 } = await txBuilder.broadcastNonXchnOpReturn(funded1)
             await txBuilder.waitForDecoder(bi1)
 
-            // Now send valid data — decoder should still work
+            // Now send valid data; decoder should still work
             const funded2 = await txBuilder.createFundedLegacyAddress()
             const action = 'SEND|0|STABLE|1|' + global.mainTestAddress + '|recovery test'
             const { txHash, blockIndex: bi2 } = await txBuilder.broadcastOpReturn(funded2, action)

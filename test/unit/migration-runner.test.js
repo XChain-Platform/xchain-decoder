@@ -13,7 +13,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Schema migration runner — pure-logic contract tests (no live DB).
+ * Schema migration runner: pure-logic contract tests (no live DB).
  *
  * Covers _migrationMode() header parsing and the invariant that every committed
  * migration declares its intent explicitly, so a destructive file can never

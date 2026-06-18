@@ -117,7 +117,7 @@ describe('Security: DISPENSER Field Validation', () => {
             const fs = require('fs')
             const source = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8')
 
-            // Look for dispenser version parsing — should use radix 10
+            // Look for dispenser version parsing; should use radix 10
             const dispenserParseIntMatch = source.match(/parseInt\(commandVersion,\s*10\)/)
             assert.ok(dispenserParseIntMatch, 'parseInt for commandVersion should specify radix 10')
         })
@@ -149,7 +149,7 @@ describe('Security: DISPENSER Field Validation', () => {
             tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
             tx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
 
-            // Should not crash — extra pipes shift fields
+            // Should not crash (extra pipes shift fields)
             const result = await decoder.parseTransaction(tx)
             assert.ok(result)
         })

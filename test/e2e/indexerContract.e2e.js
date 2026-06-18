@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E tests: Category E — Indexer Data Contract Verification.
+ * E2E tests: Category E: Indexer Data Contract Verification.
  *
  * Validates the exact data shape that the indexer's getDecoderBlockData()
  * query returns, and verifies normalization table integrity across all
@@ -36,7 +36,7 @@ describe('E2E: Indexer Contract', function () {
     // ---------------------------------------------------------------
     describe('getDecoderBlockData() field contract', () => {
 
-        it('E1.1 — should return all required fields with correct types for OP_RETURN tx', async () => {
+        it('E1.1: should return all required fields with correct types for OP_RETURN tx', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const action = 'SEND|0|CONTRACT|999|' + global.mainTestAddress + '|field test'
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
@@ -79,7 +79,7 @@ describe('E2E: Indexer Contract', function () {
             assert.strictEqual(row.output_destination, null)
         })
 
-        it('E1.2 — should return correct fields for SegWit source tx', async () => {
+        it('E1.2: should return correct fields for SegWit source tx', async () => {
             const funded = await txBuilder.createFundedSegwitAddress()
             const action = 'SEND|0|SEGCONTRACT|1|' + global.mainTestAddress + '|'
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
@@ -99,7 +99,7 @@ describe('E2E: Indexer Contract', function () {
             })
         })
 
-        it('E1.3 — should return correct fields for Taproot source tx', async () => {
+        it('E1.3: should return correct fields for Taproot source tx', async () => {
             const funded = await txBuilder.createFundedTaprootAddress()
             const action = 'SEND|0|TRCONTRACT|1|' + global.mainTestAddress + '|'
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
@@ -119,7 +119,7 @@ describe('E2E: Indexer Contract', function () {
             })
         })
 
-        it('E1.4 — should return correct fields for multisig tx', async () => {
+        it('E1.4: should return correct fields for multisig tx', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const action = 'SEND|0|MSIGCONTRACT|1|' + global.mainTestAddress + '|'
             const { txHash, blockIndex } = await txBuilder.broadcastMultisig(funded, action)
@@ -139,7 +139,7 @@ describe('E2E: Indexer Contract', function () {
             })
         })
 
-        it('E1.5 — should return empty result set for block with no XCHN transactions', async () => {
+        it('E1.5: should return empty result set for block with no XCHN transactions', async () => {
             const height = await txBuilder.mineBlocks(1)
             await txBuilder.waitForDecoder(height)
 
@@ -147,7 +147,7 @@ describe('E2E: Indexer Contract', function () {
             assert.strictEqual(rows.length, 0, 'Empty block should return no rows')
         })
 
-        it('E1.6 — DISPENSER tx should show dispenser output fields when payment exists', async () => {
+        it('E1.6: DISPENSER tx should show dispenser output fields when payment exists', async () => {
             // Create a dispenser
             const dispenserFunded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
@@ -187,7 +187,7 @@ describe('E2E: Indexer Contract', function () {
     // ---------------------------------------------------------------
     describe('blocks table contract', () => {
 
-        it('E2.1 — should track the last block index accurately', async () => {
+        it('E2.1: should track the last block index accurately', async () => {
             const info = await global.nodeClientTest.getBlockchainInfo()
             const chainHeight = info.blocks
             await txBuilder.waitForDecoder(chainHeight)
@@ -196,7 +196,7 @@ describe('E2E: Indexer Contract', function () {
             assert.strictEqual(lastBlock, chainHeight)
         })
 
-        it('E2.2 — should store block hash as 64-char hex', async () => {
+        it('E2.2: should store block hash as 64-char hex', async () => {
             const info = await global.nodeClientTest.getBlockchainInfo()
             const blockIndex = info.blocks
             await txBuilder.waitForDecoder(blockIndex)
@@ -208,7 +208,7 @@ describe('E2E: Indexer Contract', function () {
             assert.ok(/^[0-9a-f]{64}$/.test(block.block_hash), 'Block hash must be lowercase hex')
         })
 
-        it('E2.3 — block hash should match the coin node', async () => {
+        it('E2.3: block hash should match the coin node', async () => {
             const info = await global.nodeClientTest.getBlockchainInfo()
             const blockIndex = info.blocks
             await txBuilder.waitForDecoder(blockIndex)
@@ -224,11 +224,11 @@ describe('E2E: Indexer Contract', function () {
     // ---------------------------------------------------------------
     describe('normalization table integrity', () => {
 
-        it('E3.1 — all source_ids should resolve in index_addresses', async () => {
+        it('E3.1: all source_ids should resolve in index_addresses', async () => {
             await assertNormalizationIntegrity(global.db)
         })
 
-        it('E3.2 — same address across multiple transactions should use same address_id', async () => {
+        it('E3.2: same address across multiple transactions should use same address_id', async () => {
             // Create two transactions from different funded addresses but both
             // referencing mainTestAddress in the ACTION string. The source will
             // be different, but we can check the source_id is consistent.
@@ -253,7 +253,7 @@ describe('E2E: Indexer Contract', function () {
             assert.ok(tx2.source.length > 0)
         })
 
-        it('E3.3 — tx_hash should be unique across all transactions', async () => {
+        it('E3.3: tx_hash should be unique across all transactions', async () => {
             const connection = await global.db.pool.getConnection()
             try {
                 const rows = await connection.query(`
@@ -271,7 +271,7 @@ describe('E2E: Indexer Contract', function () {
             }
         })
 
-        it('E3.4 — tx_index should be unique and sequential', async () => {
+        it('E3.4: tx_index should be unique and sequential', async () => {
             const connection = await global.db.pool.getConnection()
             try {
                 // Check for duplicate tx_index values
@@ -283,7 +283,7 @@ describe('E2E: Indexer Contract', function () {
                 `)
                 assert.strictEqual(dupes.length, 0, 'No duplicate tx_index values')
 
-                // Check for gaps — the count of transactions should equal max - min + 1
+                // Check for gaps: the count of transactions should equal max - min + 1
                 // (only if there are transactions)
                 const stats = await connection.query(`
                     SELECT MIN(tx_index) as min_idx, MAX(tx_index) as max_idx, COUNT(*) as cnt

@@ -19,7 +19,7 @@
  * keeps existing databases in sync with the canonical src/sql/*.sql sources. It relies
  * on parseExpectedColumns(), whose regex only recognizes a `CREATE TABLE ... ) ENGINE`
  * definition. If a source file can't be parsed (e.g. a missing ENGINE clause), the
- * reconciler SILENTLY skips that whole table — additive column drift never applies.
+ * reconciler SILENTLY skips that whole table; additive column drift never applies.
  *
  * This locks the invariant: every table source in src/sql/ MUST be parseable into at
  * least one column, so drift reconciliation can never be silently disabled for a table.
@@ -55,14 +55,14 @@ describe('src/sql schema parse-coverage @regression', function () {
 
             it('is parseable by the drift reconciler (non-null)', function () {
                 assert.ok(cols !== null,
-                    file + ' could not be parsed by parseExpectedColumns — the column-drift ' +
+                    file + ' could not be parsed by parseExpectedColumns: the column-drift ' +
                     'reconciler would SILENTLY skip this table. Ensure the CREATE TABLE ends with ' +
                     'a `) ENGINE=...` clause (matching the other src/sql files).');
             });
 
             it('yields at least one column', function () {
                 assert.ok(Array.isArray(cols) && cols.length > 0,
-                    file + ' parsed to zero columns — drift reconciliation would be a no-op.');
+                    file + ' parsed to zero columns; drift reconciliation would be a no-op.');
             });
 
             it('every parsed column has a name and a definition', function () {

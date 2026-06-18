@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 // Unit tests for the litecoin-specific blockFromBuffer path (lines 55-111 of
-// XChainBlockDecoder.js) — the custom block parser that handles Litecoin's
+// XChainBlockDecoder.js, the custom block parser that handles Litecoin's
 // HogEx / MWEB extension marker bytes.
 //
 // We build minimal valid serialised Litecoin block buffers in-process rather
@@ -162,7 +162,7 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
         const txBuf  = buildMinimalTxBuf({ version: 1 })
         const blockBuf = buildBlockBuf(header, [txBuf])
 
-        // Bitcoin takes the default path — should parse without error
+        // Bitcoin takes the default path and should parse without error
         const block = btcDecoder.blockFromBuffer(blockBuf)
         assert.ok(block)
         assert.strictEqual(block.version, 2)
@@ -212,7 +212,7 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
 
 // ─── forged transaction count (varint sanity bound) ──────────────────────────
 
-describe('XChainBlockDecoder litecoin blockFromBuffer — forged tx count', () => {
+describe('XChainBlockDecoder litecoin blockFromBuffer: forged tx count', () => {
     let decoder
 
     beforeEach(() => {

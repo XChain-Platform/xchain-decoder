@@ -58,8 +58,8 @@ describe('Indexer Contract Query', () => {
             await txBuilder.waitForDecoder(blockIndex)
 
             const rows = await getDecoderBlockData(global.db, blockIndex)
-            // The only XChain tx candidates are our plain send — which has no XCHN data
-            // and the coinbase — which is skipped. Filter to just our block's rows.
+            // The only XChain tx candidates are our plain send (which has no XCHN data)
+            // and the coinbase (which is skipped). Filter to just our block's rows.
             const xchnRows = rows.filter(r => r.block_index === blockIndex)
             // May be 0 or there may be funding txs from previous test setup,
             // but our plain tx should NOT appear

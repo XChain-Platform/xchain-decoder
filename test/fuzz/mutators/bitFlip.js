@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Bit-flip mutator — flips random bits within a Buffer.
+ * Bit-flip mutator: flips random bits within a Buffer.
  */
 
 const crypto = require('crypto')

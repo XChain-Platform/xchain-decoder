@@ -97,7 +97,7 @@ describe('Security: Connection Handling', () => {
             assert.strictEqual(secondAcquired, false)
             assert.strictEqual(db._transactionLockQueue.length, 1)
 
-            // Release first — second should resolve
+            // Release first; second should resolve
             db._releaseTransactionLock()
             await secondPromise
             assert.strictEqual(secondAcquired, true)
@@ -145,7 +145,7 @@ describe('Security: Connection Handling', () => {
     //
     // deleteBlockByIndex runs four DELETE queries inside a transaction. If one
     // of them throws (DB timeout, deadlock, disk full) the error must not escape
-    // with the lock still held — that would permanently deadlock every later
+    // with the lock still held. A held lock permanently deadlocks every later
     // caller waiting on _acquireTransactionLock(), including verifyReorg's own
     // retry loop, halting all block ingestion until a manual restart.
 

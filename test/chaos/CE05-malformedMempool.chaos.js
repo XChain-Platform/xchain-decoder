@@ -76,8 +76,8 @@ describe('CE-05: Malformed Mempool Transaction', function () {
 
         mockConnector.getRawMempool.resolves(['badtx', 'goodtx'])
         mockConnector.getRawTransactions.resolves([
-            'zzzz_not_hex',  // Invalid — should be caught and logged
-            validCoinbaseTxHex  // Valid coinbase — will be parsed (coinbase returns null from parseTransaction)
+            'zzzz_not_hex',  // Invalid: should be caught and logged
+            validCoinbaseTxHex  // Valid coinbase: will be parsed (coinbase returns null from parseTransaction)
         ])
         mockDb.deleteAndCompareTxsNotInList.resolves({ transactionsDeleted: 0 })
 

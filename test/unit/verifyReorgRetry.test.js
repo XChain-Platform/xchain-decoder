@@ -16,7 +16,7 @@ const XChainDecoder = require('../../src/XChainDecoder')
 // Bug: retryCount was declared once before the block-deletion loop and shared
 // across every block removed in a reorg. A multi-block reorg with a few transient
 // deleteBlockByIndex failures per block could exhaust the 10-attempt budget
-// collectively and abort before all orphan blocks were removed — leaving stale
+// collectively and abort before all orphan blocks were removed, leaving stale
 // pre-reorg blocks in the decoder DB that the indexer would treat as valid chain.
 //
 // Fix: reset retryCount to 0 after each successful delete, so the 10-attempt

@@ -34,7 +34,7 @@ const SQL_DIR = path.join(__dirname, '..', '..', 'src', 'sql');
 
 describe('Database.verifyTables() file filtering @regression', function () {
 
-    it('src/sql contains a non-.sql entry (the migrations dir) — the regression trigger', function () {
+    it('src/sql contains a non-.sql entry (the migrations dir): the regression trigger', function () {
         const entries = fs.readdirSync(SQL_DIR);
         const nonSql = entries.filter(e => !e.endsWith('.sql'));
         assert.ok(nonSql.includes('migrations'),
