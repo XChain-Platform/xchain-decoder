@@ -117,22 +117,28 @@ class CryptoNetworks {
     // TODO: this config data should come from xchain-hub (https://github.com/XChain-platform/xchain-hub/issues/1)
     static getFirstBlock(networkName){
         switch(networkName){
+            // Start heights are anchored near the chain tip pre-launch: there is no
+            // committed XChain state below these heights, so a fresh bootstrap only
+            // indexes a small recent window instead of re-walking millions of empty
+            // blocks. The height is not part of any consensus hash; it is purely the
+            // indexing boundary. Re-pinned higher pre-launch (2026-06-19); dogecoin-mainnet
+            // sits just below its first live anchor (6,243,921) so the anchor stream is kept.
             case "bitcoin-mainnet":
-                return 900000;
+                return 950000;
             case "bitcoin-testnet":
-                return 100000;
+                return 138000;
             case "litecoin-mainnet":
-                return 3000000;
+                return 3120000;
             case "litecoin-testnet":
-                return 4470000;
+                return 4765000;
             case "dogecoin-mainnet":
-                return 6000000;
+                return 6240000;
             case "dogecoin-testnet":
-                // DOGE testnet mints min-difficulty blocks ~every 20s, so the
-                // chain runs tens of millions of blocks ahead of the other
-                // networks. Anchor near the current tip to avoid indexing ~42M
-                // pre-launch blocks (which bloated the decoder DB to ~13.8GB).
-                return 62500000;
+                // DOGE testnet mints min-difficulty blocks ~every 20s, so the chain runs
+                // tens of millions of blocks ahead of the other networks. Anchor near the
+                // current tip; it climbs above this over time, so periodic re-pins may be
+                // wanted. (Was 62,500,000; re-pinned 2026-06-19.)
+                return 64800000;
             // All regtest networks start parsing at block 0
             default:
                 return 0;
