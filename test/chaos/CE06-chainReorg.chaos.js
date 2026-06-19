@@ -7,7 +7,7 @@
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available —
+ * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
  **********************************************************************
@@ -75,7 +75,7 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         assert.strictEqual(deletedBlocks.length, 2, 'REORG event should contain 2 deleted blocks')
 
         // The audit log must record the actual rolled-back block hash for every
-        // entry — never null/undefined. Each entry's block_hash must be a
+        // entry (never null/undefined). Each entry's block_hash must be a
         // non-empty string carrying the hash that was in the DB.
         for (const entry of deletedBlocks) {
             assert.strictEqual(typeof entry.block_hash, 'string', `block_hash for index ${entry.block_index} must be a string, got ${entry.block_hash}`)
@@ -149,6 +149,16 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         assert.ok(mockDb.insertEvent.calledOnce, 'Should still record the REORG event for the deleted blocks')
         assert.strictEqual(mockDb.insertEvent.firstCall.args[0], 'REORG')
         assert.strictEqual(mockDb.insertEvent.firstCall.args[1].length, 3, 'REORG event should contain all 3 deleted blocks')
+
+        const exhaustedBlocks = mockDb.insertEvent.firstCall.args[1]
+        for (const entry of exhaustedBlocks) {
+            assert.strictEqual(typeof entry.block_hash, 'string', `block_hash for index ${entry.block_index} must be a string, got ${entry.block_hash}`)
+            assert.ok(entry.block_hash.length > 0, `block_hash for index ${entry.block_index} must be non-empty`)
+        }
+        const exhaustedByIndex = Object.fromEntries(exhaustedBlocks.map(b => [b.block_index, b.block_hash]))
+        assert.strictEqual(exhaustedByIndex[2], 'old_hash_2', 'REORG event should record the original hash of block 2')
+        assert.strictEqual(exhaustedByIndex[1], 'old_hash_1', 'REORG event should record the original hash of block 1')
+        assert.strictEqual(exhaustedByIndex[0], 'old_hash_0', 'REORG event should record the original hash of block 0')
     })
 
     it('verifyReorg should not insert event when no reorg found', async function () {
@@ -200,7 +210,7 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
 
     it('[REGRESSION P0] verifyReorg deletes blocks above the node tip without an RPC hash query', async function () {
         // F-9(b): the node tip dropped to 5 but the decoder still has 8,7,6 stored.
-        // Those are orphans the node no longer has — getBlockHash(8) throws "Block
+        // Those are orphans the node no longer has. getBlockHash(8) throws "Block
         // height out of range", and the transient-error catch would retry it forever.
         // verifyReorg(5) must delete 8,7,6 via a deterministic height compare (no RPC,
         // no brittle error-string matching), then hash-compare from the in-range tip.
@@ -232,8 +242,8 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
 
     it('[REGRESSION P0] reconciles when the node tip regresses below the decoder height', async function () {
         // F-9(a): node tip is 5 but the decoder has processed up to 10 (a node
-        // rollback / deep reorg). The forward hash-compare path never fires — there
-        // is no block ABOVE our height to fetch — so without the regression-branch
+        // rollback / deep reorg). The forward hash-compare path never fires: there
+        // is no block ABOVE our height to fetch, so without the regression-branch
         // reconcile the decoder loops forever logging the gap while orphan blocks
         // 6..10 survive (which the indexer inherits). The branch must call
         // verifyReorg with the current node tip.

@@ -6,7 +6,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/version-1.8.3-blue" alt="Version">
   <img src="https://img.shields.io/badge/tests-500%2B%20passing-brightgreen" alt="Tests">
-  <img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node">
+  <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-Dankest%20Community-orange" alt="License">
 </p>
 
@@ -18,17 +18,17 @@ Transaction extraction service for the XChain Platform. Polls cryptocurrency nod
 
 ## Features
 
-- **Multi-chain support** — Bitcoin, Litecoin, and Dogecoin on mainnet, testnet, and regtest
-- **AES-128-CTR deobfuscation** — derives key and IV from the first input's txid
-- **Four encoding formats** — OP_RETURN, P2SH (reassembled from scriptSigs), P2WSH (reassembled from witness data), and 1-of-3 multisig
-- **Chain-specific parsing** — Litecoin MWEB/HogEx flag stripping; Dogecoin AuxPoW header stripping
-- **Block reorganization detection** — identifies chain tip changes and rolls back affected blocks
-- **DISPENSER protocol** — tracks active dispensers with expiration, detects incoming payments
-- **Mempool tracking** — indexes unconfirmed transactions every 60 seconds when synced
-- **Normalized storage** — addresses and hashes stored as integer IDs for join efficiency
-- **ACTION validation** — 33-name whitelist enforced before database writes
-- **Graceful shutdown** — SIGTERM/SIGINT handlers complete in-flight work
-- **500+ tests** — unit, integration, e2e, boundary, security, fuzz, chaos, regression, benchmarks, mutation
+- **Multi-chain support**: Bitcoin, Litecoin, and Dogecoin on mainnet, testnet, and regtest
+- **AES-128-CTR deobfuscation**: derives key and IV from the first input's txid
+- **Four encoding formats**: OP_RETURN, P2SH (reassembled from scriptSigs), P2WSH (reassembled from witness data), and 1-of-3 multisig
+- **Chain-specific parsing**: Litecoin MWEB/HogEx flag stripping; Dogecoin AuxPoW header stripping
+- **Block reorganization detection**: identifies chain tip changes and rolls back affected blocks
+- **DISPENSER protocol**: tracks active dispensers with expiration, detects incoming payments
+- **Mempool tracking**: indexes unconfirmed transactions every 60 seconds when synced
+- **Normalized storage**: addresses and hashes stored as integer IDs for join efficiency
+- **ACTION validation**: 33-name whitelist enforced before database writes
+- **Graceful shutdown**: SIGTERM/SIGINT handlers complete in-flight work
+- **500+ tests**: unit, integration, e2e, boundary, security, fuzz, chaos, regression, benchmarks, mutation
 
 ## Documentation
 
@@ -39,7 +39,7 @@ Full decoder documentation is available in the [xchain-documentation](https://gi
 | [README](https://github.com/XChain-platform/xchain-documentation/blob/master/components/decoder/README.md) | Overview, installation, quick start, scripts, dependencies |
 | [Architecture](https://github.com/XChain-platform/xchain-documentation/blob/master/components/decoder/ARCHITECTURE.md) | Data pipeline, internal components, polling loop, deobfuscation, reorg handling |
 | [Configuration](https://github.com/XChain-platform/xchain-documentation/blob/master/components/decoder/CONFIGURATION.md) | Environment variables, internal constants, network-specific settings |
-| [Database](https://github.com/XChain-platform/xchain-documentation/blob/master/components/decoder/DATABASE.md) | Full schema reference — 8 tables covering blocks, transactions, dispensers, indexes, events |
+| [Database](https://github.com/XChain-platform/xchain-documentation/blob/master/components/decoder/DATABASE.md) | Full schema reference: 8 tables covering blocks, transactions, dispensers, indexes, events |
 | [Operations](https://github.com/XChain-platform/xchain-documentation/blob/master/components/decoder/OPERATIONS.md) | Running, Docker, API endpoints, reorg handling, mempool, troubleshooting |
 
 ## Quick Start
@@ -104,7 +104,7 @@ npm run api
 | E2E | 50+ | Full decoder pipeline: action decoding, dispenser lifecycle, multi-block processing, error handling |
 | Fuzz | 42 | 5 harnesses: removeObfuscation, parseTransaction, blockDecoder, dispenserParsing, pipeline |
 | Chaos | 50 | Node unavailability, RPC timeouts, DB pool exhaustion, mid-transaction failures, chain reorgs, signal handling |
-| Regression | 76 | Tiered: P0 critical (47), P1 high (10), P2 standard (19) — tagged across all suites |
+| Regression | 76 | Tiered: P0 critical (47), P1 high (10), P2 standard (19) -- tagged across all suites |
 | Benchmarks | 7 | Deobfuscation, parse-transaction, block-processing, sustained-sync, spike-load, large-payload, mempool-stress |
 | Mutation | 2 | Phase 1 (unit) and Phase 2 (unit + security) via Stryker Mutator |
 | **Total** | **500+** | |

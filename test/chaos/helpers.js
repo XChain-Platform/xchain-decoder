@@ -7,7 +7,7 @@
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available —
+ * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
  **********************************************************************
@@ -49,6 +49,7 @@ function createMockDatabase(overrides = {}) {
         purgeExpiredDispensers: sinon.stub().resolves(true),
         deleteAndCompareTxsNotInList: sinon.stub().resolves({ transactionsDeleted: 0 }),
         isThereADispenserForAddress: sinon.stub().resolves(false),
+        getAllOpenDispenserAddresses: sinon.stub().resolves(new Set()),
         deleteBlockByIndex: sinon.stub().resolves(true),
         dropDatabase: sinon.stub().resolves(),
         getConnection: sinon.stub().resolves({

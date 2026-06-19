@@ -8,3 +8,4 @@ CREATE TABLE dispensers (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
 CREATE INDEX dispensers_expired_block_index ON dispensers (expired_block_index);
+CREATE INDEX dispensers_expiration ON dispensers (expiration);
