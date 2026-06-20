@@ -129,7 +129,13 @@ async function startApi(){
                 lastProcessedBlock: syncStatus.last_processed_block,
                 chainTipBlock: syncStatus.node_height,
                 blockLag: syncStatus.lag,
-                lag_blocks: Math.max(0, (decoder.blockchainInfoLastBlock || 0) - (decoder.lastProcessedBlockIndex || 0)),
+                // null when either height is still unknown (-1 before the first
+                // getBlockchainInfo, or nothing processed yet): the old Math.max(0, ...)
+                // clamp turned a genuinely-unknown/negative gap into a false "synced 0",
+                // disagreeing with blockLag above. Report the true gap or null.
+                lag_blocks: (decoder.blockchainInfoLastBlock >= 0 && decoder.lastProcessedBlockIndex >= 0)
+                    ? (decoder.blockchainInfoLastBlock - decoder.lastProcessedBlockIndex)
+                    : null,
                 rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors,
                 parse_errors: decoder.parseErrors,
                 error: decoderError ? decoderError.message : null
