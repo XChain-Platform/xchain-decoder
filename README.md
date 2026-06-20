@@ -4,14 +4,14 @@
 # XChain Platform Decoder
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.8.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.11.14-blue" alt="Version">
   <img src="https://img.shields.io/badge/tests-500%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
-  <img src="https://img.shields.io/badge/license-Dankest%20Community-orange" alt="License">
+  <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20fuzz%20%7C%20chaos%20%7C%20mutation%20%7C%20boundary%20%7C%20smoke%20%7C%20security%20%7C%20regression-brightgreen" alt="Coverage">
+  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20security%20%7C%20fuzz%20%7C%20chaos%20%7C%20mutation%20%7C%20regression%20%7C%20benchmarks%20%7C%20smoke-brightgreen" alt="Coverage">
 </p>
 
 Transaction extraction service for the XChain Platform. Polls cryptocurrency nodes (Bitcoin, Litecoin, Dogecoin) via JSON-RPC, parses every block, identifies XChain-encoded transactions, deobfuscates the embedded ACTION payloads using AES-128-CTR, and writes the raw decoded data to a MariaDB database for the indexer to process.
@@ -23,12 +23,15 @@ Transaction extraction service for the XChain Platform. Polls cryptocurrency nod
 - **Four encoding formats**: OP_RETURN, P2SH (reassembled from scriptSigs), P2WSH (reassembled from witness data), and 1-of-3 multisig
 - **Chain-specific parsing**: Litecoin MWEB/HogEx flag stripping; Dogecoin AuxPoW header stripping
 - **Block reorganization detection**: identifies chain tip changes and rolls back affected blocks
-- **DISPENSER protocol**: tracks active dispensers with expiration, detects incoming payments
+- **DISPENSER protocol**: tracks active dispensers with soft-expiry, hard-purge after reorg-safe depth, and incoming payment detection
 - **Mempool tracking**: indexes unconfirmed transactions every 60 seconds when synced
 - **Normalized storage**: addresses and hashes stored as integer IDs for join efficiency
-- **ACTION validation**: 33-name whitelist enforced before database writes
+- **ACTION validation**: 33-name allowlist plus 5 short-form aliases (e.g. TRANSFER -> SEND) expanded before database writes
+- **Parse-failure quarantine**: tx-level decode failures retry up to 3 times, then are quarantined as PARSE_ERROR events rather than halting the block
+- **Source pubkey capture**: records the source address pubkey per transaction in a dedicated table for downstream use by the indexer
+- **Native-coin fee tracking**: when FEE_DESTINATION is set, outputs paying that address are persisted to transaction_outputs for indexer fee validation
 - **Graceful shutdown**: SIGTERM/SIGINT handlers complete in-flight work
-- **500+ tests**: unit, integration, e2e, boundary, security, fuzz, chaos, regression, benchmarks, mutation
+- **500+ tests**: unit, integration, e2e, security, fuzz, chaos, mutation, regression, benchmarks, smoke
 
 ## Documentation
 
@@ -121,14 +124,3 @@ with a commercial license available for proprietary use.
 You may use, modify, and distribute this material under the terms of the License.
 See [LICENSE](./LICENSE.md) and [NOTICE](./NOTICE.md) for full terms.
 See the [licensing overview](https://docs.xchain.io/legal/licensing).
-
-## License
-
-XChain Platform is **open source**, dual-licensed under:
-
-- the **[GNU Affero General Public License v3.0](./LICENSE.md)** (`AGPL-3.0-or-later`), free for everyone, and
-- a **[commercial license](https://docs.xchain.io/legal/commercial-license)** for companies that need to keep modifications private.
-
-See the **[licensing overview](https://docs.xchain.io/legal/licensing)** for which one applies to you. "XChain" is a trademark of Dankest, LLC. See the **[Trademark Policy](https://docs.xchain.io/legal/trademark)**.
-
-Copyright © 2025-2026 Dankest, LLC.
