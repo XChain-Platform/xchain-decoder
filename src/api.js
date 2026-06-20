@@ -18,7 +18,6 @@
  * 
  ********************************************************************/
 
-// Load required libraries
 const dotenv = require('dotenv')
 dotenv.config()
 
@@ -49,7 +48,6 @@ const AUX_POW = process.env.AUX_POW === 'true' || process.env.AUX_POW === '1'
 const FEE_DESTINATION = process.env.FEE_DESTINATION || null
 
 async function startApi(){
-    //Start the indexer
     const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DECODER_DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD, AUX_POW, FEE_DESTINATION);
     let decoderRunning = true
     let decoderError = null
@@ -71,10 +69,7 @@ async function startApi(){
         console.error('Unhandled promise rejection:', reason)
     })
 
-    // Create the app
     const app = express();
-
-    // Use Helmet to increase security
     app.use(helmet());
 
     // Rate limiting (requests per minute per IP; override with DECODER_RATE_LIMIT_RPM)
@@ -85,9 +80,7 @@ async function startApi(){
         legacyHeaders: false
     }));
 
-    // Allow JSON requests with size limit
     app.use(bodyParser.json({ limit: '100kb' }));
-
     // Allow CORS for development
     app.use(cors());
 
@@ -153,11 +146,8 @@ async function startApi(){
         }
     }
 
-    // Allow JSON-RPC requests
     app.use(jsonRouter({methods: jsonRpcController}))
 
-
-    // Start the server
     app.listen(DECODER_API_PORT, () => {
       console.log('API listening on port '+DECODER_API_PORT);
     });

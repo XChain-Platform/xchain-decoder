@@ -18,7 +18,6 @@
  * 
  ********************************************************************/
 
-// Load required libraries
 const axios = require('axios');
 axios.defaults.timeout = parseInt(process.env.NODE_RPC_TIMEOUT ?? '30000', 10)
 
@@ -47,7 +46,6 @@ class BlockchainConnector {
                     id: 1
                 }
 
-                // Make the request to the node
                 const response = await axios.post(this.url, data, {
                     auth: {
                         username: this.rpcUser,
@@ -55,7 +53,6 @@ class BlockchainConnector {
                     }
                 })
 
-                // Verify if there is a result and return it
                 if (response.data.result) {
                     return response.data.result;
                 } else {
@@ -87,7 +84,6 @@ class BlockchainConnector {
                     id: 1
                 }
 
-                // Make the request to the node
                 const response = await axios.post(this.url, data, {
                     auth: {
                         username: this.rpcUser,
@@ -95,7 +91,6 @@ class BlockchainConnector {
                     }
                 })
 
-                // Verify if there is a result and return it
                 if (response.data.result) {
                     return response.data.result;
                 } else {
@@ -133,7 +128,6 @@ class BlockchainConnector {
                     id: 1,
                 }
 
-                // Make the request to the node
                 const response = await axios.post(this.url, data, {
                     auth: {
                         username: this.rpcUser,
@@ -141,7 +135,6 @@ class BlockchainConnector {
                     }
                 })
 
-                // Verify if there is a result and return it
                 if (response.data.result) {
                     return response.data.result;
                 } else {
@@ -174,7 +167,6 @@ class BlockchainConnector {
                     id: 1,
                 }
 
-                // Make the request to the node
                 const response = await axios.post(this.url, data, {
                     auth: {
                         username: this.rpcUser,
@@ -182,7 +174,6 @@ class BlockchainConnector {
                     }
                 })
 
-                // Verify if there is a result and return it
                 if (response.data.result) {
                     return response.data.result;
                 } else {
@@ -192,7 +183,6 @@ class BlockchainConnector {
                 if (error.code === 'ECONNABORTED') {
                     tries = tries - 1
                     console.log("Getting timeout trying to get block hex, trying again...")
-                    //Do nothing, let the while to try again
                 } else {
                     this.rpcErrors++
                     console.error('Error getting block header:', error);
@@ -253,7 +243,6 @@ class BlockchainConnector {
                     id: 1
                 }
 
-                // Make the request to the node
                 const response = await axios.post(this.url, data, {
                     auth: {
                         username: this.rpcUser,
@@ -261,7 +250,6 @@ class BlockchainConnector {
                     }
                 })
 
-                // Verify if there is a result and return it
                 if (response.data.result) {
                     return response.data.result;
                 } else {
@@ -368,7 +356,6 @@ class BlockchainConnector {
                     id: 1,
                 }
 
-                // Make the request to the node
                 const response = await axios.post(this.url, data, {
                     auth: {
                         username: this.rpcUser,
@@ -376,7 +363,6 @@ class BlockchainConnector {
                     }
                 })
 
-                // Verify if there is a result and return it
                 if (response.data.result) {
                     return response.data.result;
                 } else {
