@@ -35,20 +35,20 @@ Transaction extraction service for the XChain Platform. Polls cryptocurrency nod
 
 ## Documentation
 
-Full decoder documentation is available in the [xchain-documentation](https://github.com/XChain-platform/xchain-documentation/tree/master/components/decoder) repository:
+Full decoder documentation is available in the [xchain-documentation](https://github.com/XChain-Platform/xchain-documentation/tree/master/components/decoder) repository:
 
 | Document | Description |
 |---|---|
-| [README](https://github.com/XChain-platform/xchain-documentation/blob/master/components/decoder/README.md) | Overview, installation, quick start, scripts, dependencies |
-| [Architecture](https://github.com/XChain-platform/xchain-documentation/blob/master/components/decoder/ARCHITECTURE.md) | Data pipeline, internal components, polling loop, deobfuscation, reorg handling |
-| [Configuration](https://github.com/XChain-platform/xchain-documentation/blob/master/components/decoder/CONFIGURATION.md) | Environment variables, internal constants, network-specific settings |
-| [Database](https://github.com/XChain-platform/xchain-documentation/blob/master/components/decoder/DATABASE.md) | Full schema reference: 8 tables covering blocks, transactions, dispensers, indexes, events |
-| [Operations](https://github.com/XChain-platform/xchain-documentation/blob/master/components/decoder/OPERATIONS.md) | Running, Docker, API endpoints, reorg handling, mempool, troubleshooting |
+| [README](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/README.md) | Overview, installation, quick start, scripts, dependencies |
+| [Architecture](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/ARCHITECTURE.md) | Data pipeline, internal components, polling loop, deobfuscation, reorg handling |
+| [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/CONFIGURATION.md) | Environment variables, internal constants, network-specific settings |
+| [Database](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/DATABASE.md) | Full schema reference: 8 tables covering blocks, transactions, dispensers, indexes, events |
+| [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/OPERATIONS.md) | Running, Docker, API endpoints, reorg handling, mempool, troubleshooting |
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/XChain-platform/xchain-decoder.git
+git clone https://github.com/XChain-Platform/xchain-decoder.git
 cd xchain-decoder
 npm install
 ```
