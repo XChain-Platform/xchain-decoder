@@ -15,19 +15,31 @@ const CryptoNetworks = require('../../src/CryptoNetworks')
 describe('CryptoNetworks', () => {
 
     describe('#getBitcoinJsNetwork()', () => {
-        it('[REGRESSION P2] R-NET-001: should return bitcoinjs bitcoin mainnet for "bitcoin-mainnet"', () => {
+        // getBitcoinJsNetwork spreads the bitcoinjs-lib built-in and adds the
+        // relay-policy fields (dustThreshold, etc.), so it returns a fresh
+        // object rather than the built-in by reference. Assert the built-in
+        // fields carry through and the augmented field is present.
+        it('[REGRESSION P2] R-NET-001: should return bitcoinjs bitcoin mainnet params for "bitcoin-mainnet"', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('bitcoin-mainnet')
-            assert.strictEqual(net, bitcoin.networks.bitcoin)
+            assert.strictEqual(net.bech32, bitcoin.networks.bitcoin.bech32)
+            assert.strictEqual(net.pubKeyHash, bitcoin.networks.bitcoin.pubKeyHash)
+            assert.strictEqual(net.scriptHash, bitcoin.networks.bitcoin.scriptHash)
+            assert.strictEqual(net.wif, bitcoin.networks.bitcoin.wif)
+            assert.strictEqual(net.dustThreshold, 546)
         })
 
-        it('[REGRESSION P2] R-NET-001: should return bitcoinjs testnet for "bitcoin-testnet"', () => {
+        it('[REGRESSION P2] R-NET-001: should return bitcoinjs testnet params for "bitcoin-testnet"', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('bitcoin-testnet')
-            assert.strictEqual(net, bitcoin.networks.testnet)
+            assert.strictEqual(net.bech32, bitcoin.networks.testnet.bech32)
+            assert.strictEqual(net.pubKeyHash, bitcoin.networks.testnet.pubKeyHash)
+            assert.strictEqual(net.dustThreshold, 546)
         })
 
-        it('[REGRESSION P2] R-NET-001: should return bitcoinjs regtest for "bitcoin-regtest"', () => {
+        it('[REGRESSION P2] R-NET-001: should return bitcoinjs regtest params for "bitcoin-regtest"', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('bitcoin-regtest')
-            assert.strictEqual(net, bitcoin.networks.regtest)
+            assert.strictEqual(net.bech32, bitcoin.networks.regtest.bech32)
+            assert.strictEqual(net.pubKeyHash, bitcoin.networks.regtest.pubKeyHash)
+            assert.strictEqual(net.dustThreshold, 546)
         })
 
         it('[REGRESSION P2] R-NET-001: should return Dogecoin mainnet config with correct pubKeyHash', () => {
