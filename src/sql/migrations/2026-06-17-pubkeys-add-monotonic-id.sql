@@ -1,7 +1,9 @@
 -- xchain:migration mode=auto
 -- (auto: a purely additive column + unique index. No data conversion, no
---  backfill of existing semantics, no destructive change. Safe to apply on a
---  running decoder; idempotent via ADD COLUMN IF NOT EXISTS.)
+--  backfill of existing semantics, no destructive change. IMPORTANT: adding an
+--  AUTO_INCREMENT column forces a full InnoDB table rebuild (not ALGORITHM=INSTANT)
+--  under a shared metadata lock. Apply at decoder startup or with the decoder
+--  stopped, not against a live writer. Idempotent via ADD COLUMN IF NOT EXISTS.)
 --
 -- Migration: pubkeys  ADD  id BIGINT UNSIGNED AUTO_INCREMENT UNIQUE
 --            (monotonic surrogate paging cursor; replication-local only).

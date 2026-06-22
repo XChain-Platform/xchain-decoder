@@ -12,9 +12,10 @@
 -- are the binding constraint: once either table accumulates ~4.3 billion unique
 -- rows, AUTO_INCREMENT wraps and the next INSERT fails with a duplicate-key
 -- error, halting address/hash interning and therefore all block ingestion. The
--- pubkeys, transactions, blocks, dispensers, transaction_outputs and
--- mempool_transactions tables all store these ids as foreign keys, so they share
--- the same 32-bit ceiling.
+-- pubkeys, transactions, blocks, dispensers, and transaction_outputs tables all
+-- store these ids as foreign keys, so they share the same 32-bit ceiling.
+-- (mempool_transactions was de-id'd by 2026-06-15-mempool-raw-strings.sql and
+-- no longer holds widenable FK ids.)
 --
 -- There is no live bug today -- every column is internally consistent and the row
 -- counts are nowhere near the limit. This is a forward-looking schema upgrade: it
