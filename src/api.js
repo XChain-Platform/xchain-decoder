@@ -41,7 +41,14 @@ const DB_PORT =  process.env.DECODER_DB_PORT
 const DECODER_DB_NAME =  process.env.DECODER_DB_NAME
 const DECODER_DB_USER =  process.env.DECODER_DB_USER
 const DB_PASSWORD =  process.env.DECODER_DB_PASS
-const DECODER_API_PORT = process.env.DECODER_API_PORT
+// Validate required env vars that have no safe default early: a missing port
+// causes Node to bind a random OS-assigned port, making the container appear
+// healthy while every downstream caller gets connection-refused.
+const DECODER_API_PORT = parseInt(process.env.DECODER_API_PORT, 10)
+if (!process.env.DECODER_API_PORT || isNaN(DECODER_API_PORT) || DECODER_API_PORT < 1 || DECODER_API_PORT > 65535) {
+    console.error('DECODER_API_PORT is not set or invalid. Set a valid port (1-65535) in the environment.')
+    process.exit(1)
+}
 const AUX_POW = process.env.AUX_POW === 'true' || process.env.AUX_POW === '1'
 // Native-coin protocol fee destination for this coin+network. When set, the decoder also persists
 // outputs paying it to transaction_outputs so the indexer can validate native-coin fee payments.

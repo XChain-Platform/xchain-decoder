@@ -1,5 +1,5 @@
 -- xchain:migration mode=auto
--- (auto: a lossless column widening — TEXT -> MEDIUMTEXT. Safe to apply on a
+-- (auto: a lossless column widening from TEXT to MEDIUMTEXT. Safe to apply on a
 --  running decoder; no data conversion, no backfill.)
 -- Migration: events.data  TEXT (64KB)  ->  MEDIUMTEXT (16MB).
 --
@@ -8,7 +8,7 @@
 -- verifyReorg serializes the list of rolled-back blocks into a single REORG event
 -- row (events.data). Each entry is ~100 bytes, so a reorg deeper than ~650 blocks
 -- (e.g. the node-tip-regression / misconfigured-node walks) overflows a TEXT
--- column and the INSERT fails — silently losing the only audit record of which
+-- column and the INSERT fails, silently losing the only audit record of which
 -- blocks were rolled back. transactions.data and mempool_transactions.data are
 -- already MEDIUMTEXT; this aligns events.data with them. Fresh installs already
 -- get MEDIUMTEXT from src/sql/events.sql, so on those this migration is a no-op.
@@ -17,7 +17,15 @@
 -- no-op, and the schema_migrations ledger records it once per DB so it never
 -- re-runs regardless. Applies automatically at decoder startup.
 --
--- Validator note: xchain-sync replicates the decoder DB to validators; followers
--- run the same auto migration on startup, so the column self-heals fleet-wide.
+-- Follower ordering note: xchain-sync replicates the decoder DB to validators.
+-- Followers run the same auto migration on startup, so the column widens fleet-wide
+-- before replication traffic arrives. However, a follower that is already running
+-- and has NOT yet been restarted (i.e. the migration has not applied) will silently
+-- truncate any oversized REORG event row received via INSERT IGNORE, because the
+-- column is still TEXT on that node. The truncated row carries no error; the sync
+-- client continues normally. Impact is low (events is operational audit, not
+-- consensus state, and >64KB REORG rows require a reorg deeper than ~650 blocks),
+-- but operators should restart all followers promptly after deploying this migration
+-- so the column widens before any such event can arrive.
 
 ALTER TABLE events MODIFY COLUMN data MEDIUMTEXT;

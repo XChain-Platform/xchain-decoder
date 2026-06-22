@@ -125,6 +125,11 @@ class XChainDecoder {
 
         this.lastProcessedBlockIndex = -1
         this.blockchainInfoLastBlock = -1
+        // Timestamp (ms) of the most recent successful getBlockchainInfo() call.
+        // Zero means the tip has never been fetched. Used by getSyncStatus() to
+        // flag a frozen tip so callers can distinguish a genuine zero lag from an
+        // outage where the cached tip stopped advancing.
+        this.blockchainInfoLastRefreshAt = 0
         this.mempoolInterval = null
         this.mempoolBusy = false
 
@@ -166,6 +171,12 @@ class XChainDecoder {
     }
     
     isSynced(){
+        // A frozen tip during a node outage must not read as synced: the chain may
+        // have advanced far past the last cached tip, so synced:true would be false-healthy.
+        if (this.blockchainInfoLastRefreshAt > 0
+            && (Date.now() - this.blockchainInfoLastRefreshAt) > 2 * BLOCKCHAIN_INFO_REFRESH_MS) {
+            return false
+        }
         return this.synced
     }
 
@@ -173,11 +184,21 @@ class XChainDecoder {
         if (this.lastProcessedBlockIndex === -1) {
             return { last_processed_block: null, node_height: null, lag: null }
         }
-        return {
+        // A stale tip means: we have polled at least once but the last successful
+        // getBlockchainInfo() was more than 2x the normal refresh interval ago,
+        // i.e. at least two consecutive poll attempts have failed (node outage).
+        // In that window blockchainInfoLastBlock is frozen, so a zero lag does not
+        // mean caught-up; it means we cannot see how far the chain has advanced.
+        const nodeHeightStale = this.blockchainInfoLastRefreshAt > 0
+            && (Date.now() - this.blockchainInfoLastRefreshAt) > 2 * BLOCKCHAIN_INFO_REFRESH_MS
+
+        const status = {
             last_processed_block: this.lastProcessedBlockIndex,
             node_height: this.blockchainInfoLastBlock,
             lag: this.blockchainInfoLastBlock - this.lastProcessedBlockIndex
         }
+        if (nodeHeightStale) status.node_height_stale = true
+        return status
     }
     
     stop(){
@@ -790,6 +811,7 @@ class XChainDecoder {
                     
                     this.blockchainInfoLastBlock = lastBlockchainInfo["blocks"]
                     lastBlockchainInfoRefreshAt = Date.now()
+                    this.blockchainInfoLastRefreshAt = lastBlockchainInfoRefreshAt
                 } catch (e){
                     console.log(e)
                     console.log("Error trying to get network info from the node. Trying again...", e)
