@@ -356,11 +356,10 @@ describe('BlockchainConnector', () => {
             // getblock(hash, 0) returns the same structure followed by transaction data.
             // After stripping, the result must be parseable by bitcoinjs-lib Block.fromBuffer.
             //
-            // Base header: version 0x00620001 (LE: 01006200) has AuxPoW flag 0x100 set,
-            // confirming this is a merge-mined block. The 80 bytes after stripping form a
-            // valid standard header that bitcoinjs-lib can parse.
+            // Base header: version 0x00620100 (LE: 00016200) has AuxPoW flag (bit 0x100) set.
+            // The 80 bytes after stripping form a valid standard header that bitcoinjs-lib can parse.
             const BASE_HEADER_HEX =
-                '01006200' +  // version 0x00620001 (LE), AuxPoW flag set
+                '00016200' +  // version 0x00620100 (LE), AuxPoW flag (0x100) set
                 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +  // prevHash 32 bytes
                 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' +  // merkleRoot 32 bytes
                 '00f15365' +  // timestamp 1700000000 (LE)
@@ -394,8 +393,56 @@ describe('BlockchainConnector', () => {
             const bitcoin = require('bitcoinjs-lib')
             const block = bitcoin.Block.fromBuffer(Buffer.from(stripped, 'hex'))
             assert.ok(block, 'Block.fromBuffer must succeed on stripped result')
-            assert.strictEqual(block.version, 0x00620001, 'parsed version must match DOGE AuxPoW block version')
+            assert.strictEqual(block.version, 0x00620100, 'parsed version must match DOGE AuxPoW block version')
             assert.ok(Array.isArray(block.transactions) && block.transactions.length === 1, 'parsed block must contain the coinbase transaction')
+        })
+
+        it('[REGRESSION] R-NET-005: Dogecoin Core 1.14 structural-parse path - getblockheader returns exactly 160 hex chars (no AuxPoW bytes) but block has AuxPoW version bit set', async () => {
+            // Dogecoin Core 1.14.x getblockheader serializes the CBlockIndex header only
+            // (always 80 bytes / 160 hex chars), never the block's AuxPoW section, even for
+            // merge-mined blocks. The old code threw on this case; after the fix it must
+            // parse the AuxPoW structure from the block hex directly and strip it.
+            const BASE_HEADER_HEX =
+                '00016200' +  // version 0x00620100 (LE), AuxPoW flag (0x100) set
+                'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +  // prevHash 32 bytes
+                'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' +  // merkleRoot 32 bytes
+                '00f15365' +  // timestamp 1700000000 (LE)
+                'ffff001d' +  // bits
+                '39300000'    // nonce
+
+            // Minimal coinbase tx: version=1, 1 input (coinbase prevout), 1 output, locktime=0
+            const COINBASE_TX_HEX = '01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d0104ffffffff0100f2052a010000001976a914aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88ac00000000'
+            // AuxPoW remainder after coinbase tx:
+            //   parent block hash (32 bytes) + coinbase branch varint 0x00 + 4-byte index +
+            //   chain branch varint 0x00 + 4-byte index + parent block header (80 bytes)
+            const PARENT_HASH   = '00'.repeat(32)       // 32 bytes
+            const CB_BRANCH     = '00' + '00000000'     // varint(0) + index (4 bytes)
+            const CHAIN_BRANCH  = '00' + '00000000'     // varint(0) + index (4 bytes)
+            const PARENT_HEADER = '00'.repeat(80)       // 80 bytes
+            const AUX_POW_TAIL  = PARENT_HASH + CB_BRANCH + CHAIN_BRANCH + PARENT_HEADER
+            const FULL_AUX_POW  = COINBASE_TX_HEX + AUX_POW_TAIL
+
+            const N_TX_VARINT = '01'
+
+            // Dogecoin Core 1.14: getblockheader returns ONLY the 80-byte base header
+            const headerHex = BASE_HEADER_HEX  // exactly 160 hex chars
+            // getblock returns the full wire format: base header + AuxPoW + tx count + txs
+            const fullBlockHex = BASE_HEADER_HEX + FULL_AUX_POW + N_TX_VARINT + COINBASE_TX_HEX
+
+            axiosStub.onCall(0).resolves({ data: { result: headerHex    } })  // getBlockHeader (160 chars)
+            axiosStub.onCall(1).resolves({ data: { result: fullBlockHex } })  // getBlock
+
+            const stripped = await connector.getBlockWithoutAuxPow('doge-114-block-hash')
+
+            // After stripping, the AuxPoW section between the header and the tx varint is gone
+            const expectedStripped = BASE_HEADER_HEX + N_TX_VARINT + COINBASE_TX_HEX
+            assert.strictEqual(stripped, expectedStripped, 'structural-parse path must strip AuxPoW when getblockheader returns only 160 hex chars')
+
+            // Verify the result parses as a valid block
+            const bitcoin = require('bitcoinjs-lib')
+            const block = bitcoin.Block.fromBuffer(Buffer.from(stripped, 'hex'))
+            assert.ok(block, 'Block.fromBuffer must succeed on structural-parse stripped result')
+            assert.strictEqual(block.version, 0x00620100, 'parsed version must match DOGE AuxPoW version')
         })
     })
 })
