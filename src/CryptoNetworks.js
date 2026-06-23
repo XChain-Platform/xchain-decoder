@@ -41,7 +41,8 @@ class CryptoNetworks {
                     "wif": 0x9e,
                     "dustThreshold": 100000,
                     "supportsSegwit": false,
-                    "singleOpReturnPolicy": false
+                    // Mirrors the encoder: DOGE/LTC enforce one OP_RETURN per tx.
+                    "singleOpReturnPolicy": true
                 }
             case "dogecoin-testnet":
                 return {
@@ -55,7 +56,8 @@ class CryptoNetworks {
                     "wif": 0xf1,
                     "dustThreshold": 100000,
                     "supportsSegwit": false,
-                    "singleOpReturnPolicy": false
+                    // Mirrors the encoder: DOGE/LTC enforce one OP_RETURN per tx.
+                    "singleOpReturnPolicy": true
                 }
             case "dogecoin-regtest":
                 // Dogecoin v1.14.x regtest reuses Bitcoin-testnet prefixes
@@ -73,7 +75,8 @@ class CryptoNetworks {
                     "wif": 0xef,
                     "dustThreshold": 100000,
                     "supportsSegwit": false,
-                    "singleOpReturnPolicy": false
+                    // Mirrors the encoder: DOGE/LTC enforce one OP_RETURN per tx.
+                    "singleOpReturnPolicy": true
                 }
             case "litecoin-mainnet":
                 return {
@@ -81,14 +84,15 @@ class CryptoNetworks {
                     "bech32": 'ltc',
                     "bip32": {
                        "public": 0x019da462,
-                       "private": 0x019d9cfe 
+                       "private": 0x019d9cfe
                     },
                     "pubKeyHash": 0x30,
                     "scriptHash": 0x32,
                     "wif": 0xb0,
                     "dustThreshold": 5460,
                     "minStandardTxNonWitnessSize": 85,
-                    "singleOpReturnPolicy": false
+                    // Mirrors the encoder: DOGE/LTC enforce one OP_RETURN per tx.
+                    "singleOpReturnPolicy": true
                 }
             case "litecoin-testnet":
                 return {
@@ -103,7 +107,8 @@ class CryptoNetworks {
                     "wif": 0xef,
                     "dustThreshold": 5460,
                     "minStandardTxNonWitnessSize": 85,
-                    "singleOpReturnPolicy": false
+                    // Mirrors the encoder: DOGE/LTC enforce one OP_RETURN per tx.
+                    "singleOpReturnPolicy": true
                 }
             case "litecoin-regtest":
                 return {
@@ -118,7 +123,8 @@ class CryptoNetworks {
                     "wif": 0xef,
                     "dustThreshold": 5460,
                     "minStandardTxNonWitnessSize": 85,
-                    "singleOpReturnPolicy": false
+                    // Mirrors the encoder: DOGE/LTC enforce one OP_RETURN per tx.
+                    "singleOpReturnPolicy": true
                 }
             default:
                 throw new TypeError(`Unknown network: "${networkName}". Supported: bitcoin-mainnet, bitcoin-testnet, bitcoin-regtest, dogecoin-mainnet, dogecoin-testnet, dogecoin-regtest, litecoin-mainnet, litecoin-testnet, litecoin-regtest`)

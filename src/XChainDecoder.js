@@ -965,17 +965,21 @@ class XChainDecoder {
                     //previousBlockHash is not the same, it must be a reorg
                     if (previousBlockHash != previousBlock.block_hash){
                         await this.db.endTransaction()
-                        console.log("A reorg has been detected. Cleaning blocks...")
+                        console.log("A reorg has been detected at block " + nextBlockHeight + ". Cleaning blocks...")
+                        const preReorgBlock = lastProcessedBlockIndex
                         await this.verifyReorg(this.blockchainInfoLastBlock)
                         // Re-clamp: same as the pre-loop guard and the node-tip regression path.
                         lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
+                        // Count rolled-back blocks as the difference between the pre-reorg tip
+                        // and the newly confirmed last good block so the log entry is actionable.
+                        const blocksDeleted = { length: Math.max(0, preReorgBlock - lastProcessedBlockIndex) }
                         lastProcessedTxIndex = await this.db.getLastTxIndex()
                         blocksQuantity = 0
                         transactionsCount = 0
                         validTransactionsCount = 0
                         outputCount = 0
                         startTimeStamp = Date.now()
-                        console.log("Blocks were updated")
+                        console.log("Blocks were updated (" + blocksDeleted.length + " blocks rolled back)")
                         continue
                     }
                 }

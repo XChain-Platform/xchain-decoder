@@ -153,6 +153,27 @@ async function startApi(){
         }
     }
 
+    // GET /status: returns 200 when the decoder is running and the DB is reachable,
+    // or 503 when not. Distinct from the JSON-RPC `health` method so load-balancer /
+    // uptime monitors can rely on the HTTP status code directly (the JSON-RPC
+    // catch-all routes all GETs to 200 today).
+    app.get('/status', async (req, res) => {
+        let dbOk = false
+        if (decoder.db) {
+            try {
+                const conn = await decoder.db.getConnection()
+                try { await conn.query('SELECT 1'); dbOk = true }
+                finally { try { await conn.release() } catch (_) {} }
+            } catch (_) {}
+        }
+        const healthy = decoderRunning && dbOk
+        res.status(healthy ? 200 : 503).json({
+            status: healthy ? 'healthy' : 'unhealthy',
+            db: dbOk,
+            running: decoderRunning
+        })
+    })
+
     app.use(jsonRouter({methods: jsonRpcController}))
 
     app.listen(DECODER_API_PORT, () => {
