@@ -583,6 +583,17 @@ class XChainDecoder {
                         compiledDataLength = dl <= 75 ? dl + 1 : dl <= 255 ? dl + 2 : dl + 3
                         if (decompiledData.length > 1){
                             rawData = decompiledData[1]
+                            // Count the second push too. The encoder bounds the WHOLE compiled
+                            // script (both pushes) against MAX_COMPILED_ACTION_DATA_LENGTH, so
+                            // measuring only push[0] here let a small action push + a large
+                            // rawData push (e.g. a FILE) decode past the guard that the encoder
+                            // and validator would have rejected. Add push[1]'s compiled size
+                            // (data length + the same OP_PUSH overhead) so the decoder's ceiling
+                            // matches the encoder's.
+                            if (Buffer.isBuffer(rawData)){
+                                const rl = rawData.length
+                                compiledDataLength += rl <= 75 ? rl + 1 : rl <= 255 ? rl + 2 : rl + 3
+                            }
                         }
                         getSource = true
                     }
