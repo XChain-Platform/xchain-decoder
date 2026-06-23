@@ -1216,7 +1216,21 @@ class XChainDecoder {
                         console.log("Parsing block "+(nextBlockHeight)+"("+nextBlockHash+") Txs ("+transactionsCount+") Outputs ("+outputCount+")")
                         console.log("Inserting data Blocks ("+blocksCount+") Valid Transactions ("+validTransactionsCount+")")
                     }
-                    await this.db.commitTransaction()
+                    const committed = await this.db.commitTransaction()
+                    if (!committed){
+                        // commitTransaction returned false: the commit failed and the whole
+                        // block batch was rolled back (endTransaction). Do NOT advance the tip
+                        // to nextBlockHeight, which would permanently skip the rolled-back
+                        // window and leave a hole in the decoded chain. Reset to the last
+                        // durably committed block and retry, mirroring the block-decode
+                        // recovery path above.
+                        console.error(`Commit failed at block ${nextBlockHeight}; resetting to last committed block and retrying`)
+                        lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
+                        lastProcessedTxIndex = await this.db.getLastTxIndex()
+                        blocksQuantity = 0
+                        await this.sleep(3000)
+                        continue
+                    }
 
                     // Hard-purge dispensers soft-expired at a reorg-safe depth. Runs
                     // AFTER the block transaction commits (a transient failure here
