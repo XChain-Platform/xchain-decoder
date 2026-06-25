@@ -920,7 +920,18 @@ class XChainDecoder {
                 let nextBlockHeight = lastProcessedBlockIndex + 1
             
                 let nextBlockHash = null
-                let nextBlockHex = null             
+                let nextBlockHex = null
+                // Track consecutive fetch failures at this exact height. A transient
+                // RPC hiccup clears on the next success; a deterministic failure (e.g.
+                // a malformed AuxPoW section that makes getBlockWithoutAuxPow throw)
+                // would otherwise retry here silently forever. We never skip the block
+                // (that would corrupt the index), but after a few attempts we escalate
+                // to parseErrors so the stall is visible to the same monitoring that
+                // watches the block-decode path below, rather than spinning unnoticed.
+                if (this._fetchErrorHeight !== nextBlockHeight) {
+                    this._fetchErrorHeight = nextBlockHeight
+                    this._fetchErrorCount = 0
+                }
                 try {
                     nextBlockHash = await this.connector.getBlockHash(nextBlockHeight)
 
@@ -929,8 +940,13 @@ class XChainDecoder {
                     } else {
                         nextBlockHex = await this.connector.getBlock(nextBlockHash)
                     }
+                    this._fetchErrorCount = 0
                 } catch (e){
-                    console.error('Error fetching block at height ' + nextBlockHeight + ':', e)
+                    this._fetchErrorCount++
+                    if (this._fetchErrorCount === 5) {
+                        this.parseErrors++
+                    }
+                    console.error('Error fetching block at height ' + nextBlockHeight + ' (attempt ' + this._fetchErrorCount + '):', e)
                     await this.sleep(3000)
                     continue
                 }
@@ -1243,6 +1259,15 @@ class XChainDecoder {
                         lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
                         lastProcessedTxIndex = await this.db.getLastTxIndex()
                         blocksQuantity = 0
+                        // Reset the in-memory log/ETA accumulators too, as the reorg
+                        // recovery path does. The rolled-back batch never reached the
+                        // DB, so leaving these set would double-count transactions and
+                        // skew the ms/block ETA on the retry. Logging-only, no tip effect.
+                        transactionsCount = 0
+                        validTransactionsCount = 0
+                        outputCount = 0
+                        blocksCount = 0
+                        startTimeStamp = Date.now()
                         await this.sleep(3000)
                         continue
                     }
