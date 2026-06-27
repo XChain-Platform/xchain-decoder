@@ -67,7 +67,7 @@ const VALID_ACTION_NAMES = new Set([
     'DELEGATE', 'DEPLOY', 'DEPOSIT', 'DESTROY', 'DISPENSER',
     'DIVIDEND', 'EXECUTE', 'FILE', 'ISSUE', 'LINK', 'LIST', 'MESSAGE', 'MINT',
     'NODEPROOF', 'ORDER', 'PRICE', 'SEND', 'SLASH', 'SLEEP', 'STAKE', 'SWAP',
-    'SWEEP', 'UNSTAKE', 'WITHDRAW'
+    'SWEEP', 'UNSTAKE', 'VOTE', 'WITHDRAW'
 ])
 
 // Short-form ACTION-name aliases. A spec-following client may encode any of
