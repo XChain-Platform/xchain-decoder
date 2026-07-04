@@ -28,6 +28,7 @@ const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const XChainDecoder  = require('./XChainDecoder');
+const { resolveFeeDestination } = require('./feeDestination');
 const jsonRouter = require('express-json-rpc-router')
 
 
@@ -50,9 +51,10 @@ if (!process.env.DECODER_API_PORT || isNaN(DECODER_API_PORT) || DECODER_API_PORT
     process.exit(1)
 }
 const AUX_POW = process.env.AUX_POW === 'true' || process.env.AUX_POW === '1'
-// Native-coin protocol fee destination for this coin+network. When set, the decoder also persists
+// Native-coin protocol fee destination for this coin+network: registry-pinned default with a
+// non-mainnet-only env override (see src/feeDestination.js). When resolved, the decoder persists
 // outputs paying it to transaction_outputs so the indexer can validate native-coin fee payments.
-const FEE_DESTINATION = process.env.FEE_DESTINATION || null
+const FEE_DESTINATION = resolveFeeDestination(NETWORK, process.env.FEE_DESTINATION || null)
 
 async function startApi(){
     const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DECODER_DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD, AUX_POW, FEE_DESTINATION);
