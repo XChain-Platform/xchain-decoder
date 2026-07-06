@@ -48,9 +48,15 @@ const P2WSH_BUFFER = Buffer.from("p2wsh")
 
 const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // Soft-expired dispensers (marked, not deleted, so a reorg can restore them) are
-// hard-purged once this many blocks deep (well past any realistic reorg), and a
-// pure function of canonical height so every node purges identically.
-const DISPENSER_EXPIRE_SAFE_DEPTH = 100
+// hard-purged once this many blocks deep, and a pure function of canonical height
+// so every node purges identically. This MUST stay >= the deepest per-chain
+// reorg-recovery window, or a row is deleted before a legal in-window reorg can
+// restore it (deleteBlockByIndex then matches zero rows), permanently losing a
+// money-bearing dispenser on the reorged node. The platform's deepest window is
+// DOGE = 120 (xchain-utxo-tracker DEFAULT_UNDO_BLOCKS: BTC 12 / LTC 48 / DOGE 120);
+// the previous flat 100 sat BELOW DOGE's window. 120 covers every chain. Keep in
+// sync if any chain's undo window is ever raised above this.
+const DISPENSER_EXPIRE_SAFE_DEPTH = 120
 const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node need to have to start parsing
 
 // Maximum compiled on-chain ACTION push, in bytes (measured before
@@ -1478,3 +1484,5 @@ module.exports = XChainDecoder
 // Exported for the cross-service regression suite, which asserts this equals the
 // encoder's compiled-push guard and the canonical protocol constant.
 module.exports.MAX_ACTION_DATA_LENGTH = MAX_ACTION_DATA_LENGTH
+// Exported so a regression test can pin it >= the deepest per-chain reorg window.
+module.exports.DISPENSER_EXPIRE_SAFE_DEPTH = DISPENSER_EXPIRE_SAFE_DEPTH

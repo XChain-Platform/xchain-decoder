@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `DISPENSER_EXPIRE_SAFE_DEPTH` raised from a flat 100 to 120 so it covers the deepest per-chain reorg-recovery window (DOGE = 120, per `xchain-utxo-tracker` `DEFAULT_UNDO_BLOCKS`); at 100 a soft-expired dispenser was hard-purged before a legal in-window DOGE reorg could restore it, permanently losing a money-bearing dispenser on the reorged node. Pinned by a regression test.
+
 ## [1.11.14] - 2026-06-20
 
 ### Added
