@@ -27,6 +27,15 @@ const bs = require("binary-search")
 const SATOSHIS_DECIMALS = 8
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/
 
+// MariaDB errnos for a write rejection that is a pure function of the row bytes + schema,
+// i.e. deterministic: it fails identically on every instance and will never succeed on a
+// retry. Distinguished from transient errors (deadlock 1213, lock-wait 1205, lost
+// connection 2006/2013, query timeout) so the block loop can quarantine a poison row
+// instead of retrying it forever. 1366=incorrect string value (e.g. a 4-byte UTF-8 char
+// on a utf8mb3 column), 1406=data too long, 1264=out of range, 1265=data truncated,
+// 1292=truncated wrong value.
+const DETERMINISTIC_WRITE_ERRNOS = new Set([1366, 1406, 1264, 1265, 1292])
+
 class Database {
     constructor(host, port, dbName, user, pass){
         if (!DB_NAME_REGEX.test(dbName)) {
@@ -40,6 +49,10 @@ class Database {
         this.user   = user;
         this.pass   = pass;
         this.DUPLICATED_TRANSACTION = 1
+        // Distinct from `false` (transient write failure -> retry the block): a row that
+        // deterministically cannot be inserted as-is (content/constraint rejection). The
+        // block loop quarantines the tx after a few retries instead of retrying forever.
+        this.POISON_ROW = 2
         // Database connection parameters
         this.connectionParams = {
             host:     this.host,
@@ -1056,13 +1069,18 @@ class Database {
                 if (this.transactionConnection){
                     await this.endTransaction()
                 }
-                return false;
+                // A deterministic content/constraint rejection can never insert as-is;
+                // signal POISON_ROW so the block loop quarantines the tx after a few
+                // retries rather than retrying the block forever (a permanent wedge).
+                // A transient error stays `false`: the loop retries indefinitely, since
+                // skipping a tx a healthy instance accepts would break cross-instance parity.
+                return DETERMINISTIC_WRITE_ERRNOS.has(err.errno) ? this.POISON_ROW : false;
             }
         } finally {
             if (ownLease){
                 await connection.release()
             }
-        }   
+        }
     }
 
     async insertMempoolTransaction(tx) {

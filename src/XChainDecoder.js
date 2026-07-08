@@ -103,6 +103,25 @@ const LOG_BLOCK_INTERVAL = 1000 //During catch-up sync, only log progress every 
 // rather than quarantining content other instances accept.
 const TX_PARSE_MAX_RETRIES = 3
 
+// Probe whether bitcoinjs-lib's 64-bit reader tolerates a value > 2^53-1 (the BigInt-safe
+// bufferutils patch) rather than throwing 'value out of range'. The decoder relies on this
+// patch to decode a Dogecoin output > 2^53-1 sat (~90.07M DOGE) without wedging block
+// decode; it ships via a Dockerfile COPY over node_modules, so a stock/unpatched
+// node_modules (a Dockerfile regression, or a non-Docker run) would silently reintroduce
+// the wedge. Reads a synthetic 2^53 uint64 (one past the stock reader's ceiling). The
+// bufferutils module is injectable for testing. Returns false on any failure (fail-safe:
+// an unrecognizable module reads as "patch not confirmed").
+function bigIntBufferutilsActive(bufferutils){
+    try {
+        let bu = bufferutils || require('bitcoinjs-lib/src/bufferutils')
+        if (!bu.BufferReader) return false
+        new bu.BufferReader(Buffer.from([0, 0, 0, 0, 0, 0, 0x20, 0])).readUInt64()
+        return true
+    } catch(_){
+        return false
+    }
+}
+
 class XChainDecoder {
     constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword, auxPow, feeDestination) {
         this.network = CryptoNetworks.getBitcoinJsNetwork(network)
@@ -813,6 +832,18 @@ class XChainDecoder {
             this.mempoolDb = new Database(this.dbUrl, this.dbPort, this.dbName, this.dbUser, this.dbPassword)
         }
 
+        // Only Dogecoin can carry a single output > 2^53-1 sat (~90.07M DOGE); BTC/LTC caps
+        // are lower. If this is a DOGE decoder and the BigInt-safe bufferutils patch is NOT
+        // active, the first such output throws during block decode and wedges the decoder
+        // permanently (a silent Dockerfile-COPY regression). Shout at startup so that
+        // regression is loud and immediate rather than a mid-operation fleet halt.
+        if (this.xchainBlockDecoder && this.xchainBlockDecoder.coin === 'dogecoin' && !bigIntBufferutilsActive()){
+            console.error('CRITICAL: bitcoinjs-lib bufferutils BigInt-safe 64-bit reader is NOT active on a ' +
+                'Dogecoin decoder. A DOGE output > 2^53-1 sat (~90.07M DOGE) will throw during block decode ' +
+                'and wedge this decoder permanently. Apply the bufferutils patch (Dockerfile COPY of ' +
+                'src/bufferutils.js over node_modules/bitcoinjs-lib/src/bufferutils.js) before running on mainnet.')
+        }
+
         // Verify the Decoder database exists
         let dbStatus   = await this.db.createDatabase();
         let dbVerified = await this.db.verifyDatabase();
@@ -863,6 +894,19 @@ class XChainDecoder {
         // retried (see TX_PARSE_MAX_RETRIES).
         let txParseRetryHeight = -1
         let txParseRetryCount = 0
+
+        // Deterministic-INSERT-failure tracking. A row the DB rejects deterministically
+        // (Database.POISON_ROW, e.g. a 4-byte-UTF-8 char on the utf8mb3 `data` column,
+        // errno 1366) can never insert as-is, so retrying the block would wedge it forever.
+        // After TX_PARSE_MAX_RETRIES the tx position is added to insertQuarantine and the
+        // re-parse skips it (PARSE_ERROR + no insert), mirroring the parse-throw quarantine.
+        // Keyed "<blockHeight>:<txPosition>"; cleared on block commit so it stays bounded
+        // and cannot leak across a height whose content changed under a reorg. Only
+        // DETERMINISTIC failures quarantine; transient ones (false) still retry forever, so
+        // no instance ever skips a tx a healthy instance accepts (cross-instance parity).
+        let insertQuarantineHeight = -1
+        let insertQuarantineCount = 0
+        const insertQuarantine = new Set()
 
         // Re-derive the loop cursors from the DB after any mid-block rollback, then
         // pause before the retry. Every rollback path MUST run this before continuing:
@@ -1162,6 +1206,31 @@ class XChainDecoder {
                     let nextTransaction = transactions[txIndex]
                     let nextTransactionHash = null
                     let parseResult = null
+
+                    // Insert-quarantine skip: this tx position deterministically failed to
+                    // INSERT on a prior pass of this block. Skip it exactly like a quarantined
+                    // parse-throw - PARSE_ERROR event, NO tx_index consumed, no insert - so a
+                    // poison row cannot wedge the block. The block transaction is open here
+                    // (beginTransaction ran when blocksQuantity hit 0), so the event commits
+                    // with the block. Deterministic across instances, so parity holds.
+                    if (insertQuarantine.has(nextBlockHeight + ':' + txIndex)){
+                        this.parseErrors++
+                        let quarantinedHash = null
+                        try { quarantinedHash = nextTransaction.getId() } catch(_){ /* unparseable id; leave null */ }
+                        let eventResult = await this.db.insertEvent("PARSE_ERROR", {
+                            block_index: nextBlockHeight,
+                            tx_position: txIndex,
+                            tx_hash: quarantinedHash,
+                            error: 'deterministic INSERT failure (quarantined after ' + TX_PARSE_MAX_RETRIES + ' block retries)'
+                        }, block.timestamp)
+                        if (eventResult === false){
+                            // insertEvent already rolled the block transaction back
+                            await resetAfterRollback()
+                            continue main_parsing
+                        }
+                        continue
+                    }
+
                     try {
                         nextTransactionHash = nextTransaction.getId()
                         parseResult = await this.parseTransaction(nextTransaction, openDispenserAddresses)
@@ -1230,37 +1299,50 @@ class XChainDecoder {
 
                             let decodedData = ""
                             if (parseResult["data"].length > 0) {
+                                // F5: a tx can carry BOTH an XChain OP_RETURN and money-bearing
+                                // dispense/payment outputs. When the ACTION is oversized or names
+                                // an unknown action, do NOT drop those outputs: treat the bad
+                                // action as no-action (empty data, null raw_data) and fall through
+                                // so the dispense/payment outputs are still recorded. Only skip the
+                                // whole tx when there is nothing else to record. The no-output skip
+                                // path is left byte-identical (still consumes a tx_index and
+                                // continues) - changing tx_index assignment for invalid-action txs
+                                // would diverge from already-decoded history.
+                                let hasOutputs = (dispenseOutputs.length > 0 || parseResult["paymentOutputs"].length > 0)
                                 if (parseResult["compiledDataLength"] > MAX_ACTION_DATA_LENGTH) {
                                     this.parseErrors++
-                                    console.error(`Skipping tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${MAX_ACTION_DATA_LENGTH})`)
-                                    continue
-                                }
+                                    console.error(`Skipping ACTION for tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${MAX_ACTION_DATA_LENGTH})`)
+                                    if (!hasOutputs) continue
+                                    decodedData = ""
+                                    parseResult["rawData"] = null
+                                } else {
+                                    try {
+                                        decodedData = strictTextDecoder.decode(parseResult["data"])
+                                    } catch (e) {
+                                        this.parseErrors++
+                                        decodedData = lenientTextDecoder.decode(parseResult["data"])
+                                        console.error(`Tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`, e)
+                                    }
 
-                                try {
-                                    decodedData = strictTextDecoder.decode(parseResult["data"])
-                                } catch (e) {
-                                    this.parseErrors++
-                                    decodedData = lenientTextDecoder.decode(parseResult["data"])
-                                    console.error(`Tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`, e)
-                                }
-
-                                let actionParts = decodedData.split("|")
-                                let rawActionName = actionParts[0]
-                                let actionName = ACTION_ALIASES[rawActionName] ?? rawActionName
-                                if (!VALID_ACTION_NAMES.has(actionName)) {
-                                    this.parseErrors++
-                                    console.error(`Skipping tx ${nextTransactionHash}: unknown ACTION name '${rawActionName.substring(0, 32)}'`)
-                                    continue
-                                }
-                                if (actionName !== rawActionName) {
-                                    // Persist the canonical name so the DB is alias-free and
-                                    // identical regardless of which spelling was used on-chain.
-                                    actionParts[0] = actionName
-                                    decodedData = actionParts.join("|")
+                                    let actionParts = decodedData.split("|")
+                                    let rawActionName = actionParts[0]
+                                    let actionName = ACTION_ALIASES[rawActionName] ?? rawActionName
+                                    if (!VALID_ACTION_NAMES.has(actionName)) {
+                                        this.parseErrors++
+                                        console.error(`Skipping ACTION for tx ${nextTransactionHash}: unknown ACTION name '${rawActionName.substring(0, 32)}'`)
+                                        if (!hasOutputs) continue
+                                        decodedData = ""
+                                        parseResult["rawData"] = null
+                                    } else if (actionName !== rawActionName) {
+                                        // Persist the canonical name so the DB is alias-free and
+                                        // identical regardless of which spelling was used on-chain.
+                                        actionParts[0] = actionName
+                                        decodedData = actionParts.join("|")
+                                    }
                                 }
                             }
                             
-                            if (!(await this.db.insertTransaction({
+                            let insertResult = await this.db.insertTransaction({
                                 index: lastProcessedTxIndex,
                                 hash: nextTransactionHash,
                                 block_index: nextBlockHeight,
@@ -1271,8 +1353,32 @@ class XChainDecoder {
                                 data: decodedData,
                                 raw_data: parseResult["rawData"] || null
 
-                            }))){
-                                // insertTransaction's error path already rolled the block back.
+                            })
+                            if (insertResult === this.db.POISON_ROW){
+                                // Deterministic content/constraint rejection (block already
+                                // rolled back by insertTransaction). Retrying the block would
+                                // wedge it forever. Bound the retries like a parse-throw, then
+                                // quarantine this tx position so the re-parse skips it. (The
+                                // retry margin guards against a misclassified transient error;
+                                // the errno set is conservative, so this normally quarantines
+                                // on the first exceedance.)
+                                if (insertQuarantineHeight != nextBlockHeight){
+                                    insertQuarantineHeight = nextBlockHeight
+                                    insertQuarantineCount = 0
+                                }
+                                insertQuarantineCount++
+                                if (insertQuarantineCount > TX_PARSE_MAX_RETRIES){
+                                    insertQuarantine.add(nextBlockHeight + ':' + txIndex)
+                                    console.error(`Quarantining tx with deterministic INSERT failure in block ${nextBlockHeight} (tx position ${txIndex}, hash ${nextTransactionHash}) after ${TX_PARSE_MAX_RETRIES} block retries`)
+                                } else {
+                                    console.error(`insertTransaction deterministic failure in block ${nextBlockHeight} (tx position ${txIndex}, attempt ${insertQuarantineCount}/${TX_PARSE_MAX_RETRIES}), retrying block`)
+                                }
+                                await resetAfterRollback()
+                                continue main_parsing
+                            } else if (insertResult === false){
+                                // Transient INSERT failure; insertTransaction's error path
+                                // already rolled the block back. Retry indefinitely (never skip
+                                // a tx a healthy instance accepts).
                                 await resetAfterRollback()
                                 continue main_parsing
                             } else {
@@ -1408,6 +1514,12 @@ class XChainDecoder {
                         await this.sleep(3000)
                         continue
                     }
+
+                    // The block committed: any poison-tx positions for it are now permanently
+                    // recorded (PARSE_ERROR) and skipped, so drop them. Keeps insertQuarantine
+                    // bounded to the block being retried and prevents a stale height:pos entry
+                    // from surviving a later reorg that changes this height's content.
+                    if (insertQuarantine.size > 0) insertQuarantine.clear()
 
                     // Hard-purge dispensers soft-expired at a reorg-safe depth. Runs
                     // AFTER the block transaction commits (a transient failure here
@@ -1618,3 +1730,5 @@ module.exports = XChainDecoder
 module.exports.MAX_ACTION_DATA_LENGTH = MAX_ACTION_DATA_LENGTH
 // Exported so a regression test can pin it >= the deepest per-chain reorg window.
 module.exports.DISPENSER_EXPIRE_SAFE_DEPTH = DISPENSER_EXPIRE_SAFE_DEPTH
+// Exported for the F3 regression test (DOGE large-output bufferutils-patch self-check).
+module.exports.bigIntBufferutilsActive = bigIntBufferutilsActive
