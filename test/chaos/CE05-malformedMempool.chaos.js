@@ -32,6 +32,9 @@ describe('CE-05: Malformed Mempool Transaction', function () {
         mockDb = createMockDatabase()
         mockConnector = createMockConnector()
         decoder.db = mockDb
+        // Mempool maintenance runs on mempoolDb, never the block db (M-19). Point it at the same
+        // mock so these mempool-failure cases still exercise the DB-error handling they target.
+        decoder.mempoolDb = mockDb
         decoder.connector = mockConnector
         decoder.sleep = (ms) => new Promise(r => setTimeout(r, Math.min(ms, 50)))
     })

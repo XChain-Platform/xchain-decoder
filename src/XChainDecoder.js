@@ -415,12 +415,16 @@ class XChainDecoder {
         return results
     }
 
-    async parseTransaction(transaction, openDispenserAddresses){
+    async parseTransaction(transaction, openDispenserAddresses, db){
         // openDispenserAddresses is a Set of every open-dispenser address, loaded
         // once per block by the caller. Membership is tested in JS here instead of
         // issuing a DB round-trip per output. Defensive fallback to an empty Set
         // keeps callers that don't pass it (e.g. some unit tests) working.
         if (!openDispenserAddresses) openDispenserAddresses = new Set()
+        // db is the handle used for the pubkey-capture writes below. The block path passes
+        // this.db (default); the mempool path passes this.mempoolDb so pubkey writes for a
+        // pending tx never touch the block's open transaction (M-19).
+        if (!db) db = this.db
         let nextTxId = transaction.getId()
         let firstInputTxId = util.uint8ArrayToHex(Buffer.from(transaction.ins[0].hash).reverse())
         let standardInput = ("standard_input" in transaction.ins[0]?transaction.ins[0]["standard_input"]:true)
@@ -654,9 +658,9 @@ class XChainDecoder {
             if (source){
                 let pubkey = this.extractPubkeyFromInput(transaction.ins[0])
                 if (pubkey){
-                    let addressId = await this.db.getAddressId(source)
-                    if (addressId && !(await this.db.hasPubkey(addressId))){
-                        await this.db.insertPubkey(addressId, pubkey)
+                    let addressId = await db.getAddressId(source)
+                    if (addressId && !(await db.hasPubkey(addressId))){
+                        await db.insertPubkey(addressId, pubkey)
                     }
                 }
             }
@@ -715,7 +719,9 @@ class XChainDecoder {
             // always passes the freshly-refreshed tip.
             if (nodeTip != null && lastBlockIndex > nodeTip){
                 try {
-                    await this.db.deleteBlockByIndex(lastBlockIndex)
+                    // Pass the block hash so the delete and its REORG audit marker commit
+                    // atomically (M-12); see deleteBlockByIndex for the durability rationale.
+                    await this.db.deleteBlockByIndex(lastBlockIndex, lastBlock["block_hash"])
                     retryCount = 0
                     blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["block_hash"]})
                 } catch (err){
@@ -737,7 +743,9 @@ class XChainDecoder {
             
             if (lastBlock["block_hash"] != blockHashFromNode){
                 try {
-                    await this.db.deleteBlockByIndex(lastBlockIndex)
+                    // Pass the block hash so the delete and its REORG audit marker commit
+                    // atomically (M-12); see deleteBlockByIndex for the durability rationale.
+                    await this.db.deleteBlockByIndex(lastBlockIndex, lastBlock["block_hash"])
 
                     // Per-block retry budget: reset after each successful delete so the
                     // 10-attempt limit applies per block, not cumulatively across the whole
@@ -756,14 +764,10 @@ class XChainDecoder {
         }
         
         if (blocksDeleted.length > 0){
-            // The REORG event is the only audit record of which blocks were rolled
-            // back. insertEvent returns false on failure (e.g. the payload once
-            // overflowed events.data TEXT (now MEDIUMTEXT) instead of throwing;
-            // never drop it silently. Log loudly so the loss is visible to ops.
-            const eventResult = await this.db.insertEvent("REORG", blocksDeleted)
-            if (eventResult === false){
-                console.error(`reorg: FAILED to persist REORG audit event for ${blocksDeleted.length} rolled-back block(s), blocks deleted: ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
-            }
+            // Each rolled-back block already persisted its own REORG marker atomically with its
+            // delete (deleteBlockByIndex, M-12), so there is no separate end-of-run event to write.
+            // This is only an ops summary of the completed reorg.
+            console.log(`reorg: rolled back ${blocksDeleted.length} block(s): ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
         }
 
         return true
@@ -773,7 +777,21 @@ class XChainDecoder {
         if (!this.db) {
             this.db = new Database(this.dbUrl, this.dbPort, this.dbName, this.dbUser, this.dbPassword)
         }
-        
+
+        // Dedicated DB handle for mempool maintenance (M-19). updateMempool runs on a 60s
+        // timer that fires during the block loop's awaits, while the block loop holds an open
+        // per-block transaction on this.db. Every db method resolves its connection via
+        // getConnection(), which returns the shared transactionConnection whenever one is open,
+        // so routing mempool work through this.db made its DELETE/INSERT land inside the live
+        // block transaction, and a failed mempool insert called endTransaction() and rolled the
+        // whole block back mid-parse. A separate Database instance never opens a block
+        // transaction, so its getConnection() always draws an independent autocommit connection
+        // from its own pool: mempool writes commit on their own and a mempool failure can neither
+        // roll back nor block the block loop. Points at the same database (tables already created
+        // by this.db); it only needs a live pool, so no createDatabase/verifyTables here.
+        if (!this.mempoolDb) {
+            this.mempoolDb = new Database(this.dbUrl, this.dbPort, this.dbName, this.dbUser, this.dbPassword)
+        }
 
         // Verify the Decoder database exists
         let dbStatus   = await this.db.createDatabase();
@@ -1435,10 +1453,10 @@ class XChainDecoder {
             let validTransactionsCount = 0
 
             try {
-            //await this.mempoolDb.beginTransaction()
-            //This deletes the txs that are in the database but not longer in the mempool. Also, it removes
-            //the transactions that already exist in the database, leaving rawMempool only with the new transactions from the mempool
-            let deletedInfo = await this.db.deleteAndCompareTxsNotInList(rawMempool)
+            // All mempool DB work runs on this.mempoolDb, never this.db, so it stays outside the
+            // block loop's open transaction (M-19). Deletes txs no longer in the node mempool and
+            // drops txs already stored, leaving rawMempool holding only the new arrivals.
+            let deletedInfo = await this.mempoolDb.deleteAndCompareTxsNotInList(rawMempool)
 
             let deletedTransactionsCount = deletedInfo.transactionsDeleted
             
@@ -1483,7 +1501,9 @@ class XChainDecoder {
 
                     let parseResult = null
                     try {
-                        parseResult = await this.parseTransaction(nextTx)
+                        // Pass mempoolDb so the pubkey-capture writes inside parseTransaction also
+                        // stay off the block transaction (M-19).
+                        parseResult = await this.parseTransaction(nextTx, undefined, this.mempoolDb)
                     } catch (err) {
                         // The surrounding try has no catch (only a finally for the busy
                         // flag), so a single undecodable mempool tx would abort the whole
@@ -1532,7 +1552,7 @@ class XChainDecoder {
                         }
                     }
 
-                    if (!(await this.db.insertMempoolTransaction({
+                    if (!(await this.mempoolDb.insertMempoolTransaction({
                         hash: nextTransactionHash,
                         source: parseResult["source"],
                         destination: parseResult["destination"],
@@ -1554,7 +1574,6 @@ class XChainDecoder {
                 //await this.sleep(10000)
             }
 
-            //await this.mempoolDb.endTransaction()
             let mempoolEndTime = Date.now()
             let timeString = this.millisecondsToTimeString(mempoolEndTime - mempoolStartTime)
 

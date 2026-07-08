@@ -66,24 +66,13 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         await decoder.verifyReorg()
 
         assert.strictEqual(mockDb.deleteBlockByIndex.callCount, 2, 'Should delete 2 mismatched blocks')
-        assert.ok(mockDb.deleteBlockByIndex.calledWith(5), 'Should delete block 5')
-        assert.ok(mockDb.deleteBlockByIndex.calledWith(4), 'Should delete block 4')
-        assert.ok(mockDb.insertEvent.calledOnce, 'Should insert REORG event')
-        assert.strictEqual(mockDb.insertEvent.firstCall.args[0], 'REORG')
-
-        const deletedBlocks = mockDb.insertEvent.firstCall.args[1]
-        assert.strictEqual(deletedBlocks.length, 2, 'REORG event should contain 2 deleted blocks')
-
-        // The audit log must record the actual rolled-back block hash for every
-        // entry (never null/undefined). Each entry's block_hash must be a
-        // non-empty string carrying the hash that was in the DB.
-        for (const entry of deletedBlocks) {
-            assert.strictEqual(typeof entry.block_hash, 'string', `block_hash for index ${entry.block_index} must be a string, got ${entry.block_hash}`)
-            assert.ok(entry.block_hash.length > 0, `block_hash for index ${entry.block_index} must be non-empty`)
-        }
-        const hashesByIndex = Object.fromEntries(deletedBlocks.map(b => [b.block_index, b.block_hash]))
-        assert.strictEqual(hashesByIndex[5], 'old_hash_5', 'REORG event should record the original hash of block 5')
-        assert.strictEqual(hashesByIndex[4], 'old_hash_4', 'REORG event should record the original hash of block 4')
+        // Since M-12 the REORG marker is written atomically inside deleteBlockByIndex; verifyReorg
+        // hands it the (block_index, block_hash) per deleted block instead of writing one event at
+        // the end. Assert the delete carried the DB's original hash (never null/undefined), which
+        // is the content that lands in the durable per-block marker.
+        assert.ok(mockDb.insertEvent.notCalled, 'must NOT write a separate end-of-run REORG event')
+        assert.ok(mockDb.deleteBlockByIndex.calledWith(5, 'old_hash_5'), 'Should delete block 5 with its original hash')
+        assert.ok(mockDb.deleteBlockByIndex.calledWith(4, 'old_hash_4'), 'Should delete block 4 with its original hash')
     })
 
     it('verifyReorg should handle getBlockHash failures during reorg', async function () {
@@ -146,19 +135,12 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         assert.strictEqual(mockDb.deleteBlockByIndex.callCount, 3, 'Should delete all 3 invalidated blocks')
         assert.strictEqual(blockIndex, -1, 'Walk should retreat to the empty-table sentinel (-1)')
         assert.ok(!mockConnector.getBlockHash.calledWith(-1), 'Guard must short-circuit before querying the node at index -1')
-        assert.ok(mockDb.insertEvent.calledOnce, 'Should still record the REORG event for the deleted blocks')
-        assert.strictEqual(mockDb.insertEvent.firstCall.args[0], 'REORG')
-        assert.strictEqual(mockDb.insertEvent.firstCall.args[1].length, 3, 'REORG event should contain all 3 deleted blocks')
-
-        const exhaustedBlocks = mockDb.insertEvent.firstCall.args[1]
-        for (const entry of exhaustedBlocks) {
-            assert.strictEqual(typeof entry.block_hash, 'string', `block_hash for index ${entry.block_index} must be a string, got ${entry.block_hash}`)
-            assert.ok(entry.block_hash.length > 0, `block_hash for index ${entry.block_index} must be non-empty`)
-        }
-        const exhaustedByIndex = Object.fromEntries(exhaustedBlocks.map(b => [b.block_index, b.block_hash]))
-        assert.strictEqual(exhaustedByIndex[2], 'old_hash_2', 'REORG event should record the original hash of block 2')
-        assert.strictEqual(exhaustedByIndex[1], 'old_hash_1', 'REORG event should record the original hash of block 1')
-        assert.strictEqual(exhaustedByIndex[0], 'old_hash_0', 'REORG event should record the original hash of block 0')
+        // Per-block atomic marker (M-12): each deleted block is handed its original hash so the
+        // marker written inside deleteBlockByIndex records it. No separate end-of-run event.
+        assert.ok(mockDb.insertEvent.notCalled, 'must NOT write a separate end-of-run REORG event')
+        assert.ok(mockDb.deleteBlockByIndex.calledWith(2, 'old_hash_2'), 'block 2 deleted with its original hash')
+        assert.ok(mockDb.deleteBlockByIndex.calledWith(1, 'old_hash_1'), 'block 1 deleted with its original hash')
+        assert.ok(mockDb.deleteBlockByIndex.calledWith(0, 'old_hash_0'), 'block 0 deleted with its original hash')
     })
 
     it('verifyReorg should not insert event when no reorg found', async function () {
@@ -237,7 +219,12 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         assert.ok(!mockConnector.getBlockHash.calledWith(7), 'must NOT query the node for an above-tip height')
         assert.ok(!mockConnector.getBlockHash.calledWith(6), 'must NOT query the node for an above-tip height')
         assert.ok(mockConnector.getBlockHash.calledWith(5), 'should hash-compare the in-range tip block')
-        assert.ok(mockDb.insertEvent.calledOnce, 'should record a REORG event for the deleted blocks')
+        // Per-block atomic marker (M-12): each above-tip delete carries its original hash for the
+        // marker written inside deleteBlockByIndex; no separate end-of-run event.
+        assert.ok(mockDb.insertEvent.notCalled, 'must NOT write a separate end-of-run REORG event')
+        assert.ok(mockDb.deleteBlockByIndex.calledWith(8, 'orphan_8'), 'block 8 deleted with its original hash')
+        assert.ok(mockDb.deleteBlockByIndex.calledWith(7, 'orphan_7'), 'block 7 deleted with its original hash')
+        assert.ok(mockDb.deleteBlockByIndex.calledWith(6, 'orphan_6'), 'block 6 deleted with its original hash')
     })
 
     it('[REGRESSION P0] reconciles when the node tip regresses below the decoder height', async function () {

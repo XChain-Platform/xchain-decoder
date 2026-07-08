@@ -563,6 +563,56 @@ describe('Database#deleteBlockByIndex()', () => {
         const paramCalls = conn.query.getCalls().filter(c => Array.isArray(c.args[1]) && c.args[1][0] === 77);
         assert.ok(paramCalls.length >= 4);
     });
+
+    // [REGRESSION M-12] The decoder reorg signal must be crash-durable: the REORG audit
+    // marker for a rolled-back block has to commit ATOMICALLY with that block's deletion.
+    // A once-at-end event write left a crash window where blocks were gone but no marker
+    // existed, so the indexer (which detects decoder reorgs only via these events rows)
+    // never retracted the orphaned old-chain rows it had already indexed.
+    it('[REGRESSION M-12] writes the per-block REORG marker in the SAME transaction, before commit', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+
+        const r = await db.deleteBlockByIndex(42, 'deadbeefhash');
+        assert.strictEqual(r, true);
+
+        const eventCall = conn.query.getCalls().find(c => /INSERT\s+INTO\s+events/i.test(c.args[0]));
+        assert.ok(eventCall, 'a REORG event INSERT must run inside deleteBlockByIndex when a block hash is given');
+        // code column is REORG and payload is the single-block array the indexer parses.
+        assert.strictEqual(eventCall.args[1][1], 'REORG');
+        assert.deepStrictEqual(JSON.parse(eventCall.args[1][2]), [{ block_index: 42, block_hash: 'deadbeefhash' }]);
+        // Atomicity: the marker INSERT must precede the transaction commit (same tx).
+        assert.ok(conn.commit.called, 'the transaction must commit');
+        assert.ok(eventCall.callId < conn.commit.getCall(0).callId, 'REORG marker must be inserted before commit');
+    });
+
+    it('[REGRESSION M-12] rolls back the block delete AND its marker together on failure', async () => {
+        const db = makeDb();
+        // Fail only the events INSERT; the deletes succeed. Because they share one
+        // transaction, the whole thing must roll back and throw (no half-applied state).
+        const q = sinon.stub().callsFake(async (sql) => {
+            if (/INSERT\s+INTO\s+events/i.test(sql)) throw new Error('event insert failed');
+            return [];
+        });
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+
+        await assert.rejects(() => db.deleteBlockByIndex(42, 'deadbeefhash'), /event insert failed/);
+        assert.ok(conn.rollback.called, 'the shared transaction must roll back when the marker insert fails');
+        assert.ok(!conn.commit.called, 'a delete whose marker failed must never commit');
+    });
+
+    it('writes NO event when called without a block hash (non-reorg delete stays a plain delete)', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        await db.deleteBlockByIndex(10);
+        const eventCall = conn.query.getCalls().find(c => /INSERT\s+INTO\s+events/i.test(c.args[0]));
+        assert.strictEqual(eventCall, undefined, 'no REORG marker without a block hash');
+    });
 });
 
 // ---------------------------------------------------------------------------

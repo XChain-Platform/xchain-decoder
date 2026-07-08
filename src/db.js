@@ -752,7 +752,7 @@ class Database {
         return negative ? `-${result}` : result;
     }
     
-    async deleteBlockByIndex(blockIndex){
+    async deleteBlockByIndex(blockIndex, reorgBlockHash){
         await this.beginTransaction()
         let connection = await this.getConnection()
 
@@ -792,6 +792,30 @@ class Database {
             // artifact. Downstream consumers resolve it to the canonical address string and never
             // treat the id as consensus-visible, so an orphan row left by a reorg is harmless. Do
             // not start feeding a raw lookup id into any consensus/hashed value.
+
+            // M-12 crash-durability: write the REORG audit marker in the SAME transaction that
+            // deletes the block, so the delete and its marker are atomic. The former design wrote
+            // one REORG event once at the END of verifyReorg, after every per-block delete had
+            // already committed. A crash in that window left the blocks gone but no marker, and the
+            // indexer (which detects decoder reorgs solely by reading these events.id rows and
+            // rolling back to the lowest block_index across them) never retracted the orphaned
+            // old-chain rows it had already indexed: a silent, permanent divergence. Per-block
+            // atomic markers close it: every deleted block carries a durable event, and a crash
+            // mid-reorg simply leaves the not-yet-deleted blocks to be re-detected and
+            // re-deleted+marked on restart. The indexer rolls back to the deepest (min) block_index
+            // across all unprocessed markers, so N single-block markers land it at exactly the same
+            // point one combined event would have. Ordering is safe by construction: a marker for
+            // block B becomes visible only once B is actually deleted, so the indexer can never roll
+            // back onto (and re-read) a block still present in a half-deleted decoder. Payload shape
+            // matches the indexer's parser (array of {block_index, block_hash}); reorgBlockHash is
+            // omitted by non-reorg callers, leaving deleteBlockByIndex a plain delete.
+            if (reorgBlockHash != null){
+                const eventQuery = `INSERT INTO events (time, code, data) VALUES (?, ?, ?);`
+                const nowString  = new Date().toISOString().slice(0, 19).replace('T', ' ')
+                const eventData  = JSON.stringify([{ block_index: blockIndex, block_hash: reorgBlockHash }])
+                await connection.query(eventQuery, [nowString, 'REORG', eventData])
+            }
+
             const committed = await this.commitTransaction()
             if (!committed) throw new Error('deleteBlockByIndex: commit failed for block ' + blockIndex)
 

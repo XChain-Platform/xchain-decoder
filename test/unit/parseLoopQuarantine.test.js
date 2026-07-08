@@ -171,7 +171,8 @@ describe('XChainDecoder parse-loop quarantine', function () {
         decoder.xchainBlockDecoder = {
             transactionFromHex: (hex) => ({ ins: [{}], outs: [], getId: () => hex })
         }
-        decoder.db = {
+        // Mempool maintenance runs on mempoolDb, never the block db (M-19).
+        decoder.mempoolDb = {
             deleteAndCompareTxsNotInList: async () => ({ transactionsDeleted: 0 }),
             insertMempoolTransaction: async () => true
         }

@@ -40,7 +40,11 @@ describe('XChainDecoder.verifyReorg retry budget', function () {
     const nodeHash = { 102: 'node102', 101: 'node101', 100: 'node100', 99: 'match99' }
     const failsLeft = { 102: failuresPerBlock, 101: failuresPerBlock, 100: failuresPerBlock }
     const deleted = []
-    let reorgEvent = null
+    // Records the (block_index, block_hash) each deleteBlockByIndex call received. Since M-12 the
+    // REORG marker is written atomically inside deleteBlockByIndex (per block), so verifyReorg no
+    // longer calls insertEvent once at the end. Capturing the hash argument here proves verifyReorg
+    // hands the durable-marker path the right block hash per deleted block.
+    const deleteArgs = []
 
     decoder.connector = {
       getBlockHash: async (h) => nodeHash[h]
@@ -48,31 +52,37 @@ describe('XChainDecoder.verifyReorg retry budget', function () {
     decoder.db = {
       getLastBlockIndex: async () => top,
       getBlockByIndex: async (h) => (dbHash[h] ? { block_hash: dbHash[h] } : null),
-      deleteBlockByIndex: async (h) => {
+      deleteBlockByIndex: async (h, reorgBlockHash) => {
         if (failsLeft[h] > 0) { failsLeft[h]--; throw new Error('transient DB error') }
         deleted.push(h)
+        deleteArgs.push({ block_index: h, block_hash: reorgBlockHash })
         top = h - 1
       },
-      insertEvent: async (type, payload) => { reorgEvent = { type, payload } }
+      // Must never be called at end-of-run any more: a failure here would flag a
+      // regression back to the non-crash-durable once-at-end event write.
+      insertEvent: async () => { throw new Error('verifyReorg must not write a separate end-of-run REORG event') }
     }
 
-    return { decoder, deleted, getReorgEvent: () => reorgEvent }
+    return { decoder, deleted, getDeleteArgs: () => deleteArgs }
   }
 
   it('resets the budget per block so a multi-block reorg with per-block transient failures removes every orphan block', async function () {
     // 3 orphan blocks × 4 transient failures = 12 total failures (> the 10-attempt
     // budget) but only 4 per block (< 10). Pre-fix the shared counter hit 10 mid-reorg
     // and aborted; post-fix each block gets its own budget and all three are deleted.
-    const { decoder, deleted, getReorgEvent } = buildDecoder(4)
+    const { decoder, deleted, getDeleteArgs } = buildDecoder(4)
 
     const result = await decoder.verifyReorg()
 
     assert.strictEqual(result, true)
     assert.deepStrictEqual(deleted, [102, 101, 100], 'all three orphan blocks should be deleted')
-    const ev = getReorgEvent()
-    assert.ok(ev, 'a REORG event should be written')
-    assert.strictEqual(ev.type, 'REORG')
-    assert.strictEqual(ev.payload.length, 3)
+    // M-12: each deleted block is handed its own block hash so deleteBlockByIndex can write the
+    // REORG marker atomically with the delete (one durable marker per rolled-back block).
+    assert.deepStrictEqual(getDeleteArgs(), [
+      { block_index: 102, block_hash: 'db102' },
+      { block_index: 101, block_hash: 'db101' },
+      { block_index: 100, block_hash: 'db100' },
+    ], 'each delete must carry its block hash for the atomic per-block REORG marker')
   })
 
   it('still aborts when a single block genuinely fails 10 times in a row', async function () {

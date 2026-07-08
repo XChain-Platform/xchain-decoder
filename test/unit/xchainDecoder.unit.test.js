@@ -371,7 +371,7 @@ describe('XChainDecoder#verifyReorg() edge cases', () => {
         assert.ok(callCount >= 2, 'should have retried at least once')
     })
 
-    it('should delete a single orphan block and write REORG event', async () => {
+    it('should delete a single orphan block and write its REORG marker atomically (M-12)', async () => {
         const decoder = makeReorgDecoder()
         let deletedBlock = null
 
@@ -390,6 +390,9 @@ describe('XChainDecoder#verifyReorg() edge cases', () => {
             deleteBlockByIndex: sinon.stub().callsFake(async (h) => {
                 deletedBlock = h
             }),
+            // Since M-12 the REORG marker is written inside deleteBlockByIndex, atomically with the
+            // delete. verifyReorg must NOT write a separate end-of-run event (that once-at-end write
+            // was the non-crash-durable path this fix removed).
             insertEvent: sinon.stub().resolves(true)
         }
         decoder.connector = {
@@ -403,11 +406,10 @@ describe('XChainDecoder#verifyReorg() edge cases', () => {
         const result = await decoder.verifyReorg()
         assert.strictEqual(result, true)
         assert.strictEqual(deletedBlock, 10)
-        assert.ok(decoder.db.insertEvent.calledOnce)
-        const eventArgs = decoder.db.insertEvent.firstCall.args
-        assert.strictEqual(eventArgs[0], 'REORG')
-        assert.strictEqual(eventArgs[1].length, 1)
-        assert.strictEqual(eventArgs[1][0].block_index, 10)
+        assert.ok(decoder.db.insertEvent.notCalled, 'no separate end-of-run REORG event')
+        // The deleted block's hash is handed to deleteBlockByIndex so the marker can be written
+        // atomically with the delete.
+        assert.ok(decoder.db.deleteBlockByIndex.calledOnceWith(10, 'stale10'))
     })
 })
 
