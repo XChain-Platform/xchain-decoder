@@ -35,9 +35,14 @@
 --
 -- pubkeys.address_id carries a real FOREIGN KEY onto index_addresses(id); MariaDB
 -- requires a foreign key's two columns to have identical types, so altering one
--- side while the other still differs would error. FOREIGN_KEY_CHECKS is therefore
--- disabled for the duration and re-enabled at the end; both sides end at the same
--- BIGINT UNSIGNED type, so the constraint is valid again once checks are restored.
+-- side while the other still differs would error. SET FOREIGN_KEY_CHECKS = 0 does
+-- NOT lift that rule for the referenced side: on a legacy DB where both sides are
+-- still INT, widening index_addresses.id fails with errno 1833 ("Cannot change
+-- column 'id': used in a foreign key constraint 'pubkeys_ibfk_1'") even with
+-- checks disabled (observed on MariaDB 10.11, test-host mainnet DBs, 2026-07-08).
+-- The constraint is therefore dropped up front and re-added at the end, once both
+-- sides are BIGINT UNSIGNED. IF EXISTS keeps the drop a no-op on fresh DBs, and
+-- the paired drop before ADD keeps a manual re-run of this file safe.
 --
 -- Applies to databases created before 2026-06-02. Fresh installs get BIGINT
 -- UNSIGNED directly from src/sql/*.sql and do not need this migration (it stays
@@ -57,6 +62,10 @@
 -- replica (or re-sync it) after it lands on the canonical node.
 
 SET FOREIGN_KEY_CHECKS = 0;
+
+-- Drop the pubkeys FK so the referenced index_addresses.id can be widened while
+-- the two sides temporarily differ (see WHY above); re-added at the end.
+ALTER TABLE pubkeys DROP FOREIGN KEY IF EXISTS pubkeys_ibfk_1;
 
 -- ============================================================================
 -- index_addresses  (AUTO_INCREMENT surrogate key -- primary overflow constraint)
@@ -102,5 +111,10 @@ ALTER TABLE dispensers         MODIFY address_id             BIGINT UNSIGNED NOT
 ALTER TABLE transaction_outputs MODIFY tx_index              BIGINT UNSIGNED NOT NULL;
 ALTER TABLE transaction_outputs MODIFY vout                  BIGINT UNSIGNED NOT NULL;
 ALTER TABLE transaction_outputs MODIFY destination_id        BIGINT UNSIGNED;
+
+-- Restore the pubkeys FK now that both sides are BIGINT UNSIGNED. The extra
+-- IF EXISTS drop makes the ADD safe on a manual re-run of this file.
+ALTER TABLE pubkeys DROP FOREIGN KEY IF EXISTS pubkeys_ibfk_1;
+ALTER TABLE pubkeys ADD CONSTRAINT pubkeys_ibfk_1 FOREIGN KEY (address_id) REFERENCES index_addresses (id);
 
 SET FOREIGN_KEY_CHECKS = 1;
