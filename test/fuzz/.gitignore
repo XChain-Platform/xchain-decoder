@@ -1,3 +1,3 @@
-# Fuzz artifacts — gitignore corpus and crashes (review before committing)
+# Fuzz artifacts - gitignore corpus and crashes (review before committing)
 corpus/
 crashes/

@@ -21,7 +21,7 @@
 
 ## 1. Executive Summary
 
-The `xchain-decoder` is a high-criticality component that sits at the front of the XChain data pipeline. It polls cryptocurrency nodes (Bitcoin, Litecoin, Dogecoin) via JSON-RPC, decrypts AES-128-CTR obfuscated payloads, parses 19 ACTION types from four script formats, and writes decoded data to MariaDB. Any regression in its decoding logic propagates silently downstream — the indexer, explorer, and all consumer services will process incorrect data.
+The `xchain-decoder` is a high-criticality component that sits at the front of the XChain data pipeline. It polls cryptocurrency nodes (Bitcoin, Litecoin, Dogecoin) via JSON-RPC, decrypts AES-128-CTR obfuscated payloads, parses 19 ACTION types from four script formats, and writes decoded data to MariaDB. Any regression in its decoding logic propagates silently downstream - the indexer, explorer, and all consumer services will process incorrect data.
 
 This plan defines a regression test suite that guards the decoder's stable behavior across code changes, dependency updates, and refactors. It leverages the existing test infrastructure (smoke, unit, integration, security, fuzz, chaos, e2e, benchmarks) to avoid duplication while ensuring comprehensive coverage of regression-critical paths.
 
@@ -48,10 +48,10 @@ The regression suite is a **curated subset** of tests drawn from all existing te
 
 ### 2.2 What the Regression Suite Does NOT Cover
 
-- **Performance benchmarks** — tracked separately via `test:bench` with baseline comparisons
-- **Exploratory/ad-hoc testing** — manual investigation of new edge cases
-- **Upstream service behavior** — coin node correctness, indexer logic
-- **New feature validation** — covered by feature-specific test plans until stabilized
+- **Performance benchmarks** - tracked separately via `test:bench` with baseline comparisons
+- **Exploratory/ad-hoc testing** - manual investigation of new edge cases
+- **Upstream service behavior** - coin node correctness, indexer logic
+- **New feature validation** - covered by feature-specific test plans until stabilized
 
 ### 2.3 Regression Suite Boundaries
 
@@ -69,7 +69,7 @@ The regression suite tests the decoder **in isolation** (unit/security) and **in
 
 | # | Criterion | Rationale |
 |---|-----------|-----------|
-| C1 | Tests core decryption path (AES-128-CTR, key derivation, magic prefix) | Single point of failure — all ACTION data flows through decryption |
+| C1 | Tests core decryption path (AES-128-CTR, key derivation, magic prefix) | Single point of failure - all ACTION data flows through decryption |
 | C2 | Tests a script parsing type (OP_RETURN, P2SH, P2WSH, multisig) | Four distinct code paths; regressions can be type-specific |
 | C3 | Tests ACTION name validation or payload parsing | Whitelist enforcement prevents injection of invalid ACTIONs |
 | C4 | Tests database write correctness (inserts, deduplication, foreign keys) | Data integrity is the decoder's primary contract with downstream |
@@ -92,7 +92,7 @@ Tests are assigned to tiers that determine execution frequency:
 
 ### 3.3 Exclusion Criteria
 
-- Tests that are flaky (>2% failure rate on identical code) — quarantined until stabilized
+- Tests that are flaky (>2% failure rate on identical code) - quarantined until stabilized
 - Tests that duplicate coverage already provided by a higher-tier test
 - Tests for features still under active development (not yet stabilized)
 - Pure performance tests (tracked separately)
@@ -101,7 +101,7 @@ Tests are assigned to tiers that determine execution frequency:
 
 ## 4. Regression Test Inventory
 
-### 4.1 P0 — Critical (run on every commit)
+### 4.1 P0 - Critical (run on every commit)
 
 #### Decryption Core
 | ID | Description | Source | Guards Against |
@@ -138,7 +138,7 @@ Tests are assigned to tiers that determine execution frequency:
 | R-SEC-002 | Error messages do not leak internal paths or credentials | `errorSanitization.security.test.js` | Information disclosure |
 | R-SEC-003 | Connection pool exhaustion handled gracefully | `connectionHandling.security.test.js` | DoS via connection leak |
 
-### 4.2 P1 — High (run on PR merge to main)
+### 4.2 P1 - High (run on PR merge to main)
 
 #### Database Integrity
 | ID | Description | Source | Guards Against |
@@ -170,7 +170,7 @@ Tests are assigned to tiers that determine execution frequency:
 |----|-------------|--------|----------------|
 | R-BUG-xxx | (Template: each resolved bug gets a regression test) | Bug-specific test file | Specific bug reintroduction |
 
-### 4.3 P2 — Standard (run nightly)
+### 4.3 P2 - Standard (run nightly)
 
 #### Multi-Network Support
 | ID | Description | Source | Guards Against |
@@ -195,7 +195,7 @@ Tests are assigned to tiers that determine execution frequency:
 | R-RPC-002 | HTTP 429 triggers 5s backoff (not 500ms) | `BlockchainConnector.test.js` | Rate limit handling failure |
 | R-RPC-003 | Verification progress < 0.99 prevents parsing | Unit tests | Premature parsing on unsynced node |
 
-### 4.4 P3 — Extended (run before release)
+### 4.4 P3 - Extended (run before release)
 
 #### Edge Cases & Rare Paths
 | ID | Description | Source | Guards Against |
@@ -219,11 +219,11 @@ Tests are assigned to tiers that determine execution frequency:
 
 | Trigger | Tiers Run | Estimated Time | Blocking? |
 |---------|-----------|---------------|-----------|
-| Every commit (pre-push hook or CI) | P0 | < 30 seconds | Yes — commit rejected on failure |
-| PR merge to main | P0 + P1 | < 3 minutes | Yes — merge blocked on failure |
-| Nightly CI run | P0 + P1 + P2 | < 8 minutes | No — failures create tickets |
-| Pre-release gate | P0 + P1 + P2 + P3 | < 20 minutes | Yes — release blocked on failure |
-| Dependency update (crypto libs, bitcoinjs-lib, mariadb) | Full suite + fuzz subset | < 30 minutes | Yes — update blocked on failure |
+| Every commit (pre-push hook or CI) | P0 | < 30 seconds | Yes - commit rejected on failure |
+| PR merge to main | P0 + P1 | < 3 minutes | Yes - merge blocked on failure |
+| Nightly CI run | P0 + P1 + P2 | < 8 minutes | No - failures create tickets |
+| Pre-release gate | P0 + P1 + P2 + P3 | < 20 minutes | Yes - release blocked on failure |
+| Dependency update (crypto libs, bitcoinjs-lib, mariadb) | Full suite + fuzz subset | < 30 minutes | Yes - update blocked on failure |
 
 ### 5.2 npm Script Integration
 
@@ -366,7 +366,7 @@ Failed in: [commit hash / CI run link]
 Tier: P0/P1/P2/P3
 Root Cause: [code change / dependency update / environment / flaky]
 Fix: [PR link]
-Regression Test Updated: [yes/no — if the test itself needed updating]
+Regression Test Updated: [yes/no - if the test itself needed updating]
 ```
 
 ---
@@ -410,7 +410,7 @@ Benchmarks ─────────────────► Separate track
 
 ### 7.3 Avoiding Duplication
 
-The regression suite does **not** duplicate tests — it **selects and tags** existing tests. The implementation approach:
+The regression suite does **not** duplicate tests - it **selects and tags** existing tests. The implementation approach:
 
 1. **Tagging over copying:** Existing tests in `test/unit/`, `test/security/`, etc. are tagged with `[REGRESSION]` in their description string rather than copied into a separate directory.
 2. **Mocha grep selection:** The `test:regression` scripts use `--grep` to select tagged tests across all directories.
