@@ -41,6 +41,11 @@ function createDecoder(feeDestination) {
     decoder.connector = {
         getRawTransaction: sinon.stub().rejects(new Error('mocked'))
     }
+    // A failed prevout lookup now throws (tagged rpcLookupFailure) instead of
+    // resolving a null source; stub source resolution to the deterministic
+    // null the parse-focused tests rely on. findFundingFeeOutputs tests call
+    // that method directly, so this stub does not shadow them.
+    decoder.getSourceFromOutput = sinon.stub().resolves(null)
     return decoder
 }
 
@@ -248,19 +253,23 @@ describe('XChainDecoder#findFundingFeeOutputs()', () => {
         assert.deepStrictEqual(result, [])
     })
 
-    it('should return [] when getRawTransaction throws', async () => {
+    it('should throw a tagged rpcLookupFailure when getRawTransaction throws (H-6: fee presence must not depend on RPC health)', async () => {
         const decoder = createDecoder(FEE_ADDR)
         decoder.connector.getRawTransaction = sinon.stub().rejects(new Error('not found'))
-        const result = await decoder.findFundingFeeOutputs('sometxid')
-        assert.deepStrictEqual(result, [])
+        await assert.rejects(
+            () => decoder.findFundingFeeOutputs('sometxid'),
+            (err) => err.rpcLookupFailure === true
+        )
         assert.strictEqual(decoder.rpcErrors, 1)
     })
 
-    it('should return [] when getRawTransaction returns null', async () => {
+    it('should throw a tagged rpcLookupFailure when getRawTransaction returns null (a confirmed funding tx always exists)', async () => {
         const decoder = createDecoder(FEE_ADDR)
         decoder.connector.getRawTransaction = sinon.stub().resolves(null)
-        const result = await decoder.findFundingFeeOutputs('sometxid')
-        assert.deepStrictEqual(result, [])
+        await assert.rejects(
+            () => decoder.findFundingFeeOutputs('sometxid'),
+            (err) => err.rpcLookupFailure === true
+        )
     })
 
     it('should return [] when no output matches feeDestination', async () => {

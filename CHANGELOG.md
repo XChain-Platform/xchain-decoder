@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Prevout/fee-output RPC lookup failures now throw tagged errors and the block loop retries the block indefinitely, so committed block contents can no longer depend on which instance's RPC happened to succeed.
+- The block loop aborts and retries on every rollback-signalling `false` db return, re-deriving its block/tx cursors from the DB so a retried block assigns the same `tx_index` values as a clean instance.
+- `getAllOpenDispenserAddresses` returns null on query error so a failed read can no longer decode a block against a silently-empty dispenser set.
 - The `health` and `GET /status` probes use a new `db.ping()` on a dedicated pooled connection; they previously grabbed (and released!) the block loop's open transaction connection mid-block, letting any monitor poll break per-block atomicity.
 - `DISPENSER_EXPIRE_SAFE_DEPTH` raised from a flat 100 to 120 so it covers the deepest per-chain reorg-recovery window (DOGE = 120, per `xchain-utxo-tracker` `DEFAULT_UNDO_BLOCKS`); at 100 a soft-expired dispenser was hard-purged before a legal in-window DOGE reorg could restore it, permanently losing a money-bearing dispenser on the reorged node. Pinned by a regression test.
 

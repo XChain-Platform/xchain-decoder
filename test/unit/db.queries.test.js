@@ -928,15 +928,14 @@ describe('Database#getAllOpenDispenserAddresses()', () => {
         assert.strictEqual(set.size, 0);
     });
 
-    it('returns an empty Set on query error', async () => {
+    it('returns null on query error (a failed read must stay distinguishable from an empty set)', async () => {
         const db = makeDb();
         const q  = sinon.stub().rejects(new Error('fail'));
         const { pool } = withConn(q);
         injectPool(db, pool);
 
         const set = await db.getAllOpenDispenserAddresses();
-        assert.ok(set instanceof Set);
-        assert.strictEqual(set.size, 0);
+        assert.strictEqual(set, null);
     });
 });
 

@@ -94,11 +94,13 @@ const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many blocks need to be processed 
 const LOG_BLOCK_INTERVAL = 1000 //During catch-up sync, only log progress every N blocks
 
 // How many times a block is re-parsed after a transaction-level parse throw before
-// the offending transaction is quarantined (skipped + PARSE_ERROR event). Throws out
-// of parseTransaction mix transient causes (node RPC, DB) with deterministic ones
-// (poison tx). Retrying first means a transient blip can never make this instance
-// skip a transaction that other decoder instances accept; only a tx that fails every
-// attempt is quarantined, which is deterministic across instances running this code.
+// the offending transaction is quarantined (skipped + PARSE_ERROR event). Retrying
+// first means a transient blip can never make this instance skip a transaction that
+// other decoder instances accept; only a tx that fails every attempt is quarantined,
+// which is deterministic across instances running this code. Throws tagged
+// rpcLookupFailure (node RPC trouble inside parseTransaction) never count toward
+// this cap: an RPC outage is not a poison tx, so those retry the block indefinitely
+// rather than quarantining content other instances accept.
 const TX_PARSE_MAX_RETRIES = 3
 
 class XChainDecoder {
@@ -243,17 +245,31 @@ class XChainDecoder {
         let source = null
         let output = null
         let outputTransaction = null
-        
+
+        // A prevout lookup that FAILS is not a prevout that does not exist. Swallowing
+        // the failure into source=null made this instance skip (or mis-source) a tx that
+        // every healthy instance accepts, committing instance-dependent block contents.
+        // Tag and rethrow instead: the block loop rolls the whole block back and retries,
+        // so a block is only ever committed from fully-resolved lookups. The prevout of a
+        // confirmed tx always exists on a txindex node, so an empty RPC result is a
+        // lookup failure too, never "absent".
         try {
             //Obtaining the output
             let outputRawTransaction = await this.connector.getRawTransaction(txId)
+            if (!outputRawTransaction){
+                throw new Error(`empty getrawtransaction result for confirmed prevout tx ${txId}`)
+            }
             outputTransaction = bitcoin.Transaction.fromHex(outputRawTransaction)
-            output = outputTransaction.outs[outputIndex]
         } catch (err){
             this.rpcErrors++
             console.error(`getSourceFromOutput: failed to fetch tx ${txId} (output ${outputIndex}): `, err)
+            err.rpcLookupFailure = true
+            throw err
         }
-        
+        // An out-of-range output index is deterministic content (the same on every
+        // instance), so it may still resolve to a null source below.
+        output = outputTransaction.outs[outputIndex]
+
         if (output != null){
             let script = output.script
             //Check if output is a P2SH or P2WSH data-carrying reveal output. If so,
@@ -276,8 +292,21 @@ class XChainDecoder {
             if (isP2sh || isP2wsh){
                 let prevOutputIndex = outputTransaction.ins[0].index
                 let prevTxHash = util.uint8ArrayToHex(Buffer.from(outputTransaction.ins[0].hash).reverse())
-                let prevRawTransaction = await this.connector.getRawTransaction(prevTxHash)
-                let prevTransaction = bitcoin.Transaction.fromHex(prevRawTransaction)
+                // Same fail-loud contract as the first fetch: tag the failure so the
+                // block loop retries the block instead of quarantining the tx.
+                let prevTransaction
+                try {
+                    let prevRawTransaction = await this.connector.getRawTransaction(prevTxHash)
+                    if (!prevRawTransaction){
+                        throw new Error(`empty getrawtransaction result for confirmed commit-funding tx ${prevTxHash}`)
+                    }
+                    prevTransaction = bitcoin.Transaction.fromHex(prevRawTransaction)
+                } catch (err){
+                    this.rpcErrors++
+                    console.error(`getSourceFromOutput: failed to fetch commit-funding tx ${prevTxHash}: `, err)
+                    err.rpcLookupFailure = true
+                    throw err
+                }
                 output = prevTransaction.outs[prevOutputIndex]
             }
             
@@ -350,31 +379,38 @@ class XChainDecoder {
     // tx) spends that commit's P2SH outputs. Fetch the funding tx and return any output paying the
     // protocol FEE_DESTINATION, shaped as a paymentOutput, so the indexer sees it among this action's
     // transaction_outputs and can validate the native-coin fee. Deterministic (same commit → same
-    // output). Returns [] when no fee destination is configured, the txid is missing, or the lookup
-    // fails (the action then falls back to XCHAIN-balance fee handling, as before).
+    // output). Returns [] only for deterministic reasons (no fee destination configured, no funding
+    // txid). A FAILED lookup throws (tagged rpcLookupFailure) so the block loop retries the block:
+    // treating it as "no fee output" committed fee outputs on some instances and not others, and
+    // whether an action paid its fee must never depend on which instance decoded it.
     async findFundingFeeOutputs(fundingTxId){
         let results = []
         if (!this.feeDestination || !fundingTxId) return results
+        let fundingTx
         try {
             let fundingTxHex = await this.connector.getRawTransaction(fundingTxId)
-            if (!fundingTxHex) return results
-            let fundingTx = bitcoin.Transaction.fromHex(fundingTxHex)
-            for (let vout = 0; vout < fundingTx.outs.length; vout++){
-                let output = fundingTx.outs[vout]
-                let outputAddress = null
-                try {
-                    if (!this.isFutureSegwitScript(output.script))
-                        outputAddress = bitcoin.address.fromOutputScript(output.script, this.network)
-                } catch (err){
-                    //the output script has no matching address; skip
-                }
-                if (outputAddress && outputAddress === this.feeDestination){
-                    results.push({ vout: vout, destinationAddress: outputAddress, amount: output.value })
-                }
+            if (!fundingTxHex){
+                throw new Error(`empty getrawtransaction result for confirmed funding tx ${fundingTxId}`)
             }
+            fundingTx = bitcoin.Transaction.fromHex(fundingTxHex)
         } catch (err){
             this.rpcErrors++
             console.error(`findFundingFeeOutputs: failed to fetch funding tx ${fundingTxId}:`, err.message)
+            err.rpcLookupFailure = true
+            throw err
+        }
+        for (let vout = 0; vout < fundingTx.outs.length; vout++){
+            let output = fundingTx.outs[vout]
+            let outputAddress = null
+            try {
+                if (!this.isFutureSegwitScript(output.script))
+                    outputAddress = bitcoin.address.fromOutputScript(output.script, this.network)
+            } catch (err){
+                //the output script has no matching address; skip
+            }
+            if (outputAddress && outputAddress === this.feeDestination){
+                results.push({ vout: vout, destinationAddress: outputAddress, amount: output.value })
+            }
         }
         return results
     }
@@ -790,6 +826,19 @@ class XChainDecoder {
         let txParseRetryHeight = -1
         let txParseRetryCount = 0
 
+        // Re-derive the loop cursors from the DB after any mid-block rollback, then
+        // pause before the retry. Every rollback path MUST run this before continuing:
+        // in particular lastProcessedTxIndex advances in memory while a block is being
+        // parsed, so retrying a rolled-back block with the stale counter would assign
+        // different tx_index values than a clean instance decoding the same block
+        // (replicated content, so that is a cross-instance divergence, not cosmetics).
+        const resetAfterRollback = async () => {
+            lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
+            lastProcessedTxIndex = await this.db.getLastTxIndex()
+            blocksQuantity = 0
+            await this.sleep(3000)
+        }
+
         main_parsing:
         while (true){
             if (this.stopFlag){
@@ -1032,14 +1081,23 @@ class XChainDecoder {
                         previous_block_hash:previousBlockHash
                     }
                 ))){
+                    // insertBlock's error path already rolled the block transaction back.
                     console.log("Error trying to insert a Block to the database")
-                    await this.sleep(3000)
+                    await resetAfterRollback()
                     continue main_parsing
                 }
-                
+
                 //Soft-expire open dispensers past their expiration (marks them with
                 //this block height instead of deleting, so a reorg can restore them).
-                await this.db.deleteOpenDispensers(nextBlockHeight, block.timestamp)
+                //false means the UPDATE failed and the block transaction was already
+                //rolled back; continuing would land every subsequent write on fresh
+                //autocommit connections OUTSIDE any transaction (durable rows the
+                //rollback was meant to discard), so retry the block instead.
+                if ((await this.db.deleteOpenDispensers(nextBlockHeight, block.timestamp)) !== true){
+                    console.error(`deleteOpenDispensers failed at block ${nextBlockHeight}; block rolled back, retrying`)
+                    await resetAfterRollback()
+                    continue main_parsing
+                }
 
                 // Load the set of open-dispenser addresses once for this block (after
                 // expiring stale ones above) so parseTransaction can test each output
@@ -1047,7 +1105,16 @@ class XChainDecoder {
                 // per-output lookup was thousands of serialized round-trips per mainnet
                 // block. Kept current within the block by .add()ing any dispenser opened
                 // by a transaction below, matching the previous per-output query timing.
+                // null signals the query failed: decoding the block against an empty set
+                // would silently drop every dispense output on this instance only, so
+                // retry the block instead.
                 let openDispenserAddresses = await this.db.getAllOpenDispenserAddresses()
+                if (openDispenserAddresses == null){
+                    console.error(`Could not load open dispenser addresses for block ${nextBlockHeight}; retrying block`)
+                    await this.db.endTransaction()
+                    await resetAfterRollback()
+                    continue main_parsing
+                }
 
                 //Loop through the transactions and saving only the ones that have valid data
                 var transactions = block.transactions
@@ -1061,6 +1128,20 @@ class XChainDecoder {
                         nextTransactionHash = nextTransaction.getId()
                         parseResult = await this.parseTransaction(nextTransaction, openDispenserAddresses)
                     } catch (e){
+                        if (e && e.rpcLookupFailure){
+                            // A prevout/fee-output RPC lookup failed even after the
+                            // connector's internal retries. That is node/infrastructure
+                            // trouble, not a poison transaction: quarantining would make
+                            // this instance skip a tx every healthy instance accepts
+                            // (instance-dependent block contents). Retry the block
+                            // indefinitely instead; rpc_errors/health make the stall
+                            // visible while the node recovers.
+                            console.error(`RPC lookup failed in block ${nextBlockHeight} (tx position ${txIndex}), retrying block:`, e)
+                            await this.db.endTransaction()
+                            await resetAfterRollback()
+                            continue main_parsing
+                        }
+
                         if (txParseRetryHeight != nextBlockHeight){
                             txParseRetryHeight = nextBlockHeight
                             txParseRetryCount = 0
@@ -1068,14 +1149,11 @@ class XChainDecoder {
                         txParseRetryCount++
 
                         if (txParseRetryCount <= TX_PARSE_MAX_RETRIES){
-                            // Could be transient (node RPC / DB hiccup inside parseTransaction):
+                            // Could be transient (DB hiccup inside parseTransaction):
                             // roll the block back and re-parse it from scratch.
                             console.error(`parseTransaction failed in block ${nextBlockHeight} (tx position ${txIndex}, attempt ${txParseRetryCount}/${TX_PARSE_MAX_RETRIES}), retrying block:`, e)
                             await this.db.endTransaction()
-                            lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
-                            lastProcessedTxIndex = await this.db.getLastTxIndex()
-                            blocksQuantity = 0
-                            await this.sleep(3000)
+                            await resetAfterRollback()
                             continue main_parsing
                         }
 
@@ -1092,7 +1170,7 @@ class XChainDecoder {
                         }, block.timestamp)
                         if (eventResult === false){
                             // insertEvent already rolled the block transaction back
-                            await this.sleep(3000)
+                            await resetAfterRollback()
                             continue main_parsing
                         }
                         continue
@@ -1156,15 +1234,24 @@ class XChainDecoder {
                                 raw_data: parseResult["rawData"] || null
 
                             }))){
-                                await this.sleep(3000)
+                                // insertTransaction's error path already rolled the block back.
+                                await resetAfterRollback()
                                 continue main_parsing
                             } else {
-                                //Store dispenses outputs
+                                //Store dispenses outputs. false means the INSERT failed and
+                                //the block transaction was already rolled back: stop writing
+                                //(anything further would land outside a transaction) and
+                                //retry the block.
                                 for (let nextOutput of dispenseOutputs){
                                     nextOutput.txIndex = lastProcessedTxIndex
                                     let insertResult = await this.db.insertTransactionOutput(
                                         nextOutput
                                     )
+                                    if (insertResult === false){
+                                        console.error(`insertTransactionOutput (dispense) failed at block ${nextBlockHeight}; block rolled back, retrying`)
+                                        await resetAfterRollback()
+                                        continue main_parsing
+                                    }
                                     if (insertResult === this.db.DUPLICATED_TRANSACTION){
                                         console.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${lastProcessedTxIndex}, vout=${nextOutput.vout}); possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
                                     }
@@ -1187,6 +1274,11 @@ class XChainDecoder {
                                         let insertResult = await this.db.insertTransactionOutput(
                                             nextOutput
                                         )
+                                        if (insertResult === false){
+                                            console.error(`insertTransactionOutput (payment) failed at block ${nextBlockHeight}; block rolled back, retrying`)
+                                            await resetAfterRollback()
+                                            continue main_parsing
+                                        }
                                         if (insertResult === this.db.DUPLICATED_TRANSACTION){
                                             console.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${lastProcessedTxIndex}, vout=${nextOutput.vout}); possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
                                         }
@@ -1222,7 +1314,8 @@ class XChainDecoder {
                                                 address: parseResult["source"],
                                                 expiration: expiration
                                             }))){
-                                                await this.sleep(3000)
+                                                // insertDispenser's error path already rolled the block back.
+                                                await resetAfterRollback()
                                                 continue main_parsing
                                             }
                                             // Keep the in-memory open-dispenser set current so a

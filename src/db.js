@@ -1479,6 +1479,10 @@ class Database {
     // state (e.g. dispensers just soft-expired by deleteOpenDispensers, which sets
     // expired_block_index; filtered out here so an expired dispenser stops
     // capturing payment outputs exactly as the old hard-delete did).
+    // Returns null when the query fails: an empty set and a FAILED read must stay
+    // distinguishable, because decoding a block against a silently-empty set would
+    // drop every dispense output on this instance only (instance-dependent block
+    // contents). The block loop retries the block on null.
     async getAllOpenDispenserAddresses(){
         let db    = await this.getConnection();
         let query =
@@ -1495,6 +1499,7 @@ class Database {
             }
         } catch (err) {
             console.error('Error loading open dispenser addresses:', err);
+            return null;
         } finally {
             if (this.transactionConnection == null){
                 await db.release()

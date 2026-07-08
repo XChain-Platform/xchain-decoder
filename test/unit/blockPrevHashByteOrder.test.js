@@ -64,7 +64,7 @@ describe('XChainDecoder block previous_block_hash byte order', function () {
             getLastTxIndex: async () => 0,
             beginTransaction: async () => {},
             commitTransaction: async () => {},
-            deleteOpenDispensers: async () => {},
+            deleteOpenDispensers: async () => true,
             purgeExpiredDispensers: async () => {},
             getAllOpenDispenserAddresses: async () => new Set(),
             insertBlock: async (block) => {

@@ -64,6 +64,10 @@ function createDecoder() {
     decoder.connector = {
         getRawTransaction: sinon.stub().rejects(new Error('mocked'))
     }
+    // A failed prevout lookup now throws (tagged rpcLookupFailure) instead of
+    // resolving a null source; stub source resolution to the deterministic
+    // null these decode-focused tests rely on.
+    decoder.getSourceFromOutput = sinon.stub().resolves(null)
     return decoder
 }
 

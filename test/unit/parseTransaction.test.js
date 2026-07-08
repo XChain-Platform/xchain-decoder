@@ -75,6 +75,11 @@ function createDecoder() {
     decoder.connector = {
         getRawTransaction: sinon.stub().rejects(new Error('mocked'))
     }
+    // A failed prevout lookup now throws (tagged rpcLookupFailure) instead of
+    // resolving a null source, so parse-focused tests stub source resolution to
+    // the deterministic null it used to observe. The getSourceFromOutput suite
+    // deletes this own-property stub to exercise the real method.
+    decoder.getSourceFromOutput = sinon.stub().resolves(null)
     return decoder
 }
 
@@ -462,17 +467,21 @@ describe('XChainDecoder#getSourceFromOutput()', () => {
 
     beforeEach(() => {
         decoder = createDecoder()
+        // Exercise the real method, not the harness's null-source stub.
+        delete decoder.getSourceFromOutput
     })
 
     afterEach(() => {
         sinon.restore()
     })
 
-    it('should return null when connector throws (invalid txid)', async () => {
+    it('should throw a tagged rpcLookupFailure when the connector throws (H-6: a failed lookup is not a null source)', async () => {
         decoder.connector.getRawTransaction = sinon.stub().rejects(new Error('not found'))
 
-        const result = await decoder.getSourceFromOutput('deadbeef', 0)
-        assert.strictEqual(result, null)
+        await assert.rejects(
+            () => decoder.getSourceFromOutput('deadbeef', 0),
+            (err) => err.rpcLookupFailure === true
+        )
     })
 
     it('should return null when output index is out of bounds', async () => {
