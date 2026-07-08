@@ -26,7 +26,7 @@ Transaction extraction service for the XChain Platform. Polls cryptocurrency nod
 - **DISPENSER protocol**: tracks active dispensers with soft-expiry, hard-purge after reorg-safe depth, and incoming payment detection
 - **Mempool tracking**: indexes unconfirmed transactions every 60 seconds when synced
 - **Normalized storage**: addresses and hashes stored as integer IDs for join efficiency
-- **ACTION validation**: 33-name allowlist plus 5 short-form aliases (e.g. TRANSFER -> SEND) expanded before database writes
+- **ACTION validation**: 34-name allowlist plus 5 short-form aliases (e.g. TRANSFER -> SEND) expanded before database writes
 - **Parse-failure quarantine**: tx-level decode failures retry up to 3 times, then are quarantined as PARSE_ERROR events rather than halting the block
 - **Source pubkey capture**: records the source address pubkey per transaction in a dedicated table for downstream use by the indexer
 - **Native-coin fee tracking**: when FEE_DESTINATION is set, outputs paying that address are persisted to transaction_outputs for indexer fee validation
