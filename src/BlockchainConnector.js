@@ -21,6 +21,30 @@
 const axios = require('axios');
 axios.defaults.timeout = parseInt(process.env.NODE_RPC_TIMEOUT ?? '30000', 10)
 
+// Sanitize an axios error before it is logged or re-thrown. Every RPC call passes
+// `auth: { username: rpcUser, password: rpcPassword }`, and axios attaches the request
+// config to the thrown error, so `console.error(msg, error)` serializes NODE_USER /
+// NODE_PASSWORD into the decoder logs (util.inspect walks error.config.auth). Scrub the
+// credential-bearing fields IN PLACE so neither this logger nor any upstream handler that
+// re-logs the re-thrown error can leak them, and return a compact, credential-free string
+// (error.message never carries the auth block) for logging. Never let scrubbing throw.
+function sanitizeRpcError(error){
+    try {
+        if (error && error.config) {
+            error.config.auth = undefined
+            if (error.config.headers) delete error.config.headers.Authorization
+        }
+        // axios stores the raw request/response, which echo the request config (and its
+        // Authorization/auth) back. Drop the request; keep only a response status.
+        if (error && error.request) error.request = undefined
+        if (error && error.response) {
+            const status = error.response.status
+            error.response = (status !== undefined) ? { status: status } : undefined
+        }
+    } catch (_) { /* sanitization must never mask the original failure */ }
+    return (error && error.message) ? error.message : String(error)
+}
+
 // Decode a Bitcoin-style varint from `buf` at `offset`.
 // Returns { value, bytes } where `bytes` is the number of bytes consumed.
 // Keep in sync with xchain-utxo-tracker/src/BlockchainConnector.js readVarint.
@@ -162,7 +186,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get network info, trying again...")
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting network info:', error);
+                    console.error('Error getting network info:', sanitizeRpcError(error));
                     throw error;
                 }
             }
@@ -200,7 +224,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get blockchain info, trying again...")
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting blockchain info:', error);
+                    console.error('Error getting blockchain info:', sanitizeRpcError(error));
                     throw error;
                 }
             }
@@ -244,7 +268,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get block hash, trying again...")
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting block hash:', error);
+                    console.error('Error getting block hash:', sanitizeRpcError(error));
                     throw error;
                 }
             }
@@ -283,7 +307,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get block hex, trying again...")
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting block header:', error);
+                    console.error('Error getting block header:', sanitizeRpcError(error));
                     throw error;
                 }
             }
@@ -358,7 +382,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get raw mempool, trying again...")
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting raw mempool:', error);
+                    console.error('Error getting raw mempool:', sanitizeRpcError(error));
                     throw error;
                 }
             }
@@ -471,7 +495,7 @@ class BlockchainConnector {
                     console.log("Getting timeout trying to get block, trying again...")
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting block:', error);
+                    console.error('Error getting block:', sanitizeRpcError(error));
                     throw error;
                 }
             }

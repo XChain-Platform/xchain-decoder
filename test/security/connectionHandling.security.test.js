@@ -15,34 +15,39 @@ describe('Security: Connection Handling', () => {
 
     // --- SEC-06: Connection pool timeout ---
 
-    describe('getConnection timeout', () => {
-        it('[REGRESSION P0] R-SEC-003: should verify GET_CONNECTION_TIMEOUT_MS constant exists in source', () => {
+    // SEC-06 intent: getConnection must be bounded so a MariaDB outage surfaces as a
+    // thrown error instead of hanging block ingestion forever. The bound was reshaped
+    // from a wall-clock cap (GET_CONNECTION_TIMEOUT_MS) to an attempt cap with
+    // exponential backoff + jitter (maxAttempts), matching the indexer's retry shape;
+    // these assertions track the current, still-bounded implementation.
+    describe('getConnection retry bound', () => {
+        it('[REGRESSION P0] R-SEC-003: should cap connection retries with a maxAttempts bound', () => {
             const fs = require('fs')
             const source = fs.readFileSync(require.resolve('../../src/db.js'), 'utf-8')
 
             assert.ok(
-                source.includes('GET_CONNECTION_TIMEOUT_MS'),
-                'db.js should define GET_CONNECTION_TIMEOUT_MS constant'
+                source.includes('maxAttempts'),
+                'db.js getConnection should bound retries with a maxAttempts cap'
             )
         })
 
-        it('should verify getConnection has a timeout check', () => {
+        it('should verify getConnection bails out once the attempt cap is reached', () => {
             const fs = require('fs')
             const source = fs.readFileSync(require.resolve('../../src/db.js'), 'utf-8')
 
             assert.ok(
-                source.includes('Date.now() - startTime > GET_CONNECTION_TIMEOUT_MS'),
-                'getConnection should check elapsed time against timeout'
+                /attempts\s*>=\s*maxAttempts/.test(source),
+                'getConnection should stop retrying once attempts reaches maxAttempts'
             )
         })
 
-        it('should verify getConnection throws after timeout', () => {
+        it('should verify getConnection throws after exhausting attempts', () => {
             const fs = require('fs')
             const source = fs.readFileSync(require.resolve('../../src/db.js'), 'utf-8')
 
             assert.ok(
                 source.includes("throw new Error('Failed to get database connection"),
-                'getConnection should throw on timeout'
+                'getConnection should throw once retries are exhausted'
             )
         })
     })

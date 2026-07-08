@@ -126,10 +126,14 @@ describe('Security: DISPENSER Field Validation', () => {
             const fs = require('fs')
             const source = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8')
 
-            // Expiration should use Number() for strict numeric conversion
+            // Expiration should use Number() for strict numeric conversion (not parseInt,
+            // which would silently accept trailing garbage like "100abc"). The field index
+            // shifts as the DISPENSER wire format gains fields (GIVE_OWNERSHIP, GIVE_ESCROW,
+            // ORACLE_ADDRESS, ...), so match the Number(decodedDataSplit[N]) shape rather than
+            // a pinned index.
             assert.ok(
-                source.includes('Number(decodedDataSplit[12])'),
-                'Expiration should be parsed with Number()'
+                /Number\(decodedDataSplit\[\d+\]\)/.test(source),
+                'Expiration should be parsed with Number(decodedDataSplit[...])'
             )
         })
     })
