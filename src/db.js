@@ -645,7 +645,24 @@ class Database {
             // console.log("releasing database connection");
             await this.transactionConnection.release();
             this.transactionConnection = null;
-        }  
+        }
+    }
+
+    // DB liveness probe for the API health/status endpoints. Draws a connection
+    // DIRECTLY from the pool, never via getConnection(): while a block is being
+    // processed, getConnection() returns the shared transactionConnection, and a
+    // probe that then .release()s it hands the block's live transaction
+    // connection back to the pool while the block loop keeps writing on it.
+    // Any monitor polling /status mid-block would break per-block atomicity.
+    // No retry/backoff either: a health check wants the current truth.
+    async ping(){
+        let conn = await this.pool.getConnection();
+        try {
+            await conn.query('SELECT 1');
+            return true;
+        } finally {
+            try { await conn.release(); } catch(_){}
+        }
     }
 
     async _acquireTransactionLock(){

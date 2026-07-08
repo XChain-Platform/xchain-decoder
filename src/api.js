@@ -107,16 +107,18 @@ async function startApi(){
         async health() {
             const syncStatus = decoder.getSyncStatus();
 
-            // Live DB reachability probe (2 s timeout). decoder.db is null until
-            // start() creates the Database instance, so a null db means we are
-            // still before the DB-connect phase.
+            // Live DB reachability probe. decoder.db is null until start()
+            // creates the Database instance, so a null db means we are still
+            // before the DB-connect phase. db.ping() draws its own pooled
+            // connection; probing via getConnection() would grab (and then
+            // release!) the block loop's open transaction connection mid-block.
             let dbOk = false
             let dbPhase = 'starting'
             if(decoder.db){
                 try {
-                    const conn = await decoder.db.getConnection()
-                    try { await conn.query('SELECT 1'); dbOk = true; dbPhase = 'running' }
-                    finally { try { await conn.release() } catch(_){} }
+                    await decoder.db.ping()
+                    dbOk = true
+                    dbPhase = 'running'
                 } catch(_) {
                     dbPhase = 'db-unreachable'
                 }
@@ -162,11 +164,8 @@ async function startApi(){
     app.get('/status', async (req, res) => {
         let dbOk = false
         if (decoder.db) {
-            try {
-                const conn = await decoder.db.getConnection()
-                try { await conn.query('SELECT 1'); dbOk = true }
-                finally { try { await conn.release() } catch (_) {} }
-            } catch (_) {}
+            // db.ping() uses its own pooled connection; see the health method note.
+            try { dbOk = await decoder.db.ping() } catch (_) {}
         }
         const healthy = decoderRunning && dbOk
         res.status(healthy ? 200 : 503).json({
