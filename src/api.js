@@ -42,21 +42,42 @@ const DB_PORT =  process.env.DECODER_DB_PORT
 const DECODER_DB_NAME =  process.env.DECODER_DB_NAME
 const DECODER_DB_USER =  process.env.DECODER_DB_USER
 const DB_PASSWORD =  process.env.DECODER_DB_PASS
-// Validate required env vars that have no safe default early: a missing port
-// causes Node to bind a random OS-assigned port, making the container appear
-// healthy while every downstream caller gets connection-refused.
 const DECODER_API_PORT = parseInt(process.env.DECODER_API_PORT, 10)
-if (!process.env.DECODER_API_PORT || isNaN(DECODER_API_PORT) || DECODER_API_PORT < 1 || DECODER_API_PORT > 65535) {
-    console.error('DECODER_API_PORT is not set or invalid. Set a valid port (1-65535) in the environment.')
-    process.exit(1)
-}
 const AUX_POW = process.env.AUX_POW === 'true' || process.env.AUX_POW === '1'
 // Native-coin protocol fee destination for this coin+network: registry-pinned default with a
 // non-mainnet-only env override (see src/feeDestination.js). When resolved, the decoder persists
 // outputs paying it to transaction_outputs so the indexer can validate native-coin fee payments.
 const FEE_DESTINATION = resolveFeeDestination(NETWORK, process.env.FEE_DESTINATION || null)
 
+// Express middleware that bounds JSON-RPC batch size. express-json-rpc-router runs
+// Promise.all over every element of a batch array, while the per-IP rate limiter counts
+// the whole batch as ONE request. Without a cap, a single ~100kb array of thousands of
+// {"method":"health"} calls fans out into thousands of concurrent invocations - each
+// health() draws a pooled MariaDB connection - amplifying one unauthenticated request
+// into pool contention against the liveness-critical block loop. Only trivial status
+// methods are exposed, so a small cap is ample.
+function makeRpcBatchGuard(maxBatch){
+    return (req, res, next) => {
+        if (Array.isArray(req.body) && req.body.length > maxBatch){
+            return res.status(400).json({
+                jsonrpc: '2.0',
+                error: { code: -32600, message: 'Batch too large (max ' + maxBatch + ' requests per call)' },
+                id: null
+            })
+        }
+        next()
+    }
+}
+
 async function startApi(){
+    // Validate required env vars that have no safe default: a missing port causes Node to
+    // bind a random OS-assigned port, making the container appear healthy while every
+    // downstream caller gets connection-refused. Checked here (not at module load) so the
+    // module can be required by tests without a valid port set.
+    if (!process.env.DECODER_API_PORT || isNaN(DECODER_API_PORT) || DECODER_API_PORT < 1 || DECODER_API_PORT > 65535) {
+        console.error('DECODER_API_PORT is not set or invalid. Set a valid port (1-65535) in the environment.')
+        process.exit(1)
+    }
     const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DECODER_DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD, AUX_POW, FEE_DESTINATION);
     let decoderRunning = true
     let decoderError = null
@@ -175,6 +196,10 @@ async function startApi(){
         })
     })
 
+    // Bound JSON-RPC batch size (see makeRpcBatchGuard). Must run after bodyParser
+    // (req.body parsed) and before the router (dispatch).
+    app.use(makeRpcBatchGuard(parseInt(process.env.DECODER_RPC_MAX_BATCH, 10) || 20))
+
     app.use(jsonRouter({methods: jsonRpcController}))
 
     app.listen(DECODER_API_PORT, () => {
@@ -182,4 +207,8 @@ async function startApi(){
     });
 }
 
-startApi()
+// Auto-start only when run directly (node src/api.js), so the module can be required by
+// tests without opening a DB connection / listening socket.
+if (require.main === module) startApi()
+
+module.exports = { makeRpcBatchGuard }

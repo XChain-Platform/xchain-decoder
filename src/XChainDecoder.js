@@ -237,7 +237,10 @@ class XChainDecoder {
     }
     
     async parseRawTransaction(rawTransaction){
-        return await this.parseTransaction(bitcoin.Transaction.fromHex(rawTransaction))
+        // Parse via xchainBlockDecoder.transactionFromHex, not bitcoin.Transaction.fromHex:
+        // the former strips the LTC MWEB marker+flag (0x08/0x09) that makes vanilla strict
+        // parsing throw a deterministic UInt64 range error. See getSourceFromOutput.
+        return await this.parseTransaction(this.xchainBlockDecoder.transactionFromHex(rawTransaction))
     }
     
     //Gets the address from the output specified by the transaction hash id and the output index
@@ -259,7 +262,15 @@ class XChainDecoder {
             if (!outputRawTransaction){
                 throw new Error(`empty getrawtransaction result for confirmed prevout tx ${txId}`)
             }
-            outputTransaction = bitcoin.Transaction.fromHex(outputRawTransaction)
+            // MUST parse through transactionFromHex (strips the LTC MWEB marker+flag), not
+            // bitcoin.Transaction.fromHex. A funding/prevout tx on Litecoin can carry the
+            // MWEB flag (0x08/0x09); vanilla strict parsing throws a deterministic UInt64
+            // range error, which the catch below then mis-tags as rpcLookupFailure=true.
+            // The block loop treats rpcLookupFailure as transient node trouble and retries
+            // the block FOREVER, so a deterministic content-parse error would wedge every
+            // LTC decoder instance permanently. transactionFromHex is the same parser the
+            // block path uses; for BTC/DOGE and non-flagged txs it is a plain parse.
+            outputTransaction = this.xchainBlockDecoder.transactionFromHex(outputRawTransaction)
         } catch (err){
             this.rpcErrors++
             console.error(`getSourceFromOutput: failed to fetch tx ${txId} (output ${outputIndex}): `, err)
@@ -300,7 +311,8 @@ class XChainDecoder {
                     if (!prevRawTransaction){
                         throw new Error(`empty getrawtransaction result for confirmed commit-funding tx ${prevTxHash}`)
                     }
-                    prevTransaction = bitcoin.Transaction.fromHex(prevRawTransaction)
+                    // transactionFromHex (MWEB-flag-safe), not bitcoin.Transaction.fromHex; see above.
+                    prevTransaction = this.xchainBlockDecoder.transactionFromHex(prevRawTransaction)
                 } catch (err){
                     this.rpcErrors++
                     console.error(`getSourceFromOutput: failed to fetch commit-funding tx ${prevTxHash}: `, err)
@@ -392,7 +404,8 @@ class XChainDecoder {
             if (!fundingTxHex){
                 throw new Error(`empty getrawtransaction result for confirmed funding tx ${fundingTxId}`)
             }
-            fundingTx = bitcoin.Transaction.fromHex(fundingTxHex)
+            // transactionFromHex (MWEB-flag-safe), not bitcoin.Transaction.fromHex; see getSourceFromOutput.
+            fundingTx = this.xchainBlockDecoder.transactionFromHex(fundingTxHex)
         } catch (err){
             this.rpcErrors++
             console.error(`findFundingFeeOutputs: failed to fetch funding tx ${fundingTxId}:`, err.message)
@@ -425,6 +438,13 @@ class XChainDecoder {
         // this.db (default); the mempool path passes this.mempoolDb so pubkey writes for a
         // pending tx never touch the block's open transaction (M-19).
         if (!db) db = this.db
+        // A zero-input transaction has no ins[0] to dereference below (the coinbase/
+        // standard_input guard also reads ins[0]). An LTC MWEB/HogEx integration tx can
+        // parse to zero canonical inputs after marker+flag stripping; such a tx carries no
+        // XChain data. Skip it cleanly here, mirroring the mempool path's ins.length guard,
+        // so it never throws a TypeError that costs 3 wasted block re-parses + a spurious
+        // PARSE_ERROR quarantine event.
+        if (!transaction.ins || transaction.ins.length === 0) return null
         let nextTxId = transaction.getId()
         let firstInputTxId = util.uint8ArrayToHex(Buffer.from(transaction.ins[0].hash).reverse())
         let standardInput = ("standard_input" in transaction.ins[0]?transaction.ins[0]["standard_input"]:true)
