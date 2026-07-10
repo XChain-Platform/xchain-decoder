@@ -1,5 +1,5 @@
 -- xchain:migration mode=manual
--- (manual: de-duplicates interned rows and rebuilds two indexes — run with the
+-- (manual: de-duplicates interned rows and rebuilds two indexes; run with the
 --  decoder stopped; see HOW TO RUN below.)
 -- Migration: enforce full-column UNIQUE indexes on index_addresses (address)
 -- and index_transactions (hash).
@@ -33,7 +33,7 @@
 --      exists, so the skipped row is itself a duplicate record) are deleted:
 --      pubkeys.address_id, dispensers.(tx_index,address_id) and
 --      mempool_transactions.tx_hash_id. Exception: transactions.tx_hash_id is
---      repointed WITHOUT ignore on purpose — two transactions rows for the
+--      repointed WITHOUT ignore on purpose: two transactions rows for the
 --      same hash would mean duplicated confirmed-transaction data, which this
 --      migration must not silently delete. In that case the UPDATE fails with
 --      a duplicate-key error, nothing is recorded in the ledger, and the
@@ -47,7 +47,7 @@
 --
 -- HOW TO RUN
 -- ----------
---   npm run migrate        # node src/migrate.js — reads DECODER_DB_* from .env
+--   npm run migrate        # node src/migrate.js, reads DECODER_DB_* from .env
 --
 -- Take a backup first. Run while the decoder process is stopped. Safe to
 -- re-run: the dedup steps are no-ops once duplicates are gone and the index
@@ -56,6 +56,20 @@
 -- Validator note: xchain-sync replicates the decoder database to validator
 -- nodes, so validator operators should run this same migration against their
 -- replica (or re-sync it) after it lands on the canonical node.
+
+-- mempool_transactions lost its interned-id columns (source_id / destination_id /
+-- tx_hash_id) in 2026-06-15-mempool-raw-strings.sql, which rebuilt the table to store
+-- raw address/hash strings. On a database created from that newer schema the mempool
+-- repoints below reference columns that no longer exist and abort the migration with
+-- errno 1054. Compute a flag once; each mempool repoint is then guarded so it runs on
+-- an old-schema DB (columns present) and is a no-op on a new-schema DB (nothing to
+-- repoint: the raw-string table carries no id references). All three id columns were
+-- added and dropped together, so one probe (source_id) is decisive.
+SET @mempool_has_ids := (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name   = 'mempool_transactions'
+     AND column_name  = 'source_id');
 
 -- ============================ index_addresses ============================
 
@@ -83,13 +97,12 @@ UPDATE transaction_outputs o
   JOIN _dup_index_addresses d ON o.destination_id = d.dup_id
    SET o.destination_id = d.keep_id;
 
-UPDATE mempool_transactions m
-  JOIN _dup_index_addresses d ON m.source_id = d.dup_id
-   SET m.source_id = d.keep_id;
+-- mempool address-id repoints, guarded on the pre-2026-06-15 schema (see @mempool_has_ids).
+SET @s := IF(@mempool_has_ids, 'UPDATE mempool_transactions m JOIN _dup_index_addresses d ON m.source_id = d.dup_id SET m.source_id = d.keep_id', 'DO 0');
+PREPARE mig_stmt FROM @s; EXECUTE mig_stmt; DEALLOCATE PREPARE mig_stmt;
 
-UPDATE mempool_transactions m
-  JOIN _dup_index_addresses d ON m.destination_id = d.dup_id
-   SET m.destination_id = d.keep_id;
+SET @s := IF(@mempool_has_ids, 'UPDATE mempool_transactions m JOIN _dup_index_addresses d ON m.destination_id = d.dup_id SET m.destination_id = d.keep_id', 'DO 0');
+PREPARE mig_stmt FROM @s; EXECUTE mig_stmt; DEALLOCATE PREPARE mig_stmt;
 
 -- pubkeys.address_id is the PRIMARY KEY: repoint, then drop rows that collided
 -- (the same address already has a pubkeys row through the kept id).
@@ -151,13 +164,12 @@ UPDATE transactions t
 
 -- mempool_transactions.tx_hash_id is UNIQUE, but mempool rows are transient:
 -- repoint, then drop the rows that collided (already represented via kept id).
-UPDATE IGNORE mempool_transactions m
-  JOIN _dup_index_transactions d ON m.tx_hash_id = d.dup_id
-   SET m.tx_hash_id = d.keep_id;
+-- Guarded on the pre-2026-06-15 schema (see @mempool_has_ids); a no-op on new schema.
+SET @s := IF(@mempool_has_ids, 'UPDATE IGNORE mempool_transactions m JOIN _dup_index_transactions d ON m.tx_hash_id = d.dup_id SET m.tx_hash_id = d.keep_id', 'DO 0');
+PREPARE mig_stmt FROM @s; EXECUTE mig_stmt; DEALLOCATE PREPARE mig_stmt;
 
-DELETE m
-  FROM mempool_transactions m
-  JOIN _dup_index_transactions d ON m.tx_hash_id = d.dup_id;
+SET @s := IF(@mempool_has_ids, 'DELETE m FROM mempool_transactions m JOIN _dup_index_transactions d ON m.tx_hash_id = d.dup_id', 'DO 0');
+PREPARE mig_stmt FROM @s; EXECUTE mig_stmt; DEALLOCATE PREPARE mig_stmt;
 
 DELETE x
   FROM index_transactions x
