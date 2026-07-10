@@ -20,9 +20,14 @@
  * so a stock deployment captures fee outputs with no operator env (previously
  * env-only: default installs captured nothing and LTC/DOGE native-fee
  * validation failed closed downstream). A FEE_DESTINATION env override is
- * honored on non-mainnet networks; on mainnet it is ignored with a warning,
+ * honored on regtest ONLY; on mainnet AND testnet it is ignored with a warning,
  * because fee-output capture feeds consensus-relevant fee acceptance and must
- * not depend on operator env (same rule as the registry's per-coin override).
+ * not depend on operator env (same rule as the registry's per-coin override,
+ * which is likewise regtest-only). Testnet is an armed multi-operator federation
+ * whose consensus_pin hashes only the static bundle, so an env-resolved override
+ * there escapes the freeze and would let two honest nodes capture different fee
+ * outputs and diverge the block-hashed ledger, the identical fork mainnet is
+ * protected from - so testnet must be gated too, not just mainnet.
  *
  ********************************************************************/
 
@@ -39,8 +44,15 @@ function resolveFeeDestination(networkName, envOverride) {
         }
     }
     if (envOverride) {
-        if (m && m[2] === 'mainnet' && pinned && envOverride !== pinned) {
-            console.log('WARNING: FEE_DESTINATION env is set but IGNORED on mainnet; using the consensus-pinned registry address.')
+        // Honored on regtest ONLY. On mainnet AND testnet the consensus-pinned registry
+        // default wins (matches src/coins/index.js resolveFeeDestination and the indexer's
+        // config, both regtest-only): the override escapes the consensus_pin freeze, so two
+        // honest nodes with different env would capture different fee outputs and fork the
+        // block-hashed ledger. When there is no pinned default (unknown coin / test double,
+        // pinned === null) the override still resolves so those paths keep working.
+        if (m && m[2] !== 'regtest' && pinned) {
+            if (envOverride !== pinned)
+                console.log('WARNING: FEE_DESTINATION env is set but IGNORED on ' + m[2] + '; using the consensus-pinned registry address.')
             return pinned
         }
         return envOverride

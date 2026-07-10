@@ -41,7 +41,9 @@ describe('XChainDecoder fee destination @unit', () => {
 
 // The api.js entry point resolves FEE_DESTINATION through resolveFeeDestination: the vendored
 // coin registry supplies the consensus-pinned default (so a stock install captures fee outputs
-// without env), an env override wins on non-mainnet only, and mainnet always uses the pin.
+// without env), an env override wins on regtest ONLY, and mainnet AND testnet always use the pin
+// (testnet is an armed multi-operator federation, so honoring the override there forks the ledger
+// exactly as it would on mainnet - same rule as the registry's regtest-only per-coin override).
 describe('resolveFeeDestination @unit', () => {
     it('defaults to the registry pin for every coin and network when no env override is set', () => {
         for (const coin of ['bitcoin', 'litecoin', 'dogecoin']) {
@@ -55,14 +57,20 @@ describe('resolveFeeDestination @unit', () => {
         }
     })
 
-    it('honors an env override on regtest/testnet', () => {
+    it('honors an env override on regtest ONLY', () => {
         assert.strictEqual(resolveFeeDestination('litecoin-regtest', REAL_ADDR), REAL_ADDR)
-        assert.strictEqual(resolveFeeDestination('dogecoin-testnet', REAL_ADDR), REAL_ADDR)
     })
 
-    it('ignores an env override on mainnet and returns the pin', () => {
-        const pinned = getCoinConfig('BTC', 'mainnet').addresses.FEE_DESTINATION
-        assert.strictEqual(resolveFeeDestination('bitcoin-mainnet', REAL_ADDR), pinned)
+    it('ignores an env override on mainnet AND testnet and returns the pin (armed-federation fork guard)', () => {
+        const btcMain = getCoinConfig('BTC', 'mainnet').addresses.FEE_DESTINATION
+        assert.strictEqual(resolveFeeDestination('bitcoin-mainnet', REAL_ADDR), btcMain)
+        // Regression: testnet used to honor the override (m[2] === 'mainnet' gate), forking the
+        // armed testnet federation against nodes with no env. It must now use the pin like mainnet.
+        for (const [coin, tick] of [['dogecoin', 'DOGE'], ['litecoin', 'LTC'], ['bitcoin', 'BTC']]) {
+            const pinned = getCoinConfig(tick, 'testnet').addresses.FEE_DESTINATION
+            assert.strictEqual(resolveFeeDestination(coin + '-testnet', REAL_ADDR), pinned,
+                coin + '-testnet must ignore the env override and use the pin')
+        }
     })
 
     it('falls back to env-only when the network is unrecognized', () => {
