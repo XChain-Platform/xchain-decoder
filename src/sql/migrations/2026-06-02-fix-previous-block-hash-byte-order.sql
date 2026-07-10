@@ -47,6 +47,9 @@
 -- Take a backup first. Run while the decoder process is stopped. Safe to re-run:
 -- the WHERE guard makes already-corrected rows a no-op. The JOIN to the parent
 -- block naturally excludes the first block in the table (it has no parent row).
+-- It is written `prev.block_index + 1 = b.block_index` (not `b.block_index - 1`)
+-- so it never subtracts from a BIGINT UNSIGNED at genesis (block 0), which raises
+-- ER_DATA_OUT_OF_RANGE on a from-genesis / regtest decoder DB.
 --
 -- VALIDATOR NOTE
 -- --------------
@@ -57,6 +60,6 @@
 -- their replica.
 
 UPDATE blocks b
-  JOIN blocks prev ON prev.block_index = b.block_index - 1
+  JOIN blocks prev ON prev.block_index + 1 = b.block_index
   SET b.previous_block_hash_id = prev.block_hash_id
   WHERE b.previous_block_hash_id <> prev.block_hash_id;
