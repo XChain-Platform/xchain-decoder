@@ -25,9 +25,10 @@ guard every statement with `IF [NOT] EXISTS`.
 
 The mode tag is a human declaration; a machine check backs it. A file tagged
 `mode=auto` whose statements contain destructive DDL (DROP TABLE/DATABASE/SCHEMA,
-TRUNCATE, RENAME TABLE, DELETE FROM, or an `ALTER TABLE` that drops/renames/CHANGEs
-a column or narrows one to NOT NULL) fails startup with an actionable error rather
-than running unattended. Re-tag such a file `mode=manual` and apply it deliberately.
+CREATE OR REPLACE TABLE, TRUNCATE, RENAME TABLE, DELETE (any form, not just
+`DELETE FROM`), or an `ALTER TABLE` that drops/renames/CHANGEs a column or narrows
+one to NOT NULL) fails startup with an actionable error rather than running
+unattended. Re-tag such a file `mode=manual` and apply it deliberately.
 
 ## Applying
 

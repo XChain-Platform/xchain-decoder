@@ -80,6 +80,21 @@ describe('Database._destructiveAutoStatement() @regression', function () {
         assert.ok(scanSql('DELETE FROM dispensers;'));
     });
 
+    it('flags non-canonical DELETE forms that omit an immediate FROM', function () {
+        // Every DELETE removes rows; the guard must not depend on `DELETE FROM` word order.
+        assert.ok(scanSql('DELETE LOW_PRIORITY FROM dispensers WHERE id = 1;'));
+        assert.ok(scanSql('DELETE IGNORE FROM dispensers WHERE id = 1;'));
+        assert.ok(scanSql('DELETE t1 FROM events t1 JOIN blocks t2 ON t1.block_index=t2.block_index;'));
+    });
+
+    it('flags CREATE OR REPLACE TABLE (atomic DROP+CREATE wipes rows) but not plain/IF NOT EXISTS', function () {
+        assert.ok(scanSql('CREATE OR REPLACE TABLE dispensers (id BIGINT) ENGINE=InnoDB;'));
+        assert.ok(scanSql('CREATE OR REPLACE TEMPORARY TABLE t (id INT);'));
+        // Additive create forms stay safe (must not false-positive and block fleet boot).
+        assert.strictEqual(scanSql('CREATE TABLE IF NOT EXISTS dispensers (id BIGINT) ENGINE=InnoDB;'), null);
+        assert.strictEqual(scanSql('CREATE TABLE new_thing (id BIGINT) ENGINE=InnoDB;'), null);
+    });
+
     it('flags ALTER TABLE ... DROP COLUMN and a bare column drop', function () {
         assert.ok(scanSql('ALTER TABLE t DROP COLUMN c;'));
         assert.ok(scanSql('ALTER TABLE t DROP c;'));
