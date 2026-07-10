@@ -251,7 +251,19 @@ class Database {
 
                     if(appliedByName.has(file)){
                         if(appliedByName.get(file) !== checksum){
-                            console.warn('runMigrations: ' + file + ' was already applied but its content CHANGED (checksum mismatch). Migrations are immutable once applied; review manually.');
+                            // Migrations are immutable once applied. A changed checksum means
+                            // someone edited an applied file, so the DB is now on a schema that
+                            // diverges from what the committed file describes.
+                            const msg = 'runMigrations: ' + file + ' was already applied but its content CHANGED (checksum mismatch: recorded ' +
+                                appliedByName.get(file) + ', current ' + checksum + '). Migrations are immutable once applied.';
+                            // Operator path (`node src/migrate.js`, includeManual) and opt-in strict
+                            // mode fail closed so a diverged schema is caught in CI / by an operator
+                            // instead of silently continuing. Default auto-startup stays non-fatal
+                            // (console.error, not warn) to avoid a surprise fleet-wide boot failure.
+                            // Mirrors xchain-indexer/src/db.js.
+                            if(includeManual || process.env.MIGRATION_STRICT_CHECKSUM === '1')
+                                throw new Error(msg + ' Review manually (set MIGRATION_STRICT_CHECKSUM=0 / omit to downgrade to a non-fatal log).');
+                            console.error(msg + ' Continuing on the diverged schema - review manually.');
                         }
                         continue;
                     }
@@ -264,6 +276,20 @@ class Database {
                     }
 
                     const statements = this.stripSqlLineComments(raw).split(';').map(s => s.trim()).filter(Boolean);
+                    // Destructive-DDL guard: the mode tag is a human declaration; this scan is
+                    // the machine check behind it. A file tagged `auto` that contains DDL able
+                    // to lose or rename data must NEVER run unattended at startup (nor slip
+                    // through migrate.js under the wrong tag) - block startup with an
+                    // actionable error instead of executing it against every validator's DB.
+                    // Mirrors xchain-indexer/src/db.js.
+                    if(mode === 'auto'){
+                        const offender = this._destructiveAutoStatement(statements);
+                        if(offender){
+                            throw new Error('runMigrations: ' + file + ' is tagged mode=auto but contains destructive DDL: "' +
+                                offender.slice(0, 160) + (offender.length > 160 ? '...' : '') + '". ' +
+                                'Re-tag the file `-- xchain:migration mode=manual` and apply it deliberately via `node src/migrate.js`.');
+                        }
+                    }
                     console.log('runMigrations: applying ' + file + ' (mode=' + mode + ', ' + statements.length + ' statement(s))...');
                     try {
                         for(const stmt of statements){ await conn.query(stmt); }
@@ -333,6 +359,59 @@ class Database {
     _migrationMode(raw){
         const m = String(raw).match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im);
         return m ? m[1].toLowerCase() : 'manual';
+    }
+
+    // Destructive-DDL scan for the auto-apply path. Given a migration file's
+    // statement list (already `--`-comment-stripped and ';'-split), returns the
+    // first statement that can lose, truncate, or rename data - or null when the
+    // file is safe to auto-run. Pure string logic (no DB), unit-tested directly.
+    // Byte-for-byte the same classifier as xchain-indexer/src/db.js so the two
+    // migration runners stay legible as a pair.
+    //
+    // Flagged as destructive: DROP TABLE/DATABASE/SCHEMA, TRUNCATE, RENAME TABLE,
+    // DELETE FROM, ALTER TABLE ... DROP <column|partition|bare identifier>,
+    // ALTER TABLE ... RENAME (except RENAME INDEX/KEY), ALTER TABLE ... CHANGE
+    // (rename+retype), and MODIFY ... NOT NULL (the statically detectable
+    // narrowing; a width reduction cannot be seen without the live schema and
+    // stays covered by the manual-tag convention).
+    //
+    // Deliberately NOT flagged (legitimate existing auto patterns): DROP INDEX/KEY,
+    // DROP FOREIGN KEY/CONSTRAINT/CHECK/DEFAULT/PRIMARY KEY (structural, no row
+    // data lost), ADD ..., CREATE ..., and MODIFY that widens/nullables a column.
+    _destructiveAutoStatement(statements){
+        // Drops that remove metadata only; anything else after DROP inside an
+        // ALTER (COLUMN, PARTITION, or a bare column identifier) loses data.
+        const SAFE_ALTER_DROP = new Set(['INDEX', 'KEY', 'FOREIGN', 'CONSTRAINT', 'CHECK', 'DEFAULT', 'PRIMARY']);
+        for(const raw of (statements || [])){
+            // Belt-and-braces: strip /* */ block comments (line comments are already
+            // gone) so a keyword inside comment prose never triggers or hides a hit.
+            const stmt = String(raw).replace(/\/\*[\s\S]*?\*\//g, ' ').trim();
+            if(!stmt) continue;
+            if(/^DROP\s+(TABLE|DATABASE|SCHEMA)\b/i.test(stmt))  return raw;
+            if(/^TRUNCATE\b/i.test(stmt))                        return raw;
+            if(/^RENAME\s+TABLE\b/i.test(stmt))                  return raw;
+            if(/^DELETE\s+FROM\b/i.test(stmt))                   return raw;
+            if(/^ALTER\s+TABLE\b/i.test(stmt)){
+                // Every DROP inside the ALTER must target a safe (metadata-only) object.
+                let m;
+                const dropRe = /\bDROP\s+([A-Za-z_]+|`[^`]+`)/gi;
+                while((m = dropRe.exec(stmt)) !== null){
+                    const target = m[1].replace(/`/g, '').toUpperCase();
+                    if(!SAFE_ALTER_DROP.has(target)) return raw;
+                }
+                // RENAME TO / RENAME COLUMN / bare RENAME lose the old name; only
+                // RENAME INDEX/KEY is a metadata-only rename.
+                if(/\bRENAME\b(?!\s+(INDEX|KEY)\b)/i.test(stmt)) return raw;
+                // CHANGE [COLUMN] renames and retypes in one clause - manual only.
+                if(/\bCHANGE\b/i.test(stmt))                     return raw;
+                // MODIFY that adds NOT NULL narrows the column domain - except an
+                // AUTO_INCREMENT attribute repair: an AUTO_INCREMENT column is
+                // definitionally NOT NULL, so no domain is narrowed.
+                if(/\bMODIFY\b[\s\S]*\bNOT\s+NULL\b/i.test(stmt) &&
+                   !/\bAUTO_INCREMENT\b/i.test(stmt))            return raw;
+            }
+        }
+        return null;
     }
 
     // Create the migration ledger if absent. Infrastructure, not a domain table, so
@@ -805,6 +884,13 @@ class Database {
             // artifact. Downstream consumers resolve it to the canonical address string and never
             // treat the id as consensus-visible, so an orphan row left by a reorg is harmless. Do
             // not start feeding a raw lookup id into any consensus/hashed value.
+
+            // events is likewise intentionally NOT deleted on reorg: it is an append-only audit
+            // log with no block_index column (rows like PARSE_ERROR only carry a height inside
+            // their JSON payload). Orphaned audit rows for rolled-back blocks are accepted as
+            // stale-but-harmless history, and the REORG marker inserted below records the
+            // deletion itself in that same log. The indexer's reorg detection consumes events
+            // by ascending id and would misbehave if rows were retroactively removed.
 
             // M-12 crash-durability: write the REORG audit marker in the SAME transaction that
             // deletes the block, so the delete and its marker are atomic. The former design wrote

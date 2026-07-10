@@ -29,7 +29,6 @@ const ecc = require('tiny-secp256k1')
 const BlockchainConnector = require('./BlockchainConnector')
 const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
-const bs = require("binary-search")
 const strictTextDecoder = new TextDecoder('utf-8', { fatal: true })
 const lenientTextDecoder = new TextDecoder('utf-8')
 
@@ -54,9 +53,14 @@ const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // restore it (deleteBlockByIndex then matches zero rows), permanently losing a
 // money-bearing dispenser on the reorged node. The platform's deepest window is
 // DOGE = 120 (xchain-utxo-tracker DEFAULT_UNDO_BLOCKS: BTC 12 / LTC 48 / DOGE 120);
-// the previous flat 100 sat BELOW DOGE's window. 120 covers every chain. Keep in
-// sync if any chain's undo window is ever raised above this.
-const DISPENSER_EXPIRE_SAFE_DEPTH = 120
+// the previous flat 100 sat BELOW DOGE's window. Invariant: SAFE_DEPTH >=
+// deepest undo window + margin. The +6 margin means a small undo-window re-tune
+// cannot land exactly at the purge threshold; dispenserSafeDepth.test.js
+// enforces the invariant with a conformance read of undo-blocks.js, so raising
+// any chain's window past the margin fails the suite until this is bumped.
+// Purging deeper is the conservative direction (rows are merely retained longer
+// before hard-purge; expiry semantics and action evaluation are unchanged).
+const DISPENSER_EXPIRE_SAFE_DEPTH = 126 // 120 (DOGE undo window) + 6 margin
 const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node need to have to start parsing
 
 // Maximum compiled on-chain ACTION push, in bytes (measured before
@@ -67,6 +71,21 @@ const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node nee
 // xchain-encoder validator MAX_COMPILED_ACTION_DATA_LENGTH. Kept equal by the
 // cross-service regression suite.
 const MAX_ACTION_DATA_LENGTH = 8192
+
+// Compiled size of a single script push once bitcoin.script.compile adds its
+// length prefix: a direct push opcode for <=75 bytes, OP_PUSHDATA1 (+2) for
+// <=255, or OP_PUSHDATA2 (+3) beyond that. Single source for measuring both
+// push[0] (data) and push[1] (rawData) in parseTransaction; this formula is
+// the protocol-arbiter side of the encoder's identical compiledPushSize
+// (xchain-encoder/src/validator.js), and the compiledPushSizeConformance test
+// pins both against bitcoin.script.compile byte-for-byte across the 75/255
+// prefix boundaries. Do not fork this logic inline again.
+function compiledPushSize(byteLength){
+    if (byteLength <= 75)  return byteLength + 1   // direct push opcode
+    if (byteLength <= 255) return byteLength + 2   // OP_PUSHDATA1
+    return byteLength + 3                           // OP_PUSHDATA2
+}
+
 const VALID_ACTION_NAMES = new Set([
     'ADDRESS', 'AIRDROP', 'ANCHOR', 'ATTEST',
     'BATCH', 'BROADCAST', 'CALLBACK', 'COINPAY', 'COLLECT',
@@ -125,6 +144,12 @@ function bigIntBufferutilsActive(bufferutils){
 class XChainDecoder {
     constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword, auxPow, feeDestination) {
         this.network = CryptoNetworks.getBitcoinJsNetwork(network)
+
+        // Net portion ('mainnet'|'testnet'|'regtest') of the "<fullname>-<network>"
+        // key, for the boot-time consensus-pin verification in start(). The
+        // getBitcoinJsNetwork call above already threw on an unknown key, so the
+        // suffix is guaranteed to be a valid network name here.
+        this.consensusNetwork = String(network).slice(String(network).lastIndexOf('-') + 1)
 
         // Native-coin protocol fee destination address for this coin+network. When set (not the
         // unset placeholder), the decoder also persists any output paying it to transaction_outputs
@@ -664,8 +689,7 @@ class XChainDecoder {
                         // result is identical to the pre-decompile measurement: the push overhead
                         // (1 byte direct, 2 bytes OP_PUSHDATA1, 3 bytes OP_PUSHDATA2) is added
                         // back, matching exactly what the encoder's compiled script measured.
-                        const dl = dataBuffer.length
-                        compiledDataLength = dl <= 75 ? dl + 1 : dl <= 255 ? dl + 2 : dl + 3
+                        compiledDataLength = compiledPushSize(dataBuffer.length)
                         if (decompiledData.length > 1){
                             rawData = decompiledData[1]
                             // Count the second push too. The encoder bounds the WHOLE compiled
@@ -676,8 +700,7 @@ class XChainDecoder {
                             // (data length + the same OP_PUSH overhead) so the decoder's ceiling
                             // matches the encoder's.
                             if (Buffer.isBuffer(rawData)){
-                                const rl = rawData.length
-                                compiledDataLength += rl <= 75 ? rl + 1 : rl <= 255 ? rl + 2 : rl + 3
+                                compiledDataLength += compiledPushSize(rawData.length)
                             }
                         }
                         getSource = true
@@ -732,6 +755,29 @@ class XChainDecoder {
         let blocksDeleted = []
         let retryCount = 0
 
+        // Fail-closed reorg-depth ceiling (parity with xchain-utxo-tracker's
+        // UNDO_BLOCKS guard, XChainUtxoTracker.js verifyReorg). Soft-expired
+        // dispensers are hard-purged once DISPENSER_EXPIRE_SAFE_DEPTH blocks
+        // deep (purgeExpiredDispensers), and deleteBlockByIndex can only
+        // resurrect a dispenser whose expired_block_index row still exists, so
+        // rolling back past that window would silently and permanently lose
+        // money-bearing dispenser state vs a from-scratch sync. A loud abort is
+        // strictly safer than a silently corrupt DB: stop and require an
+        // operator-driven resync. Called BEFORE each delete attempt (outside
+        // the per-block retry try/catch, so the throw is not retried away).
+        const assertWithinSafeDepth = (lastBlockIndex) => {
+            if (blocksDeleted.length >= DISPENSER_EXPIRE_SAFE_DEPTH){
+                const msg = "verifyReorg: reorg depth exceeds the dispenser safe-depth window "
+                    + "(DISPENSER_EXPIRE_SAFE_DEPTH=" + DISPENSER_EXPIRE_SAFE_DEPTH + "). Already rolled back "
+                    + blocksDeleted.length + " blocks; soft-expired dispenser rows for block height "
+                    + lastBlockIndex + " and below have already been hard-purged, so continuing would "
+                    + "silently lose money-bearing dispenser state. Aborting. Recovery: perform a full "
+                    + "resync from a known-good snapshot."
+                console.error(msg)
+                throw new Error(msg)
+            }
+        }
+
         while (thereAreDifferences){
             let lastBlockIndex = await this.db.getLastBlockIndex()
             let lastBlock = await this.db.getBlockByIndex(lastBlockIndex)
@@ -757,6 +803,7 @@ class XChainDecoder {
             // guard with != null so their behaviour is unchanged. The live parse loop
             // always passes the freshly-refreshed tip.
             if (nodeTip != null && lastBlockIndex > nodeTip){
+                assertWithinSafeDepth(lastBlockIndex)
                 try {
                     // Pass the block hash so the delete and its REORG audit marker commit
                     // atomically (M-12); see deleteBlockByIndex for the durability rationale.
@@ -781,6 +828,7 @@ class XChainDecoder {
             }
             
             if (lastBlock["block_hash"] != blockHashFromNode){
+                assertWithinSafeDepth(lastBlockIndex)
                 try {
                     // Pass the block hash so the delete and its REORG audit marker commit
                     // atomically (M-12); see deleteBlockByIndex for the durability rationale.
@@ -813,6 +861,14 @@ class XChainDecoder {
     }
     
     async start(){
+        // Verify the bundled canonical coin files against CONSENSUS_CONFIG_PIN
+        // before touching the DB or processing any block, mirroring the indexer
+        // (XChainIndexer.js:218). A null pin (mainnet, pre-arm) skips; a mismatch
+        // on an armed network throws and halts startup, so a partial/stale deploy
+        // cannot parse on-chain bytes with divergent network params (fail-closed,
+        // deliberately not wrapped in try/catch).
+        require('./coins').verifyConsensusPin(this.consensusNetwork)
+
         if (!this.db) {
             this.db = new Database(this.dbUrl, this.dbPort, this.dbName, this.dbUser, this.dbPassword)
         }
@@ -1562,17 +1618,15 @@ class XChainDecoder {
             try {
                 let rawMempoolUnordered = await this.connector.getRawMempool()
 
-                for (let nextUnorderedItemIndex in rawMempoolUnordered) {
-                    let nextUnorderedItem = rawMempoolUnordered[nextUnorderedItemIndex]
-
-                    let newIndex = bs(rawMempool, nextUnorderedItem, function (element, needle) { return needle.localeCompare(element) })
-
-                    if (newIndex < 0) {
-                        rawMempool.splice(-newIndex - 1, 0, nextUnorderedItem)
-                    }
-                }
-
-
+                // Dedup + single O(n log n) sort. The old per-txid binary-insert
+                // (bs + splice) was O(n^2) in mempool size every poll cycle, a CPU
+                // hazard under a mempool flood. ORDER CONTRACT: descending
+                // lexicographic, i.e. exactly what the inverted bs comparator
+                // `needle.localeCompare(element)` produced; db.js
+                // deleteAndCompareTxsNotInList binary-searches this array with
+                // that same comparator and silently breaks on any other order.
+                rawMempool = Array.from(new Set(rawMempoolUnordered))
+                    .sort((a, b) => b.localeCompare(a))
 
             } catch (error) {
                 console.log(error)
@@ -1728,6 +1782,9 @@ module.exports = XChainDecoder
 // Exported for the cross-service regression suite, which asserts this equals the
 // encoder's compiled-push guard and the canonical protocol constant.
 module.exports.MAX_ACTION_DATA_LENGTH = MAX_ACTION_DATA_LENGTH
+// Exported for the compiled-push-size conformance test, which pins this formula
+// against bitcoin.script.compile and the encoder's identical helper.
+module.exports.compiledPushSize = compiledPushSize
 // Exported so a regression test can pin it >= the deepest per-chain reorg window.
 module.exports.DISPENSER_EXPIRE_SAFE_DEPTH = DISPENSER_EXPIRE_SAFE_DEPTH
 // Exported for the F3 regression test (DOGE large-output bufferutils-patch self-check).

@@ -73,6 +73,24 @@ describe('updateMempool DB isolation (M-19)', function () {
     assert.strictEqual(getParseTxDbArg(), decoder.mempoolDb, 'mempool parse must use mempoolDb for pubkey capture')
   })
 
+  it('hands deleteAndCompareTxsNotInList a deduped, DESCENDING-sorted txid list', async () => {
+    // db.js deleteAndCompareTxsNotInList binary-searches this array with the
+    // inverted comparator `needle.localeCompare(element)`, which requires
+    // descending lexicographic order. The old O(n^2) bs+splice build produced
+    // exactly that order (with duplicates skipped); the O(n log n) sort
+    // replacement must keep the same contract or the delete-diff silently breaks.
+    const { decoder } = buildDecoder(true)
+    let received
+    decoder.mempoolDb.deleteAndCompareTxsNotInList = async (list) => {
+      received = list.slice(); return { transactionsDeleted: 0 }
+    }
+    decoder.connector.getRawMempool = async () => ['bbb', 'aaa', 'ccc', 'aaa', 'bbb']
+    decoder.connector.getRawTransactions = async () => []
+    await decoder.updateMempool()
+    assert.deepStrictEqual(received, ['ccc', 'bbb', 'aaa'],
+      'rawMempool must be deduped and sorted descending (the bs-comparator order)')
+  })
+
   it('a mempool insert failure never rolls back or ends the block transaction', async () => {
     // insertMempoolTransaction returns false (its own rollback path is a no-op with no open
     // tx). The mempool cycle must still complete and must never call endTransaction on the

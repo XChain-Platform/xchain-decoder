@@ -92,3 +92,72 @@ describe('XChainDecoder.verifyReorg retry budget', function () {
     await assert.rejects(() => decoder.verifyReorg(), /failed after 10 attempts/)
   })
 })
+
+// Fail-closed reorg-depth ceiling (parity with xchain-utxo-tracker's UNDO_BLOCKS
+// guard): soft-expired dispensers are hard-purged once DISPENSER_EXPIRE_SAFE_DEPTH
+// blocks deep, so rolling back past that window can no longer resurrect them and
+// verifyReorg must abort loudly instead of silently diverging from a fresh sync.
+describe('XChainDecoder.verifyReorg depth guard', function () {
+  this.timeout(0)
+
+  const SAFE_DEPTH = XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH
+
+  // Decoder whose DB disagrees with the node for `divergentBlocks` blocks below
+  // the tip; below that the hashes match and the backward walk stops.
+  function buildDeepReorgDecoder(divergentBlocks) {
+    const decoder = new XChainDecoder(
+      'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+    )
+    decoder.startBlockIndex = 0
+    decoder.sleep = async () => {}
+
+    const TIP = 10000
+    let top = TIP
+    const deleted = []
+    decoder.connector = {
+      getBlockHash: async (h) => (h > TIP - divergentBlocks ? 'node' + h : 'match' + h)
+    }
+    decoder.db = {
+      getLastBlockIndex: async () => top,
+      getBlockByIndex: async (h) => ({ block_hash: h > TIP - divergentBlocks ? 'db' + h : 'match' + h }),
+      deleteBlockByIndex: async (h) => { deleted.push(h); top = h - 1 },
+      insertEvent: async () => { throw new Error('verifyReorg must not write a separate end-of-run REORG event') }
+    }
+    return { decoder, deleted }
+  }
+
+  it('completes a reorg one block shallower than the safe depth', async function () {
+    const { decoder, deleted } = buildDeepReorgDecoder(SAFE_DEPTH - 1)
+    assert.strictEqual(await decoder.verifyReorg(), true)
+    assert.strictEqual(deleted.length, SAFE_DEPTH - 1)
+  })
+
+  it('aborts fail-closed once the walk reaches the safe depth instead of deleting past purged dispenser rows', async function () {
+    const { decoder, deleted } = buildDeepReorgDecoder(SAFE_DEPTH + 20)
+    await assert.rejects(() => decoder.verifyReorg(), /dispenser safe-depth window/)
+    assert.strictEqual(deleted.length, SAFE_DEPTH,
+      'must stop deleting exactly at DISPENSER_EXPIRE_SAFE_DEPTH blocks')
+  })
+
+  it('also guards the above-tip orphan branch', async function () {
+    // Blocks stored above the node tip are deleted via a separate branch; a node
+    // rollback deeper than the window must trip the same fail-closed abort.
+    const decoder = new XChainDecoder(
+      'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+    )
+    decoder.startBlockIndex = 0
+    decoder.sleep = async () => {}
+    let top = 10000
+    const deleted = []
+    decoder.connector = { getBlockHash: async (h) => 'match' + h }
+    decoder.db = {
+      getLastBlockIndex: async () => top,
+      getBlockByIndex: async (h) => ({ block_hash: 'db' + h }),
+      deleteBlockByIndex: async (h) => { deleted.push(h); top = h - 1 },
+      insertEvent: async () => { throw new Error('no end-of-run REORG event') }
+    }
+    // Node tip far below the stored tip: every stored block above it is an orphan.
+    await assert.rejects(() => decoder.verifyReorg(10000 - SAFE_DEPTH - 50), /dispenser safe-depth window/)
+    assert.strictEqual(deleted.length, SAFE_DEPTH)
+  })
+})

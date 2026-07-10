@@ -23,6 +23,12 @@ can never silently auto-run on a validator fleet:
 A file with no tag defaults to `manual`. `auto` migrations must be idempotent -
 guard every statement with `IF [NOT] EXISTS`.
 
+The mode tag is a human declaration; a machine check backs it. A file tagged
+`mode=auto` whose statements contain destructive DDL (DROP TABLE/DATABASE/SCHEMA,
+TRUNCATE, RENAME TABLE, DELETE FROM, or an `ALTER TABLE` that drops/renames/CHANGEs
+a column or narrows one to NOT NULL) fails startup with an actionable error rather
+than running unattended. Re-tag such a file `mode=manual` and apply it deliberately.
+
 ## Applying
 
 - **`auto`** migrations apply automatically on decoder startup (no-op once recorded).
@@ -35,5 +41,9 @@ guard every statement with `IF [NOT] EXISTS`.
   Reads `DECODER_DB_*` from the service environment. Run with the decoder stopped
   if a migration's header says so.
 
-Migrations are immutable once applied - editing an applied file is detected
-(checksum mismatch) and warned about, never silently re-run.
+Migrations are immutable once applied - editing an applied file is detected via a
+checksum mismatch and never silently re-run. On the operator path (`node
+src/migrate.js`) or with `MIGRATION_STRICT_CHECKSUM=1`, a mismatch fails closed
+(throws) so a diverged schema is caught in CI / by an operator; the passive
+decoder-startup path logs the mismatch at error level and continues, to avoid a
+surprise fleet-wide boot failure.

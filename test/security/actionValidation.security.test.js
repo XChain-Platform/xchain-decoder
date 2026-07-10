@@ -147,6 +147,64 @@ describe('Security: ACTION Data Validation', () => {
                 `compiledDataLength (${result.compiledDataLength}) should exceed decompiled data.length (${result.data.length}) by the OP_PUSHDATA overhead`
             )
         })
+
+        // Roundtrip conformance at the exact boundaries where a silent-drop bug
+        // hides: an encoder-assembled (bitcoin.script.compile) payload must
+        // re-measure on the decoder to the identical compiled size, and the data
+        // must roundtrip byte-identically. Covers the 75/255 OP_PUSHDATA prefix
+        // transitions and the 8191/8192/8193 accept/drop window.
+        it('encoder-compiled payloads re-measure to the identical compiledDataLength at every boundary', async () => {
+            // Raw payload byte-lengths chosen so the compiled push crosses each
+            // prefix transition and brackets MAX_ACTION_DATA_LENGTH (8192):
+            // 8188 -> 8191, 8189 -> 8192 (accept ceiling), 8190 -> 8193 (dropped).
+            const sizes = [74, 75, 76, 254, 255, 256, 8188, 8189, 8190]
+            for (const n of sizes) {
+                const payload = 'SEND|0|XCHAIN|' + '1'.repeat(n - 14) // total raw length n
+                const expected = bitcoin.script.compile([Buffer.from(payload)]).length
+                const tx = buildTxWithPayload(payload)
+                const result = await decoder.parseTransaction(tx)
+                assert.ok(result, `payload of ${n} raw bytes must parse`)
+                assert.strictEqual(result.compiledDataLength, expected,
+                    `decoder compiledDataLength must equal the encoder-compiled size for ${n} raw bytes`)
+                assert.strictEqual(result.data.toString('utf8'), payload,
+                    `payload of ${n} raw bytes must roundtrip byte-identically`)
+            }
+        })
+
+        it('dual-push (data + rawData) payloads re-measure to the summed compiled size', async () => {
+            // FILE-style dual push: prepareData compiles [dataBuf, rawDataBuf].
+            const combos = [[75, 76], [255, 256], [14, 8170]]
+            for (const [a, b] of combos) {
+                const dataBuf = Buffer.from('FILE|0|f|' + '1'.repeat(a - 9))
+                const rawBuf = Buffer.alloc(b, 0x61)
+                const scriptPayload = bitcoin.script.compile([dataBuf, rawBuf])
+                const plainBuf = Buffer.concat([Buffer.from('XCHN'), scriptPayload])
+                const tx = new bitcoin.Transaction()
+                tx.version = 2
+                tx.addInput(PREV_HASH, 1)
+                tx.ins[0].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
+                tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, encryptBuf(plainBuf)]), 0)
+                tx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
+
+                const result = await decoder.parseTransaction(tx)
+                assert.ok(result, `dual push ${a}+${b} must parse`)
+                assert.strictEqual(result.compiledDataLength, scriptPayload.length,
+                    `decoder must measure the summed dual-push compiled size for ${a}+${b}`)
+                assert.strictEqual(result.data.toString('utf8'), dataBuf.toString('utf8'))
+                assert.ok(Buffer.isBuffer(result.rawData) && result.rawData.equals(rawBuf),
+                    `rawData push of ${b} bytes must roundtrip byte-identically`)
+            }
+        })
+
+        it('the drop gate boundary: 8192 compiled is accepted, 8193 exceeds MAX_ACTION_DATA_LENGTH', async () => {
+            const MAX = XChainDecoder.MAX_ACTION_DATA_LENGTH
+            const at = await decoder.parseTransaction(buildTxWithPayload('SEND|0|XCHAIN|' + '1'.repeat(8189 - 14)))
+            const over = await decoder.parseTransaction(buildTxWithPayload('SEND|0|XCHAIN|' + '1'.repeat(8190 - 14)))
+            assert.strictEqual(at.compiledDataLength, MAX, 'compiled 8192 sits exactly at the accept ceiling')
+            assert.strictEqual(over.compiledDataLength, MAX + 1, 'compiled 8193 must measure over the gate')
+            assert.ok(!(at.compiledDataLength > MAX), '8192 passes the block-processing gate')
+            assert.ok(over.compiledDataLength > MAX, '8193 is dropped by the block-processing gate')
+        })
     })
 
     // --- SEC-12: UTF-8 handling ---

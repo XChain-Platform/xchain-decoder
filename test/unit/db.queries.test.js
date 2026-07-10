@@ -531,9 +531,24 @@ describe('Database#deleteBlockByIndex()', () => {
         const r = await db.deleteBlockByIndex(10);
         assert.strictEqual(r, true);
         const calls = conn.query.getCalls().map(c => c.args[0]);
-        // 4 DELETE queries (transaction_outputs, dispensers, transactions, blocks)
+        // Explicit per-table checks instead of a magic DELETE count: the rollback
+        // must touch exactly transaction_outputs, dispensers, transactions, blocks.
+        for (const table of ['transaction_outputs', 'dispensers', 'transactions', 'blocks']) {
+            assert.ok(
+                calls.some(s => new RegExp(`DELETE\\s+FROM\\s+${table}\\b`, 'i').test(s)),
+                `must DELETE FROM ${table} on reorg rollback`
+            );
+        }
+        // events (and index_addresses) are append-only audit/lookup tables and are
+        // intentionally NOT rolled back on reorg (see the comment in db.js next to
+        // the DELETEs); orphaned PARSE_ERROR rows are accepted stale history and the
+        // REORG marker records the deletion in that same log.
+        assert.ok(
+            !calls.some(s => /DELETE\s+FROM\s+(events|index_addresses)\b/i.test(s)),
+            'events/index_addresses must never be deleted on reorg'
+        );
         const deletes = calls.filter(s => /DELETE/i.test(s));
-        assert.strictEqual(deletes.length, 4);
+        assert.strictEqual(deletes.length, 4, 'no additional undeclared DELETE targets');
         // [REGRESSION P0] TP-17 F-7: a resurrect UPDATE (clear expiry marks left by
         // this now-orphaned block) must run BEFORE the dispenser row-delete, so a
         // dispenser expired by this block is restored on reorg.
@@ -612,6 +627,28 @@ describe('Database#deleteBlockByIndex()', () => {
         await db.deleteBlockByIndex(10);
         const eventCall = conn.query.getCalls().find(c => /INSERT\s+INTO\s+events/i.test(c.args[0]));
         assert.strictEqual(eventCall, undefined, 'no REORG marker without a block hash');
+    });
+
+    it('a PARSE_ERROR audit row survives the rollback of its block (append-only events contract)', async () => {
+        // Intended behavior, documented in db.js: events is an append-only audit log
+        // with no block_index column, so rolling back a block leaves its PARSE_ERROR
+        // rows in place (stale-but-harmless history) and adds a REORG marker.
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+
+        await db.insertEvent('PARSE_ERROR', { block_index: 42, reason: 'bad tx' });
+        await db.deleteBlockByIndex(42, 'deadbeefhash');
+
+        const calls = conn.query.getCalls().map(c => c.args[0]);
+        // (a) nothing ever deletes from events, so the PARSE_ERROR row persists;
+        assert.ok(!calls.some(s => /DELETE\s+FROM\s+events\b/i.test(s)),
+            'rollback must not delete audit events for the orphaned block');
+        // (b) the deletion itself is recorded as a REORG marker in that same log.
+        const eventInserts = conn.query.getCalls().filter(c => /INSERT\s+INTO\s+events/i.test(c.args[0]));
+        assert.strictEqual(eventInserts.length, 2, 'PARSE_ERROR insert + REORG marker');
+        assert.strictEqual(eventInserts[1].args[1][1], 'REORG');
     });
 });
 
