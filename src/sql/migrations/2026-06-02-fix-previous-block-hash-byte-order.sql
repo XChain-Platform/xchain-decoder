@@ -1,3 +1,7 @@
+-- xchain:migration mode=manual
+-- (manual: a bulk historical-row correction, run only on an explicit operator pass
+--  with the decoder stopped and a backup taken; never auto-applied at startup. The
+--  UPDATE is idempotent, so a re-run against already-corrected rows is a no-op.)
 -- Migration: correct blocks.previous_block_hash_id byte order
 -- Date: 2026-06-02
 --
@@ -5,7 +9,7 @@
 -- ---
 -- The block loop reversed the raw (wire / little-endian) previous-block hash
 -- buffer twice: once to compute the display-format (big-endian) value used for
--- reorg detection, and a second time — on the SAME, already-reversed buffer —
+-- reorg detection, and a second time (on the SAME, already-reversed buffer)
 -- when building the insertBlock payload. Buffer.prototype.reverse() mutates in
 -- place, so the second reverse undid the first and the value persisted for
 -- previous_block_hash was little-endian wire bytes instead of the big-endian
@@ -22,7 +26,7 @@
 -- blocks.previous_block_hash_id is a foreign key into index_transactions (the
 -- hash string lives in index_transactions.hash; blocks stores only the id). The
 -- correct previous_block_hash for a block is the block_hash of the block one
--- index lower — which is already stored correctly under that parent block's
+-- index lower, which is already stored correctly under that parent block's
 -- block_hash_id (block_hash is taken from getBlockHash, which returns display
 -- format, and is NOT affected by the double-reverse bug).
 --
@@ -30,12 +34,15 @@
 -- corrupt index_transactions rows and any other references to them), this
 -- repoints each block's previous_block_hash_id at the same index_transactions
 -- row the parent block's block_hash_id already uses. The now-unreferenced corrupt
--- index_transactions rows are left in place — they are harmless and removing them
+-- index_transactions rows are left in place; they are harmless and removing them
 -- is out of scope for this fix.
 --
 -- HOW TO RUN
 -- ----------
---   mysql -u <user> -p <decoder_db> < migrations/2026-06-02-fix-previous-block-hash-byte-order.sql
+--   npm run migrate     # node src/migrate.js applies pending auto AND manual migrations (reads DECODER_DB_* from .env)
+--   or, standalone:  mysql -u <user> -p <decoder_db> < src/sql/migrations/2026-06-02-fix-previous-block-hash-byte-order.sql
+-- (The normal decoder startup runs AUTO migrations only, so this manual one stays
+--  pending until an explicit `npm run migrate` pass; take a backup + stop the decoder first.)
 --
 -- Take a backup first. Run while the decoder process is stopped. Safe to re-run:
 -- the WHERE guard makes already-corrected rows a no-op. The JOIN to the parent

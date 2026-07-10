@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Consolidated all migrations under `src/sql/migrations/` (the only directory the runner reads) and deleted the stale root `migrations/` duplicates, one of which shipped the pre-fix widen-ids script that operator docs pointed at and failed with FK error 1833 on legacy databases.
+
 ### Fixed
 - Prevout/fee-output RPC lookup failures now throw tagged errors and the block loop retries the block indefinitely, so committed block contents can no longer depend on which instance's RPC happened to succeed.
 - The block loop aborts and retries on every rollback-signalling `false` db return, re-deriving its block/tx cursors from the DB so a retried block assigns the same `tx_index` values as a clean instance.

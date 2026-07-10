@@ -9,7 +9,7 @@ CREATE TABLE index_addresses (
 -- in db.js createAddress(), this makes address creation race-safe — two concurrent
 -- callers can never produce duplicate ids for the same address.
 -- NOTE: this file only runs on a FRESH database (verifyTables skips existing tables).
--- To upgrade an existing database, run migrations/2026-05-28-unique-index-tables.sql
+-- To upgrade an existing database, run `npm run migrate` (or src/sql/migrations/2026-05-28-unique-index-tables.sql)
 -- first (it de-duplicates any accumulated rows before applying this UNIQUE index).
 CREATE UNIQUE INDEX address ON index_addresses (address);
 

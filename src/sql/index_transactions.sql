@@ -9,7 +9,7 @@ CREATE TABLE index_transactions (
 -- in db.js createTransaction(), this makes hash creation race-safe — two concurrent
 -- callers can never produce duplicate ids for the same hash.
 -- NOTE: this file only runs on a FRESH database (verifyTables skips existing tables).
--- To upgrade an existing database, run migrations/2026-05-28-unique-index-tables.sql
+-- To upgrade an existing database, run `npm run migrate` (or src/sql/migrations/2026-05-28-unique-index-tables.sql)
 -- first (it de-duplicates any accumulated rows before applying this UNIQUE index).
 CREATE UNIQUE INDEX hash ON index_transactions (hash);
 
