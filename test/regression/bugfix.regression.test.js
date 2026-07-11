@@ -33,7 +33,9 @@ describe('Bug-Fix Regressions', () => {
     // Add regression tests here as bugs are fixed.
     // Each test must fail without the fix and pass with it.
 
-    it('[REGRESSION P1] R-BUG-000: placeholder: regression suite is loadable', () => {
+    // Placeholder deliberately carries no [REGRESSION P1] tag so grep-based tier
+    // selection does not count it as a real regression guard.
+    it('R-BUG-000: placeholder (untagged): regression suite is loadable', () => {
         assert.ok(true)
     })
 })
