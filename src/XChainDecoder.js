@@ -578,7 +578,7 @@ class XChainDecoder {
                                             let decodedData = decodedRedeemScript[0]
                                             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
                                         } catch (e) {
-                                            this.rpcErrors++
+                                            this.parseErrors++
                                             console.error(`P2SH data extraction failed for input ${txInputIndex} of tx ${nextTxId}:`, e)
                                         }
                                     }
@@ -598,7 +598,7 @@ class XChainDecoder {
                                             let decodedData = decodedRedeemScript[0]
                                             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
                                         } catch (e) {
-                                            this.rpcErrors++
+                                            this.parseErrors++
                                             console.error(`P2WSH data extraction failed for input ${txInputIndex} of tx ${nextTxId}:`, e)
                                         }
                                     }
