@@ -251,6 +251,17 @@ class Database {
 
                     if(appliedByName.has(file)){
                         if(appliedByName.get(file) !== checksum){
+                            // Deliberate one-off rebaselines: an applied file whose only change
+                            // was a reviewed non-executable edit (e.g. a mode retag) may be
+                            // rebaselined here so fleets that recorded the old checksum heal
+                            // in place instead of failing every operator migrate run forever.
+                            // Both hashes are pinned, so any OTHER edit still trips the guard.
+                            const rebase = Database.MIGRATION_CHECKSUM_REBASELINES[file];
+                            if(rebase && appliedByName.get(file) === rebase.from && checksum === rebase.to){
+                                await conn.query('UPDATE schema_migrations SET checksum = ? WHERE name = ?', [checksum, file]);
+                                console.log('runMigrations: rebaselined checksum for ' + file + ' (reviewed retag, executable SQL unchanged).');
+                                continue;
+                            }
                             // Migrations are immutable once applied. A changed checksum means
                             // someone edited an applied file, so the DB is now on a schema that
                             // diverges from what the committed file describes.
@@ -396,6 +407,18 @@ class Database {
             // gone) so a keyword inside comment prose never triggers or hides a hit.
             const stmt = String(raw).replace(/\/\*[\s\S]*?\*\//g, ' ').trim();
             if(!stmt) continue;
+            // Server-side indirection escapes a statement-prefix classifier: a mode=auto
+            // file can smuggle destructive SQL past every keyword check below via dynamic
+            // SQL (`SET @s = 'DROP TABLE balances'; PREPARE stmt FROM @s; EXECUTE stmt;`)
+            // or a `CALL proc()` whose body the scanner cannot see. None of these are used
+            // by any committed auto migration, so treat them as non-auto-eligible. SET of a
+            // user variable (`SET @s = ...`) exists to stage dynamic SQL for PREPARE, so
+            // flag it too - but NOT system-variable SETs (`SET NAMES ...`, `SET sql_mode
+            // = ...`, `SET @@session...`), which are benign and stay auto-eligible.
+            if(/^PREPARE\b/i.test(stmt))                         return raw;
+            if(/^EXECUTE\b/i.test(stmt))                         return raw;
+            if(/^CALL\b/i.test(stmt))                            return raw;
+            if(/^SET\s+@(?!@)/i.test(stmt))                      return raw;
             if(/^DROP\s+(TABLE|DATABASE|SCHEMA)\b/i.test(stmt))  return raw;
             // CREATE OR REPLACE TABLE is an atomic DROP TABLE IF EXISTS + CREATE: it destroys
             // every existing row. Plain CREATE TABLE / CREATE TABLE IF NOT EXISTS are additive
@@ -1794,5 +1817,13 @@ class Database {
         return this.insertEvent('REORG_HALT', { reason: reason, at: new Date().toISOString() })
     }
 }
+
+// Applied-migration files whose checksum may be healed in place. Entries are
+// (old sha256 -> new sha256) pairs pinned to a single reviewed edit; anything
+// else still fails the immutability guard in runMigrations(). Empty until a
+// decoder migration needs a reviewed non-executable retag; the escape hatch
+// exists before it is needed so a heal never requires ad-hoc schema_migrations
+// surgery. Mirrors xchain-indexer/src/db.js.
+Database.MIGRATION_CHECKSUM_REBASELINES = {};
 
 module.exports = Database

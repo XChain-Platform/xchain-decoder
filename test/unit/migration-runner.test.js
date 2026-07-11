@@ -158,6 +158,25 @@ describe('Database._destructiveAutoStatement() @regression', function () {
     it('does not let a destructive keyword inside a block comment trigger a hit', function () {
         assert.strictEqual(scanSql('ALTER TABLE t ADD COLUMN c INT /* not a DROP TABLE */;'), null);
     });
+
+    it('flags dynamic-SQL / stored-routine indirection (PREPARE/EXECUTE/CALL/SET @)', function () {
+        // A prefix classifier cannot see SQL assembled at runtime or a routine body,
+        // so these are non-auto-eligible regardless of what they resolve to.
+        assert.ok(scanSql('PREPARE stmt FROM @s;'));
+        assert.ok(scanSql('EXECUTE stmt;'));
+        assert.ok(scanSql('CALL some_proc();'));
+        assert.ok(scanSql("SET @s = 'DROP TABLE events';"));
+    });
+
+    it('flags the SET @/PREPARE/EXECUTE dynamic-SQL bypass as a whole', function () {
+        assert.ok(scanSql("SET @s = 'DROP TABLE events'; PREPARE stmt FROM @s; EXECUTE stmt;"));
+    });
+
+    it('does NOT flag benign system-variable SETs (SET NAMES / SET sql_mode / SET @@)', function () {
+        assert.strictEqual(scanSql('SET NAMES utf8mb4;'), null);
+        assert.strictEqual(scanSql('SET sql_mode = "STRICT_ALL_TABLES";'), null);
+        assert.strictEqual(scanSql('SET @@session.foreign_key_checks = 0;'), null);
+    });
 });
 
 describe('committed migrations declare intent @regression', function () {
@@ -191,5 +210,29 @@ describe('committed migrations declare intent @regression', function () {
             assert.strictEqual(offender, null,
                 file + ' is tagged mode=auto but contains destructive DDL: ' + offender);
         });
+    });
+});
+
+describe('Database.MIGRATION_CHECKSUM_REBASELINES @regression', function () {
+
+    const crypto  = require('crypto');
+    const MIG_DIR = path.join(__dirname, '..', '..', 'src', 'sql', 'migrations');
+
+    it('every rebaseline pins two distinct 64-hex sha256 values', function () {
+        for (const [file, r] of Object.entries(Database.MIGRATION_CHECKSUM_REBASELINES)) {
+            assert.match(r.from, /^[0-9a-f]{64}$/, file + ': from must be a sha256 hex digest');
+            assert.match(r.to,   /^[0-9a-f]{64}$/, file + ': to must be a sha256 hex digest');
+            assert.notStrictEqual(r.from, r.to, file + ': from and to must differ');
+        }
+    });
+
+    it('every rebaseline `to` hash matches the committed file content (heals TOWARD the repo, never away from it)', function () {
+        for (const [file, r] of Object.entries(Database.MIGRATION_CHECKSUM_REBASELINES)) {
+            const raw = fs.readFileSync(path.join(MIG_DIR, file), 'utf8');
+            const checksum = crypto.createHash('sha256').update(raw).digest('hex');
+            assert.strictEqual(checksum, r.to,
+                file + ': rebaseline target is stale - it must equal the current committed file sha256, ' +
+                'otherwise the heal path would rewrite the ledger to a hash that still mismatches.');
+        }
     });
 });
