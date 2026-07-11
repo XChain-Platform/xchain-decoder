@@ -36,6 +36,7 @@ const crypto  = require('crypto')
 const bitcoin = require('bitcoinjs-lib')
 const ecc     = require('tiny-secp256k1')
 const XChainDecoder = require('../../src/XChainDecoder')
+const { canonicalizeActionPayload, ACTION_ALIASES } = require('../../src/XChainDecoder')
 
 bitcoin.initEccLib(ecc)
 
@@ -106,24 +107,13 @@ function createDecoder() {
     return decoder
 }
 
-// Apply the same alias-expand + payload-rewrite logic the block processing
-// loop uses (XChainDecoder.js block path, post-decode).  Returns the
-// canonical string, or null if the action name is not known.
-const ACTION_ALIASES = {
-    TRANSFER : 'SEND',
-    ADDR     : 'ADDRESS',
-    DROP     : 'AIRDROP',
-    CAST     : 'BROADCAST',
-    MSG      : 'MESSAGE'
-}
-
+// : this used to re-declare its own ACTION_ALIASES table and its own
+// split/join canonicalization, a third divergent implementation of the same
+// logic forked across the decoder's two gate sites. Now it exercises the
+// real shared helper (XChainDecoder.js canonicalizeActionPayload) so these
+// tests actually pin the production canonicalization, not a copy of it.
 function canonicalize(rawString) {
-    const parts = rawString.split('|')
-    const canonical = ACTION_ALIASES[parts[0]] ?? parts[0]
-    if (canonical !== parts[0]) {
-        parts[0] = canonical
-    }
-    return parts.join('|')
+    return canonicalizeActionPayload(Buffer.from(rawString, 'utf8')).buffer.toString('utf8')
 }
 
 // ---------------------------------------------------------------------------
@@ -193,5 +183,59 @@ describe('ACTION-name alias round-trip (#4009)', () => {
             ['ADDR', 'CAST', 'DROP', 'MSG', 'TRANSFER'].sort(),
             'alias map must contain exactly the five protocol-documented aliases'
         )
+    })
+
+    // : canonicalizeActionPayload is now the single shared
+    // implementation behind both the confirmed-block and mempool decode
+    // gates. These tests pin its byte-level contract directly, including the
+    // case the two forked implementations previously only "agreed" on by
+    // accident (invalid UTF-8 after the first pipe never occurs in an
+    // encoder-producible payload, but the decoder must still handle it
+    // consistently since it decodes arbitrary on-chain bytes).
+    describe('canonicalizeActionPayload (shared helper)', () => {
+        it('preserves bytes after the first pipe verbatim, including invalid UTF-8', () => {
+            const payload = Buffer.concat([
+                Buffer.from('TRANSFER|', 'utf8'),
+                Buffer.from([0xff, 0x41, 0x7c, 0x42]) // invalid start byte, 'A', '|', 'B'
+            ])
+            const result = canonicalizeActionPayload(payload)
+            assert.strictEqual(result.isKnown, true)
+            assert.strictEqual(result.actionName, 'SEND')
+            // Canonical name bytes are ASCII; everything after the FIRST pipe
+            // (including the invalid 0xff byte and the second, literal pipe)
+            // must be byte-for-byte the original tail, untouched.
+            const expectedTail = payload.subarray(payload.indexOf(0x7c))
+            const actualTail = result.buffer.subarray(result.buffer.indexOf(0x7c))
+            assert.ok(actualTail.equals(expectedTail),
+                'post-pipe bytes must survive canonicalization unmodified, even when not valid UTF-8')
+        })
+
+        it('tokenizes on the FIRST pipe only (a literal pipe in the payload is not re-split)', () => {
+            const result = canonicalizeActionPayload(Buffer.from('MSG|a|b|c', 'utf8'))
+            assert.strictEqual(result.buffer.toString('utf8'), 'MESSAGE|a|b|c')
+        })
+
+        it('an unknown ACTION name is reported but the buffer is returned unmodified', () => {
+            const original = Buffer.from('NOTREAL|1|2', 'utf8')
+            const result = canonicalizeActionPayload(original)
+            assert.strictEqual(result.isKnown, false)
+            assert.strictEqual(result.rawActionName, 'NOTREAL')
+            assert.ok(result.buffer.equals(original))
+        })
+
+        it('a bare name with no pipe at all is handled (whole buffer is the name)', () => {
+            const result = canonicalizeActionPayload(Buffer.from('DROP', 'utf8'))
+            assert.strictEqual(result.isKnown, true)
+            assert.strictEqual(result.buffer.toString('utf8'), 'AIRDROP')
+        })
+
+        it('agrees with the confirmed-block strict/lenient string-decode contract for a valid alias payload', () => {
+            // Mirrors what the confirmed-block gate does after canonicalization:
+            // decode the returned buffer, falling back to lenient on invalid UTF-8.
+            const strictDecoder = new TextDecoder('utf-8', { fatal: true })
+            const canonical = canonicalizeActionPayload(Buffer.from('CAST|hello world', 'utf8'))
+            const decoded = strictDecoder.decode(canonical.buffer)
+            assert.strictEqual(decoded, 'BROADCAST|hello world')
+        })
     })
 })

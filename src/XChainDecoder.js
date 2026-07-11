@@ -109,6 +109,44 @@ const ACTION_ALIASES = {
     'MSG': 'MESSAGE'
 }
 
+// Canonicalize the ACTION name in a raw payload buffer, expanding a short-form
+// alias to its canonical form. Single source for the alias-canonicalization
+// tokenize+lookup logic shared by the confirmed-block and mempool decode
+// paths (: those two sites had drifted into structurally different
+// implementations -- string split/join vs byte splice -- that happened to
+// agree only because every encoder-producible payload is valid UTF-8; do not
+// fork this logic inline again, same rule as compiledPushSize above).
+//
+// Tokenizes on the FIRST 0x7C ('|') byte only, matching the on-chain wire
+// format (ACTION|param|param|...). The name portion is lenient-decoded ONLY
+// for the alias lookup (so invalid UTF-8 in the name cannot throw); every
+// byte after the first pipe is returned verbatim, untouched -- callers that
+// need a string (the confirmed-block path) decode the returned buffer
+// themselves with their own strict/lenient fallback, so U+FFFD substitution
+// for invalid UTF-8 in the payload is applied exactly once, at the same call
+// site and under the same conditions as before this helper existed.
+//
+// Returns { buffer, rawActionName, actionName, isKnown }:
+//   buffer        - payload with the name portion rewritten to the canonical
+//                    ASCII spelling when it was a recognized alias; the
+//                    original buffer reference, unmodified, otherwise
+//                    (including when the name is unknown).
+//   rawActionName - the lenient-decoded name exactly as it appeared on-chain
+//                    (for logging).
+//   actionName    - the alias-expanded name.
+//   isKnown       - whether actionName is a member of VALID_ACTION_NAMES.
+function canonicalizeActionPayload(buffer) {
+    const pipeIndex = buffer.indexOf(0x7C) // '|'
+    const nameEnd = pipeIndex === -1 ? buffer.length : pipeIndex
+    const rawActionName = lenientTextDecoder.decode(buffer.subarray(0, nameEnd))
+    const actionName = ACTION_ALIASES[rawActionName] ?? rawActionName
+    const isKnown = VALID_ACTION_NAMES.has(actionName)
+    const outBuffer = (isKnown && actionName !== rawActionName)
+        ? Buffer.concat([Buffer.from(actionName, 'ascii'), buffer.subarray(nameEnd)])
+        : buffer
+    return { buffer: outBuffer, rawActionName, actionName, isKnown }
+}
+
 const DB_TRANSACTION_BLOCKS_QUANTITY = 1 //How many blocks need to be processed before inserting the data into the database
 const LOG_BLOCK_INTERVAL = 1000 //During catch-up sync, only log progress every N blocks
 
@@ -587,6 +625,13 @@ class XChainDecoder {
                                         } catch (e) {
                                             this.parseErrors++
                                             console.error(`P2SH data extraction failed for input ${txInputIndex} of tx ${nextTxId}:`, e)
+                                            // Do NOT drop this input's chunk and keep concatenating: a missing
+                                            // interior chunk leaves nextDataBuffer holding a silently truncated
+                                            // ACTION payload that can still decompile to a corrupted push, with no
+                                            // quarantine event. Fail the whole tx instead so the block loop routes
+                                            // it through the TX_PARSE_MAX_RETRIES retry-then-PARSE_ERROR quarantine
+                                            // path (this file's fail-loud-or-quarantine contract).
+                                            throw new Error(`P2SH data extraction failed for input ${txInputIndex} of tx ${nextTxId}: ${e && e.message ? e.message : e}`)
                                         }
                                     }
 
@@ -607,6 +652,13 @@ class XChainDecoder {
                                         } catch (e) {
                                             this.parseErrors++
                                             console.error(`P2WSH data extraction failed for input ${txInputIndex} of tx ${nextTxId}:`, e)
+                                            // Do NOT drop this input's chunk and keep concatenating: a missing
+                                            // interior chunk leaves nextDataBuffer holding a silently truncated
+                                            // ACTION payload that can still decompile to a corrupted push, with no
+                                            // quarantine event. Fail the whole tx instead so the block loop routes
+                                            // it through the TX_PARSE_MAX_RETRIES retry-then-PARSE_ERROR quarantine
+                                            // path (this file's fail-loud-or-quarantine contract).
+                                            throw new Error(`P2WSH data extraction failed for input ${txInputIndex} of tx ${nextTxId}: ${e && e.message ? e.message : e}`)
                                         }
                                     }
                                 } else {
@@ -1429,28 +1481,29 @@ class XChainDecoder {
                                     decodedData = ""
                                     parseResult["rawData"] = null
                                 } else {
+                                    // : canonicalize (tokenize + alias-expand) at the byte
+                                    // level via the shared helper BEFORE string-decoding, so the
+                                    // canonical name (always plain ASCII) rides through the same
+                                    // strict/lenient decode as everything else and the DB ends up
+                                    // alias-free regardless of which spelling was used on-chain.
+                                    // canonical.buffer equals parseResult["data"] unchanged whenever
+                                    // no rewrite is needed (including the unknown-name case), so this
+                                    // decode is byte-for-byte identical to decoding the raw data.
+                                    const canonical = canonicalizeActionPayload(parseResult["data"])
                                     try {
-                                        decodedData = strictTextDecoder.decode(parseResult["data"])
+                                        decodedData = strictTextDecoder.decode(canonical.buffer)
                                     } catch (e) {
                                         this.parseErrors++
-                                        decodedData = lenientTextDecoder.decode(parseResult["data"])
+                                        decodedData = lenientTextDecoder.decode(canonical.buffer)
                                         console.error(`Tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`, e)
                                     }
 
-                                    let actionParts = decodedData.split("|")
-                                    let rawActionName = actionParts[0]
-                                    let actionName = ACTION_ALIASES[rawActionName] ?? rawActionName
-                                    if (!VALID_ACTION_NAMES.has(actionName)) {
+                                    if (!canonical.isKnown) {
                                         this.parseErrors++
-                                        console.error(`Skipping ACTION for tx ${nextTransactionHash}: unknown ACTION name '${rawActionName.substring(0, 32)}'`)
+                                        console.error(`Skipping ACTION for tx ${nextTransactionHash}: unknown ACTION name '${canonical.rawActionName.substring(0, 32)}'`)
                                         if (!hasOutputs) continue
                                         decodedData = ""
                                         parseResult["rawData"] = null
-                                    } else if (actionName !== rawActionName) {
-                                        // Persist the canonical name so the DB is alias-free and
-                                        // identical regardless of which spelling was used on-chain.
-                                        actionParts[0] = actionName
-                                        decodedData = actionParts.join("|")
                                     }
                                 }
                             }
@@ -1781,22 +1834,16 @@ class XChainDecoder {
                         } else {
                             // Guard 2: unknown ACTION names (expand aliases first so an
                             // alias-named tx doesn't show as pending and then silently vanish).
-                            let pipeIndex = mempoolData.indexOf(0x7C) // '|'
-                            let nameEnd = pipeIndex === -1 ? mempoolData.length : pipeIndex
-                            let rawActionName = lenientTextDecoder.decode(mempoolData.subarray(0, nameEnd))
-                            let actionName = ACTION_ALIASES[rawActionName] ?? rawActionName
-                            if (!VALID_ACTION_NAMES.has(actionName)) {
+                            // : shared with the confirmed-block path via
+                            // canonicalizeActionPayload so the two gates cannot drift again.
+                            const canonical = canonicalizeActionPayload(mempoolData)
+                            if (!canonical.isKnown) {
                                 this.parseErrors++
-                                console.error(`Mempool: tx ${nextTransactionHash}: unknown ACTION name '${rawActionName.substring(0, 32)}'`)
+                                console.error(`Mempool: tx ${nextTransactionHash}: unknown ACTION name '${canonical.rawActionName.substring(0, 32)}'`)
                                 if (!hasOutputs) continue
                                 mempoolData = null
-                            } else if (actionName !== rawActionName) {
-                                // Rewrite only the leading name bytes to the canonical spelling;
-                                // splicing at the first '|' preserves any binary payload verbatim.
-                                mempoolData = Buffer.concat([
-                                    Buffer.from(actionName, 'ascii'),
-                                    Buffer.from(mempoolData.subarray(nameEnd))
-                                ])
+                            } else {
+                                mempoolData = canonical.buffer
                             }
                         }
                     }
@@ -1852,3 +1899,8 @@ module.exports.compiledPushSize = compiledPushSize
 module.exports.DISPENSER_EXPIRE_SAFE_DEPTH = DISPENSER_EXPIRE_SAFE_DEPTH
 // Exported for the F3 regression test (DOGE large-output bufferutils-patch self-check).
 module.exports.bigIntBufferutilsActive = bigIntBufferutilsActive
+// Exported for the alias-canonicalization unit/regression tests () and
+// so the ActionManifestConformance test can pin VALID_ACTION_NAMES/ACTION_ALIASES.
+module.exports.canonicalizeActionPayload = canonicalizeActionPayload
+module.exports.VALID_ACTION_NAMES = VALID_ACTION_NAMES
+module.exports.ACTION_ALIASES = ACTION_ALIASES

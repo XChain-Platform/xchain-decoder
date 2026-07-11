@@ -225,6 +225,73 @@ describe('XChainDecoder#parseTransaction()', () => {
         assert.ok(result.data.equals(action), 'decoded data must match original payload byte-for-byte')
     })
 
+    // --- P2SH / P2WSH mid-input extraction failure (no silent truncation) ---
+
+    // Regression: a per-input redeem-script decompile throw used to be caught,
+    // logged, and `continue`d, dropping that input's chunk while concatenation
+    // kept going, so a truncated ACTION payload could be committed with no
+    // quarantine event. The extraction must now fail the whole tx so the block
+    // loop routes it through the retry-then-PARSE_ERROR quarantine path.
+    it('[REGRESSION] P2SH: a mid-input extraction throw fails the whole tx instead of committing a truncated payload', async () => {
+        // Force the P2SH reassembly branch deterministically.
+        sinon.stub(decoder, 'removeObfuscation').resolves(Buffer.concat([Buffer.from('XCHN'), Buffer.from('p2sh')]))
+
+        // Scoped decompile stub: throw only for the POISON script, delegate the
+        // rest (output script, input 0's valid scriptSig) to the real decoder.
+        const POISON = Buffer.from('ba'.repeat(16), 'hex')
+        const realDecompile = bitcoin.script.decompile
+        sinon.stub(bitcoin.script, 'decompile').callsFake((script) => {
+            if (Buffer.isBuffer(script) && script.equals(POISON)) throw new Error('malformed redeem script bytes')
+            return realDecompile(script)
+        })
+
+        const dataChunk     = Buffer.from('actionpayloadchunk')
+        const redeemScript  = bitcoin.script.compile([dataChunk])
+        const goodScriptSig = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02), redeemScript])
+
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        tx.addInput(PREV_HASH, 1)          // input 0: valid data chunk
+        tx.ins[0].script = goodScriptSig
+        tx.addInput(PREV_HASH, 2)          // input 1: redeem-script decompile throws
+        tx.ins[1].script = POISON
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, Buffer.alloc(8, 0xAB)]), 0)
+        addP2PKHOutput(tx)
+
+        await assert.rejects(
+            decoder.parseTransaction(tx),
+            /P2SH data extraction failed for input 1/
+        )
+    })
+
+    it('[REGRESSION] P2WSH: a mid-input extraction throw fails the whole tx instead of committing a truncated payload', async () => {
+        sinon.stub(decoder, 'removeObfuscation').resolves(Buffer.concat([Buffer.from('XCHN'), Buffer.from('p2wsh')]))
+
+        const POISON = Buffer.from('ba'.repeat(16), 'hex')
+        const realDecompile = bitcoin.script.decompile
+        sinon.stub(bitcoin.script, 'decompile').callsFake((script) => {
+            if (Buffer.isBuffer(script) && script.equals(POISON)) throw new Error('malformed witness redeem script bytes')
+            return realDecompile(script)
+        })
+
+        const dataChunk    = Buffer.from('actionpayloadchunk')
+        const redeemScript = bitcoin.script.compile([dataChunk])
+
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        tx.addInput(PREV_HASH, 1)          // input 0: valid witness data chunk
+        tx.ins[0].witness = [Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02), redeemScript]
+        tx.addInput(PREV_HASH, 2)          // input 1: witness redeem-script decompile throws
+        tx.ins[1].witness = [Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02), POISON]
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, Buffer.alloc(8, 0xAB)]), 0)
+        addP2PKHOutput(tx)
+
+        await assert.rejects(
+            decoder.parseTransaction(tx),
+            /P2WSH data extraction failed for input 1/
+        )
+    })
+
     // --- Result structure ---
 
     it('[REGRESSION P0] R-SCR-001: should return an object with data, rawData, source, destination, and dispenseOutputs', async () => {
