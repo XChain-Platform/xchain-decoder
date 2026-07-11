@@ -161,3 +161,162 @@ describe('XChainDecoder.verifyReorg depth guard', function () {
     assert.strictEqual(deleted.length, SAFE_DEPTH)
   })
 })
+
+// Item 1300: the safe-depth ceiling is a per-invocation counter, so before the
+// durable-halt fix a process restart re-entered verifyReorg with a zeroed counter
+// and silently completed an over-deep rollback past the dispenser purge window.
+// A durable REORG_HALT marker (isReorgHalted/markReorgHalted) must survive the
+// restart and make the second invocation refuse to delete anything further.
+describe('XChainDecoder.verifyReorg durable halt (restart-mid-reorg)', function () {
+  this.timeout(0)
+
+  const SAFE_DEPTH = XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH
+
+  // Shared, restart-surviving state: the persisted halt flag plus the DB block
+  // store. A fresh decoder instance models a process restart (blocksDeleted resets)
+  // while both `store` and `dbState` persist, exactly like the real DB across a
+  // crash. Every DB block below the node tip disagrees, so the backward walk wants
+  // to roll back the full `divergentBlocks` depth.
+  function makeShared(divergentBlocks) {
+    const TIP = 10000
+    const store = { halted: false }
+    const dbState = { top: TIP }
+    const forkPoint = TIP - divergentBlocks
+    return { TIP, store, dbState, forkPoint }
+  }
+
+  function buildDecoder(shared) {
+    const { TIP, store, dbState, forkPoint } = shared
+    const decoder = new XChainDecoder(
+      'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+    )
+    decoder.startBlockIndex = 0
+    decoder.sleep = async () => {}
+    const deleted = []
+    decoder.connector = {
+      getBlockHash: async (h) => (h > forkPoint ? 'node' + h : 'match' + h)
+    }
+    decoder.db = {
+      getLastBlockIndex: async () => dbState.top,
+      getBlockByIndex: async (h) => ({ block_hash: h > forkPoint ? 'db' + h : 'match' + h }),
+      deleteBlockByIndex: async (h) => { deleted.push(h); dbState.top = h - 1 },
+      insertEvent: async () => true,
+      isReorgHalted: async () => store.halted,
+      markReorgHalted: async () => { store.halted = true }
+    }
+    return { decoder, deleted }
+  }
+
+  it('halts durably on the over-deep abort and a restart refuses to resume the rollback', async function () {
+    const shared = makeShared(SAFE_DEPTH + 74) // 200-block-class reorg
+
+    // Run 1: aborts fail-closed exactly at the safe depth and persists the halt marker.
+    const first = buildDecoder(shared)
+    await assert.rejects(() => first.decoder.verifyReorg(), /dispenser safe-depth window/)
+    assert.strictEqual(first.deleted.length, SAFE_DEPTH, 'run 1 stops deleting at the ceiling')
+    assert.strictEqual(shared.store.halted, true, 'run 1 must persist a durable halt marker')
+
+    // Run 2 = process restart: fresh decoder (counter reset), same persisted state.
+    // Pre-fix it would delete the remaining 74 blocks; now it must delete NONE.
+    const second = buildDecoder(shared)
+    await assert.rejects(() => second.decoder.verifyReorg(), /HALTED from a prior over-deep reorg abort/)
+    assert.strictEqual(second.deleted.length, 0, 'restart must not resume the over-deep rollback')
+    assert.ok(shared.dbState.top > shared.forkPoint,
+      'blocks past the purge window must remain (rollback did not silently complete)')
+  })
+
+  it('a full resync (cleared halt marker) restores normal shallow-reorg operation', async function () {
+    const shared = makeShared(SAFE_DEPTH + 74)
+    await assert.rejects(() => buildDecoder(shared).decoder.verifyReorg(), /dispenser safe-depth window/)
+    assert.strictEqual(shared.store.halted, true)
+
+    // Simulate the operator-driven full resync: rebuilt schema clears the marker and
+    // reseeds a healthy chain with only a shallow divergence.
+    const fresh = makeShared(3)
+    const { decoder, deleted } = buildDecoder(fresh)
+    assert.strictEqual(await decoder.verifyReorg(), true)
+    assert.strictEqual(deleted.length, 3, 'a shallow reorg rolls back cleanly after resync')
+    assert.strictEqual(fresh.store.halted, false)
+  })
+})
+
+// Item 1301: verifyReorg froze the node tip at call time, so a mid-walk tip
+// regression (node restart onto a shorter chain / second reorg) made the stuck
+// height fall through to getBlockHash, which throws "Block height out of range",
+// and the transient catch retried the same height forever. The catch now best-
+// effort re-reads the tip so the above-tip delete branch drains the orphans.
+describe('XChainDecoder.verifyReorg mid-walk tip regression', function () {
+  this.timeout(0)
+
+  it('refreshes nodeTip on out-of-range so a regressed tip self-heals instead of wedging', async function () {
+    const decoder = new XChainDecoder(
+      'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+    )
+    decoder.startBlockIndex = 0
+    decoder.sleep = async () => {}
+
+    // DB stores 100..105; node originally reported tip 105 (call-time nodeTip), but
+    // mid-walk regressed to 102. Blocks 103,104,105 are now above the live tip and
+    // must be deleted via the above-tip branch; 102 and below still hash-match.
+    const REGRESSED_TIP = 102
+    let top = 105
+    const deleted = []
+    const dbHash = { 105: 'db105', 104: 'db104', 103: 'db103', 102: 'match102', 101: 'match101', 100: 'match100' }
+    decoder.connector = {
+      // Live node: any height above the regressed tip is out of range.
+      getBlockHash: async (h) => {
+        if (h > REGRESSED_TIP) throw new Error('Block height out of range')
+        return 'match' + h
+      },
+      getBlockchainInfo: async () => ({ blocks: REGRESSED_TIP })
+    }
+    decoder.db = {
+      getLastBlockIndex: async () => top,
+      getBlockByIndex: async (h) => ({ block_hash: dbHash[h] }),
+      deleteBlockByIndex: async (h) => { deleted.push(h); top = h - 1 },
+      insertEvent: async () => true,
+      isReorgHalted: async () => false,
+      markReorgHalted: async () => {}
+    }
+
+    // Called with the STALE higher tip (105). Without the refresh, height 105 is not
+    // above nodeTip=105, getBlockHash(105) throws out-of-range, and the walk spins
+    // forever. With the refresh it re-reads tip=102 and drains 103,104,105.
+    const result = await decoder.verifyReorg(105)
+    assert.strictEqual(result, true)
+    assert.deepStrictEqual(deleted, [105, 104, 103],
+      'blocks above the regressed tip are deleted via the above-tip branch after the tip refresh')
+  })
+
+  it('keeps retrying (does not crash) when the node is fully unreachable', async function () {
+    const decoder = new XChainDecoder(
+      'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+    )
+    decoder.startBlockIndex = 0
+    let sleeps = 0
+    decoder.sleep = async () => {
+      // Break the intentional retry-forever loop after a few passes to prove the
+      // catch tolerates a fully-down node (both getBlockHash and getBlockchainInfo
+      // failing) exactly as before, then stop the test deterministically.
+      if (++sleeps >= 3) { top = -1 } // exhaust the table so the walk terminates
+    }
+    let top = 100
+    decoder.connector = {
+      getBlockHash: async () => { throw new Error('ECONNREFUSED') },
+      getBlockchainInfo: async () => { throw new Error('ECONNREFUSED') }
+    }
+    decoder.db = {
+      getLastBlockIndex: async () => top,
+      getBlockByIndex: async (h) => (h < 0 ? null : { block_hash: 'db' + h }),
+      deleteBlockByIndex: async () => { throw new Error('should not delete while node is down') },
+      insertEvent: async () => true,
+      isReorgHalted: async () => false,
+      markReorgHalted: async () => {}
+    }
+    // nodeTip null (legacy caller): the out-of-range path is not taken; getBlockHash
+    // simply errors, the catch best-effort-refreshes (also fails), sleeps, retries.
+    const result = await decoder.verifyReorg()
+    assert.strictEqual(result, true)
+    assert.ok(sleeps >= 3, 'retries through the node outage instead of crashing')
+  })
+})

@@ -357,7 +357,12 @@ class Database {
     // Read a migration file's `-- xchain:migration mode=auto|manual` header tag.
     // Defaults to 'manual' when absent (conservative: unknown DDL never auto-runs).
     _migrationMode(raw){
-        const m = String(raw).match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im);
+        // The mode tag is a header directive: only the leading header window may
+        // carry it. Scanning the whole file (the old /m behavior) let a `mode=auto`
+        // token buried in body prose or a data literal silently arm auto-apply for a
+        // destructive migration. Restrict the match to the first 10 lines.
+        const header = String(raw).split('\n').slice(0, 10).join('\n');
+        const m = header.match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im);
         return m ? m[1].toLowerCase() : 'manual';
     }
 
@@ -369,7 +374,9 @@ class Database {
     // migration runners stay legible as a pair.
     //
     // Flagged as destructive: DROP TABLE/DATABASE/SCHEMA, TRUNCATE, RENAME TABLE,
-    // DELETE FROM, ALTER TABLE ... DROP <column|partition|bare identifier>,
+    // DELETE (any form), REPLACE INTO (atomic DELETE+INSERT), UPDATE (except the
+    // committed AUTO_INCREMENT id=0 repair),
+    // ALTER TABLE ... DROP <column|partition|bare identifier>,
     // ALTER TABLE ... RENAME (except RENAME INDEX/KEY), ALTER TABLE ... CHANGE
     // (rename+retype), and MODIFY ... NOT NULL (the statically detectable
     // narrowing; a width reduction cannot be seen without the live schema and
@@ -404,6 +411,17 @@ class Database {
             // and multi-table `DELETE t1 FROM t1 JOIN t2 ...` all delete rows yet omit an
             // immediate FROM. No false positive: a statement starting with DELETE is always DML.
             if(/^DELETE\b/i.test(stmt))                          return raw;
+            // REPLACE INTO is an atomic DELETE+INSERT on every existing-key row it
+            // touches - the same data-loss profile as DELETE, with no non-destructive
+            // form - so match the bare keyword like DELETE above.
+            if(/^REPLACE\b/i.test(stmt))                         return raw;
+            // A bare UPDATE can rewrite arbitrary row data. The one committed auto
+            // pattern is the AUTO_INCREMENT id repair (`UPDATE <table> SET id = (...)
+            // WHERE id = 0;` in 2026-06-10-mirror-id-autoincrement-repair.sql), which
+            // touches only the sentinel id=0 row; carve exactly that shape out and
+            // flag every other UPDATE.
+            if(/^UPDATE\b/i.test(stmt) &&
+               !/^UPDATE\s+\S+\s+SET\s+id\s*=\s*\([\s\S]+\)\s+WHERE\s+id\s*=\s*0\b/i.test(stmt)) return raw;
             if(/^ALTER\s+TABLE\b/i.test(stmt)){
                 // Every DROP inside the ALTER must target a safe (metadata-only) object.
                 let m;
@@ -419,9 +437,25 @@ class Database {
                 if(/\bCHANGE\b/i.test(stmt))                     return raw;
                 // MODIFY that adds NOT NULL narrows the column domain - except an
                 // AUTO_INCREMENT attribute repair: an AUTO_INCREMENT column is
-                // definitionally NOT NULL, so no domain is narrowed.
-                if(/\bMODIFY\b[\s\S]*\bNOT\s+NULL\b/i.test(stmt) &&
-                   !/\bAUTO_INCREMENT\b/i.test(stmt))            return raw;
+                // definitionally NOT NULL, so no domain is narrowed (see the
+                // committed 2026-06-10-mirror-id-autoincrement-repair.sql pattern).
+                // Check per top-level clause: a statement-wide AUTO_INCREMENT test
+                // would let one AUTO_INCREMENT clause exempt a sibling NOT NULL clause
+                // in the same multi-clause ALTER (e.g. `MODIFY id ... AUTO_INCREMENT,
+                // MODIFY source VARCHAR(255) NOT NULL`).
+                let mDepth = 0, mStart = 0;
+                const mClauses = [];
+                for(let i=0;i<stmt.length;i++){
+                    const ch = stmt[i];
+                    if(ch === '(') mDepth++;
+                    else if(ch === ')') mDepth--;
+                    else if(ch === ',' && mDepth === 0){ mClauses.push(stmt.slice(mStart, i)); mStart = i + 1; }
+                }
+                mClauses.push(stmt.slice(mStart));
+                for(const clause of mClauses){
+                    if(/\bMODIFY\b[\s\S]*\bNOT\s+NULL\b/i.test(clause) &&
+                       !/\bAUTO_INCREMENT\b/i.test(clause))      return raw;
+                }
             }
         }
         return null;
@@ -1726,6 +1760,38 @@ class Database {
                 await connection.release()
             }
         }
+    }
+
+    // Durable reorg-halt flag (item 1300). verifyReorg's fail-closed safe-depth
+    // ceiling is a per-invocation counter: on a reorg deeper than
+    // DISPENSER_EXPIRE_SAFE_DEPTH it aborts mid-rollback, but nothing persisted
+    // the abort, so a plain process restart re-entered verifyReorg with a zeroed
+    // counter and silently completed the over-deep rollback past the dispenser
+    // purge window (permanent money-bearing dispenser-state divergence). The halt
+    // is persisted as a REORG_HALT row in the events table (an existing durable
+    // store); a full resync from a known-good snapshot rebuilds the schema and so
+    // clears it, matching the recovery the abort message already demands.
+    async isReorgHalted(){
+        const query = `SELECT 1 FROM events WHERE code = 'REORG_HALT' LIMIT 1;`
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            const rows = await connection.query(query)
+            return Array.isArray(rows) ? rows.length > 0 : false
+        } finally {
+            if (ownLease){
+                await connection.release()
+            }
+        }
+    }
+
+    // Persist the durable reorg-halt marker (idempotent: no-op if already halted).
+    // Called on every verifyReorg abort path BEFORE the throw, so a restart cannot
+    // resume the over-deep rollback. Best-effort by design; the caller swallows any
+    // error so a marker-write failure never masks the original loud abort.
+    async markReorgHalted(reason){
+        if (await this.isReorgHalted()) return true
+        return this.insertEvent('REORG_HALT', { reason: reason, at: new Date().toISOString() })
     }
 }
 

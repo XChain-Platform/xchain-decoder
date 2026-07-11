@@ -50,6 +50,14 @@ describe('Database._migrationMode() @regression', function () {
     it('a non-auto/manual value falls through to manual', function () {
         assert.strictEqual(modeOf('-- xchain:migration mode=yolo\n'), 'manual');
     });
+
+    it('does not let a body-buried mode=auto tag arm auto-apply (header window only)', function () {
+        // The tag is a header directive; a mode=auto token quoted in body prose or a
+        // data literal below the header window must not flip an untagged file to auto.
+        const body = Array(12).fill('-- filler line').join('\n') +
+            '\n-- xchain:migration mode=auto (quoted convention prose)\nDROP TABLE events;';
+        assert.strictEqual(modeOf(body), 'manual');
+    });
 });
 
 const scanOf = Database.prototype._destructiveAutoStatement.bind({});
@@ -85,6 +93,23 @@ describe('Database._destructiveAutoStatement() @regression', function () {
         assert.ok(scanSql('DELETE LOW_PRIORITY FROM dispensers WHERE id = 1;'));
         assert.ok(scanSql('DELETE IGNORE FROM dispensers WHERE id = 1;'));
         assert.ok(scanSql('DELETE t1 FROM events t1 JOIN blocks t2 ON t1.block_index=t2.block_index;'));
+    });
+
+    it('flags REPLACE INTO (atomic DELETE+INSERT), matching the DELETE guard', function () {
+        assert.ok(scanSql('REPLACE INTO dispensers (id, source) VALUES (1, \'x\');'));
+    });
+
+    it('flags a bare UPDATE but not the committed AUTO_INCREMENT id=0 repair', function () {
+        assert.ok(scanSql('UPDATE blocks SET block_hash = \'x\' WHERE block_index = 1;'));
+        assert.strictEqual(
+            scanSql('UPDATE mirror SET id = (SELECT MAX(id)+1 FROM t) WHERE id = 0;'), null);
+    });
+
+    it('flags a NOT NULL-narrowing clause even when a sibling clause is AUTO_INCREMENT', function () {
+        // A statement-wide AUTO_INCREMENT test would let the first clause exempt the
+        // sibling NOT NULL narrowing; the per-clause scan must still flag it.
+        assert.ok(scanSql(
+            'ALTER TABLE t MODIFY id BIGINT NOT NULL AUTO_INCREMENT, MODIFY source VARCHAR(255) NOT NULL;'));
     });
 
     it('flags CREATE OR REPLACE TABLE (atomic DROP+CREATE wipes rows) but not plain/IF NOT EXISTS', function () {

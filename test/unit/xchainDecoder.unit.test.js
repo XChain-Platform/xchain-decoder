@@ -413,6 +413,28 @@ describe('XChainDecoder#verifyReorg() edge cases', () => {
     })
 })
 
+// ─── DOGE auxPow forcing ────────────────────────────────────────────────────
+
+describe('XChainDecoder auxPow chain-identity forcing', () => {
+    function makeDecoder(network, auxPow) {
+        return new XChainDecoder(
+            network, 'h', 3306, 'db', 'u', 'p',
+            '127.0.0.1', 18443, 'rpc', 'rpc', auxPow, null
+        )
+    }
+
+    it('forces auxPow=true for a dogecoin network even when AUX_POW is unset (false)', () => {
+        assert.strictEqual(makeDecoder('dogecoin-regtest', false).auxPow, true)
+        assert.strictEqual(makeDecoder('dogecoin-mainnet', false).auxPow, true)
+    })
+
+    it('leaves the env-driven value untouched for non-DOGE chains', () => {
+        assert.strictEqual(makeDecoder('bitcoin-regtest', false).auxPow, false)
+        assert.strictEqual(makeDecoder('litecoin-regtest', false).auxPow, false)
+        assert.strictEqual(makeDecoder('bitcoin-regtest', true).auxPow, true)
+    })
+})
+
 // ─── MAX_ACTION_DATA_LENGTH export ──────────────────────────────────────────
 
 describe('XChainDecoder.MAX_ACTION_DATA_LENGTH', () => {

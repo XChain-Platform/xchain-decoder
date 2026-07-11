@@ -187,7 +187,14 @@ class XChainDecoder {
 
         this.stopFlag = false
 
-        this.auxPow = auxPow
+        // Force the AuxPoW-stripping fetch path on for Dogecoin regardless of the
+        // AUX_POW env flag: DOGE blocks carry a merged-mining AuxPoW section between
+        // the 80-byte header and the tx count, so the plain getBlock path would hand
+        // that hex to the bitcoinjs parser and wedge/misparse at the first merged-mined
+        // block. Mirrors the same coin-derived forcing in xchain-utxo-tracker
+        // (XChainUtxoTracker.js: `coinFromNetwork(network) === 'DOGE' ? true : auxPow`)
+        // so chain identity, not operator env, decides the branch.
+        this.auxPow = String(network).toLowerCase().startsWith('dogecoin') ? true : auxPow
 
         this.rpcErrors = 0
         this.parseErrors = 0
@@ -691,7 +698,13 @@ class XChainDecoder {
                         // back, matching exactly what the encoder's compiled script measured.
                         compiledDataLength = compiledPushSize(dataBuffer.length)
                         if (decompiledData.length > 1){
-                            rawData = decompiledData[1]
+                            // Mirror the Buffer gate on decompiledData[0] above: decompile
+                            // returns opcodes as integers, so a payload whose second element
+                            // is an opcode (a trailing OP_1..OP_16/OP_1NEGATE, or the
+                            // MULTISIGN zero-pad's OP_0) would otherwise flow a bare integer
+                            // into rawData and the raw_data column, a shape no consumer
+                            // expects (the encoder's push[1] is always a Buffer).
+                            rawData = Buffer.isBuffer(decompiledData[1]) ? decompiledData[1] : null
                             // Count the second push too. The encoder bounds the WHOLE compiled
                             // script (both pushes) against MAX_COMPILED_ACTION_DATA_LENGTH, so
                             // measuring only push[0] here let a small action push + a large
@@ -755,6 +768,37 @@ class XChainDecoder {
         let blocksDeleted = []
         let retryCount = 0
 
+        // Restart-durable halt guard (item 1300). The safe-depth ceiling below is a
+        // per-invocation counter over durably-committed per-block deletes: once it
+        // fired the loud abort mid-rollback, nothing persisted the abort, so a plain
+        // process restart re-entered here with a zeroed counter and silently completed
+        // the over-deep rollback past the dispenser purge window (permanent, money-
+        // bearing dispenser-state divergence). Every abort path now persists a durable
+        // REORG_HALT marker (markReorgHalted); on entry we refuse to proceed while it
+        // is set, so a restart cannot resume an over-deep rollback. Recovery is the
+        // full resync the abort message demands (rebuilding the schema clears it).
+        // Feature-detected so the minimal-mock verifyReorg tests stay unaffected.
+        if (typeof this.db.isReorgHalted === 'function' && await this.db.isReorgHalted()){
+            const msg = "verifyReorg: decoder is HALTED from a prior over-deep reorg abort. Refusing to "
+                + "roll back further: a restart must not silently resume a rollback past the dispenser "
+                + "safe-depth window (DISPENSER_EXPIRE_SAFE_DEPTH=" + DISPENSER_EXPIRE_SAFE_DEPTH + "), which "
+                + "would permanently lose money-bearing dispenser state. Recovery: perform a full resync "
+                + "from a known-good snapshot."
+            console.error(msg)
+            throw new Error(msg)
+        }
+
+        // Persist the durable halt marker before an abort throws (best-effort: swallow
+        // write errors so a marker failure never masks the loud abort). Feature-detected.
+        const haltReorg = async (reason) => {
+            if (typeof this.db.markReorgHalted !== 'function') return
+            try {
+                await this.db.markReorgHalted(reason)
+            } catch (e) {
+                console.error('verifyReorg: failed to persist REORG_HALT marker:', e)
+            }
+        }
+
         // Fail-closed reorg-depth ceiling (parity with xchain-utxo-tracker's
         // UNDO_BLOCKS guard, XChainUtxoTracker.js verifyReorg). Soft-expired
         // dispensers are hard-purged once DISPENSER_EXPIRE_SAFE_DEPTH blocks
@@ -765,7 +809,7 @@ class XChainDecoder {
         // strictly safer than a silently corrupt DB: stop and require an
         // operator-driven resync. Called BEFORE each delete attempt (outside
         // the per-block retry try/catch, so the throw is not retried away).
-        const assertWithinSafeDepth = (lastBlockIndex) => {
+        const assertWithinSafeDepth = async (lastBlockIndex) => {
             if (blocksDeleted.length >= DISPENSER_EXPIRE_SAFE_DEPTH){
                 const msg = "verifyReorg: reorg depth exceeds the dispenser safe-depth window "
                     + "(DISPENSER_EXPIRE_SAFE_DEPTH=" + DISPENSER_EXPIRE_SAFE_DEPTH + "). Already rolled back "
@@ -774,6 +818,7 @@ class XChainDecoder {
                     + "silently lose money-bearing dispenser state. Aborting. Recovery: perform a full "
                     + "resync from a known-good snapshot."
                 console.error(msg)
+                await haltReorg(msg)
                 throw new Error(msg)
             }
         }
@@ -803,7 +848,7 @@ class XChainDecoder {
             // guard with != null so their behaviour is unchanged. The live parse loop
             // always passes the freshly-refreshed tip.
             if (nodeTip != null && lastBlockIndex > nodeTip){
-                assertWithinSafeDepth(lastBlockIndex)
+                await assertWithinSafeDepth(lastBlockIndex)
                 try {
                     // Pass the block hash so the delete and its REORG audit marker commit
                     // atomically (M-12); see deleteBlockByIndex for the durability rationale.
@@ -812,7 +857,7 @@ class XChainDecoder {
                     blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["block_hash"]})
                 } catch (err){
                     console.error(`reorg: failed to delete above-tip block ${lastBlockIndex} (${lastBlock.block_hash}): `, err)
-                    if (++retryCount >= 10) throw new Error('verifyReorg: deleteBlockByIndex failed after 10 attempts, aborting')
+                    if (++retryCount >= 10){ await haltReorg('verifyReorg: deleteBlockByIndex failed after 10 attempts (above-tip branch)'); throw new Error('verifyReorg: deleteBlockByIndex failed after 10 attempts, aborting') }
                     await this.sleep(3000)
                 }
                 continue
@@ -823,12 +868,24 @@ class XChainDecoder {
                 blockHashFromNode = await this.connector.getBlockHash(lastBlockIndex)
             } catch (err){
                 console.log("There was a problem trying to get a block hash from the node. Trying again...", err)
+                // The node's tip may have regressed below lastBlockIndex mid-walk (node
+                // restart onto a shorter chain, or a second reorg). Against the frozen
+                // call-time nodeTip that makes getBlockHash(lastBlockIndex) throw "Block
+                // height out of range" on every retry, wedging this walk forever (item
+                // 1301). Best-effort re-read the tip so the above-tip delete branch can
+                // classify and delete this now-orphaned height on the next pass. If the
+                // node is fully unreachable this refresh also fails and we keep the
+                // existing sleep-and-retry outage tolerance (retry-forever) unchanged.
+                try {
+                    const info = await this.connector.getBlockchainInfo()
+                    if (info && typeof info.blocks === 'number') nodeTip = info.blocks
+                } catch (refreshErr) { /* node unreachable; retry with the existing tip */ }
                 await this.sleep(3000)
                 continue
             }
-            
+
             if (lastBlock["block_hash"] != blockHashFromNode){
-                assertWithinSafeDepth(lastBlockIndex)
+                await assertWithinSafeDepth(lastBlockIndex)
                 try {
                     // Pass the block hash so the delete and its REORG audit marker commit
                     // atomically (M-12); see deleteBlockByIndex for the durability rationale.
@@ -842,7 +899,7 @@ class XChainDecoder {
                     blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["block_hash"]})
                 } catch (err){
                     console.error(`reorg: failed to delete block ${lastBlockIndex} (${lastBlock.block_hash}): `, err)
-                    if (++retryCount >= 10) throw new Error('verifyReorg: deleteBlockByIndex failed after 10 attempts, aborting')
+                    if (++retryCount >= 10){ await haltReorg('verifyReorg: deleteBlockByIndex failed after 10 attempts (hash-compare branch)'); throw new Error('verifyReorg: deleteBlockByIndex failed after 10 attempts, aborting') }
                     await this.sleep(3000); continue
                 }
             } else {
@@ -1706,35 +1763,41 @@ class XChainDecoder {
 
                     let mempoolData = parseResult["data"]
                     if (mempoolData != null && mempoolData.length > 0) {
-                        // Mirror the confirmed-block path: apply the same two guards so a
-                        // pending tx never shows as valid and then silently vanishes on confirm.
+                        // Mirror the confirmed-block path (F5): apply the same two guards so a
+                        // pending tx never shows one thing and then silently vanishes on confirm.
+                        // A tx can carry BOTH an invalid/oversized ACTION and money-bearing
+                        // dispense/payment outputs; when it does, do NOT drop the whole tx -
+                        // treat the bad action as no-action (null data) and still record the
+                        // pending tx, exactly as F5 does at confirmation. Only skip the whole tx
+                        // when there is nothing else to record.
+                        let hasOutputs = ((parseResult["dispenseOutputs"]?.length > 0) || (parseResult["paymentOutputs"]?.length > 0))
 
-                        // Guard 1: oversized payloads. An oversized mempool tx would be
-                        // skipped at confirmation, so skip it here too for a consistent view.
+                        // Guard 1: oversized payloads.
                         if (parseResult["compiledDataLength"] > MAX_ACTION_DATA_LENGTH) {
                             this.parseErrors++
-                            console.error(`Mempool: skipping tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${MAX_ACTION_DATA_LENGTH})`)
-                            continue
-                        }
-
-                        // Guard 2: unknown ACTION names (expand aliases first so an
-                        // alias-named tx doesn't show as pending and then silently vanish).
-                        let pipeIndex = mempoolData.indexOf(0x7C) // '|'
-                        let nameEnd = pipeIndex === -1 ? mempoolData.length : pipeIndex
-                        let rawActionName = lenientTextDecoder.decode(mempoolData.subarray(0, nameEnd))
-                        let actionName = ACTION_ALIASES[rawActionName] ?? rawActionName
-                        if (!VALID_ACTION_NAMES.has(actionName)) {
-                            this.parseErrors++
-                            console.error(`Mempool: skipping tx ${nextTransactionHash}: unknown ACTION name '${rawActionName.substring(0, 32)}'`)
-                            continue
-                        }
-                        if (actionName !== rawActionName) {
-                            // Rewrite only the leading name bytes to the canonical spelling;
-                            // splicing at the first '|' preserves any binary payload verbatim.
-                            mempoolData = Buffer.concat([
-                                Buffer.from(actionName, 'ascii'),
-                                Buffer.from(mempoolData.subarray(nameEnd))
-                            ])
+                            console.error(`Mempool: tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${MAX_ACTION_DATA_LENGTH})`)
+                            if (!hasOutputs) continue
+                            mempoolData = null
+                        } else {
+                            // Guard 2: unknown ACTION names (expand aliases first so an
+                            // alias-named tx doesn't show as pending and then silently vanish).
+                            let pipeIndex = mempoolData.indexOf(0x7C) // '|'
+                            let nameEnd = pipeIndex === -1 ? mempoolData.length : pipeIndex
+                            let rawActionName = lenientTextDecoder.decode(mempoolData.subarray(0, nameEnd))
+                            let actionName = ACTION_ALIASES[rawActionName] ?? rawActionName
+                            if (!VALID_ACTION_NAMES.has(actionName)) {
+                                this.parseErrors++
+                                console.error(`Mempool: tx ${nextTransactionHash}: unknown ACTION name '${rawActionName.substring(0, 32)}'`)
+                                if (!hasOutputs) continue
+                                mempoolData = null
+                            } else if (actionName !== rawActionName) {
+                                // Rewrite only the leading name bytes to the canonical spelling;
+                                // splicing at the first '|' preserves any binary payload verbatim.
+                                mempoolData = Buffer.concat([
+                                    Buffer.from(actionName, 'ascii'),
+                                    Buffer.from(mempoolData.subarray(nameEnd))
+                                ])
+                            }
                         }
                     }
 
