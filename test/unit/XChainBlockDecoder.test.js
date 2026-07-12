@@ -10,6 +10,7 @@
 
 const assert = require('assert')
 const crypto = require('crypto')
+const { Transaction } = require('bitcoinjs-lib')
 const XChainBlockDecoder = require('../../src/XChainBlockDecoder')
 
 // 80-byte block header: version=2, prevHash=0xaa*32, merkleRoot=0xbb*32, timestamp=1700000000, bits, nonce
@@ -178,29 +179,30 @@ describe('XChainBlockDecoder', () => {
             assert.ok(tx)
         })
 
-        it('should not strip non-MWEB flags on litecoin (flag != 0x08 or 0x09)', () => {
+        it('[REGRESSION P2] R-NET-002: should not strip non-MWEB flags on litecoin (flag != 0x08 or 0x09)', () => {
             const ltcDecoder = new XChainBlockDecoder('litecoin-mainnet')
-            // flag=0x03 is neither 0x08 nor 0x09, so it should NOT be stripped
-            // The hex must still produce a parseable tx after (or without) stripping
-            const txHex = '02000000' + '00' + '03' + '00' + '00' + '00000000'
-            // flag 0x03 doesn't match the strip condition, so it stays as-is
-            // bitcoinjs-lib will try to parse it in non-strict mode
-            // This may throw depending on the content, which is fine: the point is
-            // the strip logic did NOT activate
-            try {
-                ltcDecoder.transactionFromHex(txHex)
-            } catch (e) {
-                // Expected: the raw bytes aren't a valid tx, but the strip didn't happen
-            }
-            // Verify the strip condition: only 0x08 and 0x09 are stripped
-            // Build a valid simple tx and confirm flag=0x03 doesn't get stripped
-            const simpleTxHex = '0200000000000000000000'
-            try {
-                ltcDecoder.transactionFromHex(simpleTxHex)
-            } catch (e) {
-                // Fine; just testing the strip logic
-            }
-            assert.ok(true, 'Non-MWEB flags are not stripped')
+
+            // Build a genuinely valid segwit litecoin tx: marker 0x00, flag 0x01
+            // (ordinary segwit, NOT MWEB). Only flags 0x08/0x09 must be stripped, so
+            // this tx's marker+flag and its witness data must survive decode intact.
+            const witnessTx = new Transaction()
+            witnessTx.version = 2
+            witnessTx.addInput(Buffer.alloc(32, 1), 0)
+            witnessTx.addOutput(Buffer.from('0014' + '00'.repeat(20), 'hex'), 1000)
+            witnessTx.setWitness(0, [Buffer.from('deadbeef', 'hex')])
+            const txHex = witnessTx.toHex()
+
+            // Sanity: the fixture really is a flag-0x01 segwit tx.
+            assert.strictEqual(txHex.substr(8, 2), '00', 'fixture marker byte should be 0x00')
+            assert.strictEqual(txHex.substr(10, 2), '01', 'fixture flag byte should be 0x01')
+
+            const parsed = ltcDecoder.transactionFromHex(txHex)
+
+            // If the strip logic were widened to catch flag 0x01, the marker+flag
+            // bytes would be removed and this would fail: the tx would lose its
+            // witness structure and no longer round-trip to the original hex.
+            assert.ok(parsed.hasWitnesses(), 'non-MWEB segwit witness data must be preserved')
+            assert.strictEqual(parsed.toHex(), txHex, 'non-MWEB flag tx must round-trip unchanged (not stripped)')
         })
     })
 

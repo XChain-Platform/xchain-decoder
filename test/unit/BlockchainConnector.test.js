@@ -206,7 +206,7 @@ describe('BlockchainConnector', () => {
 
             await assert.rejects(
                 () => connector.getBlockHeader('hash'),
-                { message: /problems getting a block hex/ }
+                { message: /problems getting a block header/ }
             )
             assert.strictEqual(axiosStub.callCount, 10)
         })

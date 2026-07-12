@@ -443,8 +443,7 @@ class Database {
             // WHERE id = 0;` in 2026-06-10-mirror-id-autoincrement-repair.sql), which
             // touches only the sentinel id=0 row; carve exactly that shape out and
             // flag every other UPDATE.
-            if(/^UPDATE\b/i.test(stmt) &&
-               !/^UPDATE\s+\S+\s+SET\s+id\s*=\s*\([\s\S]+\)\s+WHERE\s+id\s*=\s*0\b/i.test(stmt)) return raw;
+            if(/^UPDATE\b/i.test(stmt) && !this._isIdRepairUpdate(stmt)) return raw;
             if(/^ALTER\s+TABLE\b/i.test(stmt)){
                 // Every DROP inside the ALTER must target a safe (metadata-only) object.
                 let m;
@@ -482,6 +481,42 @@ class Database {
             }
         }
         return null;
+    }
+
+    // True only for the one committed auto UPDATE shape: the AUTO_INCREMENT id
+    // repair `UPDATE <table> SET id = (<subquery>) WHERE id = 0`. The old carve-out
+    // regex was unanchored (`0\b`, no `$`) and used a greedy paren-unaware
+    // `\([\s\S]+\)`, so `... WHERE id = 0 OR 1=1` and a smuggled second assignment
+    // `SET id = (...), amount = (...)` both slipped past the guard and rewrote every
+    // row. This matches the shape structurally instead: (1) a single table then
+    // `SET id = (`; (2) a balanced-paren, quote-aware walk finds the value's true
+    // matching `)`, so no extra assignment or clause can ride inside the wildcard;
+    // (3) the remainder must be exactly `WHERE id = 0`, end-anchored, so nothing
+    // trails. The 2026-06-10-mirror-id-autoincrement-repair.sql migration uses a
+    // NESTED subquery with commas, so a "no inner parens / no commas" rule would
+    // wrongly reject it and hard-fail startup; the balanced scan is required.
+    // Kept byte-for-byte in sync with the xchain-indexer classifier.
+    _isIdRepairUpdate(stmt){
+        const head = /^UPDATE\s+(?:`[^`]+`|[A-Za-z0-9_$.]+)\s+SET\s+id\s*=\s*\(/i.exec(stmt);
+        if(!head) return false;
+        let i = head[0].length - 1;              // index of the opening '('
+        let depth = 0;
+        let quote = null;
+        for(; i < stmt.length; i++){
+            const ch = stmt[i];
+            if(quote){
+                if(ch === quote){
+                    if(stmt[i + 1] === quote){ i++; }    // doubled-quote escape
+                    else { quote = null; }
+                }
+                continue;
+            }
+            if(ch === "'" || ch === '"' || ch === '`'){ quote = ch; continue; }
+            if(ch === '('){ depth++; }
+            else if(ch === ')'){ depth--; if(depth === 0){ i++; break; } }
+        }
+        if(depth !== 0) return false;            // unbalanced parens: not the repair shape
+        return /^\s*WHERE\s+id\s*=\s*0\s*;?\s*$/i.test(stmt.slice(i));
     }
 
     // Create the migration ledger if absent. Infrastructure, not a domain table, so

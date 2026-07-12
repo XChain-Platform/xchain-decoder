@@ -52,6 +52,15 @@ class CryptoNetworks {
         const p = parseNetworkName(networkName);
         return p ? coins.getCoinConfig(p.tick, p.net).firstBlock : 0;
     }
+
+    // Default dispenser/order EXPIRATION window in days (consensus param). Must
+    // match the indexer's config['EXPIRATION_FEE_DEFAULT_DAYS'] that
+    // util.getDefaultExpiration substitutes for an omitted EXPIRATION field.
+    static getExpirationFeeDefaultDays(networkName){
+        const p = parseNetworkName(networkName);
+        if(!p) throw new TypeError(`Unknown network: "${networkName}". Supported: ${SUPPORTED}`);
+        return coins.getCoinConfig(p.tick, p.net).legacyFees.EXPIRATION_FEE_DEFAULT_DAYS;
+    }
 }
 
 module.exports = CryptoNetworks;

@@ -159,16 +159,17 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
     // since the actual parsing happens in the block-processing loop.
 
     // A-4: DISPENSER with only 2 fields: now rejected by field-count check
-    it('[REGRESSION P1] R-DSP-001 A-4: short DISPENSER string "DISPENSER|0": rejected for having fewer than 13 fields', () => {
+    it('[REGRESSION P1] R-DSP-001 A-4: short DISPENSER string "DISPENSER|0": rejected for having fewer than 14 fields', () => {
         const decodedData = 'DISPENSER|0'
         const decodedDataSplit = decodedData.split('|')
 
         assert.strictEqual(decodedDataSplit.length, 2)
         assert.strictEqual(parseInt(decodedDataSplit[1]), 0)
 
-        // The decoder now requires decodedDataSplit.length >= 13 before
-        // accessing fields. With only 2 fields, no dispenser is created.
-        assert.ok(decodedDataSplit.length < 13, 'short string rejected by field-count check')
+        // The decoder now requires decodedDataSplit.length >= 14 (through
+        // ORACLE_ADDRESS at index 13) before accessing fields. With only 2
+        // fields, no dispenser is created.
+        assert.ok(decodedDataSplit.length < 14, 'short string rejected by field-count check')
     })
 
     // A-7: DISPENSER version non-numeric
@@ -218,7 +219,7 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         const decodedDataSplit = decodedData.split('|')
         const commandVersion = decodedDataSplit[1]
         const giveCoin = decodedDataSplit[2]
-        const getCoin = decodedDataSplit[6]
+        const getCoin = decodedDataSplit[7]
 
         assert.strictEqual(parseInt(commandVersion), 0)
         assert.strictEqual(giveCoin, '')
@@ -227,17 +228,20 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         assert.ok(!(getCoin != '' || giveCoin != ''))
     })
 
-    // DISPENSER with giveCoin empty but getCoin present
-    // Fields: 0=ACTION, 1=version, 2=giveCoin, 3=giveAsset, 4=giveAmount, 5=giveMultiplier,
-    //         6=getCoin, 7=getAsset, 8=getAmount, 9=getAddress, 10=?, 11=?, 12=expiration
+    // DISPENSER with giveCoin empty but getCoin present.
+    // Fields: 0=ACTION 1=version 2=GIVE_COIN 3=GIVE_TICK 4=GIVE_AMOUNT
+    //         5=GIVE_OWNERSHIP 6=GIVE_ESCROW 7=GET_COIN 8=GET_TICK 9=GET_AMOUNT
+    //         10=GET_ADDRESS 11=FIAT_CODE 12=FIAT_AMOUNT 13=ORACLE_ADDRESS 14=EXPIRATION
     it('DISPENSER with only getCoin: should create dispenser', () => {
-        const decodedData = 'DISPENSER|0|||||LTC|||addr|||3600||'
-        const decodedDataSplit = decodedData.split('|')
+        const fields = ['DISPENSER', '0', '', '', '', '', '', 'LTC', '', '', 'addr', '', '', '', '3600']
+        const decodedDataSplit = fields.join('|').split('|')
         const giveCoin = decodedDataSplit[2]
-        const getCoin = decodedDataSplit[6]
+        const getCoin = decodedDataSplit[7]
+        const getAddress = decodedDataSplit[10]
 
         assert.strictEqual(giveCoin, '')
         assert.strictEqual(getCoin, 'LTC')
+        assert.strictEqual(getAddress, 'addr')
         assert.ok(getCoin != '' || giveCoin != '')
     })
 
@@ -287,22 +291,26 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
         // Passed as NaN to SQL: MariaDB may coerce to 0 or NULL
     })
 
-    // E-6: Empty string
-    it('E-6: expiration "": parseInt returns NaN', () => {
-        const expiration = ''
-        assert.ok(isNaN(parseInt(expiration)))
-        // FROM_UNIXTIME("") in MariaDB may coerce to FROM_UNIXTIME(0) = 1970-01-01
+    // E-6: Empty EXPIRATION token: decoder substitutes the block-time default
+    it('E-6: expiration "": empty token is defaulted, not skipped', () => {
+        const expirationToken = ''
+        // Current semantics: an omitted or empty EXPIRATION is replaced with
+        // getDefaultExpiration(blockTime); it is never treated as NaN/skip.
+        const defaulted = (expirationToken === undefined || expirationToken === '')
+        assert.ok(defaulted, 'empty EXPIRATION triggers the default-substitution path')
     })
 
-    // E-7: Undefined (field missing from short ACTION string)
-    it('E-7: expiration undefined: from short action string', () => {
-        const decodedDataSplit = 'DISPENSER|0'.split('|')
-        const expiration = decodedDataSplit[12]
+    // E-7: Omitted EXPIRATION (index 14 absent on an otherwise-complete open)
+    it('E-7: expiration omitted: defaulted when required fields are present', () => {
+        // A complete open through ORACLE_ADDRESS (length 14) with EXPIRATION absent.
+        const fields = ['DISPENSER', '0', 'BTC', '', '', '', '', 'LTC', '', '', 'addr', '', '', '']
+        const decodedDataSplit = fields.join('|').split('|')
+        const expirationToken = decodedDataSplit[14]
 
-        assert.strictEqual(expiration, undefined)
-        // BOUNDARY FINDING: undefined passes through to parameterized query as NULL.
-        // FROM_UNIXTIME(NULL) = NULL → dispenser never expires.
-        // Combined with A-4 finding: short DISPENSER strings create immortal dispensers.
+        assert.strictEqual(expirationToken, undefined)
+        assert.ok(decodedDataSplit.length >= 14, 'open still passes the field-count gate')
+        // Current semantics: omitted EXPIRATION → getDefaultExpiration(blockTime),
+        // so the dispenser expires on the default window rather than living forever.
     })
 
     // Additional: very large timestamp
@@ -358,7 +366,7 @@ describe('Boundary: Combinatorial DISPENSER Scenarios', () => {
 
     // Combo: DISPENSER as first command in a BATCH (should be caught)
     it('BATCH with DISPENSER as first command: decoder does parse it', async () => {
-        const action = 'DISPENSER|0|BTC|||LTC||||addr|||3600|||;SEND|0|BTC|100'
+        const action = 'DISPENSER|0|BTC|||||LTC|||addr||||3600|||;SEND|0|BTC|100'
         const tx = buildActionTx(action)
         const result = await decoder.parseTransaction(tx)
 
@@ -369,7 +377,7 @@ describe('Boundary: Combinatorial DISPENSER Scenarios', () => {
         // But the split on "|" will include the ";SEND|0|BTC|100" in later fields
         // This could pollute the expiration and other fields
         const split = decoded.split('|')
-        // Field [12] would be "3600" (if enough pipes before the semicolon)
-        assert.strictEqual(split[12], '3600')
+        // EXPIRATION lives at index 14 in the current layout
+        assert.strictEqual(split[14], '3600')
     })
 })

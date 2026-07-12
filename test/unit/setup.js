@@ -11,6 +11,10 @@
 // Pre-load setup: mock mariadb before any source file requires it.
 // The mariadb v3.5+ package is ESM-only, which breaks CommonJS require().
 // For unit tests we never need a real DB connection, so we stub it out.
+// Disable the block-path RPC timeout-retry backoff so exhaustion tests that
+// reject 10x with ECONNABORTED do not spend real seconds sleeping.
+process.env.RPC_TIMEOUT_RETRY_DELAY_MS = '0'
+
 const Module = require('module')
 const originalResolveFilename = Module._resolveFilename
 

@@ -242,7 +242,7 @@ describe('BlockchainConnector (extra coverage)', () => {
             axiosStub.resolves({ data: { result: null } })
             await assert.rejects(
                 () => connector.getBlockHeader('somehash'),
-                { message: 'Error getting block hex' }
+                { message: 'Error getting block header' }
             )
         })
     })
@@ -277,5 +277,60 @@ describe('BlockchainConnector (extra coverage)', () => {
             // ECONNRESET backoff is 5000ms
             assert.ok(elapsed >= 4000, `Expected >= 4000ms, got ${elapsed}ms`)
         }).timeout(10000)
+    })
+
+    // ─── getRawTransaction: RPC -5 not-found (eviction) branch ──────────────
+
+    describe('#getRawTransaction() RPC -5 not-found branch', () => {
+        it('should resolve null immediately when the node returns HTTP 500 + JSON-RPC code -5', async () => {
+            // Core returns HTTP 500 with {error:{code:-5}} for a missing tx; axios throws.
+            const notFoundErr = Object.assign(new Error('Request failed with status code 500'), {
+                code: 'ERR_BAD_RESPONSE',
+                response: { status: 500, data: { error: { code: -5, message: 'No such mempool or blockchain transaction' } } }
+            })
+            axiosStub.rejects(notFoundErr)
+
+            const result = await connector.getRawTransaction('missingtxid')
+            assert.strictEqual(result, null)
+            // Resolved on the first attempt, no retries burned.
+            assert.strictEqual(axiosStub.callCount, 1)
+        }).timeout(5000)
+    })
+
+    // ─── block-path RPC methods: surface node JSON-RPC error object ─────────
+
+    describe('block-path RPC methods surface response.data.error', () => {
+        it('getBlockHash includes the node error code/message when HTTP 200 carries an error object', async () => {
+            axiosStub.resolves({ data: { result: null, error: { code: -8, message: 'Block height out of range' } } })
+            await assert.rejects(
+                () => connector.getBlockHash(999999999),
+                (err) => err.message.includes('-8') && err.message.includes('Block height out of range')
+            )
+        })
+    })
+
+    // ─── block-path timeout retry backoff ──────────────────────────────────
+
+    describe('block-path ECONNABORTED retries back off', () => {
+        it('getBlockHash awaits backoffOnTimeout between timeout retries', async () => {
+            const backoffSpy = sinon.spy(connector, 'backoffOnTimeout')
+            const timeoutErr = Object.assign(new Error('timeout'), { code: 'ECONNABORTED' })
+            axiosStub.onCall(0).rejects(timeoutErr)
+            axiosStub.onCall(1).rejects(timeoutErr)
+            axiosStub.onCall(2).resolves({ data: { result: 'blockhash' } })
+
+            const result = await connector.getBlockHash(100)
+            assert.strictEqual(result, 'blockhash')
+            assert.strictEqual(backoffSpy.callCount, 2)
+        })
+
+        it('does not back off on a non-timeout error', async () => {
+            const backoffSpy = sinon.spy(connector, 'backoffOnTimeout')
+            const otherErr = Object.assign(new Error('boom'), { code: 'ECONNREFUSED' })
+            axiosStub.rejects(otherErr)
+
+            await assert.rejects(() => connector.getBlockHash(100))
+            assert.strictEqual(backoffSpy.callCount, 0)
+        })
     })
 })

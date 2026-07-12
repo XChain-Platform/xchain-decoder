@@ -29,7 +29,19 @@ const ITERATIONS = parseInt(process.env.FUZZ_ITERATIONS) || 5000
 /**
  * Extracted DISPENSER parsing logic from XChainDecoder.start().
  * Returns { shouldInsert, fields } or throws on unexpected errors.
+ *
+ * v0 wire layout (0-indexed after split on "|"):
+ *   0 DISPENSER  1 version  2 GIVE_COIN  3 GIVE_TICK  4 GIVE_AMOUNT
+ *   5 GIVE_OWNERSHIP  6 GIVE_ESCROW  7 GET_COIN  8 GET_TICK  9 GET_AMOUNT
+ *   10 GET_ADDRESS  11 FIAT_CODE  12 FIAT_AMOUNT  13 ORACLE_ADDRESS
+ *   14 EXPIRATION  15 ALLOW_LIST  16 BLOCK_LIST  17 MEMO
+ *
+ * Required fields end at ORACLE_ADDRESS (index 13), so the gate is length >= 14.
+ * EXPIRATION (index 14) is OPTIONAL: an omitted or empty value is defaulted (the
+ * decoder substitutes getDefaultExpiration), never treated as a skip.
  */
+const DEFAULT_EXPIRATION = 999999999
+
 function parseDispenserData(decodedData) {
     if (!decodedData.startsWith('DISPENSER')) {
         return { shouldInsert: false, fields: null }
@@ -38,16 +50,27 @@ function parseDispenserData(decodedData) {
     const decodedDataSplit = decodedData.split('|')
     const commandVersion = decodedDataSplit[1]
 
-    if (parseInt(commandVersion) === 0 && decodedDataSplit.length >= 13) {
+    if (parseInt(commandVersion) === 0 && decodedDataSplit.length >= 14) {
         const giveCoin = decodedDataSplit[2]
-        const getCoin = decodedDataSplit[6]
-        const getAddress = decodedDataSplit[9]
-        const expiration = decodedDataSplit[12]
+        const getCoin = decodedDataSplit[7]
+        const getAddress = decodedDataSplit[10]
+
+        // Omitted or empty EXPIRATION is defaulted, not skipped.
+        const expirationToken = decodedDataSplit[14]
+        const expiration = (expirationToken === undefined || expirationToken === '')
+            ? DEFAULT_EXPIRATION
+            : Number(expirationToken)
+
+        if (isNaN(expiration) || expiration < 0 || expiration > 4294967295) {
+            return { shouldInsert: false, fields: null }
+        }
 
         if ((getCoin !== '') || (giveCoin !== '')) {
+            // operatingAddress = GET_ADDRESS when delegated, else tx source.
+            const operatingAddress = (getAddress && getAddress.length > 0) ? getAddress : null
             return {
                 shouldInsert: true,
-                fields: { giveCoin, getCoin, getAddress, expiration }
+                fields: { giveCoin, getCoin, getAddress, operatingAddress, expiration }
             }
         }
     }
@@ -103,9 +126,9 @@ describe('Fuzz: DISPENSER parsing', function () {
             'DISPENSER|0',
             'DISPENSER|0|',
             'DISPENSER|0||',
-            'DISPENSER|0|||||||||||',   // 11 pipes (12 fields)
-            'DISPENSER|0||||||||||||',  // 12 pipes (13 fields): minimum valid
-            'DISPENSER|0|||||||||||||', // 13 pipes (14 fields)
+            'DISPENSER|0|||||||||||',   // 11 pipes (12 fields): below minimum
+            'DISPENSER|0||||||||||||',  // 12 pipes (13 fields): still below minimum
+            'DISPENSER|0|||||||||||||', // 13 pipes (14 fields): minimum valid
             'DISPENSER|0||||||||||||||||||||||', // many empty fields
             'DISPENSER|0|a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p', // all populated
         ]

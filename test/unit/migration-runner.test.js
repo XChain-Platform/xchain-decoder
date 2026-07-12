@@ -60,7 +60,9 @@ describe('Database._migrationMode() @regression', function () {
     });
 });
 
-const scanOf = Database.prototype._destructiveAutoStatement.bind({});
+// Bind to the prototype so _destructiveAutoStatement can reach _isIdRepairUpdate
+// (both pure, no instance state).
+const scanOf = Database.prototype._destructiveAutoStatement.bind(Database.prototype);
 // Split the way runMigrations does (line-comment strip is done upstream; here the
 // fixtures carry no line comments, so a plain ';'-split matches the runner's input).
 const scanSql = (sql) => scanOf(sql.split(';').map(s => s.trim()).filter(Boolean));
@@ -103,6 +105,16 @@ describe('Database._destructiveAutoStatement() @regression', function () {
         assert.ok(scanSql('UPDATE blocks SET block_hash = \'x\' WHERE block_index = 1;'));
         assert.strictEqual(
             scanSql('UPDATE mirror SET id = (SELECT MAX(id)+1 FROM t) WHERE id = 0;'), null);
+    });
+
+    it('flags UPDATE bypasses that smuggle past the id-repair carve-out (#1861)', function () {
+        // Unanchored/paren-greedy carve-out let these rewrite every row; now flagged.
+        assert.ok(scanSql('UPDATE mirror SET id = (SELECT 1) WHERE id = 0 OR 1=1;'));
+        assert.ok(scanSql('UPDATE mirror SET id = (SELECT id), amount = (SELECT \'0\') WHERE id = 0;'));
+        assert.ok(scanSql('UPDATE mirror SET id = (SELECT 1) WHERE id = 0 LIMIT 1;'));
+        // Nested-subquery repair with commas must still pass.
+        assert.strictEqual(
+            scanSql('UPDATE mirror SET id = (SELECT next_id FROM (SELECT COALESCE(MAX(id),0)+1 AS next_id FROM mirror) t) WHERE id = 0;'), null);
     });
 
     it('flags a NOT NULL-narrowing clause even when a sibling clause is AUTO_INCREMENT', function () {

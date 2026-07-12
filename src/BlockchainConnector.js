@@ -45,6 +45,23 @@ function sanitizeRpcError(error){
     return (error && error.message) ? error.message : String(error)
 }
 
+// Extract the JSON-RPC result from an axios response, surfacing the node's own
+// error object when present. The JSON-RPC contract for failures is
+// response.data.error = {code, message}; nodes and RPC proxies can return it
+// with HTTP 200 and result: null, in which case the real cause (Block height
+// out of range, Loading block index..., auth/queue errors) must not be masked
+// by a hand-written placeholder. `label` is the existing per-method message.
+function rpcResult(response, label) {
+    const rpcError = response && response.data && response.data.error
+    if (rpcError) {
+        const code = (rpcError.code !== undefined) ? rpcError.code : 'unknown'
+        const message = (typeof rpcError.message === 'string') ? rpcError.message : JSON.stringify(rpcError)
+        throw new Error(`${label}: RPC error ${code}: ${message}`)
+    }
+    if (!response || !response.data || !response.data.result) throw new Error(label)
+    return response.data.result
+}
+
 // Decode a Bitcoin-style varint from `buf` at `offset`.
 // Returns { value, bytes } where `bytes` is the number of bytes consumed.
 // Keep in sync with xchain-utxo-tracker/src/BlockchainConnector.js readVarint.
@@ -157,6 +174,16 @@ class BlockchainConnector {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    // Backoff between timeout (ECONNABORTED) retries in the block-path RPC
+    // methods. Each attempt has already burned the full RPC timeout before
+    // aborting, and an instant re-fire stacks retries onto a node that is
+    // timing out precisely because it is overloaded. Matches getRawTransaction's
+    // sleep-based backoff. Env-tunable so tests can set it to 0.
+    async backoffOnTimeout() {
+        const delay = parseInt(process.env.RPC_TIMEOUT_RETRY_DELAY_MS ?? '500', 10)
+        if (delay > 0) await this.sleep(delay)
+    }
+
     async getNetworkInfo(){
         let tries = 10
 
@@ -175,15 +202,12 @@ class BlockchainConnector {
                     }
                 })
 
-                if (response.data.result) {
-                    return response.data.result;
-                } else {
-                    throw new Error('Error getting network info');
-                }
+                return rpcResult(response, 'Error getting network info');
             } catch (error) {
                 if (error.code === 'ECONNABORTED') {
                     tries = tries - 1
                     console.log("Getting timeout trying to get network info, trying again...")
+                    await this.backoffOnTimeout()
                 } else {
                     this.rpcErrors++
                     console.error('Error getting network info:', sanitizeRpcError(error));
@@ -213,15 +237,12 @@ class BlockchainConnector {
                     }
                 })
 
-                if (response.data.result) {
-                    return response.data.result;
-                } else {
-                    throw new Error('Error getting blockchain info');
-                }
+                return rpcResult(response, 'Error getting blockchain info');
             } catch (error) {
                 if (error.code === 'ECONNABORTED') {
                     tries = tries - 1
                     console.log("Getting timeout trying to get blockchain info, trying again...")
+                    await this.backoffOnTimeout()
                 } else {
                     this.rpcErrors++
                     console.error('Error getting blockchain info:', sanitizeRpcError(error));
@@ -257,15 +278,12 @@ class BlockchainConnector {
                     }
                 })
 
-                if (response.data.result) {
-                    return response.data.result;
-                } else {
-                    throw new Error('Error getting block hash');
-                }
+                return rpcResult(response, 'Error getting block hash');
             } catch (error) {
                 if (error.code === 'ECONNABORTED') {
                     tries = tries - 1
                     console.log("Getting timeout trying to get block hash, trying again...")
+                    await this.backoffOnTimeout()
                 } else {
                     this.rpcErrors++
                     console.error('Error getting block hash:', sanitizeRpcError(error));
@@ -296,15 +314,12 @@ class BlockchainConnector {
                     }
                 })
 
-                if (response.data.result) {
-                    return response.data.result;
-                } else {
-                    throw new Error('Error getting block hex');
-                }
+                return rpcResult(response, 'Error getting block header');
             } catch (error) {
                 if (error.code === 'ECONNABORTED') {
                     tries = tries - 1
-                    console.log("Getting timeout trying to get block hex, trying again...")
+                    console.log("Getting timeout trying to get block header, trying again...")
+                    await this.backoffOnTimeout()
                 } else {
                     this.rpcErrors++
                     console.error('Error getting block header:', sanitizeRpcError(error));
@@ -313,7 +328,7 @@ class BlockchainConnector {
             }
         }
 
-        throw new Error("There were problems getting a block hex. ")
+        throw new Error("There were problems getting a block header. ")
     }
 
     async getBlockWithoutAuxPow(blockhash) {
@@ -371,15 +386,12 @@ class BlockchainConnector {
                     }
                 })
 
-                if (response.data.result) {
-                    return response.data.result;
-                } else {
-                    throw new Error('Error getting raw mempool info');
-                }
+                return rpcResult(response, 'Error getting raw mempool info');
             } catch (error) {
                 if (error.code === 'ECONNABORTED') {
                     tries = tries - 1
                     console.log("Getting timeout trying to get raw mempool, trying again...")
+                    await this.backoffOnTimeout()
                 } else {
                     this.rpcErrors++
                     console.error('Error getting raw mempool:', sanitizeRpcError(error));
@@ -420,12 +432,29 @@ class BlockchainConnector {
                     } else {
                         // Tx no longer retrievable (mined/evicted between getRawMempool and this
                         // call, or an empty RPC result): resolve null so a single missing tx does
-                        // not fail the whole Promise.all batch. Callers filter nulls.
-                        console.log(`getRawTransaction: no result for txid ${txid} (evicted/confirmed?)`)
+                        // not fail the whole Promise.all batch. Callers filter nulls. Surface the
+                        // node's own error object if it sent one rather than swallowing it.
+                        const rpcError = response.data?.error
+                        if (rpcError) {
+                            console.error(`getRawTransaction: node error for txid ${txid}: code ${rpcError.code} ${rpcError.message}`)
+                        } else {
+                            console.log(`getRawTransaction: no result for txid ${txid} (evicted/confirmed?)`)
+                        }
                         resolve(null);
                         break
                     }
                 } catch (error){
+                    // JSON-RPC error -5 ("No such mempool or blockchain transaction") is the
+                    // node's deterministic "tx not found" answer, delivered as HTTP 500 with a
+                    // JSON error body. The tx was mined/evicted between getRawMempool and this
+                    // call: resolve null immediately (the eviction path) instead of burning all
+                    // retries and rejecting the whole Promise.all batch. Read the code before any
+                    // sanitize call, since sanitizeRpcError scrubs error.response in place.
+                    if (error.response?.data?.error?.code === -5) {
+                        console.log(`getRawTransaction: tx not found (RPC -5) for txid ${txid} (evicted/confirmed?)`)
+                        resolve(null)
+                        return
+                    }
                     if (error.code === 'ECONNABORTED') {
                         console.log("Getting timeout trying to get raw transaction, trying again...")
                     }
@@ -484,15 +513,12 @@ class BlockchainConnector {
                     }
                 })
 
-                if (response.data.result) {
-                    return response.data.result;
-                } else {
-                    throw new Error('Error getting block hex');
-                }
+                return rpcResult(response, 'Error getting block hex');
             } catch (error) {
                 if (error.code === 'ECONNABORTED') {
                     tries = tries - 1
                     console.log("Getting timeout trying to get block, trying again...")
+                    await this.backoffOnTimeout()
                 } else {
                     this.rpcErrors++
                     console.error('Error getting block:', sanitizeRpcError(error));

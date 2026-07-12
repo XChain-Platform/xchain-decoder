@@ -135,8 +135,9 @@ function checkDispenserParse(decodedData) {
 
     const parts = decodedData.split('|')
 
-    // The decoder requires length >= 13 and version == 0
-    if (parts.length < 13) {
+    // The decoder requires length >= 14 (through ORACLE_ADDRESS at index 13) and
+    // version == 0. EXPIRATION (index 14) is optional and defaulted when omitted.
+    if (parts.length < 14) {
         // Decoder should skip this (no violation)
         return { ok: true, violations: [] }
     }
@@ -146,11 +147,12 @@ function checkDispenserParse(decodedData) {
         return { ok: true, violations: [] }
     }
 
-    // If we get here, the decoder would process it; check field access safety
+    // If we get here, the decoder would process it; check field access safety.
+    // Required fields: GIVE_COIN[2], GET_COIN[7], GET_ADDRESS[10]. EXPIRATION[14]
+    // is optional (defaulted), so its absence is not a violation.
     if (parts[2] === undefined) violations.push('giveCoin (parts[2]) is undefined')
-    if (parts[6] === undefined) violations.push('getCoin (parts[6]) is undefined')
-    if (parts[9] === undefined) violations.push('getAddress (parts[9]) is undefined')
-    if (parts[12] === undefined) violations.push('expiration (parts[12]) is undefined')
+    if (parts[7] === undefined) violations.push('getCoin (parts[7]) is undefined')
+    if (parts[10] === undefined) violations.push('getAddress (parts[10]) is undefined')
 
     return { ok: violations.length === 0, violations }
 }

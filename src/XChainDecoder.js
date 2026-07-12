@@ -203,6 +203,9 @@ class XChainDecoder {
         this.dbUser = dbUser
         this.dbPassword = dbPassword
         this.startBlockIndex = CryptoNetworks.getFirstBlock(network)
+        // Default EXPIRATION window (days) for v0 dispenser opens that omit the
+        // EXPIRATION field; must match the indexer's default-expiration rule.
+        this.expirationFeeDefaultDays = CryptoNetworks.getExpirationFeeDefaultDays(network)
         this.xchainBlockDecoder = new XChainBlockDecoder(network)
       
         this.db = null
@@ -241,7 +244,15 @@ class XChainDecoder {
     async sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
-    
+
+    // Default EXPIRATION for a v0 dispenser open that omits the field: block time
+    // plus the configured default window in seconds. Keep in sync with
+    // xchain-indexer/src/utility.js getDefaultExpiration so both views agree on
+    // whether an EXPIRATION-less dispenser is open.
+    getDefaultExpiration(blockTime){
+        return Number(blockTime) + (this.expirationFeeDefaultDays * 86400)
+    }
+
     markTime(timeName){
         this.debugTime[timeName] = Date.now()
     }
@@ -1301,14 +1312,14 @@ class XChainDecoder {
                         lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
                         // Count rolled-back blocks as the difference between the pre-reorg tip
                         // and the newly confirmed last good block so the log entry is actionable.
-                        const blocksDeleted = { length: Math.max(0, preReorgBlock - lastProcessedBlockIndex) }
+                        const rolledBackCount = Math.max(0, preReorgBlock - lastProcessedBlockIndex)
                         lastProcessedTxIndex = await this.db.getLastTxIndex()
                         blocksQuantity = 0
                         transactionsCount = 0
                         validTransactionsCount = 0
                         outputCount = 0
                         startTimeStamp = Date.now()
-                        console.log("Blocks were updated (" + blocksDeleted.length + " blocks rolled back)")
+                        console.log("Blocks were updated (" + rolledBackCount + " blocks rolled back)")
                         continue
                     }
                 }
@@ -1609,19 +1620,44 @@ class XChainDecoder {
                                     let decodedDataSplit = decodedData.split("|")
                                     let commandVersion = decodedDataSplit[1]
 
-                                    if (parseInt(commandVersion, 10) === 0 && decodedDataSplit.length >= 15){
+                                    // EXPIRATION (index 14) is OPTIONAL on v0: the indexer
+                                    // substitutes a block-time default when it is omitted, so the
+                                    // required fields end at GET_ADDRESS (index 10). Gate on >= 14
+                                    // (through ORACLE_ADDRESS) rather than >= 15 so an
+                                    // EXPIRATION-less-but-otherwise-valid open is still tracked
+                                    // instead of silently dropped.
+                                    if (parseInt(commandVersion, 10) === 0 && decodedDataSplit.length >= 14){
                                         let giveCoin = decodedDataSplit[2]
                                         let getCoin = decodedDataSplit[7]
                                         let getAddress = decodedDataSplit[10]
-                                        let expiration = Number(decodedDataSplit[14])
+
+                                        // Treat a missing token OR an empty-string token as an
+                                        // omitted EXPIRATION and substitute the same default the
+                                        // indexer uses; only a present, non-empty value is validated.
+                                        let expirationToken = decodedDataSplit[14]
+                                        let expiration
+                                        if (expirationToken === undefined || expirationToken === "") {
+                                            expiration = this.getDefaultExpiration(block.timestamp)
+                                        } else {
+                                            expiration = Number(expirationToken)
+                                        }
 
                                         if (isNaN(expiration) || expiration < 0 || expiration > 4294967295) {
                                             this.parseErrors++
                                             console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[14]}'`)
                                         } else if ((getCoin != "") || (giveCoin != "")){
+                                            // The dispenser operates on GET_ADDRESS when a delegated
+                                            // address is given, otherwise on the tx SOURCE (indexer
+                                            // default). The indexer matches dispense triggers on this
+                                            // operating address (get_address_id), so the decoder must
+                                            // register and gate on the SAME key or dispenses paid to a
+                                            // delegated address are never emitted.
+                                            const operatingAddress = (getAddress && getAddress.length > 0)
+                                                ? getAddress
+                                                : parseResult["source"]
                                             if (!(await this.db.insertDispenser({
                                                 txIndex: lastProcessedTxIndex,
-                                                address: parseResult["source"],
+                                                address: operatingAddress,
                                                 expiration: expiration
                                             }))){
                                                 // insertDispenser's error path already rolled the block back.
@@ -1632,8 +1668,8 @@ class XChainDecoder {
                                             // later transaction in this same block that pays this
                                             // freshly-opened dispenser is still recognized as a
                                             // dispense (mirrors the old per-output DB lookup).
-                                            if (parseResult["source"])
-                                                openDispenserAddresses.add(parseResult["source"])
+                                            if (operatingAddress)
+                                                openDispenserAddresses.add(operatingAddress)
                                         }
                                     }
                                 }
