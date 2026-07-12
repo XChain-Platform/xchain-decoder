@@ -1848,13 +1848,33 @@ class XChainDecoder {
                         }
                     }
 
+                    // Store the canonical payload as the SAME UTF-8 string the
+                    // confirmed-block path writes (strictTextDecoder over
+                    // canonical.buffer, lenient fallback on invalid UTF-8), not
+                    // hex. Otherwise mempool_transactions.data ("434f..." hex)
+                    // and transactions.data ("COINPAY|..." text) hold the same
+                    // on-wire ACTION in two encodings, so any content-correlation
+                    // between a pending row and its confirmed twin silently
+                    // mismatches (uuid:26220713). mempoolData here is
+                    // canonical.buffer (a Uint8Array) for a known ACTION.
+                    let mempoolDataString = null
+                    if (mempoolData != null) {
+                        try {
+                            mempoolDataString = strictTextDecoder.decode(mempoolData)
+                        } catch (e) {
+                            this.parseErrors++
+                            mempoolDataString = lenientTextDecoder.decode(mempoolData)
+                            console.error(`Mempool: tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`, e)
+                        }
+                    }
+
                     if (!(await this.mempoolDb.insertMempoolTransaction({
                         hash: nextTransactionHash,
                         source: parseResult["source"],
                         destination: parseResult["destination"],
                         amount: parseResult["amount"],
                         fee: 0,
-                        data: (mempoolData != null ? util.uint8ArrayToHex(mempoolData) : null)
+                        data: mempoolDataString
 
                     }))) {
                         await this.sleep(3000)
