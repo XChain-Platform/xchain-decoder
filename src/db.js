@@ -252,6 +252,18 @@ class Database {
                 const appliedByName = new Map(appliedRows.map(r => [r.name, r.checksum]));
 
                 for(const file of files){
+                    // Freeze the dated-prefix convention in code (mirrors the indexer's
+                    // runner): apply order is lexical (readdirSync().sort()), so every
+                    // migration filename must start with a YYYY-MM-DD- prefix to apply in
+                    // authorship order. The two forms the README used to sanction do NOT
+                    // interleave correctly ('-' 0x2D sorts before '0' 0x30, so a dashed
+                    // 2026-06-17- file applies BEFORE an undashed 20260612_ one), which
+                    // would silently run migrations out of authorship order.
+                    if(!/^\d{4}-\d{2}-\d{2}-/.test(file)){
+                        throw new Error('runMigrations: migration "' + file + '" is not dated. Every migration ' +
+                            'filename must start with a YYYY-MM-DD- prefix so it applies in authorship order ' +
+                            '(apply order is lexical). Rename it with the authored date.');
+                    }
                     const raw      = fs.readFileSync(dir + '/' + file, 'utf8');
                     const checksum = crypto.createHash('sha256').update(raw).digest('hex');
 

@@ -7,8 +7,12 @@ dedup-then-unique, type changes. Additive column/index drift is already
 auto-reconciled from `src/sql/*.sql`, so those don't need a migration here.
 
 Each `.sql` file is applied at most once and recorded in the `schema_migrations`
-ledger table. Files are applied in lexical filename order - prefix with a date or
-sequence (`20260612_...`) to control ordering.
+ledger table. Files are applied in lexical filename order, so every migration MUST
+be named with a `YYYY-MM-DD-` prefix (`2026-06-17-pubkeys-add-monotonic-id.sql`);
+that is the only form under which lexical order is provably chronological. The
+runner throws on an undated filename. Do not use an undashed `20260612_` sequence
+form: `-` (0x2D) sorts before `0` (0x30), so it would interleave ahead of dashed
+files authored earlier.
 
 ## Required header tag
 

@@ -225,6 +225,20 @@ describe('committed migrations declare intent @regression', function () {
                 file + ' is tagged mode=auto but contains destructive DDL: ' + offender);
         });
     });
+
+    // Apply order is lexical (readdirSync().sort() in runMigrations), so the dated
+    // prefix is what makes it chronological. Freeze the single YYYY-MM-DD- form: an
+    // undashed 20260612_ sequence name would sort BEFORE every dashed file ('-' 0x2D
+    // < '0' 0x30) and apply out of authorship order with no runtime error. The runner
+    // now throws on an undated name; this pins the committed tree to the convention.
+    const DATED_PREFIX = /^\d{4}-\d{2}-\d{2}-/;
+    files.forEach(function (file) {
+        it(file + ': is named with the YYYY-MM-DD- dated prefix', function () {
+            assert.ok(DATED_PREFIX.test(file),
+                file + ' is not dated. Apply order is lexical, so every migration filename must ' +
+                'start with a YYYY-MM-DD- prefix to apply in authorship order.');
+        });
+    });
 });
 
 describe('Database.MIGRATION_CHECKSUM_REBASELINES @regression', function () {
