@@ -63,9 +63,11 @@ describe('Database._migrationMode() @regression', function () {
 // Bind to the prototype so _destructiveAutoStatement can reach _isIdRepairUpdate
 // (both pure, no instance state).
 const scanOf = Database.prototype._destructiveAutoStatement.bind(Database.prototype);
-// Split the way runMigrations does (line-comment strip is done upstream; here the
-// fixtures carry no line comments, so a plain ';'-split matches the runner's input).
-const scanSql = (sql) => scanOf(sql.split(';').map(s => s.trim()).filter(Boolean));
+// Split exactly the way runMigrations does, through the real quote-aware splitter,
+// so the guard is exercised on the statements it actually classifies at runtime
+// rather than on a naive re-split that the runner no longer uses.
+const splitOf = (raw) => Database.prototype.splitSqlStatements.call(Database.prototype, raw);
+const scanSql = (sql) => scanOf(splitOf(sql));
 
 describe('Database._destructiveAutoStatement() @regression', function () {
 
@@ -246,5 +248,50 @@ describe('Database.MIGRATION_CHECKSUM_REBASELINES @regression', function () {
                 file + ': rebaseline target is stale - it must equal the current committed file sha256, ' +
                 'otherwise the heal path would rewrite the ledger to a hash that still mismatches.');
         }
+    });
+});
+
+// Mirrors the xchain-indexer suite for the same splitter. The decoder previously
+// used a naive `.split(';')` in both runMigrations and createTable, so a semicolon
+// inside a quoted literal tore one statement into invalid fragments (a boot-breaking
+// migration, and a destructive-DDL guard classifying fragments rather than real
+// statements). These pin the quote-aware behaviour in the decoder too.
+describe('Database.splitSqlStatements() @regression', function () {
+
+    it('does not split on a ; inside a single-quoted string literal', function () {
+        assert.deepStrictEqual(splitOf("UPDATE t SET data = 'a;b' WHERE id = 1;"),
+            ["UPDATE t SET data = 'a;b' WHERE id = 1"]);
+    });
+
+    it('does not split on a ; inside double-quoted or backtick-quoted spans', function () {
+        assert.deepStrictEqual(splitOf('UPDATE t SET data = "a;b" WHERE id = 1;'),
+            ['UPDATE t SET data = "a;b" WHERE id = 1']);
+        assert.deepStrictEqual(splitOf('UPDATE `we;ird` SET x = 1;'),
+            ['UPDATE `we;ird` SET x = 1']);
+    });
+
+    it('treats doubled quotes as escapes (a ; inside stays inside)', function () {
+        assert.deepStrictEqual(splitOf("INSERT INTO t (m) VALUES ('it''s; fine');"),
+            ["INSERT INTO t (m) VALUES ('it''s; fine')"]);
+    });
+
+    it('does not split on a ; inside a -- line comment', function () {
+        assert.deepStrictEqual(splitOf('SELECT 1; -- trailing; note\nSELECT 2;'),
+            ['SELECT 1', 'SELECT 2']);
+    });
+
+    it('splits ordinary multi-statement SQL into the same statements as before', function () {
+        assert.deepStrictEqual(splitOf('CREATE TABLE a (id INT);\nCREATE TABLE b (id INT);'),
+            ['CREATE TABLE a (id INT)', 'CREATE TABLE b (id INT)']);
+    });
+
+    it('guard classifies real statements, not fragments (both directions)', function () {
+        // A ;DROP TABLE buried in a string literal is ONE non-destructive statement.
+        assert.strictEqual(scanSql(
+            "INSERT INTO notes (body) VALUES ('watch for ;DROP TABLE x');"
+        ), null);
+        // A genuine trailing DROP TABLE is still caught.
+        const offender = scanSql("INSERT INTO notes (body) VALUES ('ok'); DROP TABLE x;");
+        assert.ok(offender && /DROP TABLE x/i.test(offender));
     });
 });

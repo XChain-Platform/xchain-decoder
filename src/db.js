@@ -292,7 +292,7 @@ class Database {
                         continue;
                     }
 
-                    const statements = this.stripSqlLineComments(raw).split(';').map(s => s.trim()).filter(Boolean);
+                    const statements = this.splitSqlStatements(raw);
                     // Destructive-DDL guard: the mode tag is a human declaration; this scan is
                     // the machine check behind it. A file tagged `auto` that contains DDL able
                     // to lose or rename data must NEVER run unattended at startup (nor slip
@@ -567,6 +567,38 @@ class Database {
         return out;
     }
 
+    // Split a SQL string into individual statements on `;`, but only when the `;`
+    // sits outside a quoted string. A naive `.split(';')` tears a statement whose
+    // string literal contains a semicolon (e.g. `SET data = 'a;b'`) into invalid
+    // fragments, so no migration or seed carrying a semicolon in quoted data can
+    // ship, and _destructiveAutoStatement ends up classifying fragments rather than
+    // real statements. `--` line comments are stripped first (same rule as the
+    // callers used); the quote model matches stripSqlLineComments exactly
+    // (single/double-quote and backtick spans, doubled quotes treated as escapes).
+    // Returns trimmed, non-empty statements. Mirrors xchain-indexer/src/db.js.
+    splitSqlStatements(sql){
+        const stripped = this.stripSqlLineComments(sql);
+        const statements = [];
+        let current = '';
+        let quote = null;
+        for(let i = 0; i < stripped.length; i++){
+            const ch = stripped[i];
+            if(quote){
+                current += ch;
+                if(ch === quote){
+                    if(stripped[i + 1] === quote){ current += stripped[++i]; }
+                    else { quote = null; }
+                }
+                continue;
+            }
+            if(ch === "'" || ch === '"' || ch === '`'){ quote = ch; current += ch; continue; }
+            if(ch === ';'){ statements.push(current); current = ''; continue; }
+            current += ch;
+        }
+        statements.push(current);
+        return statements.map(s => s.trim()).filter(Boolean);
+    }
+
     // Parse a CREATE TABLE statement to extract expected columns. Conservative:
     // only used for drift detection, not full schema management. Returns array of
     // {name, nullable, definition, notNull, hasDefault} or null when the file has
@@ -781,12 +813,12 @@ class Database {
             db = await this.getConnection();
             ownLease = true;
         }
-        // Strip `--` line comments BEFORE splitting on ';' (same as runMigrations):
-        // a column comment may legitimately contain a ';' (e.g. "raw seconds; matches
-        // …"), which would otherwise split the CREATE TABLE mid-statement and break a
-        // fresh install. Existing DBs never hit this (verifyTables skips createTable
-        // when the table already exists), so it was a latent fresh-install-only bug.
-        let queries = this.stripSqlLineComments(data).split(';');
+        // Quote-aware split (same as runMigrations): a ';' inside a `--` comment or
+        // inside a string literal must not terminate a statement, or the CREATE TABLE
+        // is torn mid-statement and a fresh install breaks. Existing DBs never hit this
+        // (verifyTables skips createTable when the table already exists), so it was a
+        // latent fresh-install-only bug.
+        let queries = this.splitSqlStatements(data);
         let query   = null;
         console.log('Creating ' + table + ' table and indexes...');
         try {
