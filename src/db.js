@@ -87,6 +87,12 @@ class Database {
     
 
     // Verify a database exists and return true or false
+    // Seam over the driver: mariadb's createConnection export is
+    // non-configurable, so tests stub this method instead of the module.
+    _createConnection(connectionParams){
+        return mariadb.createConnection(connectionParams);
+    }
+
     async verifyDatabase(){
         let connectionParams = {
             host:     this.host,
@@ -96,7 +102,7 @@ class Database {
         };
         while(true){
             try {
-                let db     = await mariadb.createConnection(connectionParams);
+                let db     = await this._createConnection(connectionParams);
                 let result = await db.query("SELECT * FROM information_schema.schemata WHERE schema_name = ?",[this.dbName]);
                 await db.end();
                 if(result.length > 0)
@@ -122,7 +128,7 @@ class Database {
         console.log("Creating " + this.dbName + " database!");
         while(!databaseCreated){
             try {
-                let db     = await mariadb.createConnection(connectionParams);
+                let db     = await this._createConnection(connectionParams);
                 let result = await db.query("CREATE DATABASE IF NOT EXISTS `" + this.dbName + "`");
                 await db.end();
                 databaseCreated = true;

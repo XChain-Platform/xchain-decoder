@@ -1429,38 +1429,35 @@ describe('Database#verifyDatabase()', () => {
 
     it('returns true when schemata row found', async () => {
         const db = makeDb();
-        const mariadb = require('mariadb');
         const fakeConn = {
             query: sinon.stub().resolves([{ schema_name: 'xchain_btc_mainnet' }]),
             end: sinon.stub().resolves()
         };
-        sinon.stub(mariadb, 'createConnection').resolves(fakeConn);
+        sinon.stub(db, '_createConnection').resolves(fakeConn);
         const r = await db.verifyDatabase();
         assert.strictEqual(r, true);
     });
 
     it('returns false when schemata is empty', async () => {
         const db = makeDb();
-        const mariadb = require('mariadb');
         const fakeConn = {
             query: sinon.stub().resolves([]),
             end: sinon.stub().resolves()
         };
-        sinon.stub(mariadb, 'createConnection').resolves(fakeConn);
+        sinon.stub(db, '_createConnection').resolves(fakeConn);
         const r = await db.verifyDatabase();
         assert.strictEqual(r, false);
     });
 
     it('retries once on error then succeeds', async () => {
         const db = makeDb();
-        const mariadb = require('mariadb');
         const utilMod = require('../../src/util.js');
         sinon.stub(utilMod, 'sleep').resolves();
         const goodConn = {
             query: sinon.stub().resolves([{ schema_name: 'xchain_btc_mainnet' }]),
             end: sinon.stub().resolves()
         };
-        sinon.stub(mariadb, 'createConnection')
+        sinon.stub(db, '_createConnection')
             .onFirstCall().rejects(new Error('no db'))
             .onSecondCall().resolves(goodConn);
         const r = await db.verifyDatabase();
@@ -1477,26 +1474,24 @@ describe('Database#createDatabase()', () => {
 
     it('returns true after creating the database', async () => {
         const db = makeDb();
-        const mariadb = require('mariadb');
         const fakeConn = {
             query: sinon.stub().resolves([]),
             end: sinon.stub().resolves()
         };
-        sinon.stub(mariadb, 'createConnection').resolves(fakeConn);
+        sinon.stub(db, '_createConnection').resolves(fakeConn);
         const r = await db.createDatabase();
         assert.strictEqual(r, true);
     });
 
     it('retries once on error then succeeds', async () => {
         const db = makeDb();
-        const mariadb = require('mariadb');
         const utilMod = require('../../src/util.js');
         sinon.stub(utilMod, 'sleep').resolves();
         const goodConn = {
             query: sinon.stub().resolves([]),
             end: sinon.stub().resolves()
         };
-        sinon.stub(mariadb, 'createConnection')
+        sinon.stub(db, '_createConnection')
             .onFirstCall().rejects(new Error('transient'))
             .onSecondCall().resolves(goodConn);
         const r = await db.createDatabase();
