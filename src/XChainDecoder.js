@@ -1009,15 +1009,15 @@ class XChainDecoder {
         }
 
         // Only Dogecoin can carry a single output > 2^53-1 sat (~90.07M DOGE); BTC/LTC caps
-        // are lower. If this is a DOGE decoder and the BigInt-safe bufferutils patch is NOT
-        // active, the first such output throws during block decode and wedges the decoder
-        // permanently (a silent Dockerfile-COPY regression). Shout at startup so that
-        // regression is loud and immediate rather than a mid-operation fleet halt.
+        // are lower. The patch is applied in-process (src/applyBufferutilsPatch.js, required
+        // by XChainBlockDecoder), so this can only fire if that module regresses or a stray
+        // bitcoinjs-lib copy shadows the patched one; keep the backstop so any such
+        // regression is loud at startup rather than a mid-operation fleet halt.
         if (this.xchainBlockDecoder && this.xchainBlockDecoder.coin === 'dogecoin' && !bigIntBufferutilsActive()){
             console.error('CRITICAL: bitcoinjs-lib bufferutils BigInt-safe 64-bit reader is NOT active on a ' +
                 'Dogecoin decoder. A DOGE output > 2^53-1 sat (~90.07M DOGE) will throw during block decode ' +
-                'and wedge this decoder permanently. Apply the bufferutils patch (Dockerfile COPY of ' +
-                'src/bufferutils.js over node_modules/bitcoinjs-lib/src/bufferutils.js) before running on mainnet.')
+                'and wedge this decoder permanently. src/applyBufferutilsPatch.js should have applied it ' +
+                'in-process; investigate before running on mainnet.')
         }
 
         // Verify the Decoder database exists
