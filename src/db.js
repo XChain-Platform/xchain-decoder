@@ -635,10 +635,13 @@ class Database {
             const tokens = line.split(/\s+/);
             if(tokens.length < 2) continue;
             const name       = tokens[0].replace(/`/g, '');
-            // A column is nullable unless it says NOT NULL or is an inline PRIMARY
-            // KEY (SQL forces PK columns NOT NULL, so a MODIFY ... NULL on one is a
-            // silent no-op that would otherwise re-fire on every startup).
-            const nullable   = !/\bNOT\s+NULL\b/i.test(line) && !/\bPRIMARY\s+KEY\b/i.test(line);
+            // A column is nullable unless it says NOT NULL, is an inline PRIMARY
+            // KEY, or is AUTO_INCREMENT. SQL forces PK and AUTO_INCREMENT columns
+            // NOT NULL, so a MODIFY ... NULL on one is a silent no-op (PK) or, worse,
+            // silently STRIPS the AUTO_INCREMENT attribute - the mirror-cursor
+            // corruption the indexer hit live on 2026-06-10. Mirrors
+            // xchain-indexer/src/db.js so both reconcilers infer NOT NULL identically.
+            const nullable   = !/\bNOT\s+NULL\b/i.test(line) && !/\bPRIMARY\s+KEY\b/i.test(line) && !/\bAUTO_INCREMENT\b/i.test(line);
             const notNull    = !nullable;
             const hasDefault = /\bDEFAULT\b/i.test(line);
             // Keep the full (comment-stripped) definition so a missing column can

@@ -341,6 +341,25 @@ describe('Database#parseExpectedColumns()', () => {
         assert.strictEqual(idCol.nullable, false)
     })
 
+    it('should treat a bare non-PK AUTO_INCREMENT column as notNull even without the NOT NULL token', () => {
+        // A surrogate AUTO_INCREMENT column whose PK is a different column (e.g.
+        // pubkeys.id, PK is address_id). AUTO_INCREMENT implies NOT NULL; if this
+        // read as nullable, alterTableForDrift would emit a bare `MODIFY <type> NULL`
+        // that silently strips AUTO_INCREMENT (the 2026-06-10 mirror-cursor incident).
+        const sql = `
+            CREATE TABLE t (
+                address_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+                id BIGINT UNSIGNED AUTO_INCREMENT UNIQUE
+            );
+        `
+        const cols = db.parseExpectedColumns(sql)
+        assert.ok(cols)
+        const idCol = cols.find(c => c.name === 'id')
+        assert.ok(idCol)
+        assert.strictEqual(idCol.notNull, true)
+        assert.strictEqual(idCol.nullable, false)
+    })
+
     it('should preserve column definition verbatim', () => {
         const sql = `
             CREATE TABLE t (
