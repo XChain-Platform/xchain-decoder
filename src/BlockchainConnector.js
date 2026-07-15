@@ -76,6 +76,27 @@ function readVarint(buf, offset) {
     return { value: hi * 0x100000000 + lo, bytes: 9 }
 }
 
+// Encode a Bitcoin-style varint as lowercase hex (inverse of readVarint).
+function encodeVarintHex(value) {
+    if (value < 0xFD) {
+        return value.toString(16).padStart(2, '0')
+    }
+    if (value <= 0xFFFF) {
+        const buf = Buffer.alloc(3)
+        buf[0] = 0xFD
+        buf.writeUInt16LE(value, 1)
+        return buf.toString('hex')
+    }
+    if (value <= 0xFFFFFFFF) {
+        const buf = Buffer.alloc(5)
+        buf[0] = 0xFE
+        buf.writeUInt32LE(value, 1)
+        return buf.toString('hex')
+    }
+    // A block can never hold 2^32 txs; refuse rather than emit a wrong varint.
+    throw new Error('encodeVarintHex: value out of supported range: ' + value)
+}
+
 // Parse the AuxPoW section from a raw block Buffer starting at byte offset `start`
 // (immediately after the 80-byte standard header). Returns the byte offset of the
 // first byte after the AuxPoW section (i.e. where the tx-count varint begins).
@@ -367,7 +388,76 @@ class BlockchainConnector {
             throw new Error("There were problems getting a block hex without auxpow. " + err.message)
         }
     }
-    
+
+    // Recovery path for a block whose AuxPoW section skipAuxPow cannot traverse
+    // : rebuild the pure (AuxPoW-free) block from RPC parts instead of
+    // stripping the raw block hex. getblockheader gives the 80-byte header,
+    // verbose getblock gives the in-block txid order, and getrawtransaction
+    // gives each tx's canonical serialization, so the result is byte-identical
+    // to what getBlockWithoutAuxPow would have produced. Every RPC here is one
+    // the decoder already depends on (Dogecoin 1.14 has no verbosity-2
+    // getblock, so per-txid fetches are the portable route). Deterministic
+    // across instances: the output depends only on chain content.
+    async getBlockReassembled(blockhash) {
+        try {
+            // Older daemons append the AuxPoW bytes to getblockheader; the pure
+            // header is always the first 80 bytes either way.
+            const headerHex = (await this.getBlockHeader(blockhash, true)).substring(0, 160)
+            const verboseBlock = await this.getBlockVerbose(blockhash)
+            if (!verboseBlock || !Array.isArray(verboseBlock.tx)) {
+                throw new Error('verbose getblock returned no tx array')
+            }
+            const txHexes = []
+            for (const txid of verboseBlock.tx) {
+                // getRawTransaction resolves null for a missing tx (mempool-eviction
+                // tolerance); for a confirmed in-block tx that is an RPC fault, and
+                // assembling without it would emit a corrupt block. Fail instead.
+                const txHex = await this.getRawTransaction(txid)
+                if (!txHex) throw new Error('no raw tx for in-block txid ' + txid)
+                txHexes.push(txHex)
+            }
+            return headerHex + encodeVarintHex(txHexes.length) + txHexes.join('')
+        } catch (err) {
+            throw new Error("There were problems reassembling a block without auxpow. " + err.message)
+        }
+    }
+
+    async getBlockVerbose(blockhash) {
+        let tries = 10
+
+        while (tries > 0) {
+            try {
+                const data = {
+                    jsonrpc: '2.0',
+                    method: 'getblock',
+                    params: [blockhash, true],
+                    id: 1,
+                }
+
+                const response = await axios.post(this.url, data, {
+                    auth: {
+                        username: this.rpcUser,
+                        password: this.rpcPassword,
+                    }
+                })
+
+                return rpcResult(response, 'Error getting verbose block');
+            } catch (error) {
+                if (error.code === 'ECONNABORTED') {
+                    tries = tries - 1
+                    console.log("Getting timeout trying to get verbose block, trying again...")
+                    await this.backoffOnTimeout()
+                } else {
+                    this.rpcErrors++
+                    console.error('Error getting verbose block:', sanitizeRpcError(error));
+                    throw error;
+                }
+            }
+        }
+
+        throw new Error("There were problems getting verbose block.")
+    }
+
     async getRawMempool(){
         let tries = 10
 
@@ -532,3 +622,5 @@ class BlockchainConnector {
 }
 
 module.exports = BlockchainConnector
+// Exported for the  malformed-AuxPoW reassembly regression test.
+module.exports.encodeVarintHex = encodeVarintHex

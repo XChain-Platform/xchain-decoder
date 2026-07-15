@@ -160,6 +160,14 @@ const LOG_BLOCK_INTERVAL = 1000 //During catch-up sync, only log progress every 
 // rather than quarantining content other instances accept.
 const TX_PARSE_MAX_RETRIES = 3
 
+// After this many consecutive fetch failures at one height on an AuxPoW chain,
+// treat the failure as deterministic (e.g. an AuxPoW section skipAuxPow cannot
+// traverse, ) and switch to getBlockReassembled, which rebuilds the pure
+// block from getblockheader + verbose getblock + per-txid getrawtransaction and
+// so never reads the AuxPoW bytes at all. The block is never skipped, and the
+// reassembled bytes equal the stripped bytes, so instances stay convergent.
+const AUXPOW_REASSEMBLE_AFTER = 5
+
 // Probe whether bitcoinjs-lib's 64-bit reader tolerates a value > 2^53-1 (the BigInt-safe
 // bufferutils patch) rather than throwing 'value out of range'. The decoder relies on this
 // patch to decode a Dogecoin output > 2^53-1 sat (~90.07M DOGE) without wedging block
@@ -979,7 +987,25 @@ class XChainDecoder {
 
         return true
     }
-    
+
+    // Fetch the (AuxPoW-free) raw block hex for the height the main loop is on.
+    // Normal path: getBlock, or getBlockWithoutAuxPow on an AuxPoW chain. Once
+    // this height has failed AUXPOW_REASSEMBLE_AFTER consecutive times on an
+    // AuxPoW chain, fall back to getBlockReassembled : a block whose
+    // AuxPoW section cannot be traversed would otherwise wedge this decoder at
+    // this height forever.
+    async fetchBlockHex(blockHash, blockHeight){
+        if (!this.auxPow) {
+            return this.connector.getBlock(blockHash)
+        }
+        if (this._fetchErrorCount >= AUXPOW_REASSEMBLE_AFTER) {
+            console.error('Block fetch at height ' + blockHeight + ' failed ' + this._fetchErrorCount +
+                ' consecutive times; falling back to per-tx block reassembly (malformed-AuxPoW recovery, ).')
+            return this.connector.getBlockReassembled(blockHash)
+        }
+        return this.connector.getBlockWithoutAuxPow(blockHash)
+    }
+
     async start(){
         // Verify the bundled canonical coin files against CONSENSUS_CONFIG_PIN
         // before touching the DB or processing any block, mirroring the indexer
@@ -1238,21 +1264,17 @@ class XChainDecoder {
                 // RPC hiccup clears on the next success; a deterministic failure (e.g.
                 // a malformed AuxPoW section that makes getBlockWithoutAuxPow throw)
                 // would otherwise retry here silently forever. We never skip the block
-                // (that would corrupt the index), but after a few attempts we escalate
-                // to parseErrors so the stall is visible to the same monitoring that
-                // watches the block-decode path below, rather than spinning unnoticed.
+                // (that would corrupt the index): after a few attempts we escalate to
+                // parseErrors so the stall is visible to monitoring, and on an AuxPoW
+                // chain fetchBlockHex switches to per-tx block reassembly, which
+                // recovers the identical pure block without touching the AuxPoW bytes.
                 if (this._fetchErrorHeight !== nextBlockHeight) {
                     this._fetchErrorHeight = nextBlockHeight
                     this._fetchErrorCount = 0
                 }
                 try {
                     nextBlockHash = await this.connector.getBlockHash(nextBlockHeight)
-
-                    if (this.auxPow) {
-                        nextBlockHex = await this.connector.getBlockWithoutAuxPow(nextBlockHash)
-                    } else {
-                        nextBlockHex = await this.connector.getBlock(nextBlockHash)
-                    }
+                    nextBlockHex = await this.fetchBlockHex(nextBlockHash, nextBlockHeight)
                     this._fetchErrorCount = 0
                 } catch (e){
                     this._fetchErrorCount++
@@ -1955,6 +1977,8 @@ module.exports.compiledPushSize = compiledPushSize
 module.exports.DISPENSER_EXPIRE_SAFE_DEPTH = DISPENSER_EXPIRE_SAFE_DEPTH
 // Exported for the F3 regression test (DOGE large-output bufferutils-patch self-check).
 module.exports.bigIntBufferutilsActive = bigIntBufferutilsActive
+// Exported for the  malformed-AuxPoW fallback regression test.
+module.exports.AUXPOW_REASSEMBLE_AFTER = AUXPOW_REASSEMBLE_AFTER
 // Exported for the alias-canonicalization unit/regression tests () and
 // so the ActionManifestConformance test can pin VALID_ACTION_NAMES/ACTION_ALIASES.
 module.exports.canonicalizeActionPayload = canonicalizeActionPayload
