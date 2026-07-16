@@ -18,11 +18,29 @@ const transaction_js_1 = require('bitcoinjs-lib/src/transaction');
 const LITECOIN_HOGEX_FLAG = 0x08
 const LITECOIN_MWEB_SEGWIT_FLAG = 0x09
 
+// Coins whose block/tx wire shape this decoder explicitly handles. The
+// per-coin branches below (litecoin MWEB marker/flag stripping, dogecoin
+// AuxPoW handled upstream in BlockchainConnector.getBlockWithoutAuxPow,
+// bitcoin default) are keyed on the coin name, NOT the canonical coin
+// registry, so a newly-registered merge-mined or MWEB-style coin would be
+// fully wired for consensus params yet silently fall through to the strict
+// bitcoinjs default parser and wedge/misparse at its first special block.
+// Fail loudly at construction instead (#2262): onboarding a new coin must
+// consciously add its wire shape here (and to BlockchainConnector when it is
+// merge-mined) before the decoder will run it.
+const KNOWN_WIRE_COINS = new Set(['bitcoin', 'litecoin', 'dogecoin'])
+
 class XChainBlockDecoder {
-    
+
     constructor(networkName) {
         let networkNameSplit = networkName.split("-")
         this.coin = networkNameSplit[0]
+        if (!KNOWN_WIRE_COINS.has(this.coin)) {
+            throw new Error(
+                'XChainBlockDecoder: no block/tx wire-format contract declared for coin "' + this.coin +
+                '" (network "' + networkName + '"). Add its shape (AuxPoW/MWEB handling or bitcoin-default) ' +
+                'to KNOWN_WIRE_COINS in XChainBlockDecoder.js before onboarding the chain.')
+        }
     }
     
     blockFromHex(blockHex){

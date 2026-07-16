@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `health` and `GET /status` probes use a new `db.ping()` on a dedicated pooled connection; they previously grabbed (and released!) the block loop's open transaction connection mid-block, letting any monitor poll break per-block atomicity.
 - `DISPENSER_EXPIRE_SAFE_DEPTH` raised from a flat 100 to 120 so it covers the deepest per-chain reorg-recovery window (DOGE = 120, per `xchain-utxo-tracker` `DEFAULT_UNDO_BLOCKS`); at 100 a soft-expired dispenser was hard-purged before a legal in-window DOGE reorg could restore it, permanently losing a money-bearing dispenser on the reorged node. Pinned by a regression test.
 
+## [1.11.16] - 2026-07-16
+
+### Fixed
+- Wire-format coin allowlist: construction fails fast on a coin outside KNOWN_WIRE_COINS instead of decoding with wrong byte params ().
+- migrate.js CLI covered by unit tests (env-guard exit 2, includeManual, exitCode 1, pool close) ().
+- Committed-migration DDL guard splits statements quote-aware via splitOf(raw) ().
+
+
 ## [1.11.14] - 2026-06-20
 
 ### Added

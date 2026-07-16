@@ -218,8 +218,7 @@ describe('committed migrations declare intent @regression', function () {
             const raw = fs.readFileSync(path.join(MIG_DIR, file), 'utf8');
             const mode = modeOf(raw);
             if (mode !== 'auto') { this.skip(); return; }
-            const statements = Database.prototype.stripSqlLineComments.call({}, raw)
-                .split(';').map(s => s.trim()).filter(Boolean);
+            const statements = splitOf(raw);
             const offender = scanOf(statements);
             assert.strictEqual(offender, null,
                 file + ' is tagged mode=auto but contains destructive DDL: ' + offender);

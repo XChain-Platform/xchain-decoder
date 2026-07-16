@@ -34,9 +34,15 @@ describe('XChainBlockDecoder', () => {
             assert.strictEqual(decoder.coin, 'dogecoin')
         })
 
-        it('should handle network names with extra dashes gracefully', () => {
-            const decoder = new XChainBlockDecoder('some-extra-dashed-name')
-            assert.strictEqual(decoder.coin, 'some')
+        // #2262: an unknown coin used to fall through silently to the strict
+        // bitcoinjs default parser and wedge/misparse at its first AuxPoW/MWEB
+        // block; the decoder now refuses at construction so onboarding a new
+        // chain must consciously declare its wire shape.
+        it('throws for a coin with no declared wire-format contract', () => {
+            assert.throws(() => new XChainBlockDecoder('some-extra-dashed-name'),
+                /no block\/tx wire-format contract declared for coin "some"/)
+            assert.throws(() => new XChainBlockDecoder('namecoin-mainnet'),
+                /namecoin/)
         })
     })
 
