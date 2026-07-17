@@ -36,6 +36,18 @@ const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/
 // 1292=truncated wrong value.
 const DETERMINISTIC_WRITE_ERRNOS = new Set([1366, 1406, 1264, 1265, 1292])
 
+const DEFAULT_QUERY_TIMEOUT_MS = 30000
+
+// Resolve DB_QUERY_TIMEOUT into the pool's queryTimeout option. An explicit 0
+// disables the timeout entirely (mariadb treats 0 as "no timeout"), which the
+// old `parseInt(...) || 30000` pattern silently turned back into the 30s cap.
+// Unset, non-numeric, or negative values fall back to the default.
+function resolveQueryTimeout(raw, defaultMs = DEFAULT_QUERY_TIMEOUT_MS) {
+    const parsed = parseInt(raw, 10)
+    if (Number.isNaN(parsed) || parsed < 0) return defaultMs
+    return parsed
+}
+
 class Database {
     constructor(host, port, dbName, user, pass){
         if (!DB_NAME_REGEX.test(dbName)) {
@@ -72,7 +84,7 @@ class Database {
             connectionLimit:  10,
             //connectTimeout: 0,
             insertIdAsNumber: true,
-            queryTimeout:     parseInt(process.env.DB_QUERY_TIMEOUT) || 30000
+            queryTimeout:     resolveQueryTimeout(process.env.DB_QUERY_TIMEOUT)
         };
         // Setup pool of connections
         this.pool = mariadb.createPool(this.connectionPoolParams);

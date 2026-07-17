@@ -44,6 +44,40 @@ describe('Database constructor', () => {
         assert.strictEqual(db.dbName, 'xchain_decoder_db')
     })
 
+    describe('DB_QUERY_TIMEOUT handling', () => {
+        const ORIGINAL = process.env.DB_QUERY_TIMEOUT
+
+        afterEach(() => {
+            if (ORIGINAL === undefined) delete process.env.DB_QUERY_TIMEOUT
+            else process.env.DB_QUERY_TIMEOUT = ORIGINAL
+        })
+
+        it('should default queryTimeout to 30000 when unset', () => {
+            delete process.env.DB_QUERY_TIMEOUT
+            assert.strictEqual(makeDb().connectionPoolParams.queryTimeout, 30000)
+        })
+
+        it('should disable the timeout when DB_QUERY_TIMEOUT=0', () => {
+            process.env.DB_QUERY_TIMEOUT = '0'
+            assert.strictEqual(makeDb().connectionPoolParams.queryTimeout, 0)
+        })
+
+        it('should honor an explicit positive DB_QUERY_TIMEOUT', () => {
+            process.env.DB_QUERY_TIMEOUT = '45000'
+            assert.strictEqual(makeDb().connectionPoolParams.queryTimeout, 45000)
+        })
+
+        it('should fall back to 30000 for a non-numeric value', () => {
+            process.env.DB_QUERY_TIMEOUT = 'nope'
+            assert.strictEqual(makeDb().connectionPoolParams.queryTimeout, 30000)
+        })
+
+        it('should fall back to 30000 for a negative value', () => {
+            process.env.DB_QUERY_TIMEOUT = '-5'
+            assert.strictEqual(makeDb().connectionPoolParams.queryTimeout, 30000)
+        })
+    })
+
     it('should throw for a DB name with a hyphen', () => {
         assert.throws(() => {
             new Database('127.0.0.1', 3306, 'bad-name', 'u', 'p')
