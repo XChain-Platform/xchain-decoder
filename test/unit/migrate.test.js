@@ -32,6 +32,7 @@ const sinon  = require('sinon');
 
 const DB_PATH      = require.resolve('../../src/db.js');
 const MIGRATE_PATH = require.resolve('../../src/migrate.js');
+const DOTENV_PATH  = require.resolve('dotenv');
 
 const ENV_KEYS = ['DECODER_DB_HOST', 'DECODER_DB_PORT', 'DECODER_DB_NAME',
                   'DECODER_DB_USER', 'DECODER_DB_PASS'];
@@ -58,6 +59,7 @@ describe('migrate.js operator CLI @regression', function () {
         }
         delete require.cache[MIGRATE_PATH];
         delete require.cache[DB_PATH];
+        delete require.cache[DOTENV_PATH];
     });
 
     // Build a fake Database class; `done` resolves when pool.end() runs
@@ -86,6 +88,13 @@ describe('migrate.js operator CLI @regression', function () {
         delete require.cache[MIGRATE_PATH];
         require.cache[DB_PATH] = {
             id: DB_PATH, filename: DB_PATH, loaded: true, exports: fakeDbClass
+        };
+        // Neutralize migrate.js's require-time dotenv.config(): a .env in the
+        // checkout (CI renders one per run) would repopulate the DECODER_DB_*
+        // vars these tests deliberately unset.
+        require.cache[DOTENV_PATH] = {
+            id: DOTENV_PATH, filename: DOTENV_PATH, loaded: true,
+            exports: { config: () => ({ parsed: {} }) }
         };
         require(MIGRATE_PATH);
     }

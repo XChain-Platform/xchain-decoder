@@ -245,11 +245,34 @@ describe('Database.MIGRATION_CHECKSUM_REBASELINES @regression', function () {
     const crypto  = require('crypto');
     const MIG_DIR = path.join(__dirname, '..', '..', 'src', 'sql', 'migrations');
 
-    it('every rebaseline pins two distinct 64-hex sha256 values', function () {
+    it('every rebaseline pins distinct 64-hex sha256 values (from may be a list)', function () {
         for (const [file, r] of Object.entries(Database.MIGRATION_CHECKSUM_REBASELINES)) {
-            assert.match(r.from, /^[0-9a-f]{64}$/, file + ': from must be a sha256 hex digest');
-            assert.match(r.to,   /^[0-9a-f]{64}$/, file + ': to must be a sha256 hex digest');
-            assert.notStrictEqual(r.from, r.to, file + ': from and to must differ');
+            const fromList = [].concat(r.from);
+            assert.ok(fromList.length >= 1, file + ': from must pin at least one hash');
+            for (const from of fromList) {
+                assert.match(from, /^[0-9a-f]{64}$/, file + ': from must be a sha256 hex digest');
+                assert.notStrictEqual(from, r.to, file + ': from and to must differ');
+            }
+            assert.strictEqual(new Set(fromList).size, fromList.length,
+                file + ': from list must not contain duplicates');
+            assert.match(r.to, /^[0-9a-f]{64}$/, file + ': to must be a sha256 hex digest');
+        }
+    });
+
+    it('the  blessed files are pinned toward the committed content', function () {
+        // The two files whose fleet-recorded checksums predate the comment-only
+        // edits (follower-ordering note, header-comment fix, license header).
+        // If a rebaseline entry is ever dropped, un-healed fleet DBs go back to
+        // failing every operator migrate run; pin their presence.
+        const blessed = [
+            '2026-06-15-events-data-mediumtext.sql',
+            '2026-06-17-pubkeys-add-monotonic-id.sql',
+        ];
+        for (const file of blessed) {
+            const r = Database.MIGRATION_CHECKSUM_REBASELINES[file];
+            assert.ok(r, file + ': expected an  rebaseline entry');
+            assert.strictEqual([].concat(r.from).length, 2,
+                file + ': expected both historical revisions pinned');
         }
     });
 
@@ -261,6 +284,90 @@ describe('Database.MIGRATION_CHECKSUM_REBASELINES @regression', function () {
                 file + ': rebaseline target is stale - it must equal the current committed file sha256, ' +
                 'otherwise the heal path would rewrite the ledger to a hash that still mismatches.');
         }
+    });
+});
+
+// Functional coverage of the heal path: drive the real runMigrations() against a
+// fake connection whose ledger records a pinned historical checksum, and assert it
+// UPDATEs schema_migrations to the blessed hash instead of tripping the
+// immutability guard. This is the fleet-wide re-bless path : the same code
+// runs at decoder startup and under `node src/migrate.js`, so the heal deploys
+// through code, never through direct SQL.
+describe('runMigrations() checksum re-bless path @regression', function () {
+
+    const crypto = require('crypto');
+    const os     = require('os');
+
+    function makeDb(sqlPath, ledgerRows) {
+        const updates = [];
+        const conn = {
+            async query(sql, params) {
+                if (/GET_LOCK/.test(sql))       return [{ l: '1' }];
+                if (/RELEASE_LOCK/.test(sql))   return [];
+                if (/CREATE TABLE/.test(sql))   return [];
+                if (/SELECT name, checksum FROM schema_migrations/.test(sql)) return ledgerRows;
+                // Post-run schema-contract assertion (dispensers.expiration type check).
+                if (/information_schema\.columns/.test(sql)) return [{ DATA_TYPE: 'bigint' }];
+                if (/^UPDATE schema_migrations SET checksum/.test(sql)) { updates.push(params); return []; }
+                throw new Error('unexpected query in fake conn: ' + sql);
+            },
+            async release() {},
+        };
+        const db = Object.create(Database.prototype);
+        db.sqlPath = sqlPath;
+        db.dbName  = 'fake_db';
+        db.getConnection = async () => conn;
+        db._ensureMigrationsLedger = async () => {};
+        return { db, updates };
+    }
+
+    function tmpMigrationsDir(fileName, content) {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'decoder-rebless-'));
+        fs.mkdirSync(path.join(root, 'migrations'));
+        fs.writeFileSync(path.join(root, 'migrations', fileName), content);
+        return root;
+    }
+
+    const FILE    = '2026-01-01-fake-widen.sql';
+    const CONTENT = '-- xchain:migration mode=auto\nALTER TABLE t MODIFY COLUMN d MEDIUMTEXT;\n';
+    const NEW_SUM = crypto.createHash('sha256').update(CONTENT).digest('hex');
+    const OLD_A   = 'a'.repeat(64);
+    const OLD_B   = 'b'.repeat(64);
+
+    afterEach(function () { delete Database.MIGRATION_CHECKSUM_REBASELINES[FILE]; });
+
+    it('heals a recorded checksum listed in `from` (list form) to the blessed hash', async function () {
+        const root = tmpMigrationsDir(FILE, CONTENT);
+        Database.MIGRATION_CHECKSUM_REBASELINES[FILE] = { from: [OLD_A, OLD_B], to: NEW_SUM };
+        const { db, updates } = makeDb(root, [{ name: FILE, checksum: OLD_B }]);
+        const res = await db.runMigrations({ includeManual: true });
+        assert.deepStrictEqual(updates, [[NEW_SUM, FILE]], 'expected exactly one ledger heal UPDATE');
+        assert.deepStrictEqual(res, { applied: [], pending: [] });
+    });
+
+    it('heals from a single-string `from` (indexer-parity form)', async function () {
+        const root = tmpMigrationsDir(FILE, CONTENT);
+        Database.MIGRATION_CHECKSUM_REBASELINES[FILE] = { from: OLD_A, to: NEW_SUM };
+        const { db, updates } = makeDb(root, [{ name: FILE, checksum: OLD_A }]);
+        await db.runMigrations({ includeManual: true });
+        assert.deepStrictEqual(updates, [[NEW_SUM, FILE]]);
+    });
+
+    it('still fails closed on an unpinned recorded checksum (immutability guard intact)', async function () {
+        const root = tmpMigrationsDir(FILE, CONTENT);
+        Database.MIGRATION_CHECKSUM_REBASELINES[FILE] = { from: [OLD_A], to: NEW_SUM };
+        const { db, updates } = makeDb(root, [{ name: FILE, checksum: 'c'.repeat(64) }]);
+        await assert.rejects(() => db.runMigrations({ includeManual: true }), /content CHANGED/);
+        assert.deepStrictEqual(updates, [], 'guard must not heal an unpinned hash');
+    });
+
+    it('is a no-op when the recorded checksum already matches the file', async function () {
+        const root = tmpMigrationsDir(FILE, CONTENT);
+        Database.MIGRATION_CHECKSUM_REBASELINES[FILE] = { from: [OLD_A], to: NEW_SUM };
+        const { db, updates } = makeDb(root, [{ name: FILE, checksum: NEW_SUM }]);
+        const res = await db.runMigrations({ includeManual: true });
+        assert.deepStrictEqual(updates, []);
+        assert.deepStrictEqual(res, { applied: [], pending: [] });
     });
 });
 

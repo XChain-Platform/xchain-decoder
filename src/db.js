@@ -275,7 +275,11 @@ class Database {
                             // in place instead of failing every operator migrate run forever.
                             // Both hashes are pinned, so any OTHER edit still trips the guard.
                             const rebase = Database.MIGRATION_CHECKSUM_REBASELINES[file];
-                            if(rebase && appliedByName.get(file) === rebase.from && checksum === rebase.to){
+                            // `from` is a single hash or a list: the same reviewed edit can
+                            // supersede several historical file revisions, and each DB recorded
+                            // whichever revision it applied first.
+                            const fromList = rebase ? [].concat(rebase.from) : [];
+                            if(rebase && fromList.includes(appliedByName.get(file)) && checksum === rebase.to){
                                 await conn.query('UPDATE schema_migrations SET checksum = ? WHERE name = ?', [checksum, file]);
                                 console.log('runMigrations: rebaselined checksum for ' + file + ' (reviewed retag, executable SQL unchanged).');
                                 continue;
@@ -1907,11 +1911,37 @@ class Database {
 }
 
 // Applied-migration files whose checksum may be healed in place. Entries are
-// (old sha256 -> new sha256) pairs pinned to a single reviewed edit; anything
-// else still fails the immutability guard in runMigrations(). Empty until a
-// decoder migration needs a reviewed non-executable retag; the escape hatch
-// exists before it is needed so a heal never requires ad-hoc schema_migrations
-// surgery. Mirrors xchain-indexer/src/db.js.
-Database.MIGRATION_CHECKSUM_REBASELINES = {};
+// (old sha256 -> new sha256) pairs pinned to reviewed edits; anything else
+// still fails the immutability guard in runMigrations(). `from` may be a list
+// when the same reviewed edit supersedes several historical revisions (fleet
+// DBs recorded whichever revision they applied first). Executable SQL is
+// byte-identical across every pinned revision (verified: strip `--` comment
+// lines and blank lines; the residue hashes identically from first commit to
+// HEAD). Applied fleet-wide through code deploy: both the startup auto-run and
+// `node src/migrate.js` pass through this heal before the mismatch guard, so no
+// direct schema_migrations SQL is ever needed. Mirrors xchain-indexer/src/db.js.
+//  blessing decided 2026-07-16.
+Database.MIGRATION_CHECKSUM_REBASELINES = {
+    // Comment-only edits: 3a1c435 rewrote the validator note into the follower
+    // ordering note (and dropped an em-dash), ec36bd4 added the license header.
+    // The single ALTER statement is unchanged since authorship (9f3b898).
+    '2026-06-15-events-data-mediumtext.sql': {
+        from: [
+            'c34872de8f381587269d0a408138b9caadb5cbec01660eef034a95a7a039ca42',  // 9f3b898..6869813
+            '08cd99f76467f8aa82ffb06df5ff46b67095c5d1fd89dd427b6a085d52a30006',  // 3a1c435
+        ],
+        to:   '3790d814dec1ecbf7be78065be82a9f7e4f983c4529620f3c1a7d01f129881e8',  // ec36bd4 (HEAD)
+    },
+    // Comment-only edits: 6869813 corrected the stale header comment (table
+    // rebuild warning), ec36bd4 added the license header. The executable
+    // statements are unchanged since authorship (710a954).
+    '2026-06-17-pubkeys-add-monotonic-id.sql': {
+        from: [
+            '84b1c8093344d8a829d724c6e99468bb12c24cb85fe9a248a04e57b6d5769697',  // 710a954
+            '1aabdd6da22872473ce26757c357dbbb68240fb5681956adce959778203b9caa',  // 6869813..3a1c435
+        ],
+        to:   '1d8406192690e5a754ec9430fcd9115e907f34944f340a70b776166a62f83868',  // ec36bd4 (HEAD)
+    },
+};
 
 module.exports = Database
