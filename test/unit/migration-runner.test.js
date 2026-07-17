@@ -51,12 +51,23 @@ describe('Database._migrationMode() @regression', function () {
         assert.strictEqual(modeOf('-- xchain:migration mode=yolo\n'), 'manual');
     });
 
-    it('does not let a body-buried mode=auto tag arm auto-apply (header window only)', function () {
-        // The tag is a header directive; a mode=auto token quoted in body prose or a
-        // data literal below the header window must not flip an untagged file to auto.
-        const body = Array(12).fill('-- filler line').join('\n') +
-            '\n-- xchain:migration mode=auto (quoted convention prose)\nDROP TABLE events;';
+    it('does not let a tag below the first SQL statement arm auto-apply (prologue window only)', function () {
+        // The tag is a leading-comment-prologue directive; once the first SQL
+        // statement (or any non-comment line) appears, a later `mode=auto` in a data
+        // literal or in trailing prose must not flip an untagged file to auto. The
+        // prologue scan stops at the first non-comment, non-blank line.
+        const body = 'ALTER TABLE events ADD COLUMN note TEXT;\n' +
+            '-- xchain:migration mode=auto (trailing prose, below the first statement)\nDROP TABLE events;';
         assert.strictEqual(modeOf(body), 'manual');
+    });
+
+    it('reads the tag past a multi-line comment banner (banner does not push it out of view)', function () {
+        // Regression for the license-banner case: a 13-line `--` banner plus a blank
+        // line put the real tag on line 15, outside the old 10-line window, silently
+        // gating a mode=auto migration to manual. The prologue scan must still see it.
+        const banner = Array(13).fill('-- license banner line').join('\n');
+        const file = banner + '\n\n-- xchain:migration mode=auto\nALTER TABLE t MODIFY COLUMN d MEDIUMTEXT;';
+        assert.strictEqual(modeOf(file), 'auto');
     });
 });
 
@@ -203,13 +214,22 @@ describe('committed migrations declare intent @regression', function () {
     });
 
     files.forEach(function (file) {
-        it(file + ': carries an explicit `-- xchain:migration mode=auto|manual` tag', function () {
+        it(file + ': carries a runner-visible `-- xchain:migration mode=auto|manual` tag', function () {
             const raw = fs.readFileSync(path.join(MIG_DIR, file), 'utf8');
-            const m = raw.match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im);
-            assert.ok(m,
+            const anywhere = raw.match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im);
+            assert.ok(anywhere,
                 file + ' has no explicit mode tag. Every migration must declare intent so a ' +
                 'destructive change can never silently auto-run at startup. Add a first line: ' +
                 '`-- xchain:migration mode=auto` (additive + idempotent) or `mode=manual` (gated).');
+            // The runner must actually SEE that tag. A whole-file regex passes even when
+            // the tag sits below the runner's prologue window (e.g. pushed past a fixed
+            // line count by the license banner), which silently gates a declared
+            // mode=auto migration to the manual default. Assert the real code path agrees
+            // with the declared intent so a runner-invisible tag fails CI.
+            assert.strictEqual(modeOf(raw), anywhere[1].toLowerCase(),
+                file + ' declares mode=' + anywhere[1].toLowerCase() + ' but the runner reads mode=' +
+                modeOf(raw) + '; the tag is outside the runner-visible comment prologue. Move it into ' +
+                'the leading comment block, before the first SQL statement.');
         });
     });
 

@@ -402,12 +402,25 @@ class Database {
     // Read a migration file's `-- xchain:migration mode=auto|manual` header tag.
     // Defaults to 'manual' when absent (conservative: unknown DDL never auto-runs).
     _migrationMode(raw){
-        // The mode tag is a header directive: only the leading header window may
-        // carry it. Scanning the whole file (the old /m behavior) let a `mode=auto`
-        // token buried in body prose or a data literal silently arm auto-apply for a
-        // destructive migration. Restrict the match to the first 10 lines.
-        const header = String(raw).split('\n').slice(0, 10).join('\n');
-        const m = header.match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im);
+        // The mode tag is a leading-prologue directive: it may only sit in the run of
+        // blank and `--`-comment lines BEFORE the first SQL statement. Scanning the
+        // whole file (the old /m behavior) let a `mode=auto` token buried in body prose
+        // or a data literal silently arm auto-apply for a destructive migration. A fixed
+        // first-N-lines window (the old slice(0,10)) fixed that but was too tight: the
+        // standard multi-line license banner pushes the tag past line 10, so every
+        // banner-prefixed `mode=auto` migration was silently read as the `manual`
+        // default and never auto-applied. Anchoring to the comment prologue keeps the
+        // body-buried protection (the scan stops at the first non-comment, non-blank
+        // line, so no data literal or trailing prose can be seen) while accommodating
+        // any length of leading comment banner.
+        const lines    = String(raw).split('\n');
+        const prologue = [];
+        for(const line of lines){
+            const trimmed = line.trim();
+            if(trimmed === '' || trimmed.startsWith('--')){ prologue.push(line); continue; }
+            break;   // first non-blank, non-comment line ends the prologue
+        }
+        const m = prologue.join('\n').match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im);
         return m ? m[1].toLowerCase() : 'manual';
     }
 
