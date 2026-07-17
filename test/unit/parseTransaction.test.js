@@ -292,6 +292,67 @@ describe('XChainDecoder#parseTransaction()', () => {
         )
     })
 
+    // --- Funding-fee output vout remap (PK-collision guard) ---
+
+    // Regression: a P2SH/P2WSH reveal attributes the native-coin fee output (which
+    // physically lives on the funding/commit tx) to this action. That output carries
+    // the FUNDING tx's vout, but is stored under the REVEAL's tx_index. transaction_outputs
+    // is keyed by (tx_index, vout), so a funding fee output at the same vout number as one
+    // of the reveal tx's OWN outputs (a dispense or COINPAY output) used to collide on the
+    // primary key and be silently dropped as a duplicate INSERT — after which the indexer's
+    // detectFeePaymentMode saw no fee output and wrongly rejected the action on LTC/DOGE (or
+    // fell back to XCHAIN deduction on BTC). The fee output is now stored at
+    // vout + FUNDING_VOUT_BASE, a domain disjoint from any real reveal-tx vout.
+    it('[REGRESSION] P2SH reveal: funding fee output is remapped into the FUNDING_VOUT_BASE domain so it cannot collide with a reveal-tx output at the same vout', async () => {
+        const FEE_ADDR = 'mzBc4XEFSdzCDcTxAgf6EZXgsZWpztRhef'
+        const BASE = XChainDecoder.FUNDING_VOUT_BASE
+        assert.ok(typeof BASE === 'number' && BASE > 0, 'FUNDING_VOUT_BASE must be exported')
+
+        // Force the P2SH reveal branch: sets p2shFundingTxId so the funding-fee lookup runs.
+        sinon.stub(decoder, 'removeObfuscation').resolves(
+            Buffer.concat([Buffer.from('XCHN'), Buffer.from('p2sh')])
+        )
+
+        // The funding (commit) tx contributes ONE fee output at vout 0 — the same vout number
+        // as the reveal tx's own output below (the previously-colliding case).
+        sinon.stub(decoder, 'findFundingFeeOutputs').resolves([
+            { vout: 0, destinationAddress: FEE_ADDR, amount: 4321 }
+        ])
+
+        // Build the reveal tx: output 0 is a real on-chain output at vout 0, output 1 is the
+        // OP_RETURN that drives the P2SH branch.
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+        addP2PKHOutput(tx, 50000)                                            // vout 0 (real reveal output)
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, Buffer.alloc(20, 0x01)]), 0) // vout 1
+
+        // Mark the reveal's own vout-0 output as a dispense output, so it lands in the reveal's
+        // output set at the exact vout the funding fee output would otherwise have claimed.
+        const result = await decoder.parseTransaction(tx, dispenserSetForTx(tx))
+
+        assert.ok(result)
+
+        // The reveal's own output stays at its real vout 0.
+        assert.strictEqual(result.dispenseOutputs.length, 1)
+        assert.strictEqual(Number(result.dispenseOutputs[0].vout), 0)
+
+        // The funding fee output is remapped into the reserved domain, NOT left at vout 0.
+        const feeOutputs = result.paymentOutputs.filter(o => o.destinationAddress === FEE_ADDR)
+        assert.strictEqual(feeOutputs.length, 1)
+        assert.strictEqual(Number(feeOutputs[0].vout), BASE + 0)
+        assert.strictEqual(Number(feeOutputs[0].amount), 4321)
+
+        // Under the reveal's single tx_index, every stored (tx_index, vout) key is unique:
+        // the real output at vout 0 and the fee output at BASE never collide.
+        const allVouts = [
+            ...result.dispenseOutputs.map(o => Number(o.vout)),
+            ...result.paymentOutputs.map(o => Number(o.vout)),
+        ]
+        assert.strictEqual(new Set(allVouts).size, allVouts.length, 'no two outputs share a vout under this tx_index')
+        assert.ok(!allVouts.some(v => v === 0 && allVouts.filter(x => x === 0).length > 1), 'no PK collision at vout 0')
+    })
+
     // --- Result structure ---
 
     it('[REGRESSION P0] R-SCR-001: should return an object with data, rawData, source, destination, and dispenseOutputs', async () => {

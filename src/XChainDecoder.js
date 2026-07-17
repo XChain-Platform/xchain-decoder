@@ -45,6 +45,20 @@ const MAGIC_WORD_BUFFER = Buffer.from(MAGIC_WORD)
 const P2SH_BUFFER = Buffer.from("p2sh")
 const P2WSH_BUFFER = Buffer.from("p2wsh")
 
+// transaction_outputs is keyed by (tx_index, vout). For a P2SH/P2WSH reveal we ALSO attribute
+// the native-coin fee output(s) that physically live on the funding (commit) transaction to the
+// reveal's tx_index (see findFundingFeeOutputs). Those rows carry the FUNDING tx's vout numbers,
+// which are a different output-index domain than the reveal tx's own vouts: storing both under the
+// same tx_index lets a funding fee output collide on the primary key with one of the reveal tx's
+// own outputs (a dispense or COINPAY output at the same vout number), and the duplicate INSERT is
+// silently dropped. To keep the two domains disjoint, funding-attributed outputs are stored at
+// vout + FUNDING_VOUT_BASE. A real Bitcoin-family transaction can never reach this many outputs
+// (block-size limits cap output counts far below), so vout >= FUNDING_VOUT_BASE unambiguously
+// marks an attributed funding output and can never collide with a real reveal-tx vout. Readers
+// must treat vout as an opaque per-tx output key, not the literal on-chain output index (the
+// indexer's detectFeePaymentMode keys on destination address, so the offset is transparent to it).
+const FUNDING_VOUT_BASE = 1000000
+
 const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // Soft-expired dispensers (marked, not deleted, so a reorg can restore them) are
 // hard-purged once this many blocks deep, and a pure function of canonical height
@@ -571,6 +585,14 @@ class XChainDecoder {
             let getSource = false
 
             for (let txOutputIndex=0;txOutputIndex < transaction.outs.length;txOutputIndex++){
+                // Invariant guard: a real on-chain output index must stay below FUNDING_VOUT_BASE
+                // so it can never collide with an attributed funding fee output stored at
+                // vout + FUNDING_VOUT_BASE. This is structurally impossible for a Bitcoin-family
+                // tx (output counts are bounded far below the base), so if it ever fires the base
+                // has been mis-sized and the funding/real vout domains are no longer disjoint.
+                if (txOutputIndex >= FUNDING_VOUT_BASE){
+                    console.error(`FATAL invariant violation: real output index ${txOutputIndex} in tx ${nextTxId} reaches FUNDING_VOUT_BASE (${FUNDING_VOUT_BASE}); funding fee outputs can no longer be stored collision-free`)
+                }
                 let nextOutput = transaction.outs[txOutputIndex]
                 let decompiledScript = bitcoin.script.decompile(nextOutput.script)
                 let nextDataBuffer = new Buffer.allocUnsafe(0)
@@ -816,7 +838,14 @@ class XChainDecoder {
             if (p2shFundingTxId){
                 let fundingFeeOutputs = await this.findFundingFeeOutputs(p2shFundingTxId)
                 for (let feeOutput of fundingFeeOutputs){
-                    paymentOutputs.push(feeOutput)
+                    // Remap the FUNDING tx's vout into the reserved funding domain before this output
+                    // is stored under the REVEAL's tx_index, so it can never collide on the
+                    // (tx_index, vout) primary key with one of the reveal tx's own outputs (a dispense
+                    // or COINPAY output at the same vout number). See FUNDING_VOUT_BASE.
+                    paymentOutputs.push({
+                        ...feeOutput,
+                        vout: FUNDING_VOUT_BASE + feeOutput.vout
+                    })
                 }
             }
 
@@ -1975,6 +2004,9 @@ module.exports.MAX_ACTION_DATA_LENGTH = MAX_ACTION_DATA_LENGTH
 module.exports.compiledPushSize = compiledPushSize
 // Exported so a regression test can pin it >= the deepest per-chain reorg window.
 module.exports.DISPENSER_EXPIRE_SAFE_DEPTH = DISPENSER_EXPIRE_SAFE_DEPTH
+// Exported so the funding-fee-output collision regression test can assert attributed
+// funding outputs are stored at vout + FUNDING_VOUT_BASE (never colliding with real vouts).
+module.exports.FUNDING_VOUT_BASE = FUNDING_VOUT_BASE
 // Exported for the F3 regression test (DOGE large-output bufferutils-patch self-check).
 module.exports.bigIntBufferutilsActive = bigIntBufferutilsActive
 // Exported for the  malformed-AuxPoW fallback regression test.
