@@ -181,15 +181,86 @@ function skipAuxPow(buf, start) {
     return offset
 }
 
+// Error codes that mean "could not reach the node at all" (socket / DNS /
+// timeout level), as opposed to an HTTP or JSON-RPC level error from a node
+// that is alive. Only these count toward endpoint failover.
+const CONNECTION_ERROR_CODES = new Set([
+    'ECONNREFUSED', 'ECONNRESET', 'ECONNABORTED', 'ENOTFOUND',
+    'EHOSTUNREACH', 'ENETUNREACH', 'ETIMEDOUT', 'EAI_AGAIN', 'EPIPE'
+])
+
+// Turn a host entry into a full RPC base URL. `entry` may carry its own
+// protocol (http/https) and/or port; anything missing falls back to http and
+// `defaultPort` (the primary NODE_PORT).
+function normalizeEndpoint(entry, defaultPort) {
+    const match = String(entry).trim().match(/^(https?:\/\/)?([^:/]+)(?::(\d+))?$/)
+    if (!match) throw new Error('BlockchainConnector: invalid RPC endpoint: ' + entry)
+    const protocol = match[1] || 'http://'
+    const port = match[3] || defaultPort
+    return protocol + match[2] + ':' + port
+}
+
 class BlockchainConnector {
     constructor(url, port, rpcUser, rpcPassword) {
-        let protocol = (url.startsWith("https://") || url.startsWith("http://")) ? "" : "http://"
-        this.url = protocol + url + ":" + port
         this.port = port
         this.rpcUser = rpcUser
         this.rpcPassword = rpcPassword
         this.rpcErrors = 0
+        // RPC endpoint failover : a dead primary endpoint used to stall
+        // the decoder forever, because the block loop retries RPC failures
+        // indefinitely by design. The connector now keeps an ordered endpoint
+        // list (primary + comma-separated NODE_URL_FALLBACK entries) and
+        // rotates to the next endpoint after NODE_FAILOVER_THRESHOLD
+        // consecutive connection-level failures. Rotation is round-robin, so a
+        // recovered primary is retried again if the fallback also dies.
+        this.endpoints = [normalizeEndpoint(url, port)]
+        const fallbacks = (process.env.NODE_URL_FALLBACK ?? '').split(',').map(s => s.trim()).filter(Boolean)
+        for (const fallback of fallbacks) this.endpoints.push(normalizeEndpoint(fallback, port))
+        this.activeEndpointIndex = 0
+        this.connectionFailures = 0
+        this.failoverThreshold = Math.max(1, parseInt(process.env.NODE_FAILOVER_THRESHOLD, 10) || 3)
+    }
+
+    // Active RPC base URL. A getter (not a stored string) so every retry loop
+    // in this class picks up an endpoint rotation on its next attempt.
+    get url() {
+        return this.endpoints[this.activeEndpointIndex]
+    }
+
+    // Single POST path for every RPC method: resets the consecutive-failure
+    // counter on any answer from the node, and counts connection-level errors
+    // toward failover before re-throwing for the caller's own retry handling.
+    async rpcPost(data) {
+        try {
+            const response = await axios.post(this.url, data, {
+                auth: {
+                    username: this.rpcUser,
+                    password: this.rpcPassword,
+                }
+            })
+            this.connectionFailures = 0
+            return response
+        } catch (error) {
+            if (error && error.response) {
+                // An HTTP-level error (auth, queue-full 500, etc.) still proves
+                // the endpoint is reachable; only unreachability drives failover.
+                this.connectionFailures = 0
+            } else if (error && CONNECTION_ERROR_CODES.has(error.code)) {
+                this.noteConnectionFailure(error.code)
+            }
+            throw error
         }
+    }
+
+    noteConnectionFailure(code) {
+        if (this.endpoints.length < 2) return
+        if (++this.connectionFailures >= this.failoverThreshold) {
+            const failing = this.url
+            this.activeEndpointIndex = (this.activeEndpointIndex + 1) % this.endpoints.length
+            this.connectionFailures = 0
+            console.warn(`RPC endpoint ${failing} unreachable (${code} x${this.failoverThreshold}); failing over to ${this.url}`)
+        }
+    }
 
     async sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
@@ -216,12 +287,7 @@ class BlockchainConnector {
                     id: 1
                 }
 
-                const response = await axios.post(this.url, data, {
-                    auth: {
-                        username: this.rpcUser,
-                        password: this.rpcPassword,
-                    }
-                })
+                const response = await this.rpcPost(data)
 
                 return rpcResult(response, 'Error getting network info');
             } catch (error) {
@@ -251,12 +317,7 @@ class BlockchainConnector {
                     id: 1
                 }
 
-                const response = await axios.post(this.url, data, {
-                    auth: {
-                        username: this.rpcUser,
-                        password: this.rpcPassword,
-                    }
-                })
+                const response = await this.rpcPost(data)
 
                 return rpcResult(response, 'Error getting blockchain info');
             } catch (error) {
@@ -292,12 +353,7 @@ class BlockchainConnector {
                     id: 1,
                 }
 
-                const response = await axios.post(this.url, data, {
-                    auth: {
-                        username: this.rpcUser,
-                        password: this.rpcPassword,
-                    }
-                })
+                const response = await this.rpcPost(data)
 
                 return rpcResult(response, 'Error getting block hash');
             } catch (error) {
@@ -328,12 +384,7 @@ class BlockchainConnector {
                     id: 1,
                 }
 
-                const response = await axios.post(this.url, data, {
-                    auth: {
-                        username: this.rpcUser,
-                        password: this.rpcPassword,
-                    }
-                })
+                const response = await this.rpcPost(data)
 
                 return rpcResult(response, 'Error getting block header');
             } catch (error) {
@@ -435,12 +486,7 @@ class BlockchainConnector {
                     id: 1,
                 }
 
-                const response = await axios.post(this.url, data, {
-                    auth: {
-                        username: this.rpcUser,
-                        password: this.rpcPassword,
-                    }
-                })
+                const response = await this.rpcPost(data)
 
                 return rpcResult(response, 'Error getting verbose block');
             } catch (error) {
@@ -470,12 +516,7 @@ class BlockchainConnector {
                     id: 1
                 }
 
-                const response = await axios.post(this.url, data, {
-                    auth: {
-                        username: this.rpcUser,
-                        password: this.rpcPassword,
-                    }
-                })
+                const response = await this.rpcPost(data)
 
                 return rpcResult(response, 'Error getting raw mempool info');
             } catch (error) {
@@ -509,12 +550,7 @@ class BlockchainConnector {
                     }
 
                     // Make the request to the node
-                    const response = await axios.post(this.url, data, {
-                        auth: {
-                            username: this.rpcUser,
-                            password: this.rpcPassword,
-                        }
-                    })
+                    const response = await this.rpcPost(data)
 
                     // Verify if there is a result and return it
                     if (response.data.result) {
@@ -620,12 +656,7 @@ class BlockchainConnector {
                     id: 1,
                 }
 
-                const response = await axios.post(this.url, data, {
-                    auth: {
-                        username: this.rpcUser,
-                        password: this.rpcPassword,
-                    }
-                })
+                const response = await this.rpcPost(data)
 
                 return rpcResult(response, 'Error getting block hex');
             } catch (error) {
