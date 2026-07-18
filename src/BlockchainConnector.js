@@ -407,14 +407,15 @@ class BlockchainConnector {
             if (!verboseBlock || !Array.isArray(verboseBlock.tx)) {
                 throw new Error('verbose getblock returned no tx array')
             }
-            const txHexes = []
-            for (const txid of verboseBlock.tx) {
+            // Fetch via the bounded-concurrency batch helper : serial
+            // per-tx fetches with per-tx retry backoff made a large DOGE block
+            // take minutes to reassemble, wedging the decoder at this height.
+            const txHexes = await this.getRawTransactions(verboseBlock.tx)
+            for (let i = 0; i < txHexes.length; i++) {
                 // getRawTransaction resolves null for a missing tx (mempool-eviction
                 // tolerance); for a confirmed in-block tx that is an RPC fault, and
                 // assembling without it would emit a corrupt block. Fail instead.
-                const txHex = await this.getRawTransaction(txid)
-                if (!txHex) throw new Error('no raw tx for in-block txid ' + txid)
-                txHexes.push(txHex)
+                if (!txHexes[i]) throw new Error('no raw tx for in-block txid ' + verboseBlock.tx[i])
             }
             return headerHex + encodeVarintHex(txHexes.length) + txHexes.join('')
         } catch (err) {
@@ -584,6 +585,29 @@ class BlockchainConnector {
         return results
     }
     
+    // Startup probe for txindex availability . getBlockReassembled (the
+    //  malformed-AuxPoW recovery path) calls getrawtransaction WITHOUT a
+    // blockhash param, which requires the node to run with txindex=1. On a node
+    // without it, recovery fails deterministically forever, turning a one-block
+    // recovery into a permanent quarantine loop with no hint why. Probe once at
+    // boot: fetch the tip's coinbase txid via verbose getblock, then try
+    // getrawtransaction on it. Returns true (txindex works), false (missing),
+    // or null (inconclusive: tip is genesis, whose coinbase is unretrievable by
+    // design, or the probe RPCs themselves failed). Never throws.
+    async probeTxIndex() {
+        try {
+            const info = await this.getBlockchainInfo()
+            if (!info || !info.bestblockhash) return null
+            if (info.blocks === 0) return null  // genesis coinbase is never indexed
+            const block = await this.getBlockVerbose(info.bestblockhash)
+            if (!block || !Array.isArray(block.tx) || block.tx.length === 0) return null
+            const txHex = await this.getRawTransaction(block.tx[0])
+            return txHex ? true : false
+        } catch (_) {
+            return null
+        }
+    }
+
     async getBlock(blockhash, hexFormat=true) {
         let tries = 10
 

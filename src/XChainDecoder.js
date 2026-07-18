@@ -1093,6 +1093,26 @@ class XChainDecoder {
             await this.db.runMigrations();
         }
     
+        // Startup txindex probe . The malformed-AuxPoW recovery path
+        // (getBlockReassembled, ) calls getrawtransaction without a
+        // blockhash and so needs txindex=1 on the node. Without it, recovery
+        // fails deterministically forever (a silent permanent wedge at one
+        // height), so surface the misconfiguration loudly at boot instead of
+        // at recovery time. Non-fatal: decoders on such a node still work
+        // until the first malformed-AuxPoW block.
+        // Optional-call guard: tests stub this.connector with plain objects.
+        const txIndexOk = (typeof this.connector.probeTxIndex === 'function')
+            ? await this.connector.probeTxIndex()
+            : null
+        if (txIndexOk === false) {
+            console.error('WARNING: node does not appear to have txindex=1 (getrawtransaction on a ' +
+                'confirmed tx returned nothing). The malformed-AuxPoW block recovery path ' +
+                '(getBlockReassembled, ) requires txindex; without it a malformed-AuxPoW ' +
+                'block will wedge this decoder permanently. Restart the node with txindex=1.')
+        } else if (txIndexOk === null) {
+            console.log('txindex probe inconclusive (empty chain or probe RPC failed); continuing.')
+        }
+
         console.log("Parsing...")
         
         let lastProcessedBlockIndex = this.lastProcessedBlockIndex = await this.db.getLastBlockIndex()

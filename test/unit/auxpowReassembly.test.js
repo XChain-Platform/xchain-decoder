@@ -75,6 +75,20 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
             assert.strictEqual(await connector.getBlockReassembled('hash'), HEADER_HEX + '01' + TX_HEX)
         })
 
+        it('fetches txs through the bounded batch helper, not serially ', async function () {
+            const batchCalls = []
+            const connector = makeConnector({
+                getBlockHeader: async () => HEADER_HEX,
+                getBlockVerbose: async () => ({ tx: [TXID, TXID, TXID] }),
+                getRawTransactions: async (txids) => { batchCalls.push(txids); return txids.map(() => TX_HEX) },
+                getRawTransaction: async () => { throw new Error('serial per-tx path must not be used') },
+            })
+            const hex = await connector.getBlockReassembled('hash')
+            assert.strictEqual(hex, HEADER_HEX + '03' + TX_HEX + TX_HEX + TX_HEX)
+            assert.strictEqual(batchCalls.length, 1)
+            assert.deepStrictEqual(batchCalls[0], [TXID, TXID, TXID])
+        })
+
         it('fails loudly when an in-block tx cannot be fetched', async function () {
             const connector = makeConnector({
                 getBlockHeader: async () => HEADER_HEX,
@@ -82,6 +96,41 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
                 getRawTransaction: async () => null,
             })
             await assert.rejects(() => connector.getBlockReassembled('hash'), /no raw tx for in-block txid/)
+        })
+    })
+
+    describe('BlockchainConnector.probeTxIndex ', function () {
+        it('returns true when the tip coinbase is retrievable without a blockhash', async function () {
+            const connector = makeConnector({
+                getBlockchainInfo: async () => ({ blocks: 100, bestblockhash: 'tip' }),
+                getBlockVerbose: async () => ({ tx: [TXID] }),
+                getRawTransaction: async (txid) => { assert.strictEqual(txid, TXID); return TX_HEX },
+            })
+            assert.strictEqual(await connector.probeTxIndex(), true)
+        })
+
+        it('returns false when getrawtransaction finds nothing (txindex missing)', async function () {
+            const connector = makeConnector({
+                getBlockchainInfo: async () => ({ blocks: 100, bestblockhash: 'tip' }),
+                getBlockVerbose: async () => ({ tx: [TXID] }),
+                getRawTransaction: async () => null,
+            })
+            assert.strictEqual(await connector.probeTxIndex(), false)
+        })
+
+        it('returns null on an empty chain (genesis coinbase is never indexed)', async function () {
+            const connector = makeConnector({
+                getBlockchainInfo: async () => ({ blocks: 0, bestblockhash: 'genesis' }),
+                getBlockVerbose: async () => { throw new Error('must not be called for genesis-only chain') },
+            })
+            assert.strictEqual(await connector.probeTxIndex(), null)
+        })
+
+        it('returns null (never throws) when the probe RPCs fail', async function () {
+            const connector = makeConnector({
+                getBlockchainInfo: async () => { throw new Error('node down') },
+            })
+            assert.strictEqual(await connector.probeTxIndex(), null)
         })
     })
 
