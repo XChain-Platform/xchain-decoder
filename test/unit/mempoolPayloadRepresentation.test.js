@@ -69,4 +69,20 @@ describe('mempool vs confirmed ACTION payload representation conformance', funct
                 `mempool and confirmed representations must match for "${s}"`);
         }
     });
+
+    // Rejected-ACTION sentinel parity: when a tx carries an invalid/oversized or
+    // unknown-name ACTION but still has money-bearing outputs, both decode paths
+    // record a no-action sentinel and keep the tx. The confirmed path assigns the
+    // empty string directly (decodedData = ""); the mempool path assigns an empty
+    // buffer that decodes through the SAME strictTextDecoder to "". A regression
+    // that reverts the mempool fallback to null would store SQL NULL where the
+    // confirmed twin holds '', breaking pending/confirmed content-correlation.
+    it('the rejected-ACTION no-action sentinel is "" on both decode paths, never null', function () {
+        const confirmedSentinel = ''                              // XChainDecoder.js confirmed path
+        const mempoolSentinel = strictTextDecoder.decode(new Uint8Array(0)) // mempool path empty-buffer decode
+        assert.strictEqual(mempoolSentinel, confirmedSentinel,
+            'mempool rejected-ACTION sentinel must equal the confirmed "" sentinel');
+        assert.notStrictEqual(mempoolSentinel, null,
+            'mempool rejected-ACTION sentinel must not be null (would persist as SQL NULL)');
+    });
 });

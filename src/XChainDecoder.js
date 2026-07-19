@@ -1195,7 +1195,23 @@ class XChainDecoder {
                 || (Date.now() - lastBlockchainInfoRefreshAt >= BLOCKCHAIN_INFO_REFRESH_MS)){
                 try {
                     lastBlockchainInfo = await this.connector.getBlockchainInfo()
-                    
+
+                    // Validate the shape before any field is used. A trimmed RPC-proxy
+                    // response or a per-coin getblockchaininfo variant could omit these
+                    // fields; without this guard `undefined < 0.99` is false (the
+                    // not-synced gate silently passes) and `blocks` becomes undefined
+                    // (every later height comparison quietly goes wrong). Mirror the
+                    // typeof-number discipline verifyReorg's tip refresh already applies
+                    // and treat a malformed result like the RPC-failure branch below.
+                    if (!lastBlockchainInfo
+                        || typeof lastBlockchainInfo["blocks"] !== 'number'
+                        || typeof lastBlockchainInfo["verificationprogress"] !== 'number'){
+                        console.log("Malformed getblockchaininfo response (missing or non-numeric 'blocks'/'verificationprogress'). Trying again...")
+                        lastBlockchainInfo = null
+                        await this.sleep(3000)
+                        continue
+                    }
+
                     if (lastBlockchainInfo["verificationprogress"] < MIN_VERIFICATION_PROGRESS_TO_PARSE){
                         if (!nodeSyncedProblem){
                             console.log("The node is not synced. Waiting for it to synchronize...")
@@ -1938,7 +1954,11 @@ class XChainDecoder {
                             this.parseErrors++
                             console.error(`Mempool: tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${MAX_ACTION_DATA_LENGTH})`)
                             if (!hasOutputs) continue
-                            mempoolData = null
+                            // Empty buffer (not null) so this decodes to the SAME ''
+                            // sentinel the confirmed-block path stores for a rejected
+                            // ACTION on a money-bearing tx; a null would persist as SQL
+                            // NULL and break pending/confirmed content-correlation.
+                            mempoolData = new Uint8Array(0)
                         } else {
                             // Guard 2: unknown ACTION names (expand aliases first so an
                             // alias-named tx doesn't show as pending and then silently vanish).
@@ -1949,7 +1969,9 @@ class XChainDecoder {
                                 this.parseErrors++
                                 console.error(`Mempool: tx ${nextTransactionHash}: unknown ACTION name '${canonical.rawActionName.substring(0, 32)}'`)
                                 if (!hasOutputs) continue
-                                mempoolData = null
+                                // Empty buffer (not null): decodes to '' matching the
+                                // confirmed-block path, not SQL NULL. See guard 1 above.
+                                mempoolData = new Uint8Array(0)
                             } else {
                                 mempoolData = canonical.buffer
                             }

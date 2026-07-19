@@ -17,8 +17,14 @@
 // was only ever decoded by copied helpers, never the shipped decoder code.
 //
 // The fixture is authored in the sibling xchain-encoder repo (single source of
-// truth); this test skips when that checkout is absent, matching the
-// compiledPushSizeConformance / ActionManifestConformance convention.
+// truth) and VENDORED byte-identically into test/fixtures/ here, matching the
+// ActionManifestConformance convention: the vendored copy is loaded
+// unconditionally so these assertions always run in single-repo CI, and a
+// separate byte-identity guard (below) catches drift against the encoder
+// original when the sibling checkout is present (or hard-fails under
+// XCHAIN_REQUIRE_SIBLINGS=1). Previously this test resolved the fixture from the
+// sibling checkout and this.skip()'d when it was absent, so single-repo CI
+// reported green having executed zero assertions.
 
 'use strict'
 
@@ -29,9 +35,8 @@ const bitcoin = require('bitcoinjs-lib')
 const XChainDecoder = require('../../src/XChainDecoder')
 const { canonicalizeActionPayload } = XChainDecoder
 
-const ENCODER = process.env.XCHAIN_ENCODER_DIR ||
-  path.join(__dirname, '..', '..', '..', 'xchain-encoder')
-const FIXTURE = path.join(ENCODER, 'test', 'fixtures', 'roundtrip-conformance.json')
+const VENDORED = path.join(__dirname, '..', 'fixtures', 'roundtrip-conformance.json')
+const fixture = JSON.parse(fs.readFileSync(VENDORED, 'utf8'))
 
 function createDecoder () {
   return new XChainDecoder(
@@ -51,13 +56,10 @@ function gateOutcome (compiled) {
 }
 
 describe('roundtrip conformance fixture: real-decoder decode ()', function () {
-  let fixture
   let decoder
   let magicBuffer
 
   before(function () {
-    if (!fs.existsSync(FIXTURE)) this.skip()
-    fixture = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'))
     decoder = createDecoder()
     magicBuffer = Buffer.from(fixture.magicWord, 'utf8')
   })
@@ -112,14 +114,10 @@ describe('roundtrip conformance fixture: real-decoder decode ()', function () {
 // ~695-731, P2SH ~633-655, P2WSH ~661-682, final decompile gate ~748-795),
 // using the real decoder deobfuscation primitive throughout.
 describe('roundtrip conformance fixture: MULTISIGN reassembly ', function () {
-  let fixture
   let decoder
   let magicBuffer
 
   before(function () {
-    if (!fs.existsSync(FIXTURE)) this.skip()
-    fixture = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'))
-    if (!fixture.multisignCases) this.skip() // stale sibling fixture predating 
     decoder = createDecoder()
     magicBuffer = Buffer.from(fixture.magicWord, 'utf8')
   })
@@ -170,14 +168,10 @@ describe('roundtrip conformance fixture: MULTISIGN reassembly ', function () {
 })
 
 describe('roundtrip conformance fixture: P2SH/P2WSH multi-input reassembly ', function () {
-  let fixture
   let decoder
   let magicBuffer
 
   before(function () {
-    if (!fs.existsSync(FIXTURE)) this.skip()
-    fixture = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'))
-    if (!fixture.p2shCases) this.skip() // stale sibling fixture predating 
     decoder = createDecoder()
     magicBuffer = Buffer.from(fixture.magicWord, 'utf8')
   })
@@ -263,14 +257,10 @@ describe('roundtrip conformance fixture: P2SH/P2WSH multi-input reassembly ', fu
 })
 
 describe('roundtrip conformance fixture: alias rewrite ', function () {
-  let fixture
   let decoder
   let magicBuffer
 
   before(function () {
-    if (!fs.existsSync(FIXTURE)) this.skip()
-    fixture = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'))
-    if (!fixture.aliasCases) this.skip() // stale sibling fixture predating 
     decoder = createDecoder()
     magicBuffer = Buffer.from(fixture.magicWord, 'utf8')
   })
@@ -304,5 +294,29 @@ describe('roundtrip conformance fixture: alias rewrite ', function () {
       assert.strictEqual(canonical.buffer.toString('hex'), c.expected.canonicalDataHex,
         `${c.name}: rewritten payload`)
     }
+  })
+})
+
+// IDENTITY: the vendored copy must match the canonical encoder fixture (skip
+// when the sibling xchain-encoder is not checked out, matching the
+// ActionManifestConformance convention; hard-fail under XCHAIN_REQUIRE_SIBLINGS).
+describe('roundtrip conformance fixture: byte-identity to encoder original', function () {
+  const ENCODER = process.env.XCHAIN_ENCODER_DIR ||
+    path.join(__dirname, '..', '..', '..', 'xchain-encoder')
+  const CANON = path.join(ENCODER, 'test', 'fixtures', 'roundtrip-conformance.json')
+
+  before(function () {
+    if (!fs.existsSync(CANON)) {
+      if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
+        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but canonical roundtrip-conformance.json not found at ' + CANON)
+      }
+      this.skip()
+    }
+  })
+
+  it('vendored test/fixtures/roundtrip-conformance.json is byte-identical to the encoder original', function () {
+    assert.strictEqual(fs.readFileSync(VENDORED, 'utf8'), fs.readFileSync(CANON, 'utf8'),
+      'vendored roundtrip-conformance.json drifted from the encoder original; ' +
+      're-run the encoder fixture generator and re-vendor the copy here.')
   })
 })

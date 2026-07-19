@@ -29,6 +29,8 @@ axios.defaults.timeout = parseInt(process.env.NODE_RPC_TIMEOUT ?? '30000', 10)
 // re-logs the re-thrown error can leak them, and return a compact, credential-free string
 // (error.message never carries the auth block) for logging. Never let scrubbing throw.
 function sanitizeRpcError(error){
+    let rpcCode
+    let rpcMessage
     try {
         if (error && error.config) {
             error.config.auth = undefined
@@ -39,10 +41,30 @@ function sanitizeRpcError(error){
         if (error && error.request) error.request = undefined
         if (error && error.response) {
             const status = error.response.status
+            // Bitcoin/Litecoin Core deliver most RPC errors as HTTP 500 with the
+            // JSON-RPC error body (response.data.error = {code, message}), which makes
+            // axios throw before rpcResult() ever runs. Capture the node's own code and
+            // message here, before the scrub replaces error.response with just its
+            // status, so callers and logs keep the real cause (-8 out of range, -28
+            // loading block index, -429 queue full) instead of a bare status line.
+            const rpcErr = error.response.data && error.response.data.error
+            if (rpcErr && typeof rpcErr === 'object') {
+                rpcCode = rpcErr.code
+                rpcMessage = (typeof rpcErr.message === 'string') ? rpcErr.message : undefined
+            }
             error.response = (status !== undefined) ? { status: status } : undefined
         }
+        if (error && (rpcCode !== undefined || rpcMessage !== undefined)) {
+            // Non-enumerable so this does not alter JSON serialization of the error.
+            Object.defineProperty(error, 'rpcCode', { value: rpcCode, enumerable: false, configurable: true })
+            Object.defineProperty(error, 'rpcMessage', { value: rpcMessage, enumerable: false, configurable: true })
+        }
     } catch (_) { /* sanitization must never mask the original failure */ }
-    return (error && error.message) ? error.message : String(error)
+    const base = (error && error.message) ? error.message : String(error)
+    if (rpcCode !== undefined || rpcMessage !== undefined) {
+        return `${base} (RPC error ${rpcCode !== undefined ? rpcCode : 'unknown'}: ${rpcMessage !== undefined ? rpcMessage : ''})`
+    }
+    return base
 }
 
 // Extract the JSON-RPC result from an axios response, surfacing the node's own
@@ -539,6 +561,10 @@ class BlockchainConnector {
         return new Promise(async (resolve, reject) => {
             let maxTries = 10
             let tries = 0
+            // Carries the last error's sanitized cause into the final rejection so a
+            // deterministic misconfiguration (401/404/DNS) is diagnosable instead of
+            // surfacing as a bare "failed after 10 attempts" line.
+            let lastErrorSummary = null
             while (tries < maxTries){
                 tries++
                 try {
@@ -552,10 +578,12 @@ class BlockchainConnector {
                     // Make the request to the node
                     const response = await this.rpcPost(data)
 
-                    // Verify if there is a result and return it
+                    // Verify if there is a result and return it. Return (not break) so
+                    // a success on the final attempt cannot fall through to the failure
+                    // guard below and inflate rpcErrors on a recovered fetch.
                     if (response.data.result) {
                         resolve(response.data.result);
-                        break
+                        return
                     } else {
                         // Tx no longer retrievable (mined/evicted between getRawMempool and this
                         // call, or an empty RPC result): resolve null so a single missing tx does
@@ -568,7 +596,7 @@ class BlockchainConnector {
                             console.log(`getRawTransaction: no result for txid ${txid} (evicted/confirmed?)`)
                         }
                         resolve(null);
-                        break
+                        return
                     }
                 } catch (error){
                     // JSON-RPC error -5 ("No such mempool or blockchain transaction") is the
@@ -591,16 +619,31 @@ class BlockchainConnector {
                     // Dogecoin v1.14 instead drops the TCP connection outright when its
                     // RPC queue fills, surfacing as an ECONNRESET/ECONNREFUSED socket error
                     // with no HTTP response at all.
-                    const isQueueFull = error.response?.data?.error?.code === -429
+                    const httpStatus = error.response?.status
+                    const rpcCode = error.response?.data?.error?.code
+                    const isQueueFull = rpcCode === -429
                         || error.code === 'ECONNRESET'
                         || error.code === 'ECONNREFUSED'
+                    const isTimeout = error.code === 'ECONNABORTED'
+                    // sanitizeRpcError scrubs error.response in place; the code/status
+                    // above were read first. Keep the sanitized cause for the final
+                    // rejection message regardless of error class.
+                    lastErrorSummary = sanitizeRpcError(error)
+                    // Deterministic faults (auth 401, 404, DNS) are neither the
+                    // eviction (-5), timeout, nor queue-full cases: the sibling RPC
+                    // methods log+surface those immediately. Match that fail-loud
+                    // contract by logging the sanitized cause on each attempt instead
+                    // of silently burning all retries.
+                    if (!isTimeout && !isQueueFull) {
+                        console.error(`getRawTransaction: attempt ${tries}/${maxTries} for txid ${txid} failed: HTTP ${httpStatus !== undefined ? httpStatus : 'n/a'} rpcCode ${rpcCode !== undefined ? rpcCode : 'n/a'}: ${lastErrorSummary}`)
+                    }
                     await this.sleep(isQueueFull ? 5000 : 500)
                 }
             }
 
             if (tries >= maxTries){
                 this.rpcErrors++
-                reject(new Error(`getRawTransaction failed after ${maxTries} attempts for txid ${txid}`))
+                reject(new Error(`getRawTransaction failed after ${maxTries} attempts for txid ${txid}${lastErrorSummary ? ': ' + lastErrorSummary : ''}`))
             }
         })
     }
