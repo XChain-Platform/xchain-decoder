@@ -80,11 +80,12 @@ const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node nee
 // Maximum compiled on-chain ACTION push, in bytes (measured before
 // bitcoin.script.decompile strips the OP_PUSHDATA prefix (see compiledDataLength).
 // This is the protocol arbiter for ACTION size: any tx whose compiled push
-// exceeds this is dropped. Canonical source of truth + the encoder's matching
-// guard: xchain-documentation/protocol/constants.js (MAX_ACTION_DATA_LENGTH) /
+// exceeds this is dropped. Vendored single source of truth: ./protocol/constants.js
+// (byte-identical to xchain-documentation/protocol/constants.js,
+// MAX_ACTION_DATA_LENGTH); the encoder's matching guard is
 // xchain-encoder validator MAX_COMPILED_ACTION_DATA_LENGTH. Kept equal by the
 // cross-service regression suite.
-const MAX_ACTION_DATA_LENGTH = 8192
+const MAX_ACTION_DATA_LENGTH = require('./protocol/constants.js').MAX_ACTION_DATA_LENGTH
 
 // Compiled size of a single script push once bitcoin.script.compile adds its
 // length prefix: a direct push opcode for <=75 bytes, OP_PUSHDATA1 (+2) for
@@ -250,14 +251,14 @@ class XChainDecoder {
 
         this.stopFlag = false
 
-        // Force the AuxPoW-stripping fetch path on for Dogecoin regardless of the
-        // AUX_POW env flag: DOGE blocks carry a merged-mining AuxPoW section between
-        // the 80-byte header and the tx count, so the plain getBlock path would hand
-        // that hex to the bitcoinjs parser and wedge/misparse at the first merged-mined
-        // block. Mirrors the same coin-derived forcing in xchain-utxo-tracker
-        // (XChainUtxoTracker.js: `coinFromNetwork(network) === 'DOGE' ? true : auxPow`)
-        // so chain identity, not operator env, decides the branch.
-        this.auxPow = String(network).toLowerCase().startsWith('dogecoin') ? true : auxPow
+        // Force the AuxPoW-stripping fetch path on for merge-mined chains regardless
+        // of the AUX_POW env flag: an 'auxpow' coin (Dogecoin) carries a merged-mining
+        // AuxPoW section between the 80-byte header and the tx count, so the plain
+        // getBlock path would hand that hex to the bitcoinjs parser and wedge/misparse
+        // at the first merged-mined block. The branch is now keyed on the coin's
+        // declared wireFormat from the canonical registry (via xchainBlockDecoder, built
+        // above), not a coin-name literal, so chain identity, not operator env, decides it.
+        this.auxPow = this.xchainBlockDecoder.wireFormat === 'auxpow' ? true : auxPow
 
         this.rpcErrors = 0
         this.parseErrors = 0

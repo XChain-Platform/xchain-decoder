@@ -1656,44 +1656,102 @@ class Database {
         }
     }
 
+    // Set-based diff of the stored mempool against the node's current mempool.
+    //  / review finding P20: the previous implementation ran
+    // `SELECT tx_hash FROM mempool_transactions` (a full-table scan) every 60s,
+    // streamed EVERY stored row into Node, and binary-searched each one against
+    // `txidList` in JS. Both the row transfer and the per-row search grew with
+    // mempool depth, so a fee-spike mempool made the poll cycle progressively
+    // more expensive. This version seeds the node's current mempool into a
+    // session-scoped temp table and does the whole diff in SQL against the
+    // unique `tx_hash` index: only the intersection ever crosses the wire.
+    //
+    // Two effects, unchanged from before:
+    //   1. stored rows whose tx_hash is no longer in the node mempool are
+    //      DELETEd (they confirmed or were evicted);
+    //   2. txids already stored are removed from `txidList` IN PLACE, so the
+    //      caller is left holding only the new arrivals to fetch and insert.
     async deleteAndCompareTxsNotInList(txidList) {
-        let deletedTxHashes = []
-        let db = await this.getConnection();
+        // Snapshot the lease ownership: inside a block transaction getConnection()
+        // hands back the shared transaction connection, which we must not release.
+        // Mempool maintenance runs on its own Database handle (M-19), so in
+        // practice ownLease is true here, but keep the guard for correctness.
+        const ownLease = (this.transactionConnection == null)
+        let connection = await this.getConnection();
 
-        const query = `
-            SELECT tx_hash AS hash
-                FROM mempool_transactions;
-        `;
+        // Bounded multi-row INSERT size: 5000 single-column rows keeps each
+        // statement well under the placeholder/packet limits even on a flood.
+        const INSERT_CHUNK = 5000
+        // A session temp table is scoped to this ONE connection. Pooled
+        // connections are reused, so it is always dropped in finally; the name is
+        // unlikely to collide with anything else on the connection.
+        const TMP = '_mempool_node_snapshot'
 
         try {
-            let rows = await db.query(query);
+            // Default temp storage engine (InnoDB) spills to disk, so a huge
+            // mempool snapshot cannot blow max_heap_table_size the way a MEMORY
+            // engine table would. Collation matches mempool_transactions.tx_hash so
+            // the JOIN uses the unique index and compares identically.
+            await connection.query(
+                'CREATE TEMPORARY TABLE IF NOT EXISTS ' + TMP + ' (' +
+                'tx_hash VARCHAR(250) CHARACTER SET utf8 COLLATE utf8_unicode_ci NOT NULL, ' +
+                'INDEX (tx_hash)' +
+                ')'
+            )
+            // A reused pooled connection may still hold a prior cycle's snapshot;
+            // clear it before seeding this cycle's node mempool.
+            await connection.query('DELETE FROM ' + TMP)
 
-            for (let nextRowIndex in rows) {
-                let nextRow = rows[nextRowIndex]
-
-                const txid = nextRow["hash"]
-                const txidIndex = bs(txidList, txid, function (element, needle) { return needle.localeCompare(element) })
-
-                if (txidIndex < 0) {
-                    deletedTxHashes.push(txid)
-                } else {
-                    txidList.splice(txidIndex, 1)
+            if (txidList.length > 0) {
+                for (let i = 0; i < txidList.length; i += INSERT_CHUNK) {
+                    const chunk = txidList.slice(i, i + INSERT_CHUNK)
+                    const placeholders = chunk.map(() => '(?)').join(',')
+                    await connection.query(
+                        'INSERT IGNORE INTO ' + TMP + ' (tx_hash) VALUES ' + placeholders,
+                        chunk
+                    )
                 }
             }
 
-            if (deletedTxHashes.length > 0) {
-                let placeholders = deletedTxHashes.map(() => '?').join(',')
-                let deleteQuery = `DELETE FROM mempool_transactions WHERE tx_hash IN (${placeholders})`
-                await db.query(deleteQuery, deletedTxHashes);
+            // (1) Delete stored rows absent from the node snapshot (anti-join).
+            // With an empty snapshot (node mempool empty) this deletes every row.
+            const deleteResult = await connection.query(
+                'DELETE m FROM mempool_transactions m ' +
+                'LEFT JOIN ' + TMP + ' s ON s.tx_hash = m.tx_hash ' +
+                'WHERE s.tx_hash IS NULL'
+            )
+            const transactionsDeleted = Number((deleteResult && deleteResult.affectedRows) || 0)
+
+            // (2) Which snapshot txids are already stored? Only the intersection is
+            // returned, never the whole table. Skip the query entirely when there
+            // is nothing to compare.
+            let presentRows = []
+            if (txidList.length > 0) {
+                presentRows = await connection.query(
+                    'SELECT s.tx_hash AS hash FROM ' + TMP + ' s ' +
+                    'JOIN mempool_transactions m ON m.tx_hash = s.tx_hash'
+                )
             }
 
-            return { transactionsDeleted: deletedTxHashes.length}
+            if (presentRows.length > 0) {
+                const present = new Set(presentRows.map((r) => r.hash))
+                // Filter preserves the caller's descending order; mutate the array
+                // in place because the caller keeps using the same reference.
+                const remaining = txidList.filter((h) => !present.has(h))
+                txidList.length = 0
+                for (const h of remaining) txidList.push(h)
+            }
+
+            return { transactionsDeleted }
         } catch (err) {
-            console.error('Error querying mempool_transactions:', err);
+            console.error('Error diffing mempool_transactions:', err);
             return { transactionsDeleted: 0 }
         } finally {
-            if (this.transactionConnection == null) {
-                await db.release()
+            // Drop the temp table so a pooled connection never leaks it into an
+            // unrelated later query, then release the lease we acquired.
+            try { await connection.query('DROP TEMPORARY TABLE IF EXISTS ' + TMP) } catch (_) {}
+            if (ownLease) {
+                await connection.release()
             }
         }
     }

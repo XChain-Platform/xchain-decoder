@@ -1127,32 +1127,83 @@ describe('Database#purgeExpiredDispensers()', () => {
 // deleteAndCompareTxsNotInList
 // ---------------------------------------------------------------------------
 
+//  / review P20: deleteAndCompareTxsNotInList now diffs the stored
+// mempool against the node's current mempool entirely in SQL via a session temp
+// table, instead of streaming every mempool_transactions row into Node. This
+// fake connection models that flow: it holds a set of currently-stored tx
+// hashes and a temp-table snapshot seeded by the INSERTs, and answers the
+// anti-join DELETE and the intersection SELECT accordingly.
+function makeMempoolConn(storedHashes) {
+    const stored   = new Set(storedHashes);
+    const snapshot = new Set();
+    const seenSql  = [];
+
+    async function query(sql, params) {
+        seenSql.push(sql);
+        if (/CREATE\s+TEMPORARY\s+TABLE/i.test(sql)) return {};
+        if (/DROP\s+TEMPORARY\s+TABLE/i.test(sql))   return {};
+        // Clear the snapshot temp table (distinct from the anti-join DELETE,
+        // which targets mempool_transactions).
+        if (/^\s*DELETE\s+FROM\s+_mempool_node_snapshot/i.test(sql)) {
+            snapshot.clear();
+            return { affectedRows: 0 };
+        }
+        if (/INSERT\s+IGNORE\s+INTO\s+_mempool_node_snapshot/i.test(sql)) {
+            for (const h of (params || [])) snapshot.add(h);
+            return { affectedRows: (params || []).length };
+        }
+        // Anti-join delete: stored rows absent from the node snapshot.
+        if (/DELETE\s+m\s+FROM\s+mempool_transactions/i.test(sql)) {
+            let deleted = 0;
+            for (const h of Array.from(stored)) {
+                if (!snapshot.has(h)) { stored.delete(h); deleted++; }
+            }
+            return { affectedRows: deleted };
+        }
+        // Intersection select: snapshot txids that are already stored.
+        if (/SELECT\s+s\.tx_hash\s+AS\s+hash\s+FROM\s+_mempool_node_snapshot/i.test(sql)) {
+            return Array.from(snapshot).filter((h) => stored.has(h)).map((h) => ({ hash: h }));
+        }
+        return [];
+    }
+
+    const conn = { query: sinon.spy(query), release: sinon.stub().resolves() };
+    const pool = { getConnection: sinon.stub().resolves(conn) };
+    return { pool, conn, stored, snapshot, seenSql };
+}
+
 describe('Database#deleteAndCompareTxsNotInList()', () => {
     afterEach(() => sinon.restore());
 
-    it('returns transactionsDeleted=0 when mempool is empty', async () => {
+    it('deletes every stored row when the node mempool is empty', async () => {
         const db = makeDb();
-        const q  = sinon.stub().resolves([]);
-        const { pool } = withConn(q);
+        const { pool } = makeMempoolConn(['aaaa', 'bbbb']);
         injectPool(db, pool);
-        const r = await db.deleteAndCompareTxsNotInList(['tx1', 'tx2']);
-        assert.deepStrictEqual(r, { transactionsDeleted: 0 });
+        // Empty node mempool → both stored rows are stale and removed.
+        const r = await db.deleteAndCompareTxsNotInList([]);
+        assert.strictEqual(r.transactionsDeleted, 2);
     });
 
-    it('removes rows not in txidList and returns count', async () => {
+    it('removes stored rows not in txidList and returns the delete count', async () => {
         const db = makeDb();
-        // First call: SELECT returns two rows; second call: DELETE
-        const q = sinon.stub()
-            .onFirstCall().resolves([
-                { hash: 'aaaa', hash_id: 1 },
-                { hash: 'bbbb', hash_id: 2 },
-            ])
-            .onSecondCall().resolves([]);
-        const { pool } = withConn(q);
+        // Stored: aaaa, bbbb. Node mempool: only aaaa → bbbb is stale.
+        const { pool } = makeMempoolConn(['aaaa', 'bbbb']);
         injectPool(db, pool);
-        // txidList contains 'aaaa' but not 'bbbb' → bbbb is deleted
         const r = await db.deleteAndCompareTxsNotInList(['aaaa']);
         assert.strictEqual(r.transactionsDeleted, 1);
+    });
+
+    it('never issues a bare full-table scan of mempool_transactions', async () => {
+        const db = makeDb();
+        const { pool, conn } = makeMempoolConn(['aaaa']);
+        injectPool(db, pool);
+        await db.deleteAndCompareTxsNotInList(['aaaa', 'cccc']);
+        const sqls = conn.query.getCalls().map((c) => String(c.args[0]));
+        // The old cost driver was `SELECT tx_hash FROM mempool_transactions` with
+        // no WHERE/JOIN. Every stored-row read now goes through the temp-table
+        // JOIN, so no such unqualified scan should be issued.
+        assert.ok(!sqls.some((s) => /FROM\s+mempool_transactions\s*;?\s*$/i.test(s.trim())),
+            'must not run an unqualified SELECT ... FROM mempool_transactions');
     });
 
     it('returns transactionsDeleted=0 on query error', async () => {
@@ -1160,21 +1211,30 @@ describe('Database#deleteAndCompareTxsNotInList()', () => {
         const q  = sinon.stub().rejects(new Error('db error'));
         const { pool } = withConn(q);
         injectPool(db, pool);
-        const r = await db.deleteAndCompareTxsNotInList([]);
+        const r = await db.deleteAndCompareTxsNotInList(['aaaa']);
         assert.deepStrictEqual(r, { transactionsDeleted: 0 });
     });
 
-    it('splices matched txids from list (mutates txidList)', async () => {
+    it('removes already-stored txids from the list in place (leaving only new arrivals)', async () => {
         const db = makeDb();
-        const q = sinon.stub()
-            .onFirstCall().resolves([{ hash: 'aaaa', hash_id: 1 }])
-            .onSecondCall().resolves([]);
-        const { pool } = withConn(q);
+        // aaaa is already stored; bbbb is a new arrival.
+        const { pool } = makeMempoolConn(['aaaa']);
         injectPool(db, pool);
-        const list = ['aaaa', 'bbbb'];
+        const list = ['bbbb', 'aaaa'];
         await db.deleteAndCompareTxsNotInList(list);
-        // 'aaaa' was found in DB and in list → spliced out
-        assert.ok(!list.includes('aaaa'));
+        // Same array reference is mutated: aaaa (already stored) dropped, bbbb kept.
+        assert.ok(!list.includes('aaaa'), 'already-stored txid removed');
+        assert.ok(list.includes('bbbb'), 'new arrival retained');
+    });
+
+    it('drops the temp table and releases the connection even on the happy path', async () => {
+        const db = makeDb();
+        const { pool, conn } = makeMempoolConn(['aaaa']);
+        injectPool(db, pool);
+        await db.deleteAndCompareTxsNotInList(['aaaa']);
+        const sqls = conn.query.getCalls().map((c) => String(c.args[0]));
+        assert.ok(sqls.some((s) => /DROP\s+TEMPORARY\s+TABLE/i.test(s)), 'temp table dropped');
+        assert.ok(conn.release.calledOnce, 'connection released');
     });
 });
 

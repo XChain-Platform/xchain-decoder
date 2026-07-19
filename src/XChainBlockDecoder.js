@@ -14,32 +14,35 @@ const bitcoinjs = require('bitcoinjs-lib');
 // output cannot wedge block decode even when the Dockerfile COPY patch is absent.
 const bufferutils_js_1 = require('./applyBufferutilsPatch');
 const transaction_js_1 = require('bitcoinjs-lib/src/transaction');
+const coins = require('./coins');
 
 const LITECOIN_HOGEX_FLAG = 0x08
 const LITECOIN_MWEB_SEGWIT_FLAG = 0x09
 
-// Coins whose block/tx wire shape this decoder explicitly handles. The
-// per-coin branches below (litecoin MWEB marker/flag stripping, dogecoin
-// AuxPoW handled upstream in BlockchainConnector.getBlockWithoutAuxPow,
-// bitcoin default) are keyed on the coin name, NOT the canonical coin
-// registry, so a newly-registered merge-mined or MWEB-style coin would be
-// fully wired for consensus params yet silently fall through to the strict
-// bitcoinjs default parser and wedge/misparse at its first special block.
-// Fail loudly at construction instead (#2262): onboarding a new coin must
-// consciously add its wire shape here (and to BlockchainConnector when it is
-// merge-mined) before the decoder will run it.
-const KNOWN_WIRE_COINS = new Set(['bitcoin', 'litecoin', 'dogecoin'])
+// Block/tx wire-serialization families this decoder actually implements. The
+// per-coin branches below (Litecoin 'mweb' marker/flag stripping, Dogecoin
+// 'auxpow' handled upstream in BlockchainConnector.getBlockWithoutAuxPow,
+// 'default' plain bitcoinjs) are keyed on the coin's declared wireFormat from
+// the canonical coin registry (src/coins) rather than a hardcoded coin-name
+// list. A newly-registered merge-mined or MWEB-style coin must declare a
+// wireFormat this decoder handles; a coin absent from the registry or carrying
+// an unimplemented family fails loudly at construction (#2262) instead of
+// silently falling through to the strict default parser and misparsing at its
+// first special block.
+const HANDLED_WIRE_FORMATS = new Set(['default', 'mweb', 'auxpow'])
 
 class XChainBlockDecoder {
 
     constructor(networkName) {
         let networkNameSplit = networkName.split("-")
         this.coin = networkNameSplit[0]
-        if (!KNOWN_WIRE_COINS.has(this.coin)) {
+        const tick = coins.FULL_NAME_TO_TICK[this.coin]
+        this.wireFormat = tick ? coins.WIRE_FORMAT[tick] : undefined
+        if (!this.wireFormat || !HANDLED_WIRE_FORMATS.has(this.wireFormat)) {
             throw new Error(
                 'XChainBlockDecoder: no block/tx wire-format contract declared for coin "' + this.coin +
-                '" (network "' + networkName + '"). Add its shape (AuxPoW/MWEB handling or bitcoin-default) ' +
-                'to KNOWN_WIRE_COINS in XChainBlockDecoder.js before onboarding the chain.')
+                '" (network "' + networkName + '"). Declare a handled wireFormat (default/mweb/auxpow) ' +
+                'on the coin in src/coins before onboarding the chain.')
         }
     }
     
@@ -48,7 +51,7 @@ class XChainBlockDecoder {
     }
 
     transactionFromHex(txHex){
-        if (this.coin === "litecoin") {
+        if (this.wireFormat === "mweb") {
             const marker = txHex.substr(8, 2)
             const flag   = txHex.substr(10, 2)
             if (
@@ -73,11 +76,11 @@ class XChainBlockDecoder {
     }
     
     blockFromBuffer(buffer){
-        switch(this.coin){
-            case "litecoin":
-                
+        switch(this.wireFormat){
+            case "mweb":
+
                 /**
-                *   This piece of code is the same as bitcoinjs-lib Block.fromBuffer with some changes for litecoin
+                *   This piece of code is the same as bitcoinjs-lib Block.fromBuffer with some changes for litecoin (MWEB)
                 */
                 if (buffer.length < 80) throw new Error('Buffer too small (< 80 bytes)');
                 const bufferReader = new bufferutils_js_1.BufferReader(buffer);

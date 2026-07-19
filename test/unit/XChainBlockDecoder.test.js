@@ -34,6 +34,15 @@ describe('XChainBlockDecoder', () => {
             assert.strictEqual(decoder.coin, 'dogecoin')
         })
 
+        // Wire-format family is resolved from the canonical coin registry
+        // (src/coins) rather than a hardcoded coin-name list, so onboarding a
+        // chain declares its parse shape in one place.
+        it('resolves wireFormat from the coin registry', () => {
+            assert.strictEqual(new XChainBlockDecoder('bitcoin-regtest').wireFormat, 'default')
+            assert.strictEqual(new XChainBlockDecoder('litecoin-mainnet').wireFormat, 'mweb')
+            assert.strictEqual(new XChainBlockDecoder('dogecoin-testnet').wireFormat, 'auxpow')
+        })
+
         // #2262: an unknown coin used to fall through silently to the strict
         // bitcoinjs default parser and wedge/misparse at its first AuxPoW/MWEB
         // block; the decoder now refuses at construction so onboarding a new
