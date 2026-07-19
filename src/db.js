@@ -239,9 +239,21 @@ class Database {
     // opts.includeManual=true also applies pending `manual` migrations (the operator
     // path: node src/migrate.js). The whole run holds a DB-scoped advisory lock so
     // concurrent processes can't apply the same file twice. Returns { applied, pending }.
+    //
+    // opts.only (string | string[]) scopes the run to specific migration filename(s):
+    // ONLY those files are applied, every other file is left untouched (an untargeted
+    // unapplied file is reported in `pending`, an untargeted applied file is ignored).
+    // This is the per-file fleet-rollout path (migrate.js --file): a single pending
+    // manual migration can be deployed to a fleet DB without a blanket migrate also
+    // applying every other pending manual migration in the tree. A scoped run is
+    // deliberately NOT gated on unrelated files' dated-prefix / checksum state, so an
+    // unrelated tree quirk can never block the targeted rollout. An unknown target
+    // (name matching no committed migration) fails loudly rather than applying nothing.
     async runMigrations(opts = {}){
         const crypto        = require('crypto');
         const includeManual = !!opts.includeManual;
+        const only          = (opts.only == null) ? null
+            : new Set([].concat(opts.only).map(s => String(s).trim()).filter(Boolean));
         const dir           = this.sqlPath + '/migrations';
         const result        = { applied: [], pending: [] };
 
@@ -249,6 +261,19 @@ class Database {
         try { files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort(); }
         catch(e){ return result; }   // no migrations dir → nothing to do
         if(!files.length) return result;
+
+        // Targeted rollout: a name that matches no committed migration is almost
+        // always a typo. Fail loudly (silently applying nothing would look like a
+        // successful no-op run) and list what IS available.
+        if(only){
+            if(only.size === 0)
+                throw new Error('runMigrations: opts.only was provided but empty; pass at least one migration filename.');
+            const known   = new Set(files);
+            const unknown = [...only].filter(n => !known.has(n));
+            if(unknown.length)
+                throw new Error('runMigrations: --file target(s) not found in ' + dir + ': ' + unknown.join(', ') +
+                    '. Available: ' + files.join(', '));
+        }
 
         const lockName = 'xchain_migrate_' + this.dbName;
         let conn = await this.getConnection();
@@ -264,6 +289,15 @@ class Database {
                 const appliedByName = new Map(appliedRows.map(r => [r.name, r.checksum]));
 
                 for(const file of files){
+                    // Scoped run (--file): touch ONLY the targeted file(s). Report an
+                    // untargeted-but-unapplied file as pending so the operator still sees
+                    // remaining work, then leave it entirely alone: no dated-prefix check,
+                    // no checksum guard, no apply. A per-file rollout must never be blocked
+                    // by an unrelated migration's state elsewhere in the tree.
+                    if(only && !only.has(file)){
+                        if(!appliedByName.has(file)) result.pending.push(file);
+                        continue;
+                    }
                     // Freeze the dated-prefix convention in code (mirrors the indexer's
                     // runner): apply order is lexical (readdirSync().sort()), so every
                     // migration filename must start with a YYYY-MM-DD- prefix to apply in

@@ -39,12 +39,16 @@ const ENV_KEYS = ['DECODER_DB_HOST', 'DECODER_DB_PORT', 'DECODER_DB_NAME',
 
 describe('migrate.js operator CLI @regression', function () {
 
-    let savedEnv, savedExitCode, exitStub, consoleErrStub, consoleLogStub;
+    let savedEnv, savedExitCode, savedArgv, exitStub, consoleErrStub, consoleLogStub;
 
     beforeEach(function () {
         savedEnv = {};
         for (const k of ENV_KEYS) { savedEnv[k] = process.env[k]; delete process.env[k]; }
         savedExitCode = process.exitCode;
+        // Pin a clean argv baseline so the CLI's --file parser sees no stray flags
+        // from the mocha invocation; individual tests append their own targeting args.
+        savedArgv = process.argv;
+        process.argv = ['node', 'migrate.js'];
         exitStub       = sinon.stub(process, 'exit');
         consoleErrStub = sinon.stub(console, 'error');
         consoleLogStub = sinon.stub(console, 'log');
@@ -53,6 +57,7 @@ describe('migrate.js operator CLI @regression', function () {
     afterEach(function () {
         sinon.restore();
         process.exitCode = savedExitCode;
+        process.argv = savedArgv;
         for (const k of ENV_KEYS) {
             if (savedEnv[k] === undefined) delete process.env[k];
             else process.env[k] = savedEnv[k];
@@ -142,5 +147,65 @@ describe('migrate.js operator CLI @regression', function () {
         assert.strictEqual(fake.poolEnded, true, 'pool closed in finally even on failure');
         const err = consoleErrStub.getCalls().map((c) => c.args[0]).join('\n');
         assert.match(err, /migrate: FAILED: .*duplicate column boom/);
+    });
+
+    it('--file: scopes the run to the named migration (passes opts.only) @regression', async function () {
+        process.env.DECODER_DB_HOST = 'db.test';
+        process.env.DECODER_DB_NAME = 'decoder_test';
+        process.env.DECODER_DB_USER = 'tester';
+        process.argv = ['node', 'migrate.js', '--file', '2026-06-13-dispensers-expiration-bigint.sql'];
+        const fake = makeFakeDb({
+            runMigrations: async () => ({ applied: ['2026-06-13-dispensers-expiration-bigint.sql'], pending: ['other.sql'] })
+        });
+        loadMigrateWith(fake.FakeDatabase);
+        await fake.done;
+        assert.strictEqual(exitStub.called, false);
+        assert.deepStrictEqual(fake.runArgs, {
+            includeManual: true,
+            only: ['2026-06-13-dispensers-expiration-bigint.sql']
+        }, 'the CLI must scope the run to the targeted file while keeping manual apply armed');
+        assert.strictEqual(fake.poolEnded, true);
+        const out = consoleLogStub.getCalls().map((c) => c.args[0]).join('\n');
+        assert.match(out, /applying ONLY targeted migration\(s\)/);
+    });
+
+    it('--file=NAME and repeated flags accumulate (comma-separated too) @regression', async function () {
+        process.env.DECODER_DB_HOST = 'db.test';
+        process.env.DECODER_DB_NAME = 'decoder_test';
+        process.env.DECODER_DB_USER = 'tester';
+        process.argv = ['node', 'migrate.js', '--file=a.sql,b.sql', '--file', 'c.sql', '-f', 'd.sql'];
+        const fake = makeFakeDb({ runMigrations: async () => ({ applied: [], pending: [] }) });
+        loadMigrateWith(fake.FakeDatabase);
+        await fake.done;
+        assert.deepStrictEqual(fake.runArgs, {
+            includeManual: true,
+            only: ['a.sql', 'b.sql', 'c.sql', 'd.sql']
+        });
+    });
+
+    it('--file with no value exits 2 before building a DB handle @regression', async function () {
+        process.env.DECODER_DB_HOST = 'db.test';
+        process.env.DECODER_DB_NAME = 'decoder_test';
+        process.env.DECODER_DB_USER = 'tester';
+        process.argv = ['node', 'migrate.js', '--file'];
+        const fake = makeFakeDb({ runMigrations: async () => ({ applied: [], pending: [] }) });
+        // process.exit is stubbed, so main() continues past the guard; assert the
+        // exit(2) signal and the actionable error fired before any migration ran.
+        loadMigrateWith(fake.FakeDatabase);
+        await fake.done;
+        assert.strictEqual(exitStub.calledWith(2), true, 'expected process.exit(2) on a valueless --file');
+        assert.match(consoleErrStub.getCalls().map((c) => c.args[0]).join('\n'),
+            /--file requires a migration filename argument/);
+    });
+
+    it('default run (no --file) still applies everything with includeManual only @regression', async function () {
+        process.env.DECODER_DB_HOST = 'db.test';
+        process.env.DECODER_DB_NAME = 'decoder_test';
+        process.env.DECODER_DB_USER = 'tester';
+        const fake = makeFakeDb({ runMigrations: async () => ({ applied: [], pending: [] }) });
+        loadMigrateWith(fake.FakeDatabase);
+        await fake.done;
+        assert.deepStrictEqual(fake.runArgs, { includeManual: true },
+            'a blanket run must NOT set opts.only');
     });
 });
