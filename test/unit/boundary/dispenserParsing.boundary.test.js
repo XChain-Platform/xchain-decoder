@@ -249,6 +249,32 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
     it('lowercase "dispenser": startsWith("DISPENSER") returns false', () => {
         assert.ok(!'dispenser|0|BTC|...'.startsWith('DISPENSER'))
     })
+
+    // A compacted `^<id>` GET_ADDRESS references the INDEXER's index_addresses id
+    // space, which the decoder cannot resolve. The decoder must NOT register a
+    // dispenser keyed on the raw token (it would never match a real payment output
+    // and would silently never dispense); it fails loud and skips the open instead.
+    it('[REGRESSION P1] DISPENSER with a compacted ^<id> GET_ADDRESS: fail-loud, not registered', () => {
+        const fields = ['DISPENSER', '0', 'BTC', '', '', '', '', 'BTC', '', '', '^123', '', '', '', '3600']
+        const decodedDataSplit = fields.join('|').split('|')
+        const getAddress = decodedDataSplit[10]
+
+        assert.strictEqual(getAddress, '^123')
+        // The guard predicate the decoder applies before insertDispenser: a present
+        // token beginning with '^' is an unresolvable compacted reference -> skip.
+        const isUnresolvedCompactedRef = getAddress && getAddress.length > 0 && getAddress.charAt(0) === '^'
+        assert.ok(isUnresolvedCompactedRef, 'a ^<id> GET_ADDRESS must be detected as an unresolved compacted ref')
+    })
+
+    // A full delegated GET_ADDRESS is NOT a compacted ref and is registered normally.
+    it('DISPENSER with a full delegated GET_ADDRESS: not treated as a compacted ref', () => {
+        const fields = ['DISPENSER', '0', 'BTC', '', '', '', '', 'BTC', '', '', 'mzBc4XEFSdzCDcTxAgf6EZXgsZWpztRhef', '', '', '', '3600']
+        const decodedDataSplit = fields.join('|').split('|')
+        const getAddress = decodedDataSplit[10]
+
+        const isUnresolvedCompactedRef = getAddress && getAddress.length > 0 && getAddress.charAt(0) === '^'
+        assert.ok(!isUnresolvedCompactedRef, 'a full address must not be flagged as a compacted ref')
+    })
 })
 
 describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {

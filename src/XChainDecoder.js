@@ -234,6 +234,14 @@ class XChainDecoder {
     constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword, auxPow, feeDestination) {
         this.network = CryptoNetworks.getBitcoinJsNetwork(network)
 
+        // Uppercase native-coin ticker ('BTC'|'DOGE'|'LTC') for this chain. This is
+        // the identity a v0 DISPENSER's GIVE_COIN/GET_COIN fields must name and the
+        // value the indexer validates against (config['COIN']); the dispenser-open
+        // gate below compares against it so the decoder only opens dispensers the
+        // indexer will accept. getBitcoinJsNetwork above already threw on an unknown
+        // key, so this cannot throw.
+        this.coinTick = CryptoNetworks.getCoinTick(network)
+
         // Net portion ('mainnet'|'testnet'|'regtest') of the "<fullname>-<network>"
         // key, for the boot-time consensus-pin verification in start(). The
         // getBitcoinJsNetwork call above already threw on an unknown key, so the
@@ -585,6 +593,26 @@ class XChainDecoder {
             }
         }
         return results
+    }
+
+    // A v0 DISPENSER open is valid for THIS chain only when BOTH coin fields name
+    // this chain's native coin. This mirrors the indexer's four format==0 checks
+    // (xchain-indexer/src/actions/dispenser.js): GIVE_COIN and GET_COIN must each be
+    // a supported COIN AND equal the local COIN. Requiring both to equal this.coinTick
+    // satisfies all four at once (the local coin is by definition supported).
+    //
+    // The decoder previously opened a dispenser whenever EITHER coin field was merely
+    // non-empty, admitting three shapes the indexer rejects outright: GIVE_COIN set
+    // with GET_COIN empty, GET_COIN set with GIVE_COIN empty, and either field naming
+    // a foreign network (e.g. a DOGE-configured decoder seeing DISPENSER|0|BTC|...).
+    // The decoder then held an open-dispenser row the indexer has no record of and
+    // reclassified every later ordinary native-coin payment to that address as a
+    // (failed) dispense. Tightening the gate keeps decoder and indexer in agreement.
+    //
+    // Only command version 0 carries these coin fields; the caller already gates this
+    // check behind commandVersion === 0, so other/future versions are unaffected.
+    dispenserOpensForThisChain(giveCoin, getCoin){
+        return giveCoin === this.coinTick && getCoin === this.coinTick
     }
 
     async parseTransaction(transaction, openDispenserAddresses, db){
@@ -1823,31 +1851,50 @@ class XChainDecoder {
                                         if (isNaN(expiration) || expiration < 0 || expiration > 4294967295) {
                                             this.parseErrors++
                                             console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[14]}'`)
-                                        } else if ((getCoin != "") || (giveCoin != "")){
-                                            // The dispenser operates on GET_ADDRESS when a delegated
-                                            // address is given, otherwise on the tx SOURCE (indexer
-                                            // default). The indexer matches dispense triggers on this
-                                            // operating address (get_address_id), so the decoder must
-                                            // register and gate on the SAME key or dispenses paid to a
-                                            // delegated address are never emitted.
-                                            const operatingAddress = (getAddress && getAddress.length > 0)
-                                                ? getAddress
-                                                : parseResult["source"]
-                                            if (!(await this.db.insertDispenser({
-                                                txIndex: lastProcessedTxIndex,
-                                                address: operatingAddress,
-                                                expiration: expiration
-                                            }))){
-                                                // insertDispenser's error path already rolled the block back.
-                                                await resetAfterRollback()
-                                                continue main_parsing
+                                        } else if (this.dispenserOpensForThisChain(giveCoin, getCoin)){
+                                            if (getAddress && getAddress.length > 0 && getAddress.charAt(0) === "^"){
+                                                // Fail loud on a compacted `^<id>` GET_ADDRESS. This is a
+                                                // reference into the INDEXER's index_addresses id space,
+                                                // which the decoder cannot resolve (its own index_addresses
+                                                // uses a different, AUTO_INCREMENT id space). Registering a
+                                                // dispenser under the raw `^<id>` token would key it on a
+                                                // string that never equals a real payment-output address,
+                                                // so the dispenser would silently never dispense (and a
+                                                // junk index_addresses row would be created). The SDK no
+                                                // longer compacts DISPENSER.GET_ADDRESS, so any token
+                                                // reaching here is a third-party composer or a historical
+                                                // replay: surface it instead of registering a dead
+                                                // dispenser. Do NOT roll the block back - the tx is
+                                                // otherwise valid, this delegated dispenser is simply not
+                                                // registered.
+                                                this.parseErrors++
+                                                console.error(`Skipping dispenser in tx ${nextTransactionHash} (txIndex ${lastProcessedTxIndex}): unresolved compacted GET_ADDRESS reference '${getAddress}' - the decoder cannot resolve ^<id> address references, so this delegated dispenser was NOT registered`)
+                                            } else {
+                                                // The dispenser operates on GET_ADDRESS when a delegated
+                                                // address is given, otherwise on the tx SOURCE (indexer
+                                                // default). The indexer matches dispense triggers on this
+                                                // operating address (get_address_id), so the decoder must
+                                                // register and gate on the SAME key or dispenses paid to a
+                                                // delegated address are never emitted.
+                                                const operatingAddress = (getAddress && getAddress.length > 0)
+                                                    ? getAddress
+                                                    : parseResult["source"]
+                                                if (!(await this.db.insertDispenser({
+                                                    txIndex: lastProcessedTxIndex,
+                                                    address: operatingAddress,
+                                                    expiration: expiration
+                                                }))){
+                                                    // insertDispenser's error path already rolled the block back.
+                                                    await resetAfterRollback()
+                                                    continue main_parsing
+                                                }
+                                                // Keep the in-memory open-dispenser set current so a
+                                                // later transaction in this same block that pays this
+                                                // freshly-opened dispenser is still recognized as a
+                                                // dispense (mirrors the old per-output DB lookup).
+                                                if (operatingAddress)
+                                                    openDispenserAddresses.add(operatingAddress)
                                             }
-                                            // Keep the in-memory open-dispenser set current so a
-                                            // later transaction in this same block that pays this
-                                            // freshly-opened dispenser is still recognized as a
-                                            // dispense (mirrors the old per-output DB lookup).
-                                            if (operatingAddress)
-                                                openDispenserAddresses.add(operatingAddress)
                                         }
                                     }
                                 }
