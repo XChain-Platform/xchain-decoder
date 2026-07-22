@@ -340,12 +340,25 @@ describe('BlockchainConnector', () => {
             assert.strictEqual(result, blockHex)
         })
 
-        it('should throw on errors', async () => {
-            axiosStub.rejects(new Error('network'))
+        it('should propagate an RPC error unwrapped (item 2731)', async () => {
+            // The catch-all used to rewrap every throw, transport faults included, in a
+            // bare Error. That discarded error.code, so the decoder counted node overload
+            // toward the malformed-AuxPoW escalation and pointed a per-tx reassembly
+            // fan-out at the node that was already saturated. RPC faults now propagate
+            // untouched; only header-strip/parse faults are wrapped, and those are tagged
+            // auxPowParseFailure (covered in auxpowReassembly.test.js).
+            const rpcErr = new Error('network')
+            rpcErr.code = 'ECONNRESET'
+            axiosStub.rejects(rpcErr)
 
             await assert.rejects(
                 () => connector.getBlockWithoutAuxPow('hash'),
-                { message: /problems getting a block hex without auxpow/ }
+                (err) => {
+                    assert.strictEqual(err.message, 'network', 'original message preserved')
+                    assert.strictEqual(err.code, 'ECONNRESET', 'original error.code preserved')
+                    assert.ok(!err.auxPowParseFailure, 'a transport fault is not a content fault')
+                    return true
+                }
             )
         })
 

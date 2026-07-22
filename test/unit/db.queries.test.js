@@ -193,12 +193,31 @@ describe('Database#getBlockByIndex()', () => {
         assert.strictEqual(await db.getBlockByIndex(99), null);
     });
 
-    it('returns null on query error', async () => {
+    it('[REGRESSION P0] throws (never returns the missing-row sentinel) after retries on persistent query error', async () => {
+        // Item 2459: returning null on a query error made a failed read
+        // indistinguishable from "no such row", and verifyReorg's backward walk reads
+        // a null row as "table exhausted". One transient DB error therefore ended the
+        // rollback walk early and reported the reorg reconciled with orphan blocks
+        // still stored. Same retry-then-throw contract as getLastBlockIndex.
         const db = makeDb();
         const q  = sinon.stub().rejects(new Error('fail'));
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        sinon.stub(db, 'sleep').resolves();
+        await assert.rejects(() => db.getBlockByIndex(1), /getBlockByIndex\(1\) failed after/);
+        assert.ok(conn.query.callCount >= 2, 'should retry before giving up');
+    });
+
+    it('recovers and returns the row when a transient error clears on retry', async () => {
+        const block = { block_index: 7, block_hash: 'def' };
+        const db = makeDb();
+        const q  = sinon.stub();
+        q.onFirstCall().rejects(new Error('transient'));
+        q.onSecondCall().resolves([block]);
         const { pool } = withConn(q);
         injectPool(db, pool);
-        assert.strictEqual(await db.getBlockByIndex(1), null);
+        sinon.stub(db, 'sleep').resolves();
+        assert.deepStrictEqual(await db.getBlockByIndex(7), block);
     });
 
     it('passes blockIndex as param', async () => {

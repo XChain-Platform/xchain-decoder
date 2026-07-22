@@ -85,7 +85,33 @@ const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node nee
 // MAX_ACTION_DATA_LENGTH); the encoder's matching guard is
 // xchain-encoder validator MAX_COMPILED_ACTION_DATA_LENGTH. Kept equal by the
 // cross-service regression suite.
+//
+// What this cap does NOT bound (item 2740): the STORED record. Both gates
+// (confirmed-block and mempool) compare compiledDataLength, the on-chain wire
+// bytes, and canonicalizeActionPayload runs AFTER the gate, so an expanding alias
+// grows the persisted payload past this number: CAST -> BROADCAST adds 5 bytes,
+// MSG -> MESSAGE 4, ADDR -> ADDRESS and DROP -> AIRDROP 3 each. A payload compiled
+// to exactly 8192 bytes is therefore stored as an 8197-byte BROADCAST string. That
+// is intended and harmless here (transactions.data is MEDIUMTEXT, nothing
+// truncates), and it is deliberately NOT "fixed" by re-measuring the canonical
+// buffer at the gate: the decoder is the protocol arbiter, so tightening this gate
+// would drop transactions whose on-chain push is legal and that other nodes accept,
+// forking the fleet and retroactively invalidating already-decoded near-cap alias
+// history. Moving the measurement point is a consensus change and would need a
+// flag-day (a *_ACTIVATION entry in ./protocol/constants.js keyed on block height
+// and network, deployed fleet-wide before its anchor), not an in-place edit.
+// aliasExpansionBoundary.test.js pins the measured behavior.
 const MAX_ACTION_DATA_LENGTH = require('./protocol/constants.js').MAX_ACTION_DATA_LENGTH
+
+// Bytes the OP_PUSHDATA2 prefix adds to a compiled push (1-byte opcode + 2-byte
+// little-endian length), i.e. the overhead for any payload above 255 bytes.
+// Vendored single source of truth: ./protocol/constants.js (byte-identical to
+// xchain-documentation/protocol/constants.js, OP_RETURN_PUSH_OVERHEAD); the
+// encoder's copy is xchain-encoder/src/validator.js. Bound to the canonical NAME
+// rather than inlined as a literal so a cross-service drift check can key on the
+// symbol the way it already can for MAX_ACTION_DATA_LENGTH. Value is unchanged
+// (3): compiledPushSize below computed the same +3 inline before this binding.
+const OP_RETURN_PUSH_OVERHEAD = require('./protocol/constants.js').OP_RETURN_PUSH_OVERHEAD
 
 // Compiled size of a single script push once bitcoin.script.compile adds its
 // length prefix: a direct push opcode for <=75 bytes, OP_PUSHDATA1 (+2) for
@@ -94,11 +120,13 @@ const MAX_ACTION_DATA_LENGTH = require('./protocol/constants.js').MAX_ACTION_DAT
 // the protocol-arbiter side of the encoder's identical compiledPushSize
 // (xchain-encoder/src/validator.js), and the compiledPushSizeConformance test
 // pins both against bitcoin.script.compile byte-for-byte across the 75/255
-// prefix boundaries. Do not fork this logic inline again.
+// prefix boundaries. Do not fork this logic inline again. Only the OP_PUSHDATA2
+// branch names a constant: the +1/+2 branches are different opcodes that
+// OP_RETURN_PUSH_OVERHEAD does not describe.
 function compiledPushSize(byteLength){
     if (byteLength <= 75)  return byteLength + 1   // direct push opcode
     if (byteLength <= 255) return byteLength + 2   // OP_PUSHDATA1
-    return byteLength + 3                           // OP_PUSHDATA2
+    return byteLength + OP_RETURN_PUSH_OVERHEAD    // OP_PUSHDATA2
 }
 
 const VALID_ACTION_NAMES = new Set([
@@ -262,6 +290,14 @@ class XChainDecoder {
 
         this.rpcErrors = 0
         this.parseErrors = 0
+
+        // Consecutive block-fetch failures at _fetchErrorHeight. _fetchErrorCount counts
+        // every failure (operator visibility); _auxPowParseErrorCount counts only the
+        // AuxPoW-header-strip content faults that may escalate to  per-tx
+        // reassembly (item 2731). Both reset on a height change and on any success.
+        this._fetchErrorHeight = null
+        this._fetchErrorCount = 0
+        this._auxPowParseErrorCount = 0
     }
     
     async sleep(ms) {
@@ -925,8 +961,26 @@ class XChainDecoder {
         }
 
         while (thereAreDifferences){
-            let lastBlockIndex = await this.db.getLastBlockIndex()
-            let lastBlock = await this.db.getBlockByIndex(lastBlockIndex)
+            let lastBlockIndex
+            let lastBlock
+            try {
+                lastBlockIndex = await this.db.getLastBlockIndex()
+                lastBlock = await this.db.getBlockByIndex(lastBlockIndex)
+            } catch (err){
+                // A FAILED read is not a walk terminator (item 2459). Both helpers retry
+                // internally and then throw; letting that throw reach the `!lastBlock`
+                // guard below (as the old error-null did) ended the rollback early and
+                // returned "reorg reconciled" with orphan blocks still above the fork
+                // point, and letting it escape verifyReorg would stop the parse loop
+                // outright. Sleep and re-walk instead, exactly like the getBlockHash
+                // catch further down: a DB outage is infrastructure, and this walk must
+                // not finish until it has actually reconciled. Deliberately NOT a
+                // REORG_HALT: that marker blocks every later reorg until an operator
+                // clears it, which is the wrong response to a transient read fault.
+                console.error('reorg: failed to read the last stored block; retrying the walk...', err)
+                await this.sleep(3000)
+                continue
+            }
 
             // Stop the backward walk once the table is exhausted (getLastBlockIndex
             // returns -1 on an empty table, so getBlockByIndex(-1) yields null) or once
@@ -1019,17 +1073,22 @@ class XChainDecoder {
     }
 
     // Fetch the (AuxPoW-free) raw block hex for the height the main loop is on.
-    // Normal path: getBlock, or getBlockWithoutAuxPow on an AuxPoW chain. Once
-    // this height has failed AUXPOW_REASSEMBLE_AFTER consecutive times on an
-    // AuxPoW chain, fall back to getBlockReassembled : a block whose
-    // AuxPoW section cannot be traversed would otherwise wedge this decoder at
-    // this height forever.
+    // Normal path: getBlock, or getBlockWithoutAuxPow on an AuxPoW chain. Once the
+    // AuxPoW header strip has failed AUXPOW_REASSEMBLE_AFTER consecutive times at
+    // this height, fall back to getBlockReassembled : a block whose AuxPoW
+    // section cannot be traversed would otherwise wedge this decoder here forever.
+    //
+    // Item 2731: this reads _auxPowParseErrorCount, NOT the all-errors
+    // _fetchErrorCount. Escalation must fire on a CONTENT fault only. The
+    // reassembly path issues one getrawtransaction per tx in the block, so
+    // escalating on transport faults pointed a per-tx fan-out at the node whose
+    // unavailability caused the failures in the first place.
     async fetchBlockHex(blockHash, blockHeight){
         if (!this.auxPow) {
             return this.connector.getBlock(blockHash)
         }
-        if (this._fetchErrorCount >= AUXPOW_REASSEMBLE_AFTER) {
-            console.error('Block fetch at height ' + blockHeight + ' failed ' + this._fetchErrorCount +
+        if (this._auxPowParseErrorCount >= AUXPOW_REASSEMBLE_AFTER) {
+            console.error('AuxPoW header strip at height ' + blockHeight + ' failed ' + this._auxPowParseErrorCount +
                 ' consecutive times; falling back to per-tx block reassembly (malformed-AuxPoW recovery, ).')
             return this.connector.getBlockReassembled(blockHash)
         }
@@ -1334,16 +1393,34 @@ class XChainDecoder {
                 // parseErrors so the stall is visible to monitoring, and on an AuxPoW
                 // chain fetchBlockHex switches to per-tx block reassembly, which
                 // recovers the identical pure block without touching the AuxPoW bytes.
+                //
+                // Item 2731: TWO counters, because they answer different questions.
+                // _fetchErrorCount counts EVERY consecutive failure at this height and
+                // exists purely for operator visibility (the parseErrors bump below), so
+                // a stall stays observable on non-AuxPoW chains too. Only
+                // _auxPowParseErrorCount, which counts content faults, drives the 
+                // reassembly escalation in fetchBlockHex.
                 if (this._fetchErrorHeight !== nextBlockHeight) {
                     this._fetchErrorHeight = nextBlockHeight
                     this._fetchErrorCount = 0
+                    this._auxPowParseErrorCount = 0
                 }
                 try {
                     nextBlockHash = await this.connector.getBlockHash(nextBlockHeight)
                     nextBlockHex = await this.fetchBlockHex(nextBlockHash, nextBlockHeight)
                     this._fetchErrorCount = 0
+                    this._auxPowParseErrorCount = 0
                 } catch (e){
                     this._fetchErrorCount++
+                    // Only a fault in the AuxPoW header strip is evidence that THIS BLOCK's
+                    // bytes are the problem; getBlockWithoutAuxPow tags those (and only
+                    // those) with auxPowParseFailure. A transport fault, which on a
+                    // Dogecoin 1.14 node under RPC-queue pressure arrives as a bare
+                    // ECONNRESET/ECONNREFUSED socket error, propagates untagged and must
+                    // not push this height toward per-tx reassembly.
+                    if (e && e.auxPowParseFailure) {
+                        this._auxPowParseErrorCount++
+                    }
                     if (this._fetchErrorCount === 5) {
                         this.parseErrors++
                     }
@@ -1376,14 +1453,27 @@ class XChainDecoder {
 
                 //verify if there is an reorg
                 if (nextBlockHeight > this.startBlockIndex){
-                    let previousBlock = await this.db.getBlockByIndex(nextBlockHeight - 1)
+                    let previousBlock = null
+                    try {
+                        previousBlock = await this.db.getBlockByIndex(nextBlockHeight - 1)
+                    } catch (err){
+                        // Since item 2459 getBlockByIndex retries internally and THROWS when
+                        // the read never succeeds, the two cases the old conflated null
+                        // covered are now distinct. Both still warrant the same response
+                        // here: retry this height. The throw must not escape start(), which
+                        // would permanently stop the parse loop (api.js only logs the
+                        // rejection). Same log prefix as the missing-row branch below so the
+                        // existing retry regression coverage still matches.
+                        console.error(`Could not load previous block ${nextBlockHeight - 1} for reorg check, retrying...`, err)
+                        await this.sleep(3000)
+                        continue
+                    }
 
-                    // getBlockByIndex returns null both for a genuinely-missing row and
-                    // for a caught DB error. A null here previously dereferenced straight
-                    // into `previousBlock.block_hash` (TypeError), escaped start(), and
-                    // permanently stopped the parse loop (api.js only logs the rejection).
-                    // Treat null as transient and retry this height, matching the
-                    // block-fetch error path above.
+                    // A null now means the row is genuinely absent (never a DB error). That
+                    // still previously dereferenced straight into `previousBlock.block_hash`
+                    // (TypeError), escaped start(), and permanently stopped the parse loop.
+                    // Treat it as transient and retry this height, matching the block-fetch
+                    // error path above.
                     if (!previousBlock){
                         console.error(`Could not load previous block ${nextBlockHeight - 1} for reorg check, retrying...`)
                         await this.sleep(3000)
@@ -2045,6 +2135,9 @@ module.exports.MAX_ACTION_DATA_LENGTH = MAX_ACTION_DATA_LENGTH
 // Exported for the compiled-push-size conformance test, which pins this formula
 // against bitcoin.script.compile and the encoder's identical helper.
 module.exports.compiledPushSize = compiledPushSize
+// Exported so the same conformance test can pin the OP_PUSHDATA2 overhead by NAME
+// against the canonical protocol constant (item 2687).
+module.exports.OP_RETURN_PUSH_OVERHEAD = OP_RETURN_PUSH_OVERHEAD
 // Exported so a regression test can pin it >= the deepest per-chain reorg window.
 module.exports.DISPENSER_EXPIRE_SAFE_DEPTH = DISPENSER_EXPIRE_SAFE_DEPTH
 // Exported so the funding-fee-output collision regression test can assert attributed

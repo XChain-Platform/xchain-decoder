@@ -1232,23 +1232,40 @@ class Database {
             WHERE block_index = ?;
         `;
         
-        let connection = await this.getConnection()
-        
-        try {
-            const rows = await connection.query(query, [blockIndex])
-            if (rows.length > 0){
-                return rows[0]
-            } else {
-                return null
+        // Retry-then-throw, same rationale as getLastBlockIndex/getLastTxIndex above
+        // (item 2459). The old `catch { return null }` made a failed query
+        // indistinguishable from "no such row", and the two callers that decide state
+        // on that value read the conflated null as data:
+        //   - verifyReorg's backward walk treats a null row as "table exhausted",
+        //     so ONE failed read ended the rollback walk and returned "reorg
+        //     reconciled" while orphan blocks were still stored above the fork point
+        //     (the same failure the getLastBlockIndex comment above records);
+        //   - the parse loop's reorg trigger retried the height, which was right for
+        //     an error and wrong-but-harmless for a genuinely missing row.
+        // After this change null means exactly "no such row"; a read that never
+        // succeeds throws, and each caller decides what to do with the failure.
+        const MAX_ATTEMPTS = 5
+        let lastErr = null
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++){
+            let connection = await this.getConnection()
+            try {
+                const rows = await connection.query(query, [blockIndex])
+                if (rows.length > 0){
+                    return rows[0]
+                } else {
+                    return null
+                }
+            } catch (err) {
+                lastErr = err
+                console.error(`Error selecting block by index ${blockIndex} (attempt ${attempt}/${MAX_ATTEMPTS}):`, err);
+            } finally {
+                if (this.transactionConnection == null){
+                    await connection.release()
+                }
             }
-        } catch (err) {
-            console.error('Error selecting max block height:', err);
-            return null
-        } finally {
-            if (this.transactionConnection == null){
-                await connection.release()
-            }
+            if (attempt < MAX_ATTEMPTS) await this.sleep(1000)
         }
+        throw new Error('getBlockByIndex(' + blockIndex + ') failed after ' + MAX_ATTEMPTS + ' attempts: ' + (lastErr && lastErr.message))
     }
     
     async insertBlock(block) {

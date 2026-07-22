@@ -425,11 +425,21 @@ class BlockchainConnector {
         throw new Error("There were problems getting a block header. ")
     }
 
+    // Item 2731: the RPC fetches below are deliberately OUTSIDE the try. A transport
+    // fault (a Dogecoin 1.14 node dropping the TCP connection when its RPC queue fills,
+    // a node restart, a network blip) must propagate unwrapped, with error.code intact,
+    // so callers can tell it apart from a block whose AuxPoW section cannot be
+    // traversed. The old catch-all wrapped every throw in a bare Error, discarding
+    // error.code, and the decoder counted the result toward the malformed-AuxPoW
+    // escalation: ~15s of node unavailability flipped it into per-tx block reassembly
+    // aimed at the node that was already saturated. Only the header-strip/parse block
+    // is wrapped now, and its errors carry auxPowParseFailure = true, which is the
+    // signal that escalation actually wants.
     async getBlockWithoutAuxPow(blockhash) {
-        try {
-            let blockHeaderHex = await this.getBlockHeader(blockhash, true)
-            let blockHex = await this.getBlock(blockhash, true)
+        let blockHeaderHex = await this.getBlockHeader(blockhash, true)
+        let blockHex = await this.getBlock(blockhash, true)
 
+        try {
             // Dogecoin Core 1.14.x getblockheader always returns the pure 80-byte header
             // (160 hex chars) regardless of whether the block is merge-mined. When the
             // header is longer than 160 chars the legacy path (length-based strip) works;
@@ -458,7 +468,12 @@ class BlockchainConnector {
 
             return blockHex
         } catch (err) {
-            throw new Error("There were problems getting a block hex without auxpow. " + err.message)
+            // Content fault: the bytes this node served cannot be traversed. Tag it so
+            // fetchBlockHex escalates to getBlockReassembled on THIS signal only.
+            const parseErr = new Error("There were problems getting a block hex without auxpow. " + err.message)
+            parseErr.auxPowParseFailure = true
+            parseErr.cause = err
+            throw parseErr
         }
     }
 

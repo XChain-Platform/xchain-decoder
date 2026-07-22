@@ -151,6 +151,62 @@ describe('Security: Error Log Sanitization', () => {
                 'the re-thrown error must have its config.auth scrubbed'
             )
         })
+
+        // Item 2731 made getBlockWithoutAuxPow propagate RPC faults UNWRAPPED so the
+        // decoder can read error.code. Until then the rewrap incidentally hid the axios
+        // config; the safety now rests entirely on sanitizeRpcError scrubbing the error
+        // in place inside getBlockHeader/getBlock before they rethrow. Lock that, or the
+        // classification fix becomes a credential leak.
+        it('[REGRESSION P0] does not leak the RPC password through the unwrapped getBlockWithoutAuxPow path', async () => {
+            const util = require('util')
+            const axios = require('axios')
+            const BlockchainConnector = require('../../src/BlockchainConnector.js')
+            const FAKE_RPC_PASSWORD = 'FAKEPASS_must_never_be_logged_7b1a'
+
+            const err = new Error('Request failed with status code 401')
+            err.code = 'ERR_BAD_REQUEST'
+            err.config = {
+                auth: { username: 'rpcuser', password: FAKE_RPC_PASSWORD },
+                headers: { Authorization: 'Basic ' + Buffer.from('rpcuser:' + FAKE_RPC_PASSWORD).toString('base64') }
+            }
+            err.request = { _header: 'POST / HTTP/1.1\r\nAuthorization: Basic ' + Buffer.from('rpcuser:' + FAKE_RPC_PASSWORD).toString('base64') + '\r\n' }
+            err.response = { status: 401, data: 'unauthorized', config: err.config }
+
+            const connector = new BlockchainConnector('127.0.0.1', 8332, 'rpcuser', FAKE_RPC_PASSWORD)
+
+            const originalPost = axios.post
+            const originalError = console.error
+            const logs = []
+            axios.post = async () => { throw err }
+            console.error = (...args) => {
+                logs.push(args.map(a => (typeof a === 'string' ? a : util.inspect(a, { depth: 8 }))).join(' '))
+            }
+
+            let thrown
+            try {
+                await connector.getBlockWithoutAuxPow('hash')
+            } catch (e) {
+                thrown = e
+            } finally {
+                axios.post = originalPost
+                console.error = originalError
+            }
+
+            const combined = logs.join('\n')
+            assert.ok(thrown, 'the failing RPC should propagate an error')
+            assert.ok(
+                !combined.includes(FAKE_RPC_PASSWORD),
+                'the RPC password must never appear in connector error logs (got: ' + combined + ')'
+            )
+            assert.ok(
+                !util.inspect(thrown, { depth: 8 }).includes(FAKE_RPC_PASSWORD),
+                'the propagated error must not carry the RPC password'
+            )
+            assert.strictEqual(
+                thrown.config && thrown.config.auth, undefined,
+                'the propagated error must have its config.auth scrubbed'
+            )
+        })
     })
 
     describe('api.js security headers', () => {

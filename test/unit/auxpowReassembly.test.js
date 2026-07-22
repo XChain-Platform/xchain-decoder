@@ -150,7 +150,7 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
                 getBlockWithoutAuxPow: async () => { calls.push('strip'); return 'aa' },
                 getBlockReassembled: async () => { calls.push('reassemble'); return 'bb' },
             })
-            decoder._fetchErrorCount = AUXPOW_REASSEMBLE_AFTER - 1
+            decoder._auxPowParseErrorCount = AUXPOW_REASSEMBLE_AFTER - 1
             assert.strictEqual(await decoder.fetchBlockHex('hash', 100), 'aa')
             assert.deepStrictEqual(calls, ['strip'])
         })
@@ -161,7 +161,7 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
                 getBlockWithoutAuxPow: async () => { calls.push('strip'); throw new Error('malformed AuxPoW') },
                 getBlockReassembled: async () => { calls.push('reassemble'); return 'bb' },
             })
-            decoder._fetchErrorCount = AUXPOW_REASSEMBLE_AFTER
+            decoder._auxPowParseErrorCount = AUXPOW_REASSEMBLE_AFTER
             assert.strictEqual(await decoder.fetchBlockHex('hash', 100), 'bb')
             assert.deepStrictEqual(calls, ['reassemble'])
         })
@@ -172,9 +172,85 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
                 getBlock: async () => { calls.push('getBlock'); return 'cc' },
                 getBlockReassembled: async () => { calls.push('reassemble'); return 'bb' },
             })
-            decoder._fetchErrorCount = AUXPOW_REASSEMBLE_AFTER + 10
+            decoder._auxPowParseErrorCount = AUXPOW_REASSEMBLE_AFTER + 10
             assert.strictEqual(await decoder.fetchBlockHex('hash', 100), 'cc')
             assert.deepStrictEqual(calls, ['getBlock'])
+        })
+
+        // Item 2731: transport faults must never reach the escalation counter. A
+        // Dogecoin 1.14 node that drops the TCP connection when its RPC queue fills
+        // surfaces as a bare ECONNRESET; escalating on that pointed getBlockReassembled's
+        // per-tx getrawtransaction fan-out at the very node that was already saturated.
+        it('does not reassemble when transport faults, not content faults, drove the count', async function () {
+            const calls = []
+            const decoder = makeDecoder(true, {
+                getBlockWithoutAuxPow: async () => { calls.push('strip'); return 'aa' },
+                getBlockReassembled: async () => { calls.push('reassemble'); return 'bb' },
+            })
+            // Every consecutive failure at this height was transport, so the all-errors
+            // counter is way past the threshold and the content counter is still zero.
+            decoder._fetchErrorCount = AUXPOW_REASSEMBLE_AFTER + 20
+            decoder._auxPowParseErrorCount = 0
+            assert.strictEqual(await decoder.fetchBlockHex('hash', 100), 'aa')
+            assert.deepStrictEqual(calls, ['strip'], 'a transport-fault streak must not escalate')
+        })
+    })
+
+    // Item 2731: the classification seam itself. getBlockWithoutAuxPow used to wrap
+    // every throw (RPC included) in a bare Error, discarding error.code, so the
+    // decoder could not tell node overload from a malformed block.
+    describe('getBlockWithoutAuxPow fault classification', function () {
+        function connErr(code) {
+            const e = new Error(code)
+            e.code = code
+            return e
+        }
+
+        it('propagates an RPC transport fault unwrapped, with error.code intact', async function () {
+            const connector = makeConnector({
+                getBlockHeader: async () => { throw connErr('ECONNRESET') },
+                getBlock: async () => { throw new Error('must not be reached') },
+            })
+            await assert.rejects(
+                () => connector.getBlockWithoutAuxPow('hash'),
+                (err) => {
+                    assert.strictEqual(err.code, 'ECONNRESET', 'error.code must survive')
+                    assert.ok(!err.auxPowParseFailure, 'a transport fault is not a content fault')
+                    return true
+                }
+            )
+        })
+
+        it('propagates a getBlock transport fault unwrapped too', async function () {
+            const connector = makeConnector({
+                getBlockHeader: async () => HEADER_HEX,
+                getBlock: async () => { throw connErr('ECONNREFUSED') },
+            })
+            await assert.rejects(
+                () => connector.getBlockWithoutAuxPow('hash'),
+                (err) => {
+                    assert.strictEqual(err.code, 'ECONNREFUSED')
+                    assert.ok(!err.auxPowParseFailure)
+                    return true
+                }
+            )
+        })
+
+        it('tags an untraversable AuxPoW section as a content fault', async function () {
+            // AuxPoW version bit set (0x100) but the AuxPoW section is truncated, so
+            // skipAuxPow throws inside the strip block.
+            const connector = makeConnector({
+                getBlockHeader: async () => HEADER_HEX,
+                getBlock: async () => '04016200' + '11'.repeat(76) + 'ff',
+            })
+            await assert.rejects(
+                () => connector.getBlockWithoutAuxPow('hash'),
+                (err) => {
+                    assert.strictEqual(err.auxPowParseFailure, true, 'content fault must be tagged')
+                    assert.ok(err.cause, 'the original parse error is preserved as cause')
+                    return true
+                }
+            )
         })
     })
 })

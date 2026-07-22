@@ -97,4 +97,25 @@ describe('compiled-push-size arbiter conformance', function () {
             assert.strictEqual(v.MAX_COMPILED_ACTION_DATA_LENGTH, XChainDecoder.MAX_ACTION_DATA_LENGTH);
         });
     });
+
+    // Item 2687: the OP_PUSHDATA2 overhead used to be a bare `+ 3` literal here, so a
+    // name-keyed cross-service drift check found the canonical symbol only in
+    // xchain-documentation. The decoder now binds the canonical name; these cases pin
+    // that the binding did not change the arithmetic (a named constant that shifts a
+    // value would be a consensus bug, not a cleanup).
+    describe('OP_RETURN_PUSH_OVERHEAD is name-keyed and value-identical', function () {
+
+        it('equals the vendored canonical protocol constant', function () {
+            const C = require('../../src/protocol/constants.js');
+            assert.strictEqual(XChainDecoder.OP_RETURN_PUSH_OVERHEAD, C.OP_RETURN_PUSH_OVERHEAD);
+            assert.strictEqual(XChainDecoder.OP_RETURN_PUSH_OVERHEAD, 3);
+        });
+
+        it('is exactly what compiledPushSize adds above the OP_PUSHDATA1 ceiling', function () {
+            for (const n of [256, 257, 1000, 8189, 8190]) {
+                assert.strictEqual(pushSize(n) - n, XChainDecoder.OP_RETURN_PUSH_OVERHEAD,
+                    `compiledPushSize(${n}) must add exactly OP_RETURN_PUSH_OVERHEAD`);
+            }
+        });
+    });
 });

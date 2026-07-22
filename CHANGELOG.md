@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Bind `OP_RETURN_PUSH_OVERHEAD` by name from the vendored constants, with a conformance test pinning the value against what `compiledPushSize` adds ().
+
 ### Changed
 - Consolidated all migrations under `src/sql/migrations/` (the only directory the runner reads) and deleted the stale root `migrations/` duplicates, one of which shipped the pre-fix widen-ids script that operator docs pointed at and failed with FK error 1833 on legacy databases.
+- Document that MAX_ACTION_DATA_LENGTH bounds the wire form only, with a boundary test pinning alias expansion at the ceiling ().
 
 ### Fixed
 - P2SH/P2WSH reveal fee outputs: the native-coin fee output attributed from a reveal's funding (commit) transaction is now stored at `vout + FUNDING_VOUT_BASE` under the reveal's `tx_index`, a domain disjoint from the reveal tx's own vouts. Previously it kept the funding tx's raw vout and could collide on the `transaction_outputs` `(tx_index, vout)` primary key with a reveal-tx dispense/COINPAY output at the same vout number; the duplicate insert was silently dropped, so the indexer saw no fee output and wrongly rejected the action on LTC/DOGE (or fell back to XCHAIN balance deduction on BTC) even though the fee was paid on-chain. Forward-only: block ranges already processed with a dropped fee row must be re-indexed to recover them.
@@ -18,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `getAllOpenDispenserAddresses` returns null on query error so a failed read can no longer decode a block against a silently-empty dispenser set.
 - The `health` and `GET /status` probes use a new `db.ping()` on a dedicated pooled connection; they previously grabbed (and released!) the block loop's open transaction connection mid-block, letting any monitor poll break per-block atomicity.
 - `DISPENSER_EXPIRE_SAFE_DEPTH` raised from a flat 100 to 120 so it covers the deepest per-chain reorg-recovery window (DOGE = 120, per `xchain-utxo-tracker` `DEFAULT_UNDO_BLOCKS`); at 100 a soft-expired dispenser was hard-purged before a legal in-window DOGE reorg could restore it, permanently losing a money-bearing dispenser on the reorged node. Pinned by a regression test.
+- `getBlockByIndex` retries then throws instead of returning null on a DB error, so a transient fault can no longer end verifyReorg's rollback walk early and report a false "rollback complete" ().
+- Transport faults no longer count toward the AuxPoW-reassembly escalation, so node overload is not misread as a malformed block and amplified into a per-tx refetch storm ().
 
 ## [1.11.16] - 2026-07-16
 
