@@ -1,0 +1,7 @@
+# Siblings the CI gate checks out (at origin/master) next to this repo so the
+# decoder's cross-repo conformance tests resolve ../xchain-encoder deterministically.
+# Without this, the byte-identity drift-guard (roundtripConformance) reads whatever
+# stale checkout happens to sit at the venue's work/xchain-encoder and can fail on a
+# non-canonical leftover; shipping the canonical origin/master copy makes the guard
+# run against the single source of truth (and self-heals any leftover via rm -rf).
+xchain-encoder

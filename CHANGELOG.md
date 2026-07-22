@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bind `OP_RETURN_PUSH_OVERHEAD` by name from the vendored constants, with a conformance test pinning the value against what `compiledPushSize` adds ().
 
 ### Changed
+- CI gate now declares `xchain-encoder` in `.ci-siblings` so the cross-repo conformance tests (`roundtripConformance` byte-identity drift-guard, `compiledPushSizeConformance`) run against the canonical encoder fixture checked out at `origin/master`, instead of skipping — or, worse, failing on whatever non-canonical `xchain-encoder` checkout happened to be left in the venue's shared `work/` directory. The gate `rm -rf`s and re-clones the sibling each run, so it also self-heals a contaminated leftover.
 - Consolidated all migrations under `src/sql/migrations/` (the only directory the runner reads) and deleted the stale root `migrations/` duplicates, one of which shipped the pre-fix widen-ids script that operator docs pointed at and failed with FK error 1833 on legacy databases.
 - Document that MAX_ACTION_DATA_LENGTH bounds the wire form only, with a boundary test pinning alias expansion at the ceiling ().
 
