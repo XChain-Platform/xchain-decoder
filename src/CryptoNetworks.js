@@ -47,6 +47,16 @@ class CryptoNetworks {
         return coins.getCoinConfig(p.tick, p.net).net;
     }
 
+    // Uppercase native-coin ticker ('BTC'|'DOGE'|'LTC') for a network key. This is
+    // the same value carried in a v0 DISPENSER's GIVE_COIN/GET_COIN fields and the
+    // indexer's config['COIN'], so the decoder can gate dispenser opens on the same
+    // coin identity the indexer validates against.
+    static getCoinTick(networkName){
+        const p = parseNetworkName(networkName);
+        if(!p) throw new TypeError(`Unknown network: "${networkName}". Supported: ${SUPPORTED}`);
+        return p.tick;
+    }
+
     // Indexing start height (not part of any consensus hash). Unknown/regtest -> 0.
     static getFirstBlock(networkName){
         const p = parseNetworkName(networkName);

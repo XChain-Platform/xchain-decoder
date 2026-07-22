@@ -234,6 +234,14 @@ class XChainDecoder {
     constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword, auxPow, feeDestination) {
         this.network = CryptoNetworks.getBitcoinJsNetwork(network)
 
+        // Uppercase native-coin ticker ('BTC'|'DOGE'|'LTC') for this chain. This is
+        // the identity a v0 DISPENSER's GIVE_COIN/GET_COIN fields must name and the
+        // value the indexer validates against (config['COIN']); the dispenser-open
+        // gate below compares against it so the decoder only opens dispensers the
+        // indexer will accept. getBitcoinJsNetwork above already threw on an unknown
+        // key, so this cannot throw.
+        this.coinTick = CryptoNetworks.getCoinTick(network)
+
         // Net portion ('mainnet'|'testnet'|'regtest') of the "<fullname>-<network>"
         // key, for the boot-time consensus-pin verification in start(). The
         // getBitcoinJsNetwork call above already threw on an unknown key, so the
@@ -585,6 +593,26 @@ class XChainDecoder {
             }
         }
         return results
+    }
+
+    // A v0 DISPENSER open is valid for THIS chain only when BOTH coin fields name
+    // this chain's native coin. This mirrors the indexer's four format==0 checks
+    // (xchain-indexer/src/actions/dispenser.js): GIVE_COIN and GET_COIN must each be
+    // a supported COIN AND equal the local COIN. Requiring both to equal this.coinTick
+    // satisfies all four at once (the local coin is by definition supported).
+    //
+    // The decoder previously opened a dispenser whenever EITHER coin field was merely
+    // non-empty, admitting three shapes the indexer rejects outright: GIVE_COIN set
+    // with GET_COIN empty, GET_COIN set with GIVE_COIN empty, and either field naming
+    // a foreign network (e.g. a DOGE-configured decoder seeing DISPENSER|0|BTC|...).
+    // The decoder then held an open-dispenser row the indexer has no record of and
+    // reclassified every later ordinary native-coin payment to that address as a
+    // (failed) dispense. Tightening the gate keeps decoder and indexer in agreement.
+    //
+    // Only command version 0 carries these coin fields; the caller already gates this
+    // check behind commandVersion === 0, so other/future versions are unaffected.
+    dispenserOpensForThisChain(giveCoin, getCoin){
+        return giveCoin === this.coinTick && getCoin === this.coinTick
     }
 
     async parseTransaction(transaction, openDispenserAddresses, db){
@@ -1823,7 +1851,7 @@ class XChainDecoder {
                                         if (isNaN(expiration) || expiration < 0 || expiration > 4294967295) {
                                             this.parseErrors++
                                             console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[14]}'`)
-                                        } else if ((getCoin != "") || (giveCoin != "")){
+                                        } else if (this.dispenserOpensForThisChain(giveCoin, getCoin)){
                                             // The dispenser operates on GET_ADDRESS when a delegated
                                             // address is given, otherwise on the tx SOURCE (indexer
                                             // default). The indexer matches dispense triggers on this
