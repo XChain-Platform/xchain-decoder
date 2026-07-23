@@ -1821,9 +1821,81 @@ class Database {
             if (ownLease){
                 await connection.release()
             }
-        }   
+        }
     }
-    
+
+    // Mirror a DISPENSER format-1 cancel by bringing the target open dispenser's
+    // expiration forward to closeExpiration (the caller passes cancel_block_time +
+    // DISPENSER_CLOSE_DELAY). The existing block-time soft-expire (deleteOpenDispensers)
+    // then closes the row at the same height the indexer's DISPENSER_CLOSE fires, so the
+    // decoder's open-dispenser view tracks the indexer across the cancelling window.
+    // The decoder has no indexer action_index, so the target is resolved by SOURCE
+    // address: the indexer requires the canceller SOURCE to equal the dispenser SOURCE
+    // or GET_ADDRESS, and the decoder keyed the open row on that operating address.
+    // Only the most-recently-opened OPEN row at that address is closed (ORDER BY
+    // tx_index DESC LIMIT 1); a stale/unknown SOURCE matches zero rows and is a no-op.
+    // Same false/true return contract as insertDispenser: false means the query failed
+    // and the block transaction was rolled back, so the caller retries the block.
+    async cancelOpenDispenserBySource(sourceAddress, closeExpiration) {
+        const query = `
+            UPDATE dispensers
+            SET expiration = ?
+            WHERE address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
+              AND expired_block_index IS NULL
+            ORDER BY tx_index DESC
+            LIMIT 1;
+        `;
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            await connection.query(query, [closeExpiration, sourceAddress])
+            return true
+        } catch (err) {
+            console.error('Error cancelling dispenser:', err);
+            if (this.transactionConnection){
+                await this.endTransaction()
+            }
+            return false;
+        } finally {
+            if (ownLease){
+                await connection.release()
+            }
+        }
+    }
+
+    // Mirror a DISPENSER format-2 edit that re-dates EXPIRATION: update the target open
+    // dispenser's stored expiration to newExpiration so the block-time soft-expire fires
+    // at the edited time, matching the indexer's last-valid-non-null-edit overlay
+    // (getExpiredItems). Only EXPIRATION affects the decoder's open-view; the caller has
+    // already validated it is a present, in-range, future timestamp. Target resolution,
+    // row selection, and the false/true contract are identical to cancelOpenDispenserBySource.
+    async editOpenDispenserExpirationBySource(sourceAddress, newExpiration) {
+        const query = `
+            UPDATE dispensers
+            SET expiration = ?
+            WHERE address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
+              AND expired_block_index IS NULL
+            ORDER BY tx_index DESC
+            LIMIT 1;
+        `;
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            await connection.query(query, [newExpiration, sourceAddress])
+            return true
+        } catch (err) {
+            console.error('Error editing dispenser expiration:', err);
+            if (this.transactionConnection){
+                await this.endTransaction()
+            }
+            return false;
+        } finally {
+            if (ownLease){
+                await connection.release()
+            }
+        }
+    }
+
     async insertTransactionOutput(dispenseOutput) {
         const query = `
             INSERT INTO transaction_outputs (
