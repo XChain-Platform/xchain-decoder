@@ -99,6 +99,7 @@ function readVarint(buf, offset) {
 }
 
 // Encode a Bitcoin-style varint as lowercase hex (inverse of readVarint).
+// Keep in sync with xchain-utxo-tracker/src/BlockchainConnector.js encodeVarintHex.
 function encodeVarintHex(value) {
     if (value < 0xFD) {
         return value.toString(16).padStart(2, '0')
@@ -201,6 +202,36 @@ function skipAuxPow(buf, start) {
     offset += 80
 
     return offset
+}
+
+// Strip the AuxPoW section from a merge-mined block's hex, preserving the 80-byte
+// (160 hex char) standard header. Two daemon behaviors are handled: an older daemon
+// whose getblockheader already includes the AuxPoW bytes (length-based strip via the
+// header/block length delta), and Dogecoin Core 1.14 whose getblockheader always
+// returns exactly 160 chars, requiring the AuxPoW size to be parsed structurally from
+// the block hex (skipAuxPow). Non-AuxPoW blocks pass through unchanged.
+// Keep in sync with xchain-utxo-tracker/src/BlockchainConnector.js stripAuxPowFromBlockHex.
+// test/unit/auxpowStripParity.test.js asserts byte identity of the two function bodies,
+// so a strip correction cannot land in one repo alone.
+function stripAuxPowFromBlockHex(headerHex, blockHex) {
+    const dataToRemove = headerHex.length - 160  // 160 hex chars = 80-byte standard header
+    if (dataToRemove > 0) {
+        // Legacy path: getblockheader included AuxPoW bytes (older daemon).
+        return blockHex.substring(0, 160) + blockHex.substring(160 + dataToRemove)
+    }
+    if (blockHex.length >= 8) {
+        const versionLE = parseInt(blockHex.substring(0, 8), 16)
+        const version = ((versionLE & 0xFF) << 24) | (((versionLE >> 8) & 0xFF) << 16) |
+                        (((versionLE >> 16) & 0xFF) << 8) | ((versionLE >> 24) & 0xFF)
+        if (version & 0x100) {
+            // AuxPoW version bit set but getblockheader returned no extra bytes
+            // (Dogecoin Core 1.14). Parse the AuxPoW size from the block hex directly.
+            const blockBuf = Buffer.from(blockHex, 'hex')
+            const afterAuxPow = skipAuxPow(blockBuf, 80)
+            return blockHex.substring(0, 160) + blockHex.substring(afterAuxPow * 2)
+        }
+    }
+    return blockHex
 }
 
 // Error codes that mean "could not reach the node at all" (socket / DNS /
@@ -440,31 +471,13 @@ class BlockchainConnector {
         let blockHex = await this.getBlock(blockhash, true)
 
         try {
-            // Dogecoin Core 1.14.x getblockheader always returns the pure 80-byte header
-            // (160 hex chars) regardless of whether the block is merge-mined. When the
-            // header is longer than 160 chars the legacy path (length-based strip) works;
-            // when it is exactly 160 chars and the AuxPoW version bit (0x100) is set we
-            // must parse the AuxPoW size from the block hex itself to find where the
-            // AuxPoW section ends and the tx-count varint begins.
-            // Keep in sync with xchain-utxo-tracker/src/BlockchainConnector.js getBlockWithoutAuxPow.
-            const dataToRemove = blockHeaderHex.length - 160
-
-            if (dataToRemove > 0) {
-                // Legacy path: getblockheader included AuxPoW bytes (older daemon).
-                blockHex = blockHex.substring(0, 160) + blockHex.substring(160 + dataToRemove)
-            } else if (blockHex.length >= 8) {
-                const versionLE = parseInt(blockHex.substring(0, 8), 16)
-                const version = ((versionLE & 0xFF) << 24) | (((versionLE >> 8) & 0xFF) << 16) |
-                                (((versionLE >> 16) & 0xFF) << 8) | ((versionLE >> 24) & 0xFF)
-                if (version & 0x100) {
-                    // AuxPoW version bit is set but getblockheader returned no extra bytes
-                    // (Dogecoin Core 1.14 behavior). Parse the AuxPoW structure directly
-                    // from the block hex to find its exact byte length and strip it.
-                    const blockBuf = Buffer.from(blockHex, 'hex')
-                    const afterAuxPow = skipAuxPow(blockBuf, 80)
-                    blockHex = blockHex.substring(0, 160) + blockHex.substring(afterAuxPow * 2)
-                }
-            }
+            // Strip logic lives in stripAuxPowFromBlockHex, which is byte-identical to
+            // the xchain-utxo-tracker twin. Only the framing differs between the repos
+            // and that difference is deliberate : the decoder fetches the header
+            // and block OUTSIDE this try so an RPC fault is not mislabeled a content
+            // fault, and tags a traversal failure with auxPowParseFailure so
+            // fetchBlockHex can escalate to getBlockReassembled.
+            blockHex = stripAuxPowFromBlockHex(blockHeaderHex, blockHex)
 
             return blockHex
         } catch (err) {
@@ -737,3 +750,6 @@ class BlockchainConnector {
 module.exports = BlockchainConnector
 // Exported for the  malformed-AuxPoW reassembly regression test.
 module.exports.encodeVarintHex = encodeVarintHex
+// Exported for the  cross-repo strip-parity test.
+module.exports.stripAuxPowFromBlockHex = stripAuxPowFromBlockHex
+module.exports.skipAuxPow = skipAuxPow
