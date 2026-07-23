@@ -2260,6 +2260,10 @@ module.exports.compiledPushSize = compiledPushSize
 module.exports.OP_RETURN_PUSH_OVERHEAD = OP_RETURN_PUSH_OVERHEAD
 // Exported so a regression test can pin it >= the deepest per-chain reorg window.
 module.exports.DISPENSER_EXPIRE_SAFE_DEPTH = DISPENSER_EXPIRE_SAFE_DEPTH
+// Exported for the DISPENSER_CLOSE_DELAY drift guard , which asserts this
+// twin constant equals the indexer's config value so the two open-dispenser views
+// cannot silently desynchronize.
+module.exports.DISPENSER_CLOSE_DELAY = DISPENSER_CLOSE_DELAY
 // Exported so the funding-fee-output collision regression test can assert attributed
 // funding outputs are stored at vout + FUNDING_VOUT_BASE (never colliding with real vouts).
 module.exports.FUNDING_VOUT_BASE = FUNDING_VOUT_BASE
