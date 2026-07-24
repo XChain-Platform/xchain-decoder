@@ -55,7 +55,7 @@ describe('DISPENSER_EXPIRE_SAFE_DEPTH', function () {
         const TRACKER = process.env.XCHAIN_UTXO_TRACKER_DIR ||
             path.join(__dirname, '..', '..', '..', 'xchain-utxo-tracker');
         const UNDO = path.join(TRACKER, 'src', 'undo-blocks.js');
-        before(function () { if (!fs.existsSync(UNDO)) this.skip(); });
+        before(function () { if (!fs.existsSync(UNDO)) { if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-utxo-tracker sibling not found at ' + UNDO + ' but XCHAIN_REQUIRE_SIBLINGS=1'); this.skip(); } });
 
         it('SAFE_DEPTH exceeds every canonical per-chain undo window by the margin', function () {
             const { DEFAULT_UNDO_BLOCKS } = require(UNDO);

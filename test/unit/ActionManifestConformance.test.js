@@ -51,6 +51,22 @@ describe('ACTION manifest conformance: decoder wireDecoded set @regression', fun
             '. Edit xchain-documentation/protocol/action-manifest.json + re-vendor, or wire the decoder.');
     });
 
+    // The decoder is the on-chain arbiter that actually performs alias expansion
+    // (ACTION_ALIASES[rawActionName] ?? rawActionName), yet it was the only manifest-
+    // vendoring repo whose alias table was not bound to MANIFEST.aliases. Bind it here,
+    // mirroring the indexer guard, so a new/retargeted manifest alias fails decoder CI
+    // instead of leaving the arbiter silently green. deepStrictEqual on the whole object
+    // checks both alias KEYS and their canonical TARGETS.
+    it('ACTION_ALIASES exactly equals the manifest aliases map', function () {
+        const { ACTION_ALIASES } = require('../../src/XChainDecoder.js');
+        const expected = MANIFEST.aliases || {};
+        assert.deepStrictEqual({ ...ACTION_ALIASES }, expected,
+            'decoder ACTION_ALIASES (src/XChainDecoder.js) drifted from action-manifest.json aliases. ' +
+            'decoder=' + JSON.stringify({ ...ACTION_ALIASES }) +
+            ' manifest=' + JSON.stringify(expected) +
+            '. Edit xchain-documentation/protocol/action-manifest.json + re-vendor, or wire src/XChainDecoder.js.');
+    });
+
     // IDENTITY: the vendored copy must match the canonical source (skip when the
     // sibling xchain-documentation is not checked out, matching the existing
     // ConsensusPrimitiveConformance convention).

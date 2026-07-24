@@ -259,6 +259,11 @@ class XChainDecoder {
         // suffix is guaranteed to be a valid network name here.
         this.consensusNetwork = String(network).slice(String(network).lastIndexOf('-') + 1)
 
+        // Coin/network-prefixed loggers so cadence/reorg/stall lines are self-describing
+        // even when a log pipeline strips container labels. Reads the fields at call time.
+        this.log = (...args) => console.log('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args)
+        this.logError = (...args) => console.error('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args)
+
         // Native-coin protocol fee destination address for this coin+network. When set (not the
         // unset placeholder), the decoder also persists any output paying it to transaction_outputs
         // so the indexer can validate native-coin fee payments. Null/placeholder disables capture.
@@ -1105,7 +1110,7 @@ class XChainDecoder {
             // Each rolled-back block already persisted its own REORG marker atomically with its
             // delete (deleteBlockByIndex, M-12), so there is no separate end-of-run event to write.
             // This is only an ops summary of the completed reorg.
-            console.log(`reorg: rolled back ${blocksDeleted.length} block(s): ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
+            this.log(`reorg: rolled back ${blocksDeleted.length} block(s): ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
         }
 
         return true
@@ -1178,12 +1183,14 @@ class XChainDecoder {
         let dbStatus   = await this.db.createDatabase();
         let dbVerified = await this.db.verifyDatabase();
         if(!dbVerified){
-            util.throwError("Database " + this.dbName + " doesn't exist!");
+            // Throw a real Error (not a bare string) so `err.message` is populated for
+            // the api.js start() catch, the health() error field, and the CE09 assertions.
+            util.throwError(new Error("Database " + this.dbName + " doesn't exist!"));
         } else {
             // Verify the Indexer tables exists
             let tablesVerified = await this.db.verifyTables();
             if(!tablesVerified)
-                util.throwError("Database " + this.dbName + " tables don't exist!");
+                util.throwError(new Error("Database " + this.dbName + " tables don't exist!"));
 
             // Apply any pending `auto` schema migrations (additive/idempotent changes the
             // drift reconciler can't make on its own). Manual/destructive migrations stay
@@ -1353,7 +1360,7 @@ class XChainDecoder {
                     // deterministic height compare, then walks the hash-compare back to
                     // the fork point. blockchainInfoLastBlock was just refreshed above, so
                     // the tip is current.
-                    console.log("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+"). Reconciling orphan blocks...")
+                    this.log("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+"). Reconciling orphan blocks...")
                     await this.db.endTransaction()
                     await this.verifyReorg(this.blockchainInfoLastBlock)
                     // Re-clamp: a deep reorg can empty the blocks table, causing
@@ -1366,7 +1373,7 @@ class XChainDecoder {
                     validTransactionsCount = 0
                     outputCount = 0
                     startTimeStamp = Date.now()
-                    console.log("Blocks were updated after node-tip regression")
+                    this.log("Blocks were updated after node-tip regression")
                     continue
                 }
             }
@@ -1390,20 +1397,29 @@ class XChainDecoder {
                 // DB query per 30-second refresh cycle, not every 1-second sleep tick).
                 if (lastBlockchainInfoRefreshAt > tipHashCheckedAt && lastProcessedBlockIndex >= this.startBlockIndex){
                     tipHashCheckedAt = lastBlockchainInfoRefreshAt
+                    // Guard ONLY the detection reads: an RPC/DB blip there is transient and
+                    // should log-and-skip until the next refresh, as before.
+                    let needsReconcile = false
                     try {
                         const nodeHash = await this.connector.getBlockHash(lastProcessedBlockIndex)
                         const storedBlock = await this.db.getBlockByIndex(lastProcessedBlockIndex)
-                        if (storedBlock && nodeHash && storedBlock.block_hash !== nodeHash){
-                            console.log("Equal-height tip replacement detected at height " + lastProcessedBlockIndex + ". Reconciling...")
-                            await this.db.endTransaction()
-                            await this.verifyReorg(this.blockchainInfoLastBlock)
-                            lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
-                            lastProcessedTxIndex = await this.db.getLastTxIndex()
-                            blocksQuantity = 0
-                            continue
-                        }
+                        needsReconcile = !!(storedBlock && nodeHash && storedBlock.block_hash !== nodeHash)
                     } catch (e){
-                        console.error('Error during equal-height tip-hash check, skipping:', e)
+                        console.error('Error during equal-height tip-hash detection reads, skipping:', e)
+                    }
+                    if (needsReconcile){
+                        // Run the reconcile OUTSIDE the try so a fail-closed verifyReorg abort
+                        // (durable REORG_HALT, safe-depth ceiling, or delete-failure) propagates
+                        // out of start() and halts loudly, matching the two sibling verifyReorg
+                        // call sites. Swallowing it here left a partially rolled-back DB under a
+                        // stale in-memory cursor while this.synced stayed true.
+                        this.log("Equal-height tip replacement detected at height " + lastProcessedBlockIndex + ". Reconciling...")
+                        await this.db.endTransaction()
+                        await this.verifyReorg(this.blockchainInfoLastBlock)
+                        lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
+                        lastProcessedTxIndex = await this.db.getLastTxIndex()
+                        blocksQuantity = 0
+                        continue
                     }
                 }
 
@@ -1536,7 +1552,7 @@ class XChainDecoder {
                         validTransactionsCount = 0
                         outputCount = 0
                         startTimeStamp = Date.now()
-                        console.log("Blocks were updated (" + rolledBackCount + " blocks rolled back)")
+                        this.log("Blocks were updated (" + rolledBackCount + " blocks rolled back)")
                         continue
                     }
                 }
@@ -1987,8 +2003,8 @@ class XChainDecoder {
                 //If the pendings blocks are enough, then commit the transaction and print statistics
                 if ((blocksQuantity == DB_TRANSACTION_BLOCKS_QUANTITY-1) || (nextBlockHeight == this.blockchainInfoLastBlock)){
                     if ((nextBlockHeight % LOG_BLOCK_INTERVAL === 0) || ((this.blockchainInfoLastBlock - nextBlockHeight) <= SYNCED_THRESHOLD)) {
-                        console.log("Parsing block "+(nextBlockHeight)+"("+nextBlockHash+") Txs ("+transactionsCount+") Outputs ("+outputCount+")")
-                        console.log("Inserting data Blocks ("+blocksCount+") Valid Transactions ("+validTransactionsCount+")")
+                        this.log("Parsing block "+(nextBlockHeight)+"("+nextBlockHash+") Txs ("+transactionsCount+") Outputs ("+outputCount+")")
+                        this.log("Inserting data Blocks ("+blocksCount+") Valid Transactions ("+validTransactionsCount+")")
                     }
                     const committed = await this.db.commitTransaction()
                     if (!committed){

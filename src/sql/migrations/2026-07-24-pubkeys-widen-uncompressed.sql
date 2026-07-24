@@ -1,0 +1,53 @@
+--********************************************************************
+--
+-- Copyright © 2025-2026 Dankest, LLC
+-- Based on XChain Platform by Dankest, LLC - https://dankest.llc
+--
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- This file is part of XChain Platform. Licensed under the GNU Affero
+-- General Public License v3.0 or later; see LICENSE.md. A commercial
+-- license (without AGPL source-disclosure terms) is available -
+-- contact legal@dankest.llc.
+--
+--********************************************************************
+
+-- xchain:migration mode=manual
+-- (manual: the statement is a safe column WIDEN that preserves every existing value,
+--  but `MODIFY ... NOT NULL` is indistinguishable from a narrowing to the auto-apply
+--  destructive-DDL classifier, and widening past 85 chars forces a COPY table rebuild
+--  under a metadata lock. Gated to an explicit operator run (`node src/migrate.js`) so
+--  it applies with the writer quiesced rather than silently at startup.)
+--
+-- Migration: pubkeys.pubkey  VARCHAR(66) -> VARCHAR(130)
+--
+-- WHY
+-- ---
+-- extractPubkeyFromInput (src/XChainDecoder.js) accepts BOTH compressed (33-byte,
+-- 66 hex chars) and uncompressed (65-byte, 130 hex chars) public keys. The column
+-- was VARCHAR(66), so an uncompressed key (still common on legacy P2PKH inputs)
+-- either failed the INSERT with errno 1406 under STRICT_TRANS_TABLES (insertPubkey
+-- only logs and returns false, so hasPubkey stays false and the same address retries
+-- forever) or silently truncated to 66 chars under a non-strict sql_mode. Either way
+-- the decoder->indexer seam field source_pubkey ended up NULL or corrupted, and which
+-- branch occurred depended on the server sql_mode rather than the chain data. (#3195.)
+--
+-- CONSENSUS / VALUE NOTE
+-- ---------------------
+-- This widen does NOT change any stored value: the exact key bytes the producer
+-- already emits are preserved. It only stops longer keys from being dropped/truncated.
+-- The indexer mirrors the same widen (xchain-indexer pubkeys.pubkey -> VARCHAR(130)).
+--
+-- NOTE: widening a VARCHAR from <=85 (1-byte length prefix) to >85 chars changes the
+-- row-format length prefix, so this is a COPY rebuild (not ALGORITHM=INSTANT) under a
+-- shared metadata lock. Apply at decoder startup or with the decoder stopped, not
+-- against a heavy live writer.
+--
+-- IDEMPOTENT: re-running MODIFY to the same type is a no-op, and the schema_migrations
+-- ledger records this file once per DB so it never re-runs. Fresh installs already get
+-- VARCHAR(130) from src/sql/pubkeys.sql, making this a no-op there.
+--
+-- Rows written NULL/truncated before this migration are not retroactively repaired;
+-- a separate re-decode of the affected addresses would be needed to backfill them.
+
+ALTER TABLE pubkeys MODIFY pubkey VARCHAR(130) NOT NULL;

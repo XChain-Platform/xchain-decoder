@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- review review-round fixes: reorg verify errors propagate on the equal-height branch, start() fails fast with bounded DB retries, coin-prefixed cadence logs, pubkeys widened to VARCHAR(130) with migration, migration guard on early returns, manifest alias conformance test, safe-depth changelog correction.
+
 ### Added
 - Bind `OP_RETURN_PUSH_OVERHEAD` by name from the vendored constants, with a conformance test pinning the value against what `compiledPushSize` adds ().
 
@@ -24,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The block loop aborts and retries on every rollback-signalling `false` db return, re-deriving its block/tx cursors from the DB so a retried block assigns the same `tx_index` values as a clean instance.
 - `getAllOpenDispenserAddresses` returns null on query error so a failed read can no longer decode a block against a silently-empty dispenser set.
 - The `health` and `GET /status` probes use a new `db.ping()` on a dedicated pooled connection; they previously grabbed (and released!) the block loop's open transaction connection mid-block, letting any monitor poll break per-block atomicity.
-- `DISPENSER_EXPIRE_SAFE_DEPTH` raised from a flat 100 to 120 so it covers the deepest per-chain reorg-recovery window (DOGE = 120, per `xchain-utxo-tracker` `DEFAULT_UNDO_BLOCKS`); at 100 a soft-expired dispenser was hard-purged before a legal in-window DOGE reorg could restore it, permanently losing a money-bearing dispenser on the reorged node. Pinned by a regression test.
+- `DISPENSER_EXPIRE_SAFE_DEPTH` raised from a flat 100 to 126 (the deepest per-chain reorg-recovery window, DOGE = 120 undo blocks, plus a 6-block safety margin; mirrored by `xchain-utxo-tracker` `MAX_SAFE_UNDO_BLOCKS = 126`); at 100 a soft-expired dispenser was hard-purged before a legal in-window DOGE reorg could restore it, permanently losing a money-bearing dispenser on the reorged node. Pinned by a regression test.
 - `getBlockByIndex` retries then throws instead of returning null on a DB error, so a transient fault can no longer end verifyReorg's rollback walk early and report a false "rollback complete" ().
 - Transport faults no longer count toward the AuxPoW-reassembly escalation, so node overload is not misread as a malformed block and amplified into a per-tx refetch storm ().
 

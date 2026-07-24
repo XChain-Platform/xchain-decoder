@@ -112,6 +112,12 @@ class Database {
             password: this.pass,
             port:     this.port
         };
+        // Bounded retry (~75s of patience) so a wrong DECODER_DB_USER/DECODER_DB_PASS or an
+        // otherwise-unreachable MariaDB fails loud at startup instead of wedging the process
+        // in an unbounded loop the container restart policy can never recycle. Matches the
+        // getConnection() retry shape; a slow-starting MariaDB sidecar still boots normally.
+        let attempts = 0;
+        const maxAttempts = 15;
         while(true){
             try {
                 let db     = await this._createConnection(connectionParams);
@@ -121,7 +127,10 @@ class Database {
                     return true;
                 return false;
             } catch (e){
-                console.error('Error checking if database ' + this.dbName + ' exists:', e)
+                attempts++;
+                if(attempts >= maxAttempts)
+                    throw new Error('Failed to verify database ' + this.dbName + ' after ' + maxAttempts + ' attempts: ' + (e.code || e.message));
+                console.error('Error checking if database ' + this.dbName + ' exists (attempt ' + attempts + '/' + maxAttempts + '):', e)
                 await util.sleep(5000); // Wait 5 seconds
             }
         }
@@ -138,6 +147,11 @@ class Database {
         };
         let databaseCreated = false;
         console.log("Creating " + this.dbName + " database!");
+        // Bounded retry (~75s of patience): see verifyDatabase above. A persistent auth or
+        // config failure throws so the process exits and the container can be restarted,
+        // rather than looping and re-logging the same error forever.
+        let attempts = 0;
+        const maxAttempts = 15;
         while(!databaseCreated){
             try {
                 let db     = await this._createConnection(connectionParams);
@@ -145,7 +159,10 @@ class Database {
                 await db.end();
                 databaseCreated = true;
             } catch(e){
-                console.error('Error creating database ' + this.dbName + ':', e)
+                attempts++;
+                if(attempts >= maxAttempts)
+                    throw new Error('Failed to create database ' + this.dbName + ' after ' + maxAttempts + ' attempts: ' + (e.code || e.message));
+                console.error('Error creating database ' + this.dbName + ' (attempt ' + attempts + '/' + maxAttempts + '):', e)
                 await util.sleep(5000); // Waiting 5 seconds
             }
         }
@@ -249,7 +266,20 @@ class Database {
     // deliberately NOT gated on unrelated files' dated-prefix / checksum state, so an
     // unrelated tree quirk can never block the targeted rollout. An unknown target
     // (name matching no committed migration) fails loudly rather than applying nothing.
+    // Public entry point. Runs the migration body on every path, then always verifies the
+    // dispensers.expiration schema contract, so the fail-closed guard fires even when the
+    // body early-returns (no migrations dir, empty dir, or lock contention during a fleet
+    // rollout). If the inner body throws, the error propagates and the assertion is skipped
+    // (already failing loudly); on any normal return the assertion runs exactly once. The
+    // assertion is a no-op when the dispensers table is absent, so no-dir/empty paths stay
+    // cheap and safe.
     async runMigrations(opts = {}){
+        const result = await this._runMigrationsInner(opts);
+        await this._assertDispenserExpirationIsInteger();
+        return result;
+    }
+
+    async _runMigrationsInner(opts = {}){
         const crypto        = require('crypto');
         const includeManual = !!opts.includeManual;
         const only          = (opts.only == null) ? null
@@ -340,8 +370,22 @@ class Database {
                             // instead of silently continuing. Default auto-startup stays non-fatal
                             // (console.error, not warn) to avoid a surprise fleet-wide boot failure.
                             // Mirrors xchain-indexer/src/db.js.
-                            if(includeManual || process.env.MIGRATION_STRICT_CHECKSUM === '1')
-                                throw new Error(msg + ' Review manually (set MIGRATION_STRICT_CHECKSUM=0 / omit to downgrade to a non-fatal log).');
+                            if(includeManual || process.env.MIGRATION_STRICT_CHECKSUM === '1'){
+                                // Tailor the remedy to which branch actually fired. The operator path
+                                // (includeManual, `node src/migrate.js`) ALWAYS fails closed by design, so
+                                // MIGRATION_STRICT_CHECKSUM has no effect there - telling the operator to
+                                // clear it just loops them back to the same error. Only the passive
+                                // startup path opted into strict mode via MIGRATION_STRICT_CHECKSUM=1 can
+                                // actually be downgraded by clearing it. ()
+                                const hint = includeManual
+                                    ? ' This operator run always fails closed (MIGRATION_STRICT_CHECKSUM has no' +
+                                      ' effect here). Either revert ' + file + ' to the content matching the' +
+                                      ' recorded checksum, or - if the edit was reviewed and changed no' +
+                                      ' executable SQL - add a pinned Database.MIGRATION_CHECKSUM_REBASELINES' +
+                                      ' entry mapping the recorded hash to the current one.'
+                                    : ' Review manually (set MIGRATION_STRICT_CHECKSUM=0 / omit to downgrade to a non-fatal log).';
+                                throw new Error(msg + hint);
+                            }
                             console.error(msg + ' Continuing on the diverged schema - review manually.');
                         }
                         continue;
@@ -393,14 +437,9 @@ class Database {
         if(result.applied.length) console.log('runMigrations: ' + result.applied.length + ' migration(s) applied to ' + this.dbName + '.');
         if(result.pending.length) console.log('runMigrations: ' + result.pending.length + ' manual migration(s) pending for ' + this.dbName + '; run `node src/migrate.js` to apply.');
 
-        // Schema-contract assertion: dispensers.expiration must be an integer type.
-        // The fresh-install DDL declares it BIGINT UNSIGNED. An upgrade from an older
-        // schema requires a manual migration (2026-06-13-dispensers-expiration-bigint.sql).
-        // If that migration was skipped, the column stays DATETIME and code that stores
-        // raw unix integers into it will error or silently corrupt data under strict mode.
-        // Fail closed here so a missed migration is loud at startup, not silent at runtime.
-        await this._assertDispenserExpirationIsInteger();
-
+        // NOTE: the dispensers.expiration schema-contract assertion now runs in the public
+        // runMigrations() wrapper so it fires on every exit path, including the early
+        // returns above (no-dir, empty-dir, lock contention).
         return result;
     }
 

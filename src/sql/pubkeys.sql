@@ -15,7 +15,11 @@
 DROP TABLE IF EXISTS pubkeys;
 CREATE TABLE pubkeys (
   address_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-  pubkey     VARCHAR(66) NOT NULL,
+  -- 130 hex chars: the producer (extractPubkeyFromInput) accepts BOTH compressed
+  -- (33-byte -> 66 hex) and uncompressed (65-byte -> 130 hex) keys. A VARCHAR(66)
+  -- here dropped or truncated every uncompressed key (legacy P2PKH), yielding a
+  -- NULL/corrupted source_pubkey across the decoder->indexer seam.
+  pubkey     VARCHAR(130) NOT NULL,
   -- Monotonic surrogate for id-ordered replication paging only (xchain-sync
   -- streamTableRowsById / _syncLookupTablesPaged). address_id is NOT monotonic
   -- with insert order: a pubkeys row is inserted at first-SPEND, but its

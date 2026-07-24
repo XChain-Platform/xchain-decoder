@@ -85,6 +85,13 @@ async function startApi(){
         console.error('Decoder crashed:', err)
         decoderRunning = false
         decoderError = err
+        // A decoder whose start() rejected does no work: the parse loop never runs and
+        // the process would otherwise linger as a permanently-unhealthy but RUNNING
+        // container that `--restart unless-stopped` never recycles. Exit non-zero so the
+        // container restart policy (or a supervisor) can act, mirroring the sibling
+        // xchain-indexer fatal handler. Faults that require an operator resync (durable
+        // REORG_HALT) surface as a visible Exited(1) rather than a silent wedge.
+        process.exit(1)
     })
 
     // Graceful shutdown on process signals

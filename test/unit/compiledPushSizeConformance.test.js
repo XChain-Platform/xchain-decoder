@@ -78,7 +78,7 @@ describe('compiled-push-size arbiter conformance', function () {
         const ENCODER = process.env.XCHAIN_ENCODER_DIR ||
             path.join(__dirname, '..', '..', '..', 'xchain-encoder');
         const VALIDATOR = path.join(ENCODER, 'src', 'validator.js');
-        before(function () { if (!fs.existsSync(VALIDATOR)) this.skip(); });
+        before(function () { if (!fs.existsSync(VALIDATOR)) { if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-encoder sibling not found at ' + VALIDATOR + ' but XCHAIN_REQUIRE_SIBLINGS=1'); this.skip(); } });
 
         it('agrees with the decoder helper for every length up to the ceiling', function () {
             const encoderPushSize = require(VALIDATOR).compiledPushSize;
