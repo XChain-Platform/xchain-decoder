@@ -275,6 +275,31 @@ const CROSS_CHAIN_ROYALTY_ACTIVATION = {
     regtest: 0,
 };
 
+// ORACLE_FEE_OUTPUT_ACTIVATION ( /  PRICE v1 oracle usage fee): the flag-day
+// at/above which the DECODER persists a native-coin output paying a DISPENSER's
+// ORACLE_ADDRESS into transaction_outputs, so the indexer's validateOracleFee can see the
+// fee that was actually paid. Keyed on BLOCK TIME (not height) because dispensers settle on
+// BTC, LTC and DOGE, whose heights diverge; compared with the same >= semantics the indexer's
+// protocol_changes gates use.
+//
+// The mainnet value is NOT free to choose: capturing a second output on a data-bearing
+// transaction makes it fan out to two rows in getDecoderBlockData, and BELOW the indexer's
+// FIX_OUTPUT_FANOUT flag-day (protocol_changes.js, mainnet block_time 1790812800) such a
+// transaction is a consensus-critical fault that HALTS the block. This gate must therefore
+// never precede FIX_OUTPUT_FANOUT; it is armed to exactly the same instant so capture begins
+// in the same block the collapse does. Below it a Mode B create against a fee-bearing oracle
+// is rejected with 'missing oracle fee output' whether or not the payer paid, which is the
+// fail-closed direction and costs nothing while no mainnet chain holds a dispenser.
+// testnet/regtest are genesis-on, matching FIX_OUTPUT_FANOUT there.
+//
+// Vendored byte-equal into xchain-decoder/src/protocol/constants.js; the parity suites keep
+// the two copies and the indexer's FIX_OUTPUT_FANOUT timestamp in lockstep.
+const ORACLE_FEE_OUTPUT_ACTIVATION = {
+    mainnet: 1790812800,  // 2026-10-01 00:00:00 UTC, the contract-era flag-day FIX_OUTPUT_FANOUT rides
+    testnet: 0,
+    regtest: 0,
+};
+
 // VALID_FIAT_CODES: the accepted FIAT_CODE allow-list for PRICE actions. The indexer's
 // config['FIATS'] keys (xchain-indexer/src/config.js) are the on-chain arbiter; this list
 // mirrors them in the indexer's insertion order. The SDK validator (VALID_FIAT_CODES) must
@@ -333,6 +358,7 @@ module.exports = {
     ARCHIVE_REWARD_ACTIVATION,
     ARCHIVE_REWARD_AMOUNT,
     CROSS_CHAIN_ROYALTY_ACTIVATION,
+    ORACLE_FEE_OUTPUT_ACTIVATION,
     VALID_FIAT_CODES,
     GAS_TICK,
     PRICE_MAX,

@@ -29,6 +29,7 @@ const ecc = require('tiny-secp256k1')
 const BlockchainConnector = require('./BlockchainConnector')
 const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
+const { isOracleFeeCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress } = require('./oracleFeeOutput')
 const strictTextDecoder = new TextDecoder('utf-8', { fatal: true })
 const lenientTextDecoder = new TextDecoder('utf-8')
 
@@ -629,6 +630,69 @@ class XChainDecoder {
     // check behind commandVersion === 0, so other/future versions are unaffected.
     dispenserOpensForThisChain(giveCoin, getCoin){
         return giveCoin === this.coinTick && getCoin === this.coinTick
+    }
+
+    // The ORACLE_ADDRESS whose native-coin output this transaction's payment-output
+    // capture must persist, or null when there is none .
+    //
+    // A Mode B dispenser pays its PRICE v1 oracle operator up front as a real on-chain
+    // output, and the indexer rejects the create/refill when it cannot SEE that output
+    // in `transaction_outputs` (utility.validateOracleFee, ). The decoder stays
+    // address-keyed and prices nothing: it captures any output paying the oracle address
+    // this transaction is associated with and leaves every amount/eligibility question to
+    // the indexer, exactly as it does for the protocol FEE_DESTINATION.
+    //
+    //   v0 (create): the address is in the payload itself (field 13).
+    //   v2 (edit/refill): the payload carries no address - it names the target by
+    //       DISPENSER_ACTION_INDEX, an id in the INDEXER's action space the decoder does
+    //       not maintain - so the oracle address is read back from the open dispenser row
+    //       this decoder registered, resolved by SOURCE address. That is the SAME
+    //       resolution cancelOpenDispenserBySource / editOpenDispenserExpirationBySource
+    //       already use, and it carries the same documented residual: a delegated
+    //       (GET_ADDRESS) dispenser refilled by its original creator matches no
+    //       SOURCE-keyed row, so nothing is captured and the indexer rejects that refill.
+    //       Fail-closed, and no worse than the pre- behavior it replaces.
+    //
+    // Returns false on a DB fault so the caller can roll the block back: silently
+    // capturing nothing would make this node disagree with a healthy one about what the
+    // transaction paid, which is a ledger fork rather than a missed row.
+    async resolveOracleFeeAddress(decodedData, source, blockTime, transactionHash){
+        if (typeof decodedData !== 'string' || !decodedData.startsWith("DISPENSER|"))
+            return null
+        // Consensus gate. Below it the decoder captures nothing, so a fee-bearing Mode B
+        // create is rejected whether or not it paid - the fail-closed direction, and the
+        // one that keeps a from-genesis re-decode byte-identical to what live nodes wrote.
+        // The gate is armed to the indexer's FIX_OUTPUT_FANOUT instant because capturing a
+        // SECOND output on a data-bearing transaction fans it out to two rows, which below
+        // that flag-day is a consensus-critical fault that halts the block.
+        if (!isOracleFeeCaptureActive(this.consensusNetwork, blockTime))
+            return null
+
+        let fields = decodedData.split("|")
+        let format = parseInt(fields[1], 10)
+
+        if (format === 0){
+            if (isCompactedOracleAddress(fields)){
+                // Unresolvable `^<id>` reference into the indexer's address-id space. Log
+                // it the way the sibling GET_ADDRESS case does rather than capturing
+                // against a token no output can pay. The SDK does not compact this field
+                // (addressRefFields.js `noCompact`), so this is a third-party composer or
+                // a historical replay.
+                this.parseErrors++
+                console.error(`Oracle-fee output NOT captured for tx ${transactionHash}: compacted ORACLE_ADDRESS reference '${fields[13]}' cannot be resolved by the decoder, so the indexer will reject this dispenser create`)
+                return null
+            }
+            return oracleAddressFromCreate(fields)
+        }
+
+        if (format === 2){
+            if (!source || source.length === 0) return null
+            let oracleAddress = await this.db.getOpenDispenserOracleAddressBySource(source)
+            if (oracleAddress === false) return false
+            return oracleAddress || null
+        }
+
+        return null
     }
 
     async parseTransaction(transaction, openDispenserAddresses, db){
@@ -1819,10 +1883,29 @@ class XChainDecoder {
                                 //    FEE_DESTINATION, so the indexer can validate native-coin fee
                                 //    payments (xchain-indexer/src/utility.js detectFeePaymentMode /
                                 //    validateNativeCoinFee). Captured only when feeDestination is set.
+                                //  • DISPENSER v0/v2: the PRICE v1 oracle-usage-fee output paying
+                                //    the dispenser's ORACLE_ADDRESS, so the indexer can validate it
+                                //    (utility.validateOracleFee, ). Gated on
+                                //    ORACLE_FEE_OUTPUT_ACTIVATION - see resolveOracleFeeAddress.
                                 let isCoinpay = decodedData.startsWith("COINPAY|")
-                                if (isCoinpay || this.feeDestination){
+                                let oracleFeeAddress = await this.resolveOracleFeeAddress(decodedData, parseResult["source"], block.timestamp, nextTransactionHash)
+                                if (oracleFeeAddress === false){
+                                    // Deterministic DB fault while resolving a refill's oracle
+                                    // address. Capturing nothing here would drop an output a
+                                    // healthy node captures, so retry the block instead.
+                                    console.error(`resolveOracleFeeAddress failed at block ${nextBlockHeight}; block rolled back, retrying`)
+                                    await resetAfterRollback()
+                                    continue main_parsing
+                                }
+                                if (isCoinpay || this.feeDestination || oracleFeeAddress){
                                     for (let nextOutput of parseResult["paymentOutputs"]){
-                                        if (!isCoinpay && nextOutput.destinationAddress !== this.feeDestination)
+                                        // Both address tests are truthiness-guarded: an unset
+                                        // feeDestination/oracleFeeAddress is null, and an output
+                                        // whose address could not be resolved is null too, so a
+                                        // bare !== comparison would capture it by accident.
+                                        let isFeeOutput    = this.feeDestination && nextOutput.destinationAddress === this.feeDestination
+                                        let isOracleOutput = oracleFeeAddress    && nextOutput.destinationAddress === oracleFeeAddress
+                                        if (!isCoinpay && !isFeeOutput && !isOracleOutput)
                                             continue
                                         nextOutput.txIndex = lastProcessedTxIndex
                                         let insertResult = await this.db.insertTransactionOutput(
@@ -1925,9 +2008,15 @@ class XChainDecoder {
                                                 const operatingAddress = (getAddress && getAddress.length > 0)
                                                     ? getAddress
                                                     : parseResult["source"]
+                                                // Mode B dispensers carry their PRICE v1 oracle address so a
+                                                // later v2 refill - whose payload names no address - can
+                                                // still have its oracle-fee output captured .
+                                                // Compacted `^<id>` tokens resolve to null, same reason as
+                                                // GET_ADDRESS above.
                                                 if (!(await this.db.insertDispenser({
                                                     txIndex: lastProcessedTxIndex,
                                                     address: operatingAddress,
+                                                    oracleAddress: oracleAddressFromCreate(decodedDataSplit),
                                                     expiration: expiration
                                                 }))){
                                                     // insertDispenser's error path already rolled the block back.

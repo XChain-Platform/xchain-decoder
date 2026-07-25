@@ -1817,8 +1817,9 @@ class Database {
             INSERT INTO dispensers (
             tx_index,
             address_id,
-            expiration
-        ) VALUES (?, ?, ?);
+            expiration,
+            oracle_address_id
+        ) VALUES (?, ?, ?, ?);
         `;
         // expiration is a raw unix timestamp (seconds) stored as-is into a BIGINT UNSIGNED
         // column. It is deliberately NOT wrapped in FROM_UNIXTIME(): FROM_UNIXTIME() caps at
@@ -1838,11 +1839,17 @@ class Database {
             let txIndex = openDispenser.txIndex
             let addressId = await this.createAddress(openDispenser.address)
             let expiration = openDispenser.expiration
-            
+            // Mode B only: interned so a later v2 refill (whose payload names no address)
+            // can still resolve which oracle-fee output to capture .
+            let oracleAddressId = openDispenser.oracleAddress
+                ? await this.createAddress(openDispenser.oracleAddress)
+                : null
+
             await connection.query(query, [
                 txIndex,
                 addressId,
-                expiration
+                expiration,
+                oracleAddressId
             ])
             
             return true
@@ -1924,6 +1931,47 @@ class Database {
             return true
         } catch (err) {
             console.error('Error editing dispenser expiration:', err);
+            if (this.transactionConnection){
+                await this.endTransaction()
+            }
+            return false;
+        } finally {
+            if (ownLease){
+                await connection.release()
+            }
+        }
+    }
+
+    // The ORACLE_ADDRESS of the open dispenser a DISPENSER v2 edit/refill targets, so the
+    // block loop can capture that transaction's PRICE v1 oracle-usage-fee output .
+    // The v2 payload names its target by DISPENSER_ACTION_INDEX, an id in the INDEXER's
+    // action space the decoder does not maintain, so the target is resolved by SOURCE
+    // address and the most-recently-opened OPEN row wins - identical selection to
+    // cancelOpenDispenserBySource / editOpenDispenserExpirationBySource, and carrying the
+    // same delegated-GET_ADDRESS residual.
+    //
+    // Returns the address string, null when there is no match or the dispenser named no
+    // oracle, and false on a query fault (the caller retries the block rather than
+    // capturing a different output set than a healthy node).
+    async getOpenDispenserOracleAddressBySource(sourceAddress) {
+        const query = `
+            SELECT a2.address AS oracle_address
+            FROM dispensers d
+            INNER JOIN index_addresses a2 ON (a2.id = d.oracle_address_id)
+            WHERE d.address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
+              AND d.expired_block_index IS NULL
+            ORDER BY d.tx_index DESC
+            LIMIT 1;
+        `;
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            let rows = await connection.query(query, [sourceAddress])
+            if (rows && rows.length > 0 && rows[0].oracle_address)
+                return rows[0].oracle_address
+            return null
+        } catch (err) {
+            console.error('Error reading dispenser oracle address:', err);
             if (this.transactionConnection){
                 await this.endTransaction()
             }

@@ -47,10 +47,19 @@ class DispenserModel {
         this.rows  = []
         this.calls = { insert: [], cancel: [], edit: [] }
     }
-    async insertDispenser({ txIndex, address, expiration }) {
+    async insertDispenser({ txIndex, address, expiration, oracleAddress }) {
         this.calls.insert.push({ txIndex, address, expiration: Number(expiration) })
-        this.rows.push({ txIndex, address, expiration: Number(expiration), expiredBlockIndex: null })
+        this.rows.push({ txIndex, address, expiration: Number(expiration), expiredBlockIndex: null,
+                         oracleAddress: oracleAddress || null })
         return true
+    }
+    // Mirrors getOpenDispenserOracleAddressBySource : same SOURCE-keyed,
+    // most-recent-open-row selection as cancel/edit.
+    async getOpenDispenserOracleAddressBySource(sourceAddress) {
+        const open = this.rows
+            .filter(r => r.address === sourceAddress && r.expiredBlockIndex === null)
+            .sort((a, b) => b.txIndex - a.txIndex)
+        return (open.length && open[0].oracleAddress) ? open[0].oracleAddress : null
     }
     // Mirrors cancelOpenDispenserBySource: UPDATE ... SET expiration=? WHERE address open
     // ORDER BY tx_index DESC LIMIT 1.
@@ -147,6 +156,7 @@ function buildDecoder(txSpecs, model) {
         deleteOpenDispensers:                (b, m) => model.deleteOpenDispensers(b, m),
         purgeExpiredDispensers:              (h) => model.purgeExpiredDispensers(h),
         getAllOpenDispenserAddresses:        () => model.getAllOpenDispenserAddresses(),
+        getOpenDispenserOracleAddressBySource: (s) => model.getOpenDispenserOracleAddressBySource(s),
     }
 
     decoder.xchainBlockDecoder = {
