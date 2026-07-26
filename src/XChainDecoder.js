@@ -632,6 +632,33 @@ class XChainDecoder {
         return giveCoin === this.coinTick && getCoin === this.coinTick
     }
 
+    // Does a split v0 DISPENSER create payload carry every field the indexer
+    // requires? Split indices are offset by one from the indexer's field list
+    // because the decoder splits the whole action string, ACTION token included:
+    //
+    //   [0] DISPENSER [1] VERSION [2] GIVE_COIN [3] GIVE_TICK [4] GIVE_AMOUNT
+    //   [5] GIVE_OWNERSHIP [6] GIVE_ESCROW [7] GET_COIN [8] GET_TICK
+    //   [9] GET_AMOUNT [10] GET_ADDRESS [11] FIAT_CODE [12] FIAT_AMOUNT
+    //   [13] ORACLE_ADDRESS [14] EXPIRATION [15] ALLOW_LIST [16] BLOCK_LIST
+    //   [17] MEMO
+    //
+    // Everything from GET_ADDRESS on is optional (GET_ADDRESS defaults to
+    // SOURCE, EXPIRATION to a block-time window), so the required run ends at
+    // GET_AMOUNT and a conforming create is at least 10 tokens long.
+    //
+    // This gate was >= 14, which silently dropped every create whose optional
+    // tail was omitted rather than padded - the shape the wallet emits when the
+    // seller keeps the default expiry (`DISPENSER|0|BTC|TICK|500||2000|BTC||0.01`,
+    // 10 tokens). The indexer opened those dispensers and showed them valid with
+    // escrow locked while the decoder never registered the operating address, so
+    // buyer payments were never recognised as dispenses: the buyer's coin went to
+    // the seller and no tokens came back. Verified on BTC regtest - a 10-token
+    // create took a payment and dispensed nothing; the same create with an
+    // explicit EXPIRATION (15 tokens) dispensed correctly.
+    hasRequiredDispenserCreateFields(decodedDataSplit){
+        return Array.isArray(decodedDataSplit) && decodedDataSplit.length >= 10
+    }
+
     // The ORACLE_ADDRESS whose native-coin output this transaction's payment-output
     // capture must persist, or null when there is none .
     //
@@ -1955,13 +1982,11 @@ class XChainDecoder {
                                     let commandVersion = decodedDataSplit[1]
                                     let dispenserFormat = parseInt(commandVersion, 10)
 
-                                    // EXPIRATION (index 14) is OPTIONAL on v0: the indexer
-                                    // substitutes a block-time default when it is omitted, so the
-                                    // required fields end at GET_ADDRESS (index 10). Gate on >= 14
-                                    // (through ORACLE_ADDRESS) rather than >= 15 so an
-                                    // EXPIRATION-less-but-otherwise-valid open is still tracked
-                                    // instead of silently dropped.
-                                    if (dispenserFormat === 0 && decodedDataSplit.length >= 14){
+                                    // Everything after GET_AMOUNT is optional on v0, so the
+                                    // length gate ends the required run there rather than at
+                                    // ORACLE_ADDRESS; see hasRequiredDispenserCreateFields for
+                                    // the field map and for what the old >= 14 gate cost.
+                                    if (dispenserFormat === 0 && this.hasRequiredDispenserCreateFields(decodedDataSplit)){
                                         let giveCoin = decodedDataSplit[2]
                                         let getCoin = decodedDataSplit[7]
                                         let getAddress = decodedDataSplit[10]

@@ -61,3 +61,42 @@ describe('dispenser-open gate — coin parity with the indexer', () => {
         assert.strictEqual(ltc.dispenserOpensForThisChain('', ''), false)
     })
 })
+
+// A v0 create may stop at GET_AMOUNT: everything after it is optional, and a
+// composer that omits the tail rather than padding it emits a 10-token string.
+// The old >= 14 length gate dropped those creates, so the decoder never held an
+// open row for a dispenser the indexer had opened with escrow locked, and every
+// buyer payment to it was classified as an ordinary transfer: coin to the
+// seller, no tokens back. Reproduced live on BTC regtest before this fix.
+describe('dispenser-open gate - optional-tail creates', () => {
+    const CREATE_NO_TAIL = 'DISPENSER|0|BTC|XCHAIN|500||2000|BTC||0.01'.split('|')
+    const CREATE_WITH_EXPIRATION =
+        'DISPENSER|0|BTC|XCHAIN|100||500|BTC||0.005|||||1798747200'.split('|')
+    const CREATE_FULL =
+        'DISPENSER|0|BTC|XCHAIN|10||1000|BTC||0.0001|||||1787714697|||stocked'.split('|')
+
+    it('[REGRESSION P1] accepts a create that ends at GET_AMOUNT', () => {
+        const btc = makeDecoder('bitcoin-regtest')
+        assert.strictEqual(CREATE_NO_TAIL.length, 10)
+        assert.strictEqual(btc.hasRequiredDispenserCreateFields(CREATE_NO_TAIL), true)
+    })
+
+    it('accepts creates that carry part or all of the optional tail', () => {
+        const btc = makeDecoder('bitcoin-regtest')
+        assert.strictEqual(btc.hasRequiredDispenserCreateFields(CREATE_WITH_EXPIRATION), true)
+        assert.strictEqual(btc.hasRequiredDispenserCreateFields(CREATE_FULL), true)
+    })
+
+    it('still rejects a create truncated before GET_AMOUNT', () => {
+        const btc = makeDecoder('bitcoin-regtest')
+        const truncated = 'DISPENSER|0|BTC|XCHAIN|500||2000|BTC|'.split('|')
+        assert.strictEqual(truncated.length, 9)
+        assert.strictEqual(btc.hasRequiredDispenserCreateFields(truncated), false)
+    })
+
+    it('rejects a non-array payload rather than throwing', () => {
+        const btc = makeDecoder('bitcoin-regtest')
+        assert.strictEqual(btc.hasRequiredDispenserCreateFields(null), false)
+        assert.strictEqual(btc.hasRequiredDispenserCreateFields(undefined), false)
+    })
+})
