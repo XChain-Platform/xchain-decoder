@@ -768,10 +768,11 @@ class XChainDecoder {
     //       not maintain - so the oracle address is read back from the open dispenser row
     //       this decoder registered, resolved by SOURCE address. That is the SAME
     //       resolution cancelOpenDispenserBySource / editOpenDispenserExpirationBySource
-    //       already use, and it carries the same documented residual: a delegated
-    //       (GET_ADDRESS) dispenser refilled by its original creator matches no
-    //       SOURCE-keyed row, so nothing is captured and the indexer rejects that refill.
-    //       Fail-closed, and no worse than the pre- behavior it replaces.
+    //       already use, and since  it matches the create SOURCE as well as the
+    //       operating address, so a delegated (GET_ADDRESS) dispenser refilled by its
+    //       original creator now resolves too. An unmatched SOURCE still captures nothing
+    //       and the indexer rejects that refill: fail-closed, and no worse than the
+    //       pre- behavior it replaces.
     //
     // Returns false on a DB fault so the caller can roll the block back: silently
     // capturing nothing would make this node disagree with a healthy one about what the
@@ -2085,12 +2086,15 @@ class XChainDecoder {
                                     // create path fails loud on). The decoder therefore resolves the
                                     // target by the cancel/edit tx SOURCE address: the indexer gates
                                     // both on SOURCE == dispenser SOURCE or GET_ADDRESS, and the
-                                    // decoder keyed the open row on that same operating address, so a
-                                    // SOURCE-address match reproduces the indexer's outcome for the
-                                    // (non-delegated) case the decoder can represent (a delegated
-                                    // GET_ADDRESS dispenser cancelled by its original creator is the
-                                    // documented residual: no SOURCE-keyed open row to match). The gap
-                                    // this closes is enumerated in
+                                    // decoder row records BOTH of those addresses (address_id = the
+                                    // operating address, source_address_id = the create SOURCE when
+                                    // delegated), so a SOURCE-address match reproduces the indexer's
+                                    // authorisation outcome for delegated dispensers too .
+                                    // What stays approximate is only WHICH dispenser an address's
+                                    // cancel targets when that address has several open at once: the
+                                    // action_index that would disambiguate is not in the decoder's id
+                                    // space, so the row keyed on the operating address wins, then the
+                                    // most recent. The gap this closes is enumerated in
                                     // xchain-indexer/src/dispenserDivergenceMetrics.js.
                                     let commandVersion = decodedDataSplit[1]
                                     let dispenserFormat = parseInt(commandVersion, 10)
@@ -2154,6 +2158,14 @@ class XChainDecoder {
                                                 if (!(await this.db.insertDispenser({
                                                     txIndex: lastProcessedTxIndex,
                                                     address: operatingAddress,
+                                                    // The create SOURCE, kept alongside the operating
+                                                    // address so a later cancel/edit/refill issued by the
+                                                    // creator of a DELEGATED (GET_ADDRESS) dispenser still
+                                                    // resolves to this row, exactly as the indexer's
+                                                    // "SOURCE == dispenser SOURCE or GET_ADDRESS" gate
+                                                    // allows . Stored only when it differs from
+                                                    // the operating address.
+                                                    sourceAddress: parseResult["source"],
                                                     oracleAddress: oracleAddressFromCreate(decodedDataSplit),
                                                     expiration: expiration
                                                 }))){

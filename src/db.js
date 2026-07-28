@@ -1818,8 +1818,9 @@ class Database {
             tx_index,
             address_id,
             expiration,
-            oracle_address_id
-        ) VALUES (?, ?, ?, ?);
+            oracle_address_id,
+            source_address_id
+        ) VALUES (?, ?, ?, ?, ?);
         `;
         // expiration is a raw unix timestamp (seconds) stored as-is into a BIGINT UNSIGNED
         // column. It is deliberately NOT wrapped in FROM_UNIXTIME(): FROM_UNIXTIME() caps at
@@ -1844,12 +1845,25 @@ class Database {
             let oracleAddressId = openDispenser.oracleAddress
                 ? await this.createAddress(openDispenser.oracleAddress)
                 : null
+            // The create's SOURCE, recorded ONLY when the dispenser operates on a
+            // delegated GET_ADDRESS (address != source). The indexer authorises a later
+            // cancel/edit from EITHER the dispenser SOURCE or its GET_ADDRESS
+            // (xchain-indexer/src/actions/dispenser.js "SOURCE (not owner)"), and
+            // address_id records only the operating address, so without this id a
+            // creator-issued cancel of a delegated dispenser matched no decoder row and
+            // the row stayed open past the indexer's close . A non-delegated
+            // dispenser leaves this NULL, so its rows are unchanged from before.
+            let sourceAddressId = (openDispenser.sourceAddress &&
+                                   openDispenser.sourceAddress !== openDispenser.address)
+                ? await this.createAddress(openDispenser.sourceAddress)
+                : null
 
             await connection.query(query, [
                 txIndex,
                 addressId,
                 expiration,
-                oracleAddressId
+                oracleAddressId,
+                sourceAddressId
             ])
             
             return true
@@ -1876,25 +1890,38 @@ class Database {
     // then closes the row at the same height the indexer's DISPENSER_CLOSE fires, so the
     // decoder's open-dispenser view tracks the indexer across the cancelling window.
     // The decoder has no indexer action_index, so the target is resolved by SOURCE
-    // address: the indexer requires the canceller SOURCE to equal the dispenser SOURCE
-    // or GET_ADDRESS, and the decoder keyed the open row on that operating address.
-    // Only the most-recently-opened OPEN row at that address is closed (ORDER BY
-    // tx_index DESC LIMIT 1); a stale/unknown SOURCE matches zero rows and is a no-op.
+    // address, reproducing the indexer's ownership gate (the canceller SOURCE must equal
+    // the dispenser SOURCE or its GET_ADDRESS) with the two ids stored on the row:
+    // address_id (the operating address, i.e. GET_ADDRESS when delegated) and
+    // source_address_id (the create SOURCE, set only when the two differ). Matching on
+    // BOTH is what closes the delegated-cancel gap : before it, a dispenser
+    // opened on a delegated GET_ADDRESS and cancelled by its original creator matched no
+    // decoder row, so the decoder kept the address in its open set long past the
+    // indexer's DISPENSER_CLOSE.
+    // Only ONE open row is closed. Operating-address matches are preferred over
+    // create-SOURCE matches (the leading ORDER BY term), so whenever the pre-
+    // query would have closed a row this one closes that same row; a source-keyed row is
+    // reached only when the address keys no open row at all. Ties break most-recent-first
+    // (ORDER BY tx_index DESC). That preference direction matters: closing the wrong row
+    // early would stop capturing payment outputs to a still-live dispenser (money-bearing),
+    // whereas leaving one open too long only produces triggers the indexer drops.
+    // A stale/unknown SOURCE matches zero rows and is a no-op.
     // Same false/true return contract as insertDispenser: false means the query failed
     // and the block transaction was rolled back, so the caller retries the block.
     async cancelOpenDispenserBySource(sourceAddress, closeExpiration) {
         const query = `
             UPDATE dispensers
             SET expiration = ?
-            WHERE address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
+            WHERE (address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
+                OR source_address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1))
               AND expired_block_index IS NULL
-            ORDER BY tx_index DESC
+            ORDER BY (address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)) DESC, tx_index DESC
             LIMIT 1;
         `;
         let connection = await this.getConnection()
         const ownLease = (this.transactionConnection == null)
         try {
-            await connection.query(query, [closeExpiration, sourceAddress])
+            await connection.query(query, [closeExpiration, sourceAddress, sourceAddress, sourceAddress])
             return true
         } catch (err) {
             console.error('Error cancelling dispenser:', err);
@@ -1919,15 +1946,16 @@ class Database {
         const query = `
             UPDATE dispensers
             SET expiration = ?
-            WHERE address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
+            WHERE (address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
+                OR source_address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1))
               AND expired_block_index IS NULL
-            ORDER BY tx_index DESC
+            ORDER BY (address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)) DESC, tx_index DESC
             LIMIT 1;
         `;
         let connection = await this.getConnection()
         const ownLease = (this.transactionConnection == null)
         try {
-            await connection.query(query, [newExpiration, sourceAddress])
+            await connection.query(query, [newExpiration, sourceAddress, sourceAddress, sourceAddress])
             return true
         } catch (err) {
             console.error('Error editing dispenser expiration:', err);
@@ -1946,9 +1974,11 @@ class Database {
     // block loop can capture that transaction's PRICE v1 oracle-usage-fee output .
     // The v2 payload names its target by DISPENSER_ACTION_INDEX, an id in the INDEXER's
     // action space the decoder does not maintain, so the target is resolved by SOURCE
-    // address and the most-recently-opened OPEN row wins - identical selection to
-    // cancelOpenDispenserBySource / editOpenDispenserExpirationBySource, and carrying the
-    // same delegated-GET_ADDRESS residual.
+    // address - identical selection to cancelOpenDispenserBySource /
+    // editOpenDispenserExpirationBySource, including the  create-SOURCE match that
+    // lets a refill of a DELEGATED dispenser (paid by its original creator, whose SOURCE
+    // is not the operating address) still find its dispenser and capture the oracle-fee
+    // output the indexer will look for.
     //
     // Returns the address string, null when there is no match or the dispenser named no
     // oracle, and false on a query fault (the caller retries the block rather than
@@ -1958,15 +1988,16 @@ class Database {
             SELECT a2.address AS oracle_address
             FROM dispensers d
             INNER JOIN index_addresses a2 ON (a2.id = d.oracle_address_id)
-            WHERE d.address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
+            WHERE (d.address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
+                OR d.source_address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1))
               AND d.expired_block_index IS NULL
-            ORDER BY d.tx_index DESC
+            ORDER BY (d.address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)) DESC, d.tx_index DESC
             LIMIT 1;
         `;
         let connection = await this.getConnection()
         const ownLease = (this.transactionConnection == null)
         try {
-            let rows = await connection.query(query, [sourceAddress])
+            let rows = await connection.query(query, [sourceAddress, sourceAddress, sourceAddress])
             if (rows && rows.length > 0 && rows[0].oracle_address)
                 return rows[0].oracle_address
             return null

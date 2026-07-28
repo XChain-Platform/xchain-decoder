@@ -47,35 +47,47 @@ class DispenserModel {
         this.rows  = []
         this.calls = { insert: [], cancel: [], edit: [] }
     }
-    async insertDispenser({ txIndex, address, expiration, oracleAddress }) {
-        this.calls.insert.push({ txIndex, address, expiration: Number(expiration) })
+    async insertDispenser({ txIndex, address, sourceAddress, expiration, oracleAddress }) {
+        this.calls.insert.push({ txIndex, address, sourceAddress, expiration: Number(expiration) })
         this.rows.push({ txIndex, address, expiration: Number(expiration), expiredBlockIndex: null,
-                         oracleAddress: oracleAddress || null })
+                         oracleAddress: oracleAddress || null,
+                         // Mirrors db.js: the create SOURCE is stored only when it differs
+                         // from the operating address (NULL means "same as address").
+                         sourceAddress: (sourceAddress && sourceAddress !== address) ? sourceAddress : null })
         return true
     }
-    // Mirrors getOpenDispenserOracleAddressBySource : same SOURCE-keyed,
-    // most-recent-open-row selection as cancel/edit.
+    // Mirrors the shared target resolution of cancelOpenDispenserBySource /
+    // editOpenDispenserExpirationBySource / getOpenDispenserOracleAddressBySource: open
+    // rows this address may act on (operating address OR stored create SOURCE, ),
+    // operating-address matches ranked first, then most recent.
+    _openFor(actingAddress) {
+        return this.rows
+            .filter(r => r.expiredBlockIndex === null &&
+                         (r.address === actingAddress || r.sourceAddress === actingAddress))
+            .sort((a, b) => {
+                const aKeyed = (a.address === actingAddress) ? 1 : 0
+                const bKeyed = (b.address === actingAddress) ? 1 : 0
+                if (aKeyed !== bKeyed) return bKeyed - aKeyed
+                return b.txIndex - a.txIndex
+            })
+    }
+    // Mirrors getOpenDispenserOracleAddressBySource : same target resolution as
+    // cancel/edit.
     async getOpenDispenserOracleAddressBySource(sourceAddress) {
-        const open = this.rows
-            .filter(r => r.address === sourceAddress && r.expiredBlockIndex === null)
-            .sort((a, b) => b.txIndex - a.txIndex)
+        const open = this._openFor(sourceAddress)
         return (open.length && open[0].oracleAddress) ? open[0].oracleAddress : null
     }
-    // Mirrors cancelOpenDispenserBySource: UPDATE ... SET expiration=? WHERE address open
-    // ORDER BY tx_index DESC LIMIT 1.
+    // Mirrors cancelOpenDispenserBySource: UPDATE ... SET expiration=? on the single
+    // resolved open row.
     async cancelOpenDispenserBySource(sourceAddress, closeExpiration) {
         this.calls.cancel.push({ sourceAddress, closeExpiration: Number(closeExpiration) })
-        const open = this.rows
-            .filter(r => r.address === sourceAddress && r.expiredBlockIndex === null)
-            .sort((a, b) => b.txIndex - a.txIndex)
+        const open = this._openFor(sourceAddress)
         if (open.length) open[0].expiration = Number(closeExpiration)
         return true
     }
     async editOpenDispenserExpirationBySource(sourceAddress, newExpiration) {
         this.calls.edit.push({ sourceAddress, newExpiration: Number(newExpiration) })
-        const open = this.rows
-            .filter(r => r.address === sourceAddress && r.expiredBlockIndex === null)
-            .sort((a, b) => b.txIndex - a.txIndex)
+        const open = this._openFor(sourceAddress)
         if (open.length) open[0].expiration = Number(newExpiration)
         return true
     }
@@ -171,6 +183,10 @@ const ADDR = 'bcrt1qtestsource'
 // Fields: DISPENSER|0|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|GIVE_OWNERSHIP|GIVE_ESCROW|
 //         GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS|EXPIRATION
 const CREATE = `DISPENSER|0|BTC|TICK|1||10|BTC||1|||||${T0 + 1000000}`
+// Delegated-dispenser pair : CREATOR signs the create, DELEGATE is the
+// GET_ADDRESS the dispenser then operates on.
+const CREATOR  = 'bcrt1qtestcreator'
+const DELEGATE = 'bcrt1qtestdelegate'
 
 describe('DISPENSER lifecycle mirror ', function () {
     this.timeout(0)
@@ -258,12 +274,11 @@ describe('DISPENSER lifecycle mirror ', function () {
         assert.strictEqual(model.rows[0].expiration, T0 + 1000000)
     })
 
-    it('documented residual: a cancel from an address with no open decoder dispenser is a no-op', async () => {
-        // The decoder resolves the target by SOURCE address (it has no indexer
-        // action_index). A cancel whose SOURCE is not the operating address the decoder
-        // keyed the row on (e.g. a delegated-GET_ADDRESS dispenser cancelled by its
-        // original creator) matches no open row and leaves the view unchanged. This
-        // pins the known boundary rather than guessing a wrong row to close.
+    it('a cancel from an address that owns no dispenser at all is a no-op', async () => {
+        // The decoder resolves the target by acting address (it has no indexer
+        // action_index). An address that is neither the operating address nor the
+        // recorded create SOURCE of any open row matches nothing, exactly as the indexer
+        // rejects it with "invalid: SOURCE (not owner)". No row is guessed at.
         const model = new DispenserModel()
         const decoder = buildDecoder([
             { id: 'create01', action: CREATE,               source: ADDR },
@@ -273,10 +288,92 @@ describe('DISPENSER lifecycle mirror ', function () {
         await decoder.start()
 
         assert.strictEqual(model.calls.cancel.length, 1, 'the cancel decision still fires')
-        // The far-future expiry is untouched: no open row existed at the cancel SOURCE.
+        // The far-future expiry is untouched: no open row was actionable by that address.
         await model.deleteOpenDispensers(1, T0 + DISPENSER_CLOSE_DELAY + 1)
         const open = await model.getAllOpenDispenserAddresses()
-        assert.ok(open.has(ADDR), 'unresolved cancel leaves the original dispenser open')
+        assert.ok(open.has(ADDR), 'an unauthorised cancel leaves the dispenser open')
+    })
+
+    // ── Delegated (GET_ADDRESS) dispensers, . The indexer authorises a cancel/edit
+    //    from the dispenser SOURCE *or* its GET_ADDRESS
+    //    (xchain-indexer/src/actions/dispenser.js, "invalid: SOURCE (not owner)"). The
+    //    decoder keys the open row on the operating address (GET_ADDRESS when delegated),
+    //    so before this fix a creator-issued cancel matched no row and the decoder kept
+    //    the delegated address in its open set long past the indexer's DISPENSER_CLOSE:
+    //    every later plain payment to that address was still captured as a dispense
+    //    trigger the indexer drops. These pin the closure.
+    //
+    // SENSITIVITY: both fail against pre- code, where insertDispenser records no
+    // create SOURCE and the cancel/edit lookups match on the operating address only.
+
+    it('a delegated dispenser is closed by a cancel from its original creator', async () => {
+        const model = new DispenserModel()
+        // GET_ADDRESS (field 10) = DELEGATE, so the dispenser operates on DELEGATE while
+        // CREATOR signs the create.
+        const delegatedCreate = `DISPENSER|0|BTC|TICK|1||10|BTC||1|${DELEGATE}||||${T0 + 1000000}`
+        const decoder = buildDecoder([
+            { id: 'create01', action: delegatedCreate,       source: CREATOR },
+            { id: 'cancel01', action: 'DISPENSER|1|7|bye',   source: CREATOR },
+        ], model)
+
+        await decoder.start()
+
+        // The row is keyed on the delegated operating address, and carries the creator.
+        assert.strictEqual(model.calls.insert.length, 1)
+        assert.strictEqual(model.calls.insert[0].address, DELEGATE)
+        assert.strictEqual(model.rows[0].sourceAddress, CREATOR)
+
+        // The creator's cancel resolves to it and brings the expiry to the indexer's
+        // close time, so the address leaves the open set at the same height.
+        assert.strictEqual(model.rows[0].expiration, T0 + DISPENSER_CLOSE_DELAY)
+        let open = await model.getAllOpenDispenserAddresses()
+        assert.ok(open.has(DELEGATE), 'still open through the cancelling window')
+        await model.deleteOpenDispensers(1, T0 + DISPENSER_CLOSE_DELAY + 1)
+        open = await model.getAllOpenDispenserAddresses()
+        assert.ok(!open.has(DELEGATE), 'closed at the indexer close height, not at its original expiry')
+    })
+
+    it('a creator-issued EXPIRATION edit re-dates the delegated dispenser', async () => {
+        const model = new DispenserModel()
+        const delegatedCreate = `DISPENSER|0|BTC|TICK|1||10|BTC||1|${DELEGATE}||||${T0 + 1000000}`
+        const shortened = T0 + 500
+        const decoder = buildDecoder([
+            { id: 'create01', action: delegatedCreate,                 source: CREATOR },
+            { id: 'edit01',   action: `DISPENSER|2|7||${shortened}||`, source: CREATOR },
+        ], model)
+
+        await decoder.start()
+
+        assert.strictEqual(model.calls.edit.length, 1)
+        assert.strictEqual(model.rows[0].expiration, shortened)
+        await model.deleteOpenDispensers(1, shortened + 1)
+        const open = await model.getAllOpenDispenserAddresses()
+        assert.ok(!open.has(DELEGATE), 'the shortened expiry closes the delegated dispenser')
+    })
+
+    it('an operating-address dispenser wins over a delegated one the same address created', async () => {
+        // An address can hold its own dispenser AND be the creator of a delegated one.
+        // The action_index that would disambiguate is not in the decoder's id space, so
+        // resolution prefers the row keyed on the acting address. That preference is the
+        // safe direction: closing the delegated row early would stop capturing payments
+        // to a dispenser that is still live (money-bearing), while leaving it open only
+        // produces triggers the indexer authoritatively drops.
+        const model = new DispenserModel()
+        const delegatedCreate = `DISPENSER|0|BTC|TICK|1||10|BTC||1|${DELEGATE}||||${T0 + 1000000}`
+        // The delegated row is deliberately the MORE RECENT of the two, so a
+        // recency-only resolution would pick it and the assertion below would fail.
+        const decoder = buildDecoder([
+            { id: 'create01', action: CREATE,               source: CREATOR },  // own, older
+            { id: 'create02', action: delegatedCreate,      source: CREATOR },  // delegated, newer
+            { id: 'cancel01', action: 'DISPENSER|1|7|bye',  source: CREATOR },
+        ], model)
+
+        await decoder.start()
+
+        const ownRow       = model.rows.find(r => r.address === CREATOR)
+        const delegatedRow = model.rows.find(r => r.address === DELEGATE)
+        assert.strictEqual(ownRow.expiration, T0 + DISPENSER_CLOSE_DELAY, 'the own dispenser is the one closed')
+        assert.strictEqual(delegatedRow.expiration, T0 + 1000000, 'the delegated dispenser is left alone')
     })
 
     // ── DISPENSER caps twin (, Leg F). At/after the caps flag-day
