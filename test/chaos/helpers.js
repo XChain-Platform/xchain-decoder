@@ -19,6 +19,15 @@
 const sinon = require('sinon')
 const EventEmitter = require('events')
 
+// The stored-tip hash the mock DB reports AND the hash the mock node reports for
+// that height. These MUST agree: verifyReorg compares them, and when they differ
+// the decoder booted on the default mocks detects a phantom reorg at startup and
+// walks the rollback (deleteBlockByIndex is a no-op stub, so getLastBlockIndex
+// never retreats) until it hits the DISPENSER_EXPIRE_SAFE_DEPTH abort. That is
+// what rotted the CE-01 outage tests: they assert node-retry behaviour and never
+// meant to be inside a reorg at all.
+const MOCK_TIP_HASH = '0000000000000000000000000000000000000000000000000000000000000001'
+
 /**
  * Creates a mock Database instance with controllable behavior.
  * All methods return success by default; use stubs to inject faults.
@@ -31,7 +40,7 @@ function createMockDatabase(overrides = {}) {
 
         getLastBlockIndex: sinon.stub().resolves(0),
         getLastTxIndex: sinon.stub().resolves(0),
-        getBlockByIndex: sinon.stub().resolves({ block_hash: 'abc123', block_index: 0 }),
+        getBlockByIndex: sinon.stub().resolves({ block_hash: MOCK_TIP_HASH, block_index: 0 }),
         createDatabase: sinon.stub().resolves(true),
         verifyDatabase: sinon.stub().resolves(true),
         verifyTables: sinon.stub().resolves(true),
@@ -79,7 +88,7 @@ function createMockConnector(overrides = {}) {
             blocks: 100,
             verificationprogress: 1.0
         }),
-        getBlockHash: sinon.stub().resolves('0000000000000000000000000000000000000000000000000000000000000001'),
+        getBlockHash: sinon.stub().resolves(MOCK_TIP_HASH),
         getBlockHeader: sinon.stub().resolves('0'.repeat(160)),
         getBlock: sinon.stub().resolves(null),
         getBlockWithoutAuxPow: sinon.stub().resolves(null),
@@ -187,13 +196,56 @@ function withLatency(value, minMs, maxMs) {
     })
 }
 
+/**
+ * Removes // line comments and block comments from JS source, preserving line
+ * structure and offsets by replacing each stripped character with a space.
+ * Source-shape assertions must scan code, not prose: this codebase's comments
+ * routinely quote the very keywords those assertions search for.
+ */
+function stripJsComments(source) {
+    // States: 0 code, 1 line comment, 2 block comment, 3 single-quote string,
+    // 4 double-quote string, 5 template string. Regex literals are not tracked;
+    // a `//` inside one would over-strip, which is acceptable for shape checks.
+    let out = ''
+    let state = 0
+    for (let i = 0; i < source.length; i++) {
+        const c = source[i]
+        const next = source[i + 1]
+        if (state === 0) {
+            if (c === '/' && next === '/') { state = 1; out += '  '; i++; continue }
+            if (c === '/' && next === '*') { state = 2; out += '  '; i++; continue }
+            if (c === "'") state = 3
+            else if (c === '"') state = 4
+            else if (c === '`') state = 5
+            out += c
+            continue
+        }
+        if (state === 1) {
+            if (c === '\n') { state = 0; out += c } else out += ' '
+            continue
+        }
+        if (state === 2) {
+            if (c === '*' && next === '/') { state = 0; out += '  '; i++ }
+            else out += (c === '\n' ? c : ' ')
+            continue
+        }
+        // Inside a string literal: copy through, honouring backslash escapes.
+        out += c
+        if (c === '\\') { out += (next === undefined ? '' : next); i++; continue }
+        if ((state === 3 && c === "'") || (state === 4 && c === '"') || (state === 5 && c === '`')) state = 0
+    }
+    return out
+}
+
 module.exports = {
     createMockDatabase,
     createMockConnector,
     createMinimalBlockHex,
+    MOCK_TIP_HASH,
     wait,
     captureConsole,
     failNTimes,
     intermittentFault,
-    withLatency
+    withLatency,
+    stripJsComments
 }

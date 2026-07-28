@@ -100,13 +100,21 @@ describe('CE-01: Node Unavailability and Recovery', function () {
         mockConnector.getBlock = sinon.stub().rejects(new Error('Also unavailable'))
         mockDb.getLastBlockIndex.resolves(-1)
 
-        const { logs } = await captureConsole(async () => {
+        const { errors } = await captureConsole(async () => {
             await decoder.start()
         })
 
         assert.ok(blockHashCalls >= 3, 'Should have retried getBlockHash')
-        const retryLogs = logs.filter(l => l.includes('Error trying to get next block'))
+        // The block-fetch retry now reports on console.error as
+        // "Error fetching block at height N (attempt X):" and carries a per-height
+        // attempt counter; the old console.log "Error trying to get next block"
+        // string no longer exists anywhere in the decoder.
+        const retryLogs = errors.filter(l => l.includes('Error fetching block at height'))
         assert.ok(retryLogs.length >= 1, 'Should log block fetch retry messages')
+        assert.ok(retryLogs.some(l => l.includes('(attempt 1)')),
+            'The first failure at a height should be reported as attempt 1')
+        assert.ok(retryLogs.some(l => l.includes('(attempt 2)')),
+            'Consecutive failures at the same height should increment the attempt counter')
     })
 
     it('should handle getBlock failure after getBlockHash succeeds', async function () {

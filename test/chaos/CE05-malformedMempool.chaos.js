@@ -20,7 +20,7 @@
 const assert = require('assert')
 const sinon = require('sinon')
 const XChainDecoder = require('../../src/XChainDecoder')
-const { createMockDatabase, createMockConnector, captureConsole } = require('./helpers')
+const { createMockDatabase, createMockConnector, captureConsole, stripJsComments } = require('./helpers')
 
 describe('CE-05: Malformed Mempool Transaction', function () {
     let decoder
@@ -209,17 +209,25 @@ describe('CE-05: Malformed Mempool Transaction', function () {
 
     it('should verify the post-sort body is wrapped in try/finally that resets mempoolBusy in source', function () {
         const fs = require('fs')
-        const source = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8')
+        const rawSource = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8')
+
+        // Strip comments before scanning. The narrative comments inside updateMempool
+        // mention the word "finally" in prose, so a raw indexOf('finally') lands on a
+        // comment and reads the following 400 characters as if they were the finally
+        // body. That is what rotted this assertion: the code was correct all along.
+        const source = stripJsComments(rawSource)
 
         // The updateMempool body must end in a finally clause that clears the flag.
         const start = source.indexOf('async updateMempool')
         assert.ok(start >= 0, 'updateMempool method should exist')
         const body = source.slice(start)
-        const finallyIdx = body.indexOf('finally')
-        assert.ok(finallyIdx >= 0, 'updateMempool should contain a finally block')
-        const finallyBlock = body.slice(finallyIdx, finallyIdx + 400)
-        assert.ok(/this\.mempoolBusy\s*=\s*false/.test(finallyBlock),
-            'the finally block should reset this.mempoolBusy = false')
+
+        // Check every real finally clause in the method, not just the first: the flag
+        // only has to be cleared by one of them.
+        const cleared = [...body.matchAll(/\bfinally\b/g)].some(m =>
+            /this\.mempoolBusy\s*=\s*false/.test(body.slice(m.index, m.index + 400)))
+        assert.ok(cleared,
+            'updateMempool should contain a finally block that resets this.mempoolBusy = false')
     })
 
     it('should verify transactionFromHex is wrapped in try/catch in source', function () {

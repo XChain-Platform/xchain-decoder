@@ -103,7 +103,14 @@ describe('CE-10: Fire-and-Forget DB Call (insertTransactionOutput)', function ()
             await decoder.start()
         })
 
-        assert.strictEqual(outputInsertCalls, 2, 'Both insertTransactionOutput calls should complete (awaited)')
+        // A false return means the INSERT failed and the block transaction was
+        // already rolled back, so the loop must NOT keep writing (those writes would
+        // land outside a transaction): it aborts and re-parses the block. Call 1
+        // fails, then the retry writes both outputs (calls 2 and 3).
+        assert.strictEqual(outputInsertCalls, 3,
+            'Failed output insert should abort the block and both outputs land on the retry')
+        const written = mockDb.insertTransactionOutput.getCalls().slice(1).map(c => c.args[0].vout)
+        assert.deepStrictEqual(written, [0, 1], 'The retry should re-write every dispense output in order')
     })
 
     it('insertTransactionOutput should be called with correct parameters', async function () {

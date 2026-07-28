@@ -85,7 +85,8 @@ describe('CE-02: RPC Timeout Storm', function () {
             await connector.getBlockHeader('abc123')
             assert.fail('Should have thrown')
         } catch (err) {
-            assert.ok(err.message.includes('problems getting a block hex'))
+            assert.ok(err.message.includes('problems getting a block header'),
+                `Got: ${err.message}`)
             assert.strictEqual(callCount, 10)
         } finally {
             stub.restore()

@@ -154,9 +154,53 @@ describe('CE-07: Concurrent Instance Behavior', function () {
 
         await db.deleteBlockByIndex(5)
 
-        // deleteBlockByIndex calls beginTransaction -> queries -> commitTransaction
+        // deleteBlockByIndex calls beginTransaction -> queries -> commitTransaction.
+        // The old assertion pinned exactly two queries; the rollback path has since
+        // grown the dispenser un-expire and the child-row deletes that must precede
+        // the parent `transactions` delete, so assert the statements by shape instead
+        // of by count.
         assert.ok(mockConn.beginTransaction.called, 'Should begin transaction')
-        assert.ok(mockConn.query.calledTwice, 'Should run DELETE for transactions and blocks')
+        const sql = mockConn.query.getCalls().map(c => c.args[0].replace(/\s+/g, ' ').trim())
+        const has = (re) => sql.some(s => re.test(s))
+        assert.ok(has(/^UPDATE dispensers SET expired_block_index = NULL/i),
+            'Should un-expire dispensers soft-expired by the orphaned block')
+        assert.ok(has(/^DELETE FROM transaction_outputs/i), 'Should delete transaction_outputs')
+        assert.ok(has(/^DELETE FROM dispensers/i), 'Should delete dispensers')
+        assert.ok(has(/^DELETE FROM transactions WHERE block_index/i), 'Should delete transactions')
+        assert.ok(has(/^DELETE FROM blocks WHERE block_index/i), 'Should delete blocks')
+        // Child rows must go before the parent transactions rows they reference.
+        assert.ok(sql.findIndex(s => /^DELETE FROM transaction_outputs/i.test(s))
+            < sql.findIndex(s => /^DELETE FROM transactions WHERE block_index/i.test(s)),
+            'transaction_outputs must be deleted before transactions')
+        // Plain (non-reorg) call writes no REORG marker.
+        assert.ok(!has(/INSERT INTO events/i), 'Plain delete should not write a REORG event')
         assert.ok(mockConn.commit.called, 'Should commit transaction')
+    })
+
+    it('deleteBlockByIndex writes the REORG marker inside the same transaction', async function () {
+        const db = new Database('localhost', 3306, 'test_chaos_db', 'root', '')
+
+        const order = []
+        const mockConn = {
+            query: sinon.stub().callsFake(async (q) => { order.push('query:' + q.replace(/\s+/g, ' ').trim()); return [] }),
+            release: sinon.stub().resolves(),
+            beginTransaction: sinon.stub().callsFake(async () => { order.push('begin') }),
+            commit: sinon.stub().callsFake(async () => { order.push('commit') }),
+            rollback: sinon.stub().resolves()
+        }
+
+        db.pool = { getConnection: sinon.stub().resolves(mockConn) }
+
+        await db.deleteBlockByIndex(5, 'deadbeef')
+
+        const eventIdx = order.findIndex(o => /^query:INSERT INTO events/i.test(o))
+        assert.ok(eventIdx >= 0, 'Reorg call should write a REORG event row')
+        assert.ok(order.indexOf('begin') < eventIdx && eventIdx < order.indexOf('commit'),
+            'The REORG marker must be written inside the delete transaction, never after the commit')
+
+        const eventCall = mockConn.query.getCalls().find(c => /INSERT INTO events/i.test(c.args[0]))
+        const [, code, data] = eventCall.args[1]
+        assert.strictEqual(code, 'REORG')
+        assert.deepStrictEqual(JSON.parse(data), [{ block_index: 5, block_hash: 'deadbeef' }])
     })
 })

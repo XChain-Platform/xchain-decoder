@@ -82,7 +82,8 @@ describe('CE-04: Mid-Transaction Database Failure', function () {
             rawData: null,
             source: 'testaddress',
             destination: null,
-            dispenseOutputs: []
+            dispenseOutputs: [],
+            paymentOutputs: []
         })
 
         mockDb.insertTransaction = sinon.stub().callsFake(async () => {

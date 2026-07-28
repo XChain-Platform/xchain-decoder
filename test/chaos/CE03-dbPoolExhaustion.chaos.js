@@ -19,6 +19,7 @@
 const assert = require('assert')
 const sinon = require('sinon')
 const Database = require('../../src/db.js')
+const util = require('../../src/util')
 
 describe('CE-03: Database Connection Pool Exhaustion', function () {
     let db
@@ -27,22 +28,46 @@ describe('CE-03: Database Connection Pool Exhaustion', function () {
         db = new Database('localhost', 3306, 'test_chaos_db', 'root', '')
     })
 
-    it('getConnection should timeout after GET_CONNECTION_TIMEOUT_MS', async function () {
-        // Override pool to always fail
+    afterEach(function () {
+        sinon.restore()
+    })
+
+    // getConnection is bounded by an ATTEMPT count (30) with exponential backoff
+    // capped at 15s, not by a wall-clock GET_CONNECTION_TIMEOUT_MS. There is no such
+    // constant any more, and the real schedule runs for minutes, so the old
+    // "elapsed >= 28s under a 60s mocha timeout" assertion could never pass on any
+    // code. Stub the backoff sleep and assert the schedule the code actually
+    // implements: 30 attempts, exponential from 500ms, clamped at 15s, then throw.
+    it('getConnection gives up after the bounded retry schedule', async function () {
+        const delays = []
+        sinon.stub(util, 'sleep').callsFake(async (ms) => { delays.push(ms) })
+
         db.pool = {
             getConnection: sinon.stub().rejects(new Error('Too many connections'))
         }
 
-        const startTime = Date.now()
+        let err = null
         try {
             await db.getConnection()
-            assert.fail('Should have thrown timeout error')
-        } catch (err) {
-            const elapsed = Date.now() - startTime
-            assert.ok(err.message.includes('Failed to get database connection'), `Got: ${err.message}`)
-            // Should take at least 30s (GET_CONNECTION_TIMEOUT_MS)
-            assert.ok(elapsed >= 28000, `Expected >= 28s timeout, got ${elapsed}ms`)
+        } catch (e) {
+            err = e
         }
+
+        assert.ok(err, 'Should have thrown once the attempt budget was exhausted')
+        assert.ok(err.message.includes('Failed to get database connection'), `Got: ${err.message}`)
+        assert.ok(err.message.includes('30 attempts'), `Should report the attempt budget. Got: ${err.message}`)
+
+        // 30 attempts means 29 backoff sleeps (the last failure throws instead).
+        assert.strictEqual(db.pool.getConnection.callCount, 30)
+        assert.strictEqual(delays.length, 29)
+
+        // Exponential from 500ms with up to 30% jitter, clamped at 15s.
+        assert.ok(delays[0] >= 500 && delays[0] <= 650, `first backoff out of range: ${delays[0]}`)
+        assert.ok(delays[1] >= 1000 && delays[1] <= 1300, `second backoff out of range: ${delays[1]}`)
+        for (let i = 1; i < delays.length; i++) {
+            assert.ok(delays[i] >= delays[i - 1] * 0.7, 'backoff must not collapse back toward zero')
+        }
+        assert.ok(delays[delays.length - 1] <= 15000 * 1.3, 'backoff must stay clamped at the 15s cap')
     })
 
     it('getConnection should return transactionConnection when available', async function () {
