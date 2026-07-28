@@ -39,6 +39,11 @@ bitcoin.initEccLib(ecc);
 const CHECK_BLOCK_DELAY_MS = 1000 //1 second to continously ask for new block when all has been parsed
 const BLOCKCHAIN_INFO_REFRESH_MS = 30000 //Re-poll the node tip at least this often during catch-up so reported lag stays accurate
 const MEMPOOL_INTERVAL = 60000 //60 seconds between mempool checks
+// How often a health surface may re-probe the durable REORG_HALT marker . The
+// marker changes at most once in a decoder's life, so a slow TTL is ample; the point of
+// the cache is that an unauthenticated health endpoint must not turn into one DB query
+// per request.
+const REORG_HALT_PROBE_INTERVAL_MS = 60000
 const MEMPOOL_BATCH_SIZE = 1000
 
 const MAGIC_WORD = "XCHN"
@@ -323,8 +328,24 @@ class XChainDecoder {
         this._fetchErrorHeight = null
         this._fetchErrorCount = 0
         this._auxPowParseErrorCount = 0
+
+        // Latent REORG_HALT marker state . The durable marker written by
+        // verifyReorg is only ever READ by verifyReorg, so a decoder carrying one
+        // looks perfectly healthy right up until the next reorg trips it - which
+        // can be weeks later and then reads as a sudden unexplained outage (
+        // sat dormant for at least a week, and the weekly bootstrap cron published
+        // the halted database as the newest "good" archive in the meantime). These
+        // fields cache a periodic probe so health()/GET /status can report the
+        // marker BEFORE a reorg finds it. reorgHaltCheckedAt is the epoch-ms of the
+        // last successful probe (0 = never probed), which also drives the TTL that
+        // keeps a hot monitoring loop from issuing one query per request.
+        this.reorgHalted = false
+        this.reorgHaltReason = null
+        this.reorgHaltAt = null
+        this.reorgHaltCheckedAt = 0
+        this._reorgHaltProbeInFlight = null
     }
-    
+
     async sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
@@ -392,7 +413,79 @@ class XChainDecoder {
         if (nodeHeightStale) status.node_height_stale = true
         return status
     }
-    
+
+    // Probe the durable REORG_HALT marker and cache the answer .
+    //
+    // The marker is written by verifyReorg and, until now, read ONLY by verifyReorg:
+    // a decoder carrying one keeps parsing blocks and reports "healthy" until the
+    // next reorg trips it, at which point a week-old fault presents as a sudden
+    // outage. Worse, the bootstrap publisher snapshotted such a database and shipped
+    // it as the newest "good" archive. This probe runs on a TTL so every
+    // operator-facing surface can report a LATENT halt.
+    //
+    // Never throws: a probe fault leaves the last known state in place and is logged
+    // once per transition, because a DB blip must not flap a health surface. Fails
+    // SAFE in the sense that matters here: it never clears a halt it could not read.
+    async checkReorgHalt({ force = false, now = Date.now() } = {}){
+        if (!force && this.reorgHaltCheckedAt > 0
+            && (now - this.reorgHaltCheckedAt) < REORG_HALT_PROBE_INTERVAL_MS){
+            return this.getReorgHaltStatus()
+        }
+        // Collapse concurrent probes (a health endpoint under a monitoring burst)
+        // onto one in-flight query rather than one query per caller.
+        if (this._reorgHaltProbeInFlight) return this._reorgHaltProbeInFlight
+        this._reorgHaltProbeInFlight = (async () => {
+            try {
+                if (!this.db) return this.getReorgHaltStatus()
+                let marker
+                if (typeof this.db.getReorgHaltMarker === 'function'){
+                    marker = await this.db.getReorgHaltMarker()
+                } else if (typeof this.db.isReorgHalted === 'function'){
+                    // Older/minimal db shapes (and the mocks in the verifyReorg suites)
+                    // expose only the boolean probe.
+                    const halted = await this.db.isReorgHalted()
+                    marker = { halted: !!(halted && halted.halted !== undefined ? halted.halted : halted), at: null, reason: null }
+                } else {
+                    return this.getReorgHaltStatus()
+                }
+                const wasHalted = this.reorgHalted
+                this.reorgHalted        = !!(marker && marker.halted)
+                this.reorgHaltReason    = (marker && marker.reason) || null
+                this.reorgHaltAt        = (marker && marker.at) || null
+                this.reorgHaltCheckedAt = now
+                if (this.reorgHalted && !wasHalted){
+                    console.error('XChainDecoder: LATENT REORG_HALT MARKER PRESENT - this decoder carries a durable ' +
+                        'REORG_HALT row from an aborted rollback. It will keep parsing forward and look healthy, but ' +
+                        'the NEXT reorg will refuse to roll back and stop the decoder. This database is NOT a valid ' +
+                        'bootstrap source. REQUIRED OPERATOR ACTION: full resync from a known-good snapshot.' +
+                        (this.reorgHaltReason ? ' Marker detail: ' + this.reorgHaltReason : ''))
+                } else if (!this.reorgHalted && wasHalted){
+                    console.warn('XChainDecoder: REORG_HALT marker is gone; halt cleared.')
+                }
+                return this.getReorgHaltStatus()
+            } catch (e){
+                console.warn('XChainDecoder: REORG_HALT probe failed (non-fatal), keeping last known state (' +
+                    this.reorgHalted + '): ' + (e && e.message))
+                return this.getReorgHaltStatus()
+            } finally {
+                this._reorgHaltProbeInFlight = null
+            }
+        })()
+        return this._reorgHaltProbeInFlight
+    }
+
+    // Cached view of the halt marker for health surfaces. `checked_at` is null until
+    // the first successful probe, so a consumer can tell "not halted" apart from
+    // "never looked".
+    getReorgHaltStatus(){
+        return {
+            halted:     !!this.reorgHalted,
+            reason:     this.reorgHaltReason || null,
+            at:         this.reorgHaltAt || null,
+            checked_at: this.reorgHaltCheckedAt || null
+        }
+    }
+
     stop(){
         this.stopFlag = true
     }
@@ -1051,6 +1144,10 @@ class XChainDecoder {
         // full resync the abort message demands (rebuilding the schema clears it).
         // Feature-detected so the minimal-mock verifyReorg tests stay unaffected.
         if (typeof this.db.isReorgHalted === 'function' && await this.db.isReorgHalted()){
+            // Mirror the durable marker into the in-memory health state  so the
+            // health surface agrees with the abort even before the next TTL probe.
+            this.reorgHalted = true
+            this.reorgHaltCheckedAt = Date.now()
             const msg = "verifyReorg: decoder is HALTED from a prior over-deep reorg abort. Refusing to "
                 + "roll back further: a restart must not silently resume a rollback past the dispenser "
                 + "safe-depth window (DISPENSER_EXPIRE_SAFE_DEPTH=" + DISPENSER_EXPIRE_SAFE_DEPTH + "), which "
@@ -1063,6 +1160,13 @@ class XChainDecoder {
         // Persist the durable halt marker before an abort throws (best-effort: swallow
         // write errors so a marker failure never masks the loud abort). Feature-detected.
         const haltReorg = async (reason) => {
+            // Set the in-memory health state first : the durable write is
+            // best-effort, but this decoder is halted either way and every health
+            // surface must say so, including when the marker write itself fails.
+            this.reorgHalted = true
+            this.reorgHaltReason = reason
+            this.reorgHaltAt = new Date().toISOString()
+            this.reorgHaltCheckedAt = Date.now()
             if (typeof this.db.markReorgHalted !== 'function') return
             try {
                 await this.db.markReorgHalted(reason)
@@ -1289,7 +1393,16 @@ class XChainDecoder {
             // schema_migrations ledger, so this is a no-op once applied.
             await this.db.runMigrations();
         }
-    
+
+        // Report a LATENT reorg halt at boot . A decoder restored from (or
+        // running on) a database that already carries a REORG_HALT marker parses
+        // forward normally and looks healthy; nothing said so until the next reorg
+        // hit the guard in verifyReorg, weeks later. Probe once here so the fault is
+        // in the startup log and in every health response from the first request on.
+        // Non-fatal by design: the marker only blocks rollbacks, so a halted-but-
+        // advancing decoder must not be turned into a crash loop by this check.
+        await this.checkReorgHalt({ force: true });
+
         // Startup txindex probe . The malformed-AuxPoW recovery path
         // (getBlockReassembled, ) calls getrawtransaction without a
         // blockhash and so needs txindex=1 on the node. Without it, recovery

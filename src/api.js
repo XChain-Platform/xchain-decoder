@@ -152,11 +152,30 @@ async function startApi(){
                 }
             }
 
+            // Latent REORG_HALT marker . TTL-cached inside checkReorgHalt, so a
+            // monitoring burst costs at most one DB query per minute. Deliberately does
+            // NOT flip `status` to unhealthy: the decoder healthcheck carries autoheal,
+            // and a halted decoder still parses forward, so reporting unhealthy would
+            // restart-loop a service that is doing useful work while fixing nothing (the
+            // marker survives restarts and is only cleared by a resync). Report it as its
+            // own field instead, and let the operator/watchdog act on it.
+            let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
+            if (dbOk && typeof decoder.checkReorgHalt === 'function'){
+                try { reorgHalt = await decoder.checkReorgHalt() } catch (_) {}
+            }
+
             const healthy = decoderRunning && dbOk
             return {
                 status: healthy ? "healthy" : "unhealthy",
                 phase: dbPhase,
                 synced: decoder.isSynced(),
+                // True when this decoder is carrying a durable REORG_HALT marker, whether
+                // it was just written or has sat dormant since before the last restart.
+                // Any database reporting true is unfit to publish as a bootstrap.
+                reorg_halted:        reorgHalt.halted,
+                reorg_halt_reason:   reorgHalt.reason,
+                reorg_halted_at:     reorgHalt.at,
+                reorg_halt_checked_at: reorgHalt.checked_at,
                 ...syncStatus,
                 lastProcessedBlock: syncStatus.last_processed_block,
                 chainTipBlock: syncStatus.node_height,
@@ -195,11 +214,22 @@ async function startApi(){
             // db.ping() uses its own pooled connection; see the health method note.
             try { dbOk = await decoder.db.ping() } catch (_) {}
         }
+        // Latent halt marker , reported here too so an operator running the
+        // same probe the Docker healthcheck runs can see it. The HTTP code stays keyed
+        // on running+db for the reason given in health() above: a dormant halt must not
+        // make an advancing decoder look dead to autoheal.
+        let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
+        if (dbOk && typeof decoder.checkReorgHalt === 'function'){
+            try { reorgHalt = await decoder.checkReorgHalt() } catch (_) {}
+        }
         const healthy = decoderRunning && dbOk
         res.status(healthy ? 200 : 503).json({
             status: healthy ? 'healthy' : 'unhealthy',
             db: dbOk,
-            running: decoderRunning
+            running: decoderRunning,
+            reorg_halted:      reorgHalt.halted,
+            reorg_halt_reason: reorgHalt.reason,
+            reorg_halted_at:   reorgHalt.at
         })
     })
 

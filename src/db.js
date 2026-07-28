@@ -2193,6 +2193,41 @@ class Database {
         }
     }
 
+    // Read the durable halt marker WITH its detail . isReorgHalted() above
+    // answers the one question verifyReorg asks (may I roll back?) and deliberately
+    // stays a bare existence probe on the hot reorg path. Operator-facing surfaces
+    // (health, GET /status, the bootstrap publisher's source gate) need to say WHEN
+    // the decoder halted and WHY, because a latent marker is otherwise invisible
+    // until a reorg trips it days later. Returns { halted, at, reason }; `at`/`reason`
+    // are null when the row exists but its payload is unreadable (an older marker, or
+    // JSON written by a different revision), which must never turn a real halt into a
+    // reported non-halt.
+    async getReorgHaltMarker(){
+        const query = `SELECT time, data FROM events WHERE code = 'REORG_HALT' ORDER BY id DESC LIMIT 1;`
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            const rows = await connection.query(query)
+            if (!Array.isArray(rows) || rows.length === 0) return { halted: false, at: null, reason: null }
+            const row = rows[0]
+            let payload = null
+            try {
+                payload = (typeof row.data === 'string') ? JSON.parse(row.data) : row.data
+            } catch (_) {
+                payload = null
+            }
+            return {
+                halted: true,
+                at:     (payload && payload.at) ? payload.at : (row.time != null ? String(row.time) : null),
+                reason: (payload && payload.reason) ? payload.reason : null
+            }
+        } finally {
+            if (ownLease){
+                await connection.release()
+            }
+        }
+    }
+
     // Persist the durable reorg-halt marker (idempotent: no-op if already halted).
     // Called on every verifyReorg abort path BEFORE the throw, so a restart cannot
     // resume the over-deep rollback. Best-effort by design; the caller swallows any
