@@ -30,6 +30,7 @@ const rateLimit = require('express-rate-limit');
 const XChainDecoder  = require('./XChainDecoder');
 const { resolveFeeDestination } = require('./feeDestination');
 const jsonRouter = require('express-json-rpc-router')
+const { installObservability } = require('./observability');   // : default-off /metrics + structured log shim
 
 
 const NETWORK = process.env.NETWORK
@@ -120,6 +121,23 @@ async function startApi(){
     app.use(bodyParser.json({ limit: '100kb' }));
     // Allow CORS for development
     app.use(cors());
+
+    // : Prometheus /metrics plus a structured log shim, both DEFAULT OFF.
+    // Nothing is registered and no timer starts unless METRICS_ENABLED (and, for
+    // log shipping, LOG_SHIP_ENABLED + LOG_SHIP_URL) are set. The coin/network
+    // labels let one Prometheus scrape distinguish the per-chain decoders.
+    // See src/observability/README.md.
+    let decoderVersion = '';
+    try { decoderVersion = require('../package.json').version; } catch { /* version label is cosmetic */ }
+    installObservability(app, {
+        service: 'xchain-decoder',
+        version: decoderVersion,
+        // The decoder has no coin env of its own (chain identity comes from the
+        // node it is pointed at), so COIN is optional and the label stays empty
+        // unless a deploy sets it.
+        coin:    process.env.COIN || '',
+        network: NETWORK || ''
+    });
 
 
     const jsonRpcController = {

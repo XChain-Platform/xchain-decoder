@@ -19,11 +19,11 @@ export default {
   // ── What to mutate ─────────────────────────────────────────────────────────
   // Excludes db.js (requires real MariaDB) and api.js (requires running server).
   mutate: [
-    '../../src/XChainDecoder.js',
-    '../../src/XChainBlockDecoder.js',
-    '../../src/BlockchainConnector.js',
-    '../../src/CryptoNetworks.js',
-    '../../src/util.js',
+    'src/XChainDecoder.js',
+    'src/XChainBlockDecoder.js',
+    'src/BlockchainConnector.js',
+    'src/CryptoNetworks.js',
+    'src/util.js',
   ],
 
   // ── Test runner ────────────────────────────────────────────────────────────
@@ -33,9 +33,16 @@ export default {
     // require('mariadb') to a mock. Stryker workers are fresh Node.js forks that
     // do NOT inherit the parent's module state; this require entry re-installs
     // the patch in each worker before any source file is loaded.
-    require: ['../../test/unit/setup.js'],
-    spec: ['../../test/unit/**/*.test.js'],
-    config: '../../test/mutation/.mocharc.mutation.yml',
+    require: ['test/unit/setup.js'],
+    spec: ['test/unit/**/*.test.js'],
+    // ActionManifestConformance reads src/XChainDecoder.js as TEXT and greps it
+    // for a `VALID_ACTION_NAMES` Set literal. Stryker runs against an
+    // instrumented copy in its sandbox, where that literal no longer looks the
+    // way the regex expects, so the test fails on every mutation run including
+    // the dry run and takes the whole run down with it. It is a real guard on
+    // the real tree (npm test runs it); it just cannot participate here.
+    ignore: ['test/unit/ActionManifestConformance.test.js'],
+    config: 'test/mutation/.mocharc.mutation.yml',
     'no-package': true,
   },
 
@@ -45,13 +52,13 @@ export default {
   coverageAnalysis: 'perTest',
 
   // ── Timing ─────────────────────────────────────────────────────────────────
-  timeoutMs: 30000,
+  timeoutMS: 30000,
   timeoutFactor: 1.5,
 
   // ── Reporting ──────────────────────────────────────────────────────────────
   reporters: ['html', 'clear-text', 'progress'],
   htmlReporter: {
-    fileName: '../../reports/mutation/index.html',
+    fileName: 'reports/mutation/index.html',
   },
 
   // ── Quality thresholds ─────────────────────────────────────────────────────
