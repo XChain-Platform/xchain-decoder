@@ -377,7 +377,7 @@ describe('DISPENSER lifecycle mirror ', function () {
     })
 
     // ── DISPENSER caps twin (, Leg F). At/after the caps flag-day
-    //    (dispenser_caps_activation.js, mainnet block_time 1790812800, testnet/regtest
+    //    (dispenser_caps_activation.js, mainnet block_time 1786924800, testnet/regtest
     //    genesis) the INDEXER closes a dispenser at MAX_DISPENSES and rejects the 6th
     //    refill (MAX_REFILLS). Below assess/pin what the recognition-only decoder can
     //    mirror in lockstep, and document what it structurally cannot.
