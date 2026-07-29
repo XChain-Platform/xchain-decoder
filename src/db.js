@@ -1884,81 +1884,79 @@ class Database {
         }
     }
 
-    // Mirror a DISPENSER format-1 cancel by bringing the target open dispenser's
-    // expiration forward to closeExpiration (the caller passes cancel_block_time +
-    // DISPENSER_CLOSE_DELAY). The existing block-time soft-expire (deleteOpenDispensers)
-    // then closes the row at the same height the indexer's DISPENSER_CLOSE fires, so the
-    // decoder's open-dispenser view tracks the indexer across the cancelling window.
-    // The decoder has no indexer action_index, so the target is resolved by SOURCE
-    // address, reproducing the indexer's ownership gate (the canceller SOURCE must equal
-    // the dispenser SOURCE or its GET_ADDRESS) with the two ids stored on the row:
-    // address_id (the operating address, i.e. GET_ADDRESS when delegated) and
-    // source_address_id (the create SOURCE, set only when the two differ). Matching on
-    // BOTH is what closes the delegated-cancel gap : before it, a dispenser
-    // opened on a delegated GET_ADDRESS and cancelled by its original creator matched no
-    // decoder row, so the decoder kept the address in its open set long past the
-    // indexer's DISPENSER_CLOSE.
-    // Only ONE open row is closed. Operating-address matches are preferred over
-    // create-SOURCE matches (the leading ORDER BY term), so whenever the pre-
-    // query would have closed a row this one closes that same row; a source-keyed row is
-    // reached only when the address keys no open row at all. Ties break most-recent-first
-    // (ORDER BY tx_index DESC). That preference direction matters: closing the wrong row
-    // early would stop capturing payment outputs to a still-live dispenser (money-bearing),
-    // whereas leaving one open too long only produces triggers the indexer drops.
-    // A stale/unknown SOURCE matches zero rows and is a no-op.
-    // Same false/true return contract as insertDispenser: false means the query failed
-    // and the block transaction was rolled back, so the caller retries the block.
-    async cancelOpenDispenserBySource(sourceAddress, closeExpiration) {
-        const query = `
-            UPDATE dispensers
-            SET expiration = ?
-            WHERE (address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
-                OR source_address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1))
-              AND expired_block_index IS NULL
-            ORDER BY (address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)) DESC, tx_index DESC
-            LIMIT 1;
-        `;
-        let connection = await this.getConnection()
-        const ownLease = (this.transactionConnection == null)
-        try {
-            await connection.query(query, [closeExpiration, sourceAddress, sourceAddress, sourceAddress])
-            return true
-        } catch (err) {
-            console.error('Error cancelling dispenser:', err);
-            if (this.transactionConnection){
-                await this.endTransaction()
-            }
-            return false;
-        } finally {
-            if (ownLease){
-                await connection.release()
-            }
-        }
-    }
+    // ── The decoder's open-dispenser view is ADVISORY (#3119) ────────────────────────
+    //
+    // It exists for ONE purpose: decide which transaction outputs are captured as
+    // potential dispense payments. The indexer is the sole arbiter of whether a dispenser
+    // is open, which one a cancel/edit targets, and whether a captured payment dispenses
+    // anything. The two views are allowed to disagree, and the disagreement is only ever
+    // safe in one direction:
+    //
+    //   decoder open LONGER than the indexer  -> extra captured outputs the indexer drops
+    //   decoder closed EARLIER than the indexer -> payments to a LIVE dispenser are never
+    //                                              captured, so real dispenses are lost
+    //
+    // The second is money-bearing, so the decoder must never close a row on anything less
+    // than certainty. It has no certainty available: the indexer targets a cancel/edit by
+    // an explicit DISPENSER_ACTION_INDEX wire field, and the decoder runs UPSTREAM of the
+    // indexer and has no such id, so it can only resolve a target by SOURCE address. When
+    // one source holds more than one open dispenser that resolution is a GUESS, and a
+    // wrong guess closed the wrong row - the money-bearing direction. No tie-break rule
+    // can fix that, because the two sides are not addressing the same thing at all.
+    //
+    // So the guess is gone rather than refined:
+    //   * The format-1 cancel mirror is RETIRED. It only ever moved an expiration EARLIER
+    //     (cancel_block_time + close delay), which is the one thing this view must not do
+    //     on a guess. Without it a cancelled dispenser stays in the decoder's open set
+    //     until its own original expiration, and the indexer drops the extra triggers.
+    //   * The format-2 edit mirror survives as extendOpenDispenserExpirationBySource
+    //     below, but only in the extend direction and without picking a row.
+    // Do NOT re-add a closing mirror here, in either form, and do not reintroduce
+    // ORDER BY ... LIMIT 1 targeting: both are the defect, not the fix.
+    //
+    // NOTE the advisory contract stops at the open-view. Output CAPTURE resolution
+    // (getOpenDispenserOracleAddressBySource, ) still resolves by SOURCE, because
+    // there a miss means capturing too little, and capturing too much is the benign side
+    // there as well; that function's own header carries its reasoning.
 
-    // Mirror a DISPENSER format-2 edit that re-dates EXPIRATION: update the target open
-    // dispenser's stored expiration to newExpiration so the block-time soft-expire fires
-    // at the edited time, matching the indexer's last-valid-non-null-edit overlay
-    // (getExpiredItems). Only EXPIRATION affects the decoder's open-view; the caller has
-    // already validated it is a present, in-range, future timestamp. Target resolution,
-    // row selection, and the false/true contract are identical to cancelOpenDispenserBySource.
-    async editOpenDispenserExpirationBySource(sourceAddress, newExpiration) {
+    // Mirror a DISPENSER format-2 edit that re-dates EXPIRATION, so the block-time
+    // soft-expire (deleteOpenDispensers) does not close a decoder row while the indexer
+    // still considers the dispenser live. Two deliberate departures from a faithful
+    // mirror, both of which make a wrong resolution benign instead of money-bearing:
+    //
+    //   1. EXTEND ONLY. GREATEST(expiration, ?) never brings an expiration forward, so
+    //      an edit that SHORTENS the expiry is not mirrored at all: the indexer closes at
+    //      the edited time and the decoder keeps capturing a little longer. Mirroring the
+    //      shortening faithfully would mean closing early on a guessed row.
+    //   2. NO TARGET SELECTION. Every open row of that source is extended, not one
+    //      chosen by an ORDER BY. The correct row is therefore ALWAYS extended (which a
+    //      LIMIT 1 guess could miss - itself an early close), and any other row of the
+    //      same source is merely held open longer, which the indexer absorbs.
+    //
+    // Matching address_id OR source_address_id keeps the delegated case working :
+    // address_id is the operating address (GET_ADDRESS when delegated), source_address_id
+    // the create SOURCE, stored only when the two differ, so an edit issued by the
+    // creator of a delegated dispenser still reaches its row.
+    //
+    // The caller has already validated newExpiration is present, in range and future.
+    // A stale/unknown SOURCE matches zero rows and is a no-op. Same false/true contract
+    // as insertDispenser: false means the query failed and the block transaction was
+    // rolled back, so the caller retries the block.
+    async extendOpenDispenserExpirationBySource(sourceAddress, newExpiration) {
         const query = `
             UPDATE dispensers
-            SET expiration = ?
+            SET expiration = GREATEST(expiration, ?)
             WHERE (address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
                 OR source_address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1))
-              AND expired_block_index IS NULL
-            ORDER BY (address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)) DESC, tx_index DESC
-            LIMIT 1;
+              AND expired_block_index IS NULL;
         `;
         let connection = await this.getConnection()
         const ownLease = (this.transactionConnection == null)
         try {
-            await connection.query(query, [newExpiration, sourceAddress, sourceAddress, sourceAddress])
+            await connection.query(query, [newExpiration, sourceAddress, sourceAddress])
             return true
         } catch (err) {
-            console.error('Error editing dispenser expiration:', err);
+            console.error('Error extending dispenser expiration:', err);
             if (this.transactionConnection){
                 await this.endTransaction()
             }
@@ -1974,11 +1972,16 @@ class Database {
     // block loop can capture that transaction's PRICE v1 oracle-usage-fee output .
     // The v2 payload names its target by DISPENSER_ACTION_INDEX, an id in the INDEXER's
     // action space the decoder does not maintain, so the target is resolved by SOURCE
-    // address - identical selection to cancelOpenDispenserBySource /
-    // editOpenDispenserExpirationBySource, including the  create-SOURCE match that
-    // lets a refill of a DELEGATED dispenser (paid by its original creator, whose SOURCE
-    // is not the operating address) still find its dispenser and capture the oracle-fee
-    // output the indexer will look for.
+    // address - the same two-key match (operating address OR stored create SOURCE, )
+    // extendOpenDispenserExpirationBySource uses, which lets a refill of a DELEGATED
+    // dispenser (paid by its original creator, whose SOURCE is not the operating address)
+    // still find its dispenser and capture the oracle-fee output the indexer will look for.
+    //
+    // This one KEEPS the ORDER BY ... LIMIT 1 ranking that #3119 removed from the extend
+    // path, and that is deliberate: this resolves ONE address to capture an output against,
+    // not a row to act on, and here a miss captures too little (the indexer then rejects the
+    // refill, fail-closed) while a wrong pick captures an extra output the indexer ignores.
+    // The advisory contract above governs the open-VIEW; it does not extend to this read.
     //
     // Returns the address string, null when there is no match or the dispenser named no
     // oracle, and false on a query fault (the caller retries the block rather than

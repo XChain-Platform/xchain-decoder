@@ -8,25 +8,35 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// DISPENSER lifecycle mirror : the decoder must track DISPENSER format 1
-// (cancel) and format 2 (edit) so its open-dispenser view matches the indexer's.
-// Before this fix the decoder only tracked format 0 (create), so its open-dispenser
-// view outlived the indexer's once a dispenser was cancelled or re-dated
-// (xchain-indexer/src/dispenserDivergenceMetrics.js enumerates exactly this gap:
-// cancels applied, EXPIRATION edits, and DISPENSE triggers dropped against an
-// already-closed dispenser).
+// DISPENSER lifecycle mirror: ADVISORY open-view (#3119, revising ).
+//
+//  made the decoder track DISPENSER format 1 (cancel) and format 2 (edit) so its
+// open-dispenser view would CLOSE when the indexer's did. #3119 found that the two sides
+// do not address dispensers the same way at all: the indexer targets a cancel/edit by an
+// explicit DISPENSER_ACTION_INDEX, while the decoder runs UPSTREAM of it and has no such
+// id, so it resolved the target by SOURCE with a most-recent-first guess. Whenever one
+// source held more than one open dispenser that guess could close the WRONG row, which
+// stops capturing payment outputs to a still-live dispenser: money-bearing, and not
+// fixable by any tie-break rule.
+//
+// The open-view is therefore explicitly advisory and the indexer is the sole arbiter of
+// closure. What this suite now pins:
+//   * a format-1 cancel is NOT mirrored at all (it could only ever close, on a guess);
+//   * a format-2 EXPIRATION edit is mirrored in the EXTEND direction only, and against
+//     every open row of the source rather than one guessed row, so the correct row is
+//     always covered and any extra row is merely held open longer;
+//   * the resulting divergence is one-directional: the decoder may stay open longer than
+//     the indexer (extra captured outputs the indexer drops), never close earlier.
 //
 // These tests drive the REAL block-processing loop (decoder.start) with a faithful
 // in-memory dispensers model whose methods mirror the db.js SQL semantics
 // (deleteOpenDispensers: expiration < block_time AND open -> soft-expire;
-// getAllOpenDispenserAddresses: addresses of open rows; cancel/edit: most-recent
-// open row at the address). The loop's own decision code decides whether/how to
-// cancel or edit; the model reflects it; we then assert the resulting open-view.
+// getAllOpenDispenserAddresses: addresses of open rows; extend: GREATEST(expiration, ?)
+// over every open row the acting address may act on). The loop's own decision code
+// decides whether to extend; the model reflects it; we then assert the open-view.
 //
-// SENSITIVITY: the cancel-closure and edit-closure assertions FAIL against pre-fix
-// code, because a format 1/2 tx is a no-op there (only format 0 was handled), so the
-// row keeps its original far-future expiration and the address never leaves the open
-// set at the indexer's close/expire height.
+// SENSITIVITY: the cancel and shorten assertions FAIL against the  code they
+// replace, which closed the row at the indexer's close height / re-dated it earlier.
 
 const assert = require('assert')
 const XChainDecoder = require('../../src/XChainDecoder')
@@ -37,7 +47,10 @@ const PREV_WIRE = Buffer.from(
 )
 
 const T0 = 1700000000            // block timestamp used for the single processed block
-const DISPENSER_CLOSE_DELAY = 3600 // must equal the decoder/indexer constant
+// The indexer's cancel close-delay. Kept here as a local test value ONLY to express "a
+// block time past where the indexer would have closed a cancelled dispenser"; the decoder
+// no longer carries this constant (its twin and drift guard went with the cancel mirror).
+const INDEXER_CLOSE_DELAY = 3600
 
 // A faithful in-memory model of the decoder `dispensers` table. Each method mirrors
 // the corresponding db.js query so the open-view we assert on is the same one the
@@ -45,7 +58,7 @@ const DISPENSER_CLOSE_DELAY = 3600 // must equal the decoder/indexer constant
 class DispenserModel {
     constructor() {
         this.rows  = []
-        this.calls = { insert: [], cancel: [], edit: [] }
+        this.calls = { insert: [], extend: [] }
     }
     async insertDispenser({ txIndex, address, sourceAddress, expiration, oracleAddress }) {
         this.calls.insert.push({ txIndex, address, sourceAddress, expiration: Number(expiration) })
@@ -56,10 +69,11 @@ class DispenserModel {
                          sourceAddress: (sourceAddress && sourceAddress !== address) ? sourceAddress : null })
         return true
     }
-    // Mirrors the shared target resolution of cancelOpenDispenserBySource /
-    // editOpenDispenserExpirationBySource / getOpenDispenserOracleAddressBySource: open
-    // rows this address may act on (operating address OR stored create SOURCE, ),
-    // operating-address matches ranked first, then most recent.
+    // Mirrors getOpenDispenserOracleAddressBySource's target resolution: open rows this
+    // address may act on (operating address OR stored create SOURCE, ),
+    // operating-address matches ranked first, then most recent. Since #3119 only the
+    // oracle-address read uses the ranking - the extend path deliberately takes the whole
+    // set (no ORDER BY, no LIMIT), because ranking is the guess that closed wrong rows.
     _openFor(actingAddress) {
         return this.rows
             .filter(r => r.expiredBlockIndex === null &&
@@ -77,18 +91,13 @@ class DispenserModel {
         const open = this._openFor(sourceAddress)
         return (open.length && open[0].oracleAddress) ? open[0].oracleAddress : null
     }
-    // Mirrors cancelOpenDispenserBySource: UPDATE ... SET expiration=? on the single
-    // resolved open row.
-    async cancelOpenDispenserBySource(sourceAddress, closeExpiration) {
-        this.calls.cancel.push({ sourceAddress, closeExpiration: Number(closeExpiration) })
-        const open = this._openFor(sourceAddress)
-        if (open.length) open[0].expiration = Number(closeExpiration)
-        return true
-    }
-    async editOpenDispenserExpirationBySource(sourceAddress, newExpiration) {
-        this.calls.edit.push({ sourceAddress, newExpiration: Number(newExpiration) })
-        const open = this._openFor(sourceAddress)
-        if (open.length) open[0].expiration = Number(newExpiration)
+    // Mirrors extendOpenDispenserExpirationBySource (#3119):
+    //   UPDATE ... SET expiration = GREATEST(expiration, ?) ... (no ORDER BY, no LIMIT)
+    // over EVERY open row the acting address may act on. Never shortens, never picks.
+    async extendOpenDispenserExpirationBySource(sourceAddress, newExpiration) {
+        this.calls.extend.push({ sourceAddress, newExpiration: Number(newExpiration) })
+        for (const r of this._openFor(sourceAddress))
+            r.expiration = Math.max(Number(r.expiration), Number(newExpiration))
         return true
     }
     // Mirrors deleteOpenDispensers: soft-expire open rows whose expiration < minExpiration.
@@ -163,8 +172,7 @@ function buildDecoder(txSpecs, model) {
         DUPLICATED_TRANSACTION: 1,
         // Dispenser lifecycle surface -> the in-memory model.
         insertDispenser:                     (d) => model.insertDispenser(d),
-        cancelOpenDispenserBySource:         (s, e) => model.cancelOpenDispenserBySource(s, e),
-        editOpenDispenserExpirationBySource: (s, e) => model.editOpenDispenserExpirationBySource(s, e),
+        extendOpenDispenserExpirationBySource: (s, e) => model.extendOpenDispenserExpirationBySource(s, e),
         deleteOpenDispensers:                (b, m) => model.deleteOpenDispensers(b, m),
         purgeExpiredDispensers:              (h) => model.purgeExpiredDispensers(h),
         getAllOpenDispenserAddresses:        () => model.getAllOpenDispenserAddresses(),
@@ -188,10 +196,10 @@ const CREATE = `DISPENSER|0|BTC|TICK|1||10|BTC||1|||||${T0 + 1000000}`
 const CREATOR  = 'bcrt1qtestcreator'
 const DELEGATE = 'bcrt1qtestdelegate'
 
-describe('DISPENSER lifecycle mirror ', function () {
+describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', function () {
     this.timeout(0)
 
-    it('format 1 cancel closes the open dispenser in the decoder view at the indexer close height', async () => {
+    it('a format 1 cancel is not mirrored at all: no DB call, no closure', async () => {
         const model = new DispenserModel()
         const decoder = buildDecoder([
             { id: 'create01', action: CREATE,                  source: ADDR },
@@ -200,52 +208,70 @@ describe('DISPENSER lifecycle mirror ', function () {
 
         await decoder.start()
 
-        // Create registered the dispenser; cancel brought its expiration forward to the
-        // indexer's close time (cancel_block_time + DISPENSER_CLOSE_DELAY).
+        // The create still registers. The cancel reaches no dispenser method whatsoever:
+        // there is no longer a closing mirror to reach, guessed target or not.
         assert.strictEqual(model.calls.insert.length, 1)
         assert.strictEqual(model.calls.insert[0].address, ADDR)
-        assert.strictEqual(model.calls.cancel.length, 1)
-        assert.deepStrictEqual(model.calls.cancel[0], {
-            sourceAddress:   ADDR,
-            closeExpiration: T0 + DISPENSER_CLOSE_DELAY,
-        })
+        assert.strictEqual(model.calls.extend.length, 0, 'a cancel must not touch the open-view')
 
-        // During the cancelling window the address is still open (the indexer keeps
-        // dispensing until DISPENSER_CLOSE fires), so it must remain captured.
+        // Past the height the indexer's DISPENSER_CLOSE would have fired, the decoder is
+        // deliberately STILL open: it keeps capturing payment outputs and the indexer
+        // authoritatively drops the triggers. That is the benign direction of divergence.
+        await model.deleteOpenDispensers(1, T0 + INDEXER_CLOSE_DELAY + 1)
         let open = await model.getAllOpenDispenserAddresses()
-        assert.ok(open.has(ADDR), 'dispenser stays open through the close-delay window')
+        assert.ok(open.has(ADDR), 'a cancelled dispenser stays in the decoder open-view')
 
-        // A later block whose time passes the close height soft-expires the row. After
-        // it, the decoder view no longer holds the address -> matches the indexer, which
-        // fired DISPENSER_CLOSE at exactly block_time > cancel_time + DISPENSER_CLOSE_DELAY.
-        await model.deleteOpenDispensers(1, T0 + DISPENSER_CLOSE_DELAY + 1)
+        // It closes only at its OWN expiration - the soft-expire is the single closer.
+        await model.deleteOpenDispensers(2, (T0 + 1000000) + 1)
         open = await model.getAllOpenDispenserAddresses()
-        assert.ok(!open.has(ADDR), 'cancel closes the dispenser at the indexer close height')
+        assert.ok(!open.has(ADDR), 'the row still closes at its own EXPIRATION')
     })
 
-    it('format 2 edit re-dates the expiry so the decoder view expires when the indexer does', async () => {
+    it('a format 2 edit that LENGTHENS the expiry is mirrored (the money-bearing case)', async () => {
+        // This is why the edit mirror survives at all: the indexer overlays the edited
+        // EXPIRATION, so without mirroring an extension the decoder would soft-expire at
+        // the ORIGINAL time while the indexer kept dispensing, and payments to a live
+        // dispenser would stop being captured.
         const model = new DispenserModel()
-        const editExpiration = T0 + 100 // future (indexer requires EXPIRATION > BLOCK_TIME), shorter than create
+        const extended = T0 + 2000000            // beyond the create's T0 + 1000000
         const decoder = buildDecoder([
-            { id: 'create01', action: CREATE,                              source: ADDR },
-            { id: 'edit01',   action: `DISPENSER|2|7||${editExpiration}||`, source: ADDR },
+            { id: 'create01', action: CREATE,                          source: ADDR },
+            { id: 'edit01',   action: `DISPENSER|2|7||${extended}||`,   source: ADDR },
         ], model)
 
         await decoder.start()
 
-        assert.strictEqual(model.calls.edit.length, 1)
-        assert.deepStrictEqual(model.calls.edit[0], { sourceAddress: ADDR, newExpiration: editExpiration })
+        assert.strictEqual(model.calls.extend.length, 1)
+        assert.deepStrictEqual(model.calls.extend[0], { sourceAddress: ADDR, newExpiration: extended })
+        assert.strictEqual(model.rows[0].expiration, extended, 'the stored expiry moved out')
 
-        // Not yet expired at the edited time boundary...
-        await model.deleteOpenDispensers(1, editExpiration)  // block_time == edited expiration: expiration < block_time is false
-        let open = await model.getAllOpenDispenserAddresses()
-        assert.ok(open.has(ADDR), 'still open at exactly the edited expiration')
+        // Past the ORIGINAL expiry the dispenser is still open, matching the indexer.
+        await model.deleteOpenDispensers(1, (T0 + 1000000) + 1)
+        const open = await model.getAllOpenDispenserAddresses()
+        assert.ok(open.has(ADDR), 'the extended dispenser is still captured past its old expiry')
+    })
 
-        // ...expires once block_time passes the edited (earlier) expiration, not the
-        // original far-future one. Pre-fix the row would still carry T0+1000000 here.
-        await model.deleteOpenDispensers(2, editExpiration + 1)
-        open = await model.getAllOpenDispenserAddresses()
-        assert.ok(!open.has(ADDR), 'edit shortened the expiry to the indexer-overlaid value')
+    it('a format 2 edit that SHORTENS the expiry is deliberately NOT mirrored', async () => {
+        // The indexer will close at the shortened time; the decoder keeps capturing until
+        // the original one. Mirroring the shortening faithfully would mean closing a row
+        // the decoder only guessed at, which is the defect #3119 is about.
+        const model = new DispenserModel()
+        const shortened = T0 + 100  // future (indexer requires EXPIRATION > BLOCK_TIME), earlier than create
+        const decoder = buildDecoder([
+            { id: 'create01', action: CREATE,                          source: ADDR },
+            { id: 'edit01',   action: `DISPENSER|2|7||${shortened}||`,  source: ADDR },
+        ], model)
+
+        await decoder.start()
+
+        // The decision still fires (the loop cannot know which direction is safe; the DB
+        // layer's GREATEST is what refuses to shorten), and the row keeps its own expiry.
+        assert.strictEqual(model.calls.extend.length, 1)
+        assert.strictEqual(model.rows[0].expiration, T0 + 1000000, 'expiration never moves earlier')
+
+        await model.deleteOpenDispensers(1, shortened + 1)
+        const open = await model.getAllOpenDispenserAddresses()
+        assert.ok(open.has(ADDR), 'the decoder stays open past the indexer close, never before it')
     })
 
     it('format 2 edit with an empty EXPIRATION is a no-op (only a present EXPIRATION moves the view)', async () => {
@@ -257,7 +283,7 @@ describe('DISPENSER lifecycle mirror ', function () {
 
         await decoder.start()
 
-        assert.strictEqual(model.calls.edit.length, 0, 'empty EXPIRATION does not re-date the dispenser')
+        assert.strictEqual(model.calls.extend.length, 0, 'empty EXPIRATION does not re-date the dispenser')
         assert.strictEqual(model.rows[0].expiration, T0 + 1000000, 'stored expiration is unchanged')
     })
 
@@ -270,43 +296,36 @@ describe('DISPENSER lifecycle mirror ', function () {
 
         await decoder.start()
 
-        assert.strictEqual(model.calls.edit.length, 0, 'a non-future EXPIRATION is not applied')
+        assert.strictEqual(model.calls.extend.length, 0, 'a non-future EXPIRATION is not applied')
         assert.strictEqual(model.rows[0].expiration, T0 + 1000000)
     })
 
-    it('a cancel from an address that owns no dispenser at all is a no-op', async () => {
-        // The decoder resolves the target by acting address (it has no indexer
-        // action_index). An address that is neither the operating address nor the
-        // recorded create SOURCE of any open row matches nothing, exactly as the indexer
-        // rejects it with "invalid: SOURCE (not owner)". No row is guessed at.
+    it('an extend from an address that owns no dispenser at all is a no-op', async () => {
+        // The extend still resolves by acting address (operating address OR recorded
+        // create SOURCE, ). An address that is neither matches zero rows, exactly as
+        // the indexer rejects it with "invalid: SOURCE (not owner)". Nothing is guessed at,
+        // and in this direction a miss is harmless anyway.
         const model = new DispenserModel()
         const decoder = buildDecoder([
-            { id: 'create01', action: CREATE,               source: ADDR },
-            { id: 'cancel01', action: 'DISPENSER|1|7|bye',  source: 'bcrt1qsomeoneelse' },
+            { id: 'create01', action: CREATE,                              source: ADDR },
+            { id: 'edit01',   action: `DISPENSER|2|7||${T0 + 2000000}||`,   source: 'bcrt1qsomeoneelse' },
         ], model)
 
         await decoder.start()
 
-        assert.strictEqual(model.calls.cancel.length, 1, 'the cancel decision still fires')
-        // The far-future expiry is untouched: no open row was actionable by that address.
-        await model.deleteOpenDispensers(1, T0 + DISPENSER_CLOSE_DELAY + 1)
-        const open = await model.getAllOpenDispenserAddresses()
-        assert.ok(open.has(ADDR), 'an unauthorised cancel leaves the dispenser open')
+        assert.strictEqual(model.calls.extend.length, 1, 'the extend decision still fires')
+        assert.strictEqual(model.rows[0].expiration, T0 + 1000000, 'an unauthorised edit moves nothing')
     })
 
     // ── Delegated (GET_ADDRESS) dispensers, . The indexer authorises a cancel/edit
     //    from the dispenser SOURCE *or* its GET_ADDRESS
     //    (xchain-indexer/src/actions/dispenser.js, "invalid: SOURCE (not owner)"). The
-    //    decoder keys the open row on the operating address (GET_ADDRESS when delegated),
-    //    so before this fix a creator-issued cancel matched no row and the decoder kept
-    //    the delegated address in its open set long past the indexer's DISPENSER_CLOSE:
-    //    every later plain payment to that address was still captured as a dispense
-    //    trigger the indexer drops. These pin the closure.
-    //
-    // SENSITIVITY: both fail against pre- code, where insertDispenser records no
-    // create SOURCE and the cancel/edit lookups match on the operating address only.
+    //    decoder keys the open row on the operating address (GET_ADDRESS when delegated)
+    //    and stores the create SOURCE beside it, so a creator-issued edit still reaches
+    //    its row.  wired that up to close delegated rows; #3119 keeps the reach and
+    //    drops the closing.
 
-    it('a delegated dispenser is closed by a cancel from its original creator', async () => {
+    it('a delegated dispenser is NOT closed by a cancel from its original creator', async () => {
         const model = new DispenserModel()
         // GET_ADDRESS (field 10) = DELEGATE, so the dispenser operates on DELEGATE while
         // CREATOR signs the create.
@@ -323,57 +342,58 @@ describe('DISPENSER lifecycle mirror ', function () {
         assert.strictEqual(model.calls.insert[0].address, DELEGATE)
         assert.strictEqual(model.rows[0].sourceAddress, CREATOR)
 
-        // The creator's cancel resolves to it and brings the expiry to the indexer's
-        // close time, so the address leaves the open set at the same height.
-        assert.strictEqual(model.rows[0].expiration, T0 + DISPENSER_CLOSE_DELAY)
-        let open = await model.getAllOpenDispenserAddresses()
-        assert.ok(open.has(DELEGATE), 'still open through the cancelling window')
-        await model.deleteOpenDispensers(1, T0 + DISPENSER_CLOSE_DELAY + 1)
-        open = await model.getAllOpenDispenserAddresses()
-        assert.ok(!open.has(DELEGATE), 'closed at the indexer close height, not at its original expiry')
+        // The cancel changes nothing: the delegated address stays captured past the
+        // indexer's close height, which is the benign side of the divergence.
+        assert.strictEqual(model.rows[0].expiration, T0 + 1000000)
+        await model.deleteOpenDispensers(1, T0 + INDEXER_CLOSE_DELAY + 1)
+        const open = await model.getAllOpenDispenserAddresses()
+        assert.ok(open.has(DELEGATE), 'the delegated dispenser stays in the decoder open-view')
     })
 
-    it('a creator-issued EXPIRATION edit re-dates the delegated dispenser', async () => {
+    it('a creator-issued lengthening edit still reaches the delegated dispenser ( reach kept)', async () => {
         const model = new DispenserModel()
         const delegatedCreate = `DISPENSER|0|BTC|TICK|1||10|BTC||1|${DELEGATE}||||${T0 + 1000000}`
-        const shortened = T0 + 500
+        const extended = T0 + 3000000
         const decoder = buildDecoder([
-            { id: 'create01', action: delegatedCreate,                 source: CREATOR },
-            { id: 'edit01',   action: `DISPENSER|2|7||${shortened}||`, source: CREATOR },
+            { id: 'create01', action: delegatedCreate,                source: CREATOR },
+            { id: 'edit01',   action: `DISPENSER|2|7||${extended}||`, source: CREATOR },
         ], model)
 
         await decoder.start()
 
-        assert.strictEqual(model.calls.edit.length, 1)
-        assert.strictEqual(model.rows[0].expiration, shortened)
-        await model.deleteOpenDispensers(1, shortened + 1)
+        assert.strictEqual(model.calls.extend.length, 1)
+        assert.strictEqual(model.rows[0].expiration, extended,
+            'the creator-issued extension reaches the delegated row via source_address_id')
+        await model.deleteOpenDispensers(1, (T0 + 1000000) + 1)
         const open = await model.getAllOpenDispenserAddresses()
-        assert.ok(!open.has(DELEGATE), 'the shortened expiry closes the delegated dispenser')
+        assert.ok(open.has(DELEGATE), 'still captured past its original expiry, as the indexer expects')
     })
 
-    it('an operating-address dispenser wins over a delegated one the same address created', async () => {
+    it('an extend covers EVERY open row of the source, so no row is guessed at', async () => {
         // An address can hold its own dispenser AND be the creator of a delegated one.
-        // The action_index that would disambiguate is not in the decoder's id space, so
-        // resolution prefers the row keyed on the acting address. That preference is the
-        // safe direction: closing the delegated row early would stop capturing payments
-        // to a dispenser that is still live (money-bearing), while leaving it open only
-        // produces triggers the indexer authoritatively drops.
+        // The action_index that would disambiguate is not in the decoder's id space, and
+        // the pre-#3119 code therefore picked ONE row (operating address first, then most
+        // recent) - the guess that could act on the wrong dispenser. Extending BOTH is what
+        // removes the guess: the correct row is always covered, and the other one is merely
+        // held open longer, which the indexer authoritatively absorbs.
         const model = new DispenserModel()
         const delegatedCreate = `DISPENSER|0|BTC|TICK|1||10|BTC||1|${DELEGATE}||||${T0 + 1000000}`
-        // The delegated row is deliberately the MORE RECENT of the two, so a
-        // recency-only resolution would pick it and the assertion below would fail.
+        const extended = T0 + 4000000
         const decoder = buildDecoder([
-            { id: 'create01', action: CREATE,               source: CREATOR },  // own, older
-            { id: 'create02', action: delegatedCreate,      source: CREATOR },  // delegated, newer
-            { id: 'cancel01', action: 'DISPENSER|1|7|bye',  source: CREATOR },
+            { id: 'create01', action: CREATE,                          source: CREATOR },  // own, older
+            { id: 'create02', action: delegatedCreate,                 source: CREATOR },  // delegated, newer
+            { id: 'edit01',   action: `DISPENSER|2|7||${extended}||`,   source: CREATOR },
         ], model)
 
         await decoder.start()
 
         const ownRow       = model.rows.find(r => r.address === CREATOR)
         const delegatedRow = model.rows.find(r => r.address === DELEGATE)
-        assert.strictEqual(ownRow.expiration, T0 + DISPENSER_CLOSE_DELAY, 'the own dispenser is the one closed')
-        assert.strictEqual(delegatedRow.expiration, T0 + 1000000, 'the delegated dispenser is left alone')
+        assert.strictEqual(ownRow.expiration, extended,       'the own dispenser is extended')
+        assert.strictEqual(delegatedRow.expiration, extended, 'and so is the delegated one');
+        // Teeth: a LIMIT 1 resolution would have left one of the two at its create expiry.
+        assert.notStrictEqual(ownRow.expiration, T0 + 1000000)
+        assert.notStrictEqual(delegatedRow.expiration, T0 + 1000000)
     })
 
     // ── DISPENSER caps twin (, Leg F). At/after the caps flag-day
@@ -407,9 +427,8 @@ describe('DISPENSER lifecycle mirror ', function () {
         await decoder.start()
 
         // No count-based close surface exists: the lifecycle is only ever asked to
-        // insert/cancel/edit/expire, never to close on dispense volume.
-        assert.strictEqual(model.calls.cancel.length, 0, 'no dispense count triggers a cancel/close')
-        assert.strictEqual(model.calls.edit.length, 0)
+        // insert/extend/expire, never to close on dispense volume.
+        assert.strictEqual(model.calls.extend.length, 0, 'no dispense count moves the open-view')
 
         // The dispenser stays open at its far-future create EXPIRATION regardless of dispense
         // volume; it leaves the open set only when block_time passes that EXPIRATION, NOT at
@@ -439,7 +458,7 @@ describe('DISPENSER lifecycle mirror ', function () {
 
         // A pure escrow refill carries no EXPIRATION, so it does not re-date the row: the
         // open-view decision is a no-op and the dispenser stays open at its original expiry.
-        assert.strictEqual(model.calls.edit.length, 0, 'a pure escrow refill does not move the decoder open-view')
+        assert.strictEqual(model.calls.extend.length, 0, 'a pure escrow refill does not move the decoder open-view')
         const open = await model.getAllOpenDispenserAddresses()
         assert.ok(open.has(ADDR), 'the dispenser stays open regardless of the refill accept/reject verdict')
     })

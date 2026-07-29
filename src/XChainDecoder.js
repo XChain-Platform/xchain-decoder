@@ -81,17 +81,16 @@ const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // Purging deeper is the conservative direction (rows are merely retained longer
 // before hard-purge; expiry semantics and action evaluation are unchanged).
 const DISPENSER_EXPIRE_SAFE_DEPTH = 126 // 120 (DOGE undo window) + 6 margin
-// Seconds a cancelled dispenser keeps dispensing before it is closed. Mirrors the
-// indexer's DISPENSER_CLOSE_DELAY (xchain-indexer/src/config.js): a DISPENSER format-1
-// cancel does NOT close immediately; the indexer holds the dispenser in a 'cancelling'
-// state (still dispensable) until block_time > cancel_block_time + this delay, then
-// DISPENSER_CLOSE fires. getExpiredItems only expires status='open', so a cancelling
-// dispenser's base EXPIRATION no longer governs. The decoder reproduces that exact
-// end-time by bringing the row's expiration forward to cancel_block_time + this delay,
-// so its own block-time soft-expire (deleteOpenDispensers) closes the row at the same
-// height the indexer does. MUST stay equal to the indexer value or the decoder's
-// open-dispenser window diverges across the cancelling window.
-const DISPENSER_CLOSE_DELAY = 3600
+// DISPENSER_CLOSE_DELAY (a twin of the indexer's, xchain-indexer/src/config.js) used to
+// live here so the decoder could close a cancelled dispenser's row at exactly the height
+// the indexer's DISPENSER_CLOSE fires. It is GONE with the cancel mirror (#3119): the
+// decoder no longer closes anything on a cancel, so it no longer needs the indexer's
+// close-delay value, and keeping a pinned cross-repo twin for a relationship this repo
+// does not have would document a rule that is not enforced anywhere. Its drift guard
+// (test/unit/dispenserCloseDelayConformance.test.js, ) went with it. The indexer
+// keeps its own value; nothing here reads it. Reintroducing a closing mirror would need
+// the twin back, and would first need the decoder to resolve targets exactly rather than
+// by SOURCE - see db.js above extendOpenDispenserExpirationBySource.
 const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node need to have to start parsing
 
 // Maximum compiled on-chain ACTION push, in bytes (measured before
@@ -766,11 +765,12 @@ class XChainDecoder {
     //   v2 (edit/refill): the payload carries no address - it names the target by
     //       DISPENSER_ACTION_INDEX, an id in the INDEXER's action space the decoder does
     //       not maintain - so the oracle address is read back from the open dispenser row
-    //       this decoder registered, resolved by SOURCE address. That is the SAME
-    //       resolution cancelOpenDispenserBySource / editOpenDispenserExpirationBySource
-    //       already use, and since  it matches the create SOURCE as well as the
-    //       operating address, so a delegated (GET_ADDRESS) dispenser refilled by its
-    //       original creator now resolves too. An unmatched SOURCE still captures nothing
+    //       this decoder registered, resolved by SOURCE address. Since  that matches
+    //       the create SOURCE as well as the operating address, so a delegated
+    //       (GET_ADDRESS) dispenser refilled by its original creator now resolves too.
+    //       This read keeps its single-row ranking even though #3119 removed ranking from
+    //       the open-view mirror: the reasoning differs, and db.js states it at the site.
+    //       An unmatched SOURCE still captures nothing
     //       and the indexer rejects that refill: fail-closed, and no worse than the
     //       pre- behavior it replaces.
     //
@@ -2183,23 +2183,15 @@ class XChainDecoder {
                                         }
                                     } else if (dispenserFormat === 1){
                                         // Format 1 = cancel. Wire: VERSION|DISPENSER_ACTION_INDEX|MEMO.
-                                        // Bring the target open dispenser's expiration forward to the
-                                        // indexer's close time (cancel_block_time + DISPENSER_CLOSE_DELAY)
-                                        // so the block-time soft-expire closes the decoder row at the same
-                                        // height the indexer's DISPENSER_CLOSE fires. Unconditional (not a
-                                        // min against the current expiration): the indexer stops expiring
-                                        // a dispenser the moment it is cancelling, so the close-delay end
-                                        // governs even when it lands after the original EXPIRATION. Target
-                                        // resolved by SOURCE address (see the format note above).
-                                        const cancelSource = parseResult["source"]
-                                        if (cancelSource && cancelSource.length > 0){
-                                            const closeExpiration = block.timestamp + DISPENSER_CLOSE_DELAY
-                                            if ((await this.db.cancelOpenDispenserBySource(cancelSource, closeExpiration)) === false){
-                                                // cancelOpenDispenserBySource's error path already rolled the block back.
-                                                await resetAfterRollback()
-                                                continue main_parsing
-                                            }
-                                        }
+                                        // NOT MIRRORED (#3119). The decoder's open-dispenser view is
+                                        // advisory and must never close a row on a guessed target: it has
+                                        // no DISPENSER_ACTION_INDEX, so it could only resolve the cancel
+                                        // by SOURCE, and with two open dispensers on one source that
+                                        // closed the wrong one - which stops capturing payments to a
+                                        // still-live dispenser (money-bearing). Left unmirrored, a
+                                        // cancelled dispenser stays in the decoder's open set until its
+                                        // own expiration and the indexer drops the extra triggers.
+                                        // Full reasoning: db.js, above extendOpenDispenserExpirationBySource.
                                     } else if (dispenserFormat === 2){
                                         // Format 2 = edit. Wire: VERSION|DISPENSER_ACTION_INDEX|GIVE_ESCROW
                                         //   |EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO.
@@ -2209,7 +2201,13 @@ class XChainDecoder {
                                         // valid non-null edit EXPIRATION onto the base (getExpiredItems),
                                         // and rejects a non-future value (bclte(EXPIRATION, BLOCK_TIME)), so
                                         // an empty EXPIRATION is a no-op here and a past/invalid one is
-                                        // skipped. Target resolved by SOURCE address (see format note).
+                                        // skipped.
+                                        //
+                                        // EXTEND ONLY, and against every open row of the source rather
+                                        // than a guessed one (#3119): the decoder must not close early,
+                                        // and an edit that lengthens an expiry is exactly the case where
+                                        // failing to mirror WOULD close early. An edit that shortens one
+                                        // is deliberately not mirrored.
                                         const editSource = parseResult["source"]
                                         const editExpirationToken = decodedDataSplit[4]
                                         if (editSource && editSource.length > 0 &&
@@ -2217,8 +2215,8 @@ class XChainDecoder {
                                             const newExpiration = Number(editExpirationToken)
                                             if (!isNaN(newExpiration) && newExpiration >= 0 &&
                                                 newExpiration <= 4294967295 && newExpiration > block.timestamp){
-                                                if ((await this.db.editOpenDispenserExpirationBySource(editSource, newExpiration)) === false){
-                                                    // editOpenDispenserExpirationBySource's error path already rolled the block back.
+                                                if ((await this.db.extendOpenDispenserExpirationBySource(editSource, newExpiration)) === false){
+                                                    // extendOpenDispenserExpirationBySource's error path already rolled the block back.
                                                     await resetAfterRollback()
                                                     continue main_parsing
                                                 }
@@ -2515,10 +2513,6 @@ module.exports.compiledPushSize = compiledPushSize
 module.exports.OP_RETURN_PUSH_OVERHEAD = OP_RETURN_PUSH_OVERHEAD
 // Exported so a regression test can pin it >= the deepest per-chain reorg window.
 module.exports.DISPENSER_EXPIRE_SAFE_DEPTH = DISPENSER_EXPIRE_SAFE_DEPTH
-// Exported for the DISPENSER_CLOSE_DELAY drift guard , which asserts this
-// twin constant equals the indexer's config value so the two open-dispenser views
-// cannot silently desynchronize.
-module.exports.DISPENSER_CLOSE_DELAY = DISPENSER_CLOSE_DELAY
 // Exported so the funding-fee-output collision regression test can assert attributed
 // funding outputs are stored at vout + FUNDING_VOUT_BASE (never colliding with real vouts).
 module.exports.FUNDING_VOUT_BASE = FUNDING_VOUT_BASE

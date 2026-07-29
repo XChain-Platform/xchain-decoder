@@ -57,8 +57,7 @@ class DispenserModel {
                          oracleAddress: oracleAddress || null, expiredBlockIndex: null })
         return true
     }
-    async cancelOpenDispenserBySource() { return true }
-    async editOpenDispenserExpirationBySource() { return true }
+    async extendOpenDispenserExpirationBySource() { return true }
     async deleteOpenDispensers() { return true }
     async purgeExpiredDispensers() { return true }
     async getAllOpenDispenserAddresses() {
@@ -127,8 +126,7 @@ function buildDecoder(txSpecs, model, opts) {
         POISON_ROW: 2,
         DUPLICATED_TRANSACTION: 1,
         insertDispenser:                     (d) => model.insertDispenser(d),
-        cancelOpenDispenserBySource:         (s, e) => model.cancelOpenDispenserBySource(s, e),
-        editOpenDispenserExpirationBySource: (s, e) => model.editOpenDispenserExpirationBySource(s, e),
+        extendOpenDispenserExpirationBySource: (s, e) => model.extendOpenDispenserExpirationBySource(s, e),
         deleteOpenDispensers:                (b, m) => model.deleteOpenDispensers(b, m),
         purgeExpiredDispensers:              (h) => model.purgeExpiredDispensers(h),
         getAllOpenDispenserAddresses:        () => model.getAllOpenDispenserAddresses(),

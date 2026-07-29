@@ -8,11 +8,18 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// DB-layer unit tests for the DISPENSER cancel/edit mirror .
-// These pin the real db.js UPDATE that closes / re-dates an open dispenser
-// row: the SQL shape, the bound args order, the single-row target selection,
-// and the same false/true rollback-signalling contract insertDispenser uses.
-// No real DB: a fake pool is injected, exactly like db.queries.test.js.
+// DB-layer unit tests for the DISPENSER open-view mirror (, revised by #3119).
+// These pin the real db.js UPDATE that re-dates an open dispenser row: the SQL shape,
+// the bound args order, and the same false/true rollback-signalling contract
+// insertDispenser uses. No real DB: a fake pool is injected, like db.queries.test.js.
+//
+// #3119 turned the two closing mirrors into ONE extending one. The decoder's open-view is
+// advisory (the indexer targets a cancel/edit by DISPENSER_ACTION_INDEX, which the decoder
+// does not have), so what the SQL must NOT do is now as load-bearing as what it does:
+// never move an expiration earlier, and never pick one row out of several. Both negatives
+// are asserted below, because both were present before and either one coming back
+// reintroduces the money-bearing failure (closing a row while the indexer still dispenses
+// from it, so payments to it stop being captured).
 
 'use strict';
 
@@ -37,35 +44,65 @@ function injectPool(db, pool) {
     db.pool = pool;
 }
 
-describe('Database#cancelOpenDispenserBySource() ', () => {
+describe('the cancel mirror is retired (#3119)', () => {
+    it('db.js exposes no dispenser-closing method at all', () => {
+        const db = makeDb();
+        // A cancel could only ever be mirrored by moving an expiration EARLIER on a row
+        // resolved by SOURCE, i.e. closing a guessed dispenser. The method is gone rather
+        // than fixed; re-adding one under any name reopens #3119.
+        assert.strictEqual(typeof db.cancelOpenDispenserBySource, 'undefined');
+        assert.strictEqual(typeof db.editOpenDispenserExpirationBySource, 'undefined',
+            'the unconditional-set edit is gone too; only the extending form survives');
+    });
+});
+
+describe('Database#extendOpenDispenserExpirationBySource() (#3119)', () => {
     afterEach(() => sinon.restore());
 
-    it('issues a single-row soft-close UPDATE keyed on address, args [expiration, address]', async () => {
+    it('extends with GREATEST and never shortens', async () => {
         const db = makeDb();
         const q  = sinon.stub().resolves([]);
-        const { pool, conn } = withConn(q);
+        const { pool } = withConn(q);
         injectPool(db, pool);
 
-        const ok = await db.cancelOpenDispenserBySource('bcrt1qsource', 1700003600);
+        const ok = await db.extendOpenDispenserExpirationBySource('bcrt1qsource', 1700050000);
 
         assert.strictEqual(ok, true);
         assert.ok(q.calledOnce, 'exactly one query is issued');
         const [sql, args] = q.firstCall.args;
-        // Target: the open dispenser row(s) this address may act on, one row.
         assert.match(sql, /UPDATE\s+dispensers/i);
-        assert.match(sql, /SET\s+expiration\s*=\s*\?/i);
+        assert.match(sql, /SET\s+expiration\s*=\s*GREATEST\(\s*expiration\s*,\s*\?\s*\)/i,
+            'the stored expiration may only move outward');
+        assert.doesNotMatch(sql, /SET\s+expiration\s*=\s*\?/i,
+            'an unconditional SET would let a shortening edit close the row early');
         assert.match(sql, /expired_block_index\s+IS\s+NULL/i);
-        assert.match(sql, /ORDER\s+BY\s+.*tx_index\s+DESC/i);
-        assert.match(sql, /LIMIT\s+1/i);
-        // : the indexer authorises a cancel from the dispenser SOURCE *or* its
-        // GET_ADDRESS, so the decoder matches its operating-address key AND the stored
-        // create SOURCE, with operating-address matches ranked first.
+        // Args: the new expiration, then the acting address once per key subquery. The
+        // third bind of the pre-#3119 query was the ranking term, which no longer exists.
+        assert.deepStrictEqual(args, [1700050000, 'bcrt1qsource', 'bcrt1qsource']);
+    });
+
+    it('picks no row: no ORDER BY and no LIMIT, so every open row of the source is covered', async () => {
+        // The target selection IS the defect. With two open dispensers on one source, a
+        // LIMIT 1 pick could extend the wrong one and leave the right one to expire early
+        // in the decoder view, which stops capturing payments the indexer still honours.
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+
+        await db.extendOpenDispenserExpirationBySource('bcrt1qsource', 1700050000);
+
+        const sql = q.firstCall.args[0];
+        assert.doesNotMatch(sql, /ORDER\s+BY/i, 'no ranking: ranking is how the wrong row got picked');
+        // No row limit on the UPDATE itself. Anchored past the last WHERE term, because the
+        // scalar address subqueries legitimately carry their own LIMIT 1 (one id per
+        // address) and a bare /LIMIT/ would match those and pass for the wrong reason.
+        assert.doesNotMatch(sql, /expired_block_index\s+IS\s+NULL[\s\S]*\bLIMIT\b/i,
+            'no single-row limit on the dispensers UPDATE');
+        //  reach is kept: the indexer authorises an edit from the dispenser SOURCE
+        // *or* its GET_ADDRESS, so both keys still match.
         assert.match(sql, /address_id\s*=\s*\(SELECT\s+id\s+FROM\s+index_addresses/i);
         assert.match(sql, /OR\s+source_address_id\s*=\s*\(SELECT\s+id\s+FROM\s+index_addresses/i);
-        assert.match(sql, /ORDER\s+BY\s+\(address_id\s*=\s*\(SELECT\s+id\s+FROM\s+index_addresses[^)]*\)\s*\)\s*DESC/i);
-        // Args order mirrors the query: SET expiration = ?, then the address bound once
-        // per subquery (operating-address match, source match, preference ranking).
-        assert.deepStrictEqual(args, [1700003600, 'bcrt1qsource', 'bcrt1qsource', 'bcrt1qsource']);
     });
 
     it('returns false on a query error and does not end a non-existent transaction', async () => {
@@ -76,49 +113,11 @@ describe('Database#cancelOpenDispenserBySource() ', () => {
         // Not inside a block transaction, so the error path must not try to end one.
         db.endTransaction = sinon.stub().resolves();
 
-        const ok = await db.cancelOpenDispenserBySource('bcrt1qsource', 1700003600);
+        const ok = await db.extendOpenDispenserExpirationBySource('bcrt1qsource', 1700050000);
 
         assert.strictEqual(ok, false, 'a failed write signals rollback to the block loop');
         assert.ok(db.endTransaction.notCalled, 'no open block transaction to end');
         assert.ok(conn.release.calledOnce, 'the leased connection is released');
-    });
-});
-
-describe('Database#editOpenDispenserExpirationBySource() ', () => {
-    afterEach(() => sinon.restore());
-
-    it('issues a single-row expiration UPDATE keyed on address, args [expiration, address]', async () => {
-        const db = makeDb();
-        const q  = sinon.stub().resolves([]);
-        const { pool } = withConn(q);
-        injectPool(db, pool);
-
-        const ok = await db.editOpenDispenserExpirationBySource('bcrt1qsource', 1700050000);
-
-        assert.strictEqual(ok, true);
-        assert.ok(q.calledOnce);
-        const [sql, args] = q.firstCall.args;
-        assert.match(sql, /UPDATE\s+dispensers/i);
-        assert.match(sql, /SET\s+expiration\s*=\s*\?/i);
-        assert.match(sql, /expired_block_index\s+IS\s+NULL/i);
-        assert.match(sql, /ORDER\s+BY\s+.*tx_index\s+DESC/i);
-        assert.match(sql, /LIMIT\s+1/i);
-        // Same two-key (operating address OR create SOURCE) resolution as cancel, .
-        assert.match(sql, /OR\s+source_address_id\s*=\s*\(SELECT\s+id\s+FROM\s+index_addresses/i);
-        assert.deepStrictEqual(args, [1700050000, 'bcrt1qsource', 'bcrt1qsource', 'bcrt1qsource']);
-    });
-
-    it('returns false on a query error', async () => {
-        const db = makeDb();
-        const q  = sinon.stub().rejects(new Error('db down'));
-        const { pool, conn } = withConn(q);
-        injectPool(db, pool);
-        db.endTransaction = sinon.stub().resolves();
-
-        const ok = await db.editOpenDispenserExpirationBySource('bcrt1qsource', 1700050000);
-
-        assert.strictEqual(ok, false);
-        assert.ok(conn.release.calledOnce);
     });
 });
 
