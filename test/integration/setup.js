@@ -21,6 +21,9 @@ const dotenv = require('dotenv')
 dotenv.config()
 
 const { execSync } = require('child_process')
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
 const nodeHelper = require('../nodeHelper')
 const XChainDecoder = require('../../src/XChainDecoder')
 const Database = require('../../src/db.js')
@@ -64,6 +67,35 @@ exports.mochaHooks = {
         await global.db.verifyTables()
 
         // Prepare node
+        //
+        // SAFETY GATE. This fixture takes over the HOST bitcoind: it stops any running
+        // regtest node and then deletes ~/.bitcoin/regtest outright. On a machine that
+        // keeps a real regtest chain, running this tier is silent, unrecoverable data
+        // loss, and nothing in the tier's name or output warns about it. So refuse
+        // rather than wipe, unless the operator states that this machine's regtest data
+        // is disposable. A machine with no regtest datadir (a container, CI, a fresh
+        // checkout) is unaffected and never sees this.
+        const REGTEST_DIR = path.join(os.homedir(), '.bitcoin', 'regtest')
+        if (fs.existsSync(REGTEST_DIR) && process.env.DECODER_IT_ALLOW_REGTEST_WIPE !== '1') {
+            throw new Error(
+                'integration setup REFUSES to run: it would stop any running regtest bitcoind and ' +
+                'DELETE ' + REGTEST_DIR + '. Set DECODER_IT_ALLOW_REGTEST_WIPE=1 if this machine\'s ' +
+                'regtest chain is disposable, or run the tier inside a container that has its own.')
+        }
+
+        // bitcoind must be on PATH. Without this check `checkNode()` swallows the
+        // failure and returns false, and the run dies further down on an opaque
+        // execSync error from `bitcoind -regtest -daemon` that reads as a test failure
+        // rather than as a missing dependency.
+        try {
+            exec('bitcoin-cli -version')
+        } catch (e) {
+            throw new Error(
+                'integration setup requires bitcoind and bitcoin-cli on PATH: this fixture runs its ' +
+                'own regtest daemon on the host rather than connecting to NODE_URL. Without them the ' +
+                'run fails later with an unrelated-looking execSync error.')
+        }
+
         if (checkNode()) {
             console.log('[integration] Stopping existing bitcoind')
             exec('bitcoin-cli -regtest stop')
@@ -71,7 +103,7 @@ exports.mochaHooks = {
         }
 
         console.log('[integration] Cleaning regtest data')
-        exec('rm -rf ~/.bitcoin/regtest')
+        exec('rm -rf ' + JSON.stringify(REGTEST_DIR))
 
         console.log('[integration] Starting bitcoind regtest')
         exec('bitcoind -regtest -daemon -fallbackfee=1.0 -maxtxfee=1.1')
