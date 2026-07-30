@@ -62,16 +62,26 @@ describe('E2E: Indexer Contract', function () {
             assert.ok(row.source.length > 0)
             assert.strictEqual(row.source, funded.address)
 
-            // block_index: integer matching the block
-            assert.strictEqual(typeof row.block_index, 'number')
-            assert.strictEqual(row.block_index, blockIndex)
+            // block_index: integer matching the block. It is a BIGINT column and the
+            // mariadb driver hands those back as BigInt, so the contract is an
+            // integral value, not a JS Number.
+            assert.ok(
+                typeof row.block_index === 'bigint' || typeof row.block_index === 'number',
+                'block_index should be an integer type, got ' + typeof row.block_index
+            )
+            assert.strictEqual(Number(row.block_index), blockIndex)
 
-            // block_time: positive unix timestamp
-            assert.strictEqual(typeof row.block_time, 'number')
-            assert.ok(row.block_time > 0)
+            // block_time: positive unix timestamp, BIGINT for the same reason as
+            // block_index above, so normalise before comparing.
+            assert.ok(
+                typeof row.block_time === 'bigint' || typeof row.block_time === 'number',
+                'block_time should be an integer type, got ' + typeof row.block_time
+            )
+            const blockTime = Number(row.block_time)
+            assert.ok(blockTime > 0)
             const now = Math.floor(Date.now() / 1000)
-            assert.ok(row.block_time > now - 3600, 'block_time should be recent')
-            assert.ok(row.block_time <= now + 60, 'block_time should not be far in the future')
+            assert.ok(blockTime > now - 3600, 'block_time should be recent')
+            assert.ok(blockTime <= now + 60, 'block_time should not be far in the future')
 
             // For a standard non-dispenser tx, dispenser output fields should be null
             assert.strictEqual(row.vout, null)
@@ -151,7 +161,7 @@ describe('E2E: Indexer Contract', function () {
             // Create a dispenser
             const dispenserFunded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
-            const dispenserAction = `DISPENSER|0|CDISP_G||100||CDISP_R||50||||${expiration}|||`
+            const dispenserAction = `DISPENSER|0|BTC|CDISP_G|100|||BTC||50|||||${expiration}|||`
             const { txHash: dispHash, blockIndex: dispBlock } = await txBuilder.broadcastOpReturn(dispenserFunded, dispenserAction)
             await txBuilder.waitForDecoder(dispBlock)
             await txBuilder.waitForTransaction(dispHash)
@@ -214,7 +224,7 @@ describe('E2E: Indexer Contract', function () {
             await txBuilder.waitForDecoder(blockIndex)
 
             const block = await global.db.getBlockByIndex(blockIndex)
-            const nodeHash = txBuilder.getBlockHash(blockIndex)
+            const nodeHash = await txBuilder.getBlockHash(blockIndex)
             assert.strictEqual(block.block_hash, nodeHash, 'DB block hash should match node')
         })
     })
@@ -289,8 +299,11 @@ describe('E2E: Indexer Contract', function () {
                     SELECT MIN(tx_index) as min_idx, MAX(tx_index) as max_idx, COUNT(*) as cnt
                     FROM transactions
                 `)
-                if (stats[0].cnt > 0) {
-                    const expected = stats[0].max_idx - stats[0].min_idx + 1
+                // tx_index is a BIGINT column, so MIN/MAX come back as BigInt and the
+                // arithmetic below has to start from Numbers or it throws "Cannot mix
+                // BigInt and other types".
+                if (Number(stats[0].cnt) > 0) {
+                    const expected = Number(stats[0].max_idx) - Number(stats[0].min_idx) + 1
                     assert.strictEqual(
                         Number(stats[0].cnt), expected,
                         `tx_index should be sequential: ${stats[0].cnt} rows but range is ${expected}`

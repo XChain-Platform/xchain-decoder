@@ -97,8 +97,8 @@ parity gate in `bin/check-observability-parity.js`.
 | `npm run test:smoke` | Smoke tests (52 tests, no external services) |
 | `npm run test:unit` | Unit tests (221 tests, no external services) |
 | `npm run test:security` | Security tests (75 tests, no external services) |
-| `npm run test:integration` | Integration tests (requires bitcoind regtest + MariaDB) |
-| `npm run test:e2e` | End-to-end tests (requires full stack) |
+| `npm run test:integration` | Integration tests (30 tests; brings up its own throwaway regtest node and MariaDB, requires Docker) |
+| `npm run test:e2e` | End-to-end tests (72 tests; brings up its own throwaway regtest node and MariaDB on separate ports, requires Docker) |
 | `npm run test:fuzz` | Fuzz tests (5 harnesses, 1000 iterations each) |
 | `npm run test:fuzz:quick` | Quick fuzz (100 iterations) |
 | `npm run test:chaos` | Chaos engineering tests (50 tests) |
@@ -117,7 +117,7 @@ parity gate in `bin/check-observability-parity.js`.
 | Unit | 221 | Core modules: BlockchainConnector, CryptoNetworks, parseTransaction, removeObfuscation, XChainBlockDecoder, util, boundary tests |
 | Security | 75 | SQL parameterization, deobfuscation robustness, ACTION validation, DISPENSER field validation, error sanitization, connection handling |
 | Boundary | 78 | AES deobfuscation edge cases, script type detection, multisig zero-trim, DISPENSER parsing, satoshi conversion |
-| Integration | 30+ | OP_RETURN, multisig, P2SH, P2WSH, dispensers, malformed data, indexer contract queries (requires bitcoind + MariaDB) |
+| Integration | 30 | OP_RETURN, multisig, P2SH, P2WSH, dispensers, malformed data, indexer contract queries (runs against its own containerised regtest node and MariaDB; requires Docker) |
 | E2E | 50+ | Full decoder pipeline: action decoding, dispenser lifecycle, multi-block processing, error handling |
 | Fuzz | 42 | 5 harnesses: removeObfuscation, parseTransaction, blockDecoder, dispenserParsing, pipeline |
 | Chaos | 50 | Node unavailability, RPC timeouts, DB pool exhaustion, mid-transaction failures, chain reorgs, signal handling |

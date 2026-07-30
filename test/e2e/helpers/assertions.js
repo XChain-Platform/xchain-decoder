@@ -89,7 +89,9 @@ function assertRowFields(row, expected) {
     if (expected.source !== undefined)
         assert.strictEqual(row.source, expected.source, 'source mismatch')
     if (expected.block_index !== undefined)
-        assert.strictEqual(row.block_index, expected.block_index, 'block_index mismatch')
+        // block_index is a BIGINT column and the mariadb driver hands those back as
+        // BigInt, so compare the value rather than its JS representation.
+        assert.strictEqual(Number(row.block_index), expected.block_index, 'block_index mismatch')
     if (expected.block_time_gt !== undefined)
         assert.ok(row.block_time > expected.block_time_gt, 'block_time should be > ' + expected.block_time_gt)
 }

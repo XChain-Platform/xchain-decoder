@@ -1,0 +1,82 @@
+# Throwaway venue for the decoder E2E tier: a regtest bitcoind and a MariaDB,
+# both disposable.
+#
+# Same shape as the integration venue (test/integration/fixtures), on different
+# published ports so the two tiers can run side by side without fighting over a
+# node or a database. The E2E tier additionally invalidates and reconsiders
+# blocks to simulate reorgs, which is another reason it must own its own chain.
+#
+# The tier used to run its own bitcoind on the HOST and `rm -rf ~/.bitcoin/regtest`
+# before every run, which made it unrunnable on any machine that kept a real
+# regtest chain. Everything the fixture owns now lives inside these two
+# containers, so there is no host path for it to delete.
+#
+# Both datadirs are tmpfs: the chain and the database exist only for the life of
+# the container, so a fresh run always starts from an empty chain at height 0.
+# `docker compose down -v` is belt and braces on top of that.
+#
+# The credentials below are fixture-local throwaway values. They exist only
+# inside these containers, never authenticate anything outside this compose
+# project, and must never be reused for a real node or database.
+#
+# The explicit project name matters. Compose otherwise derives it from the
+# containing DIRECTORY, and every repo in this monorepo puts its test compose
+# file in a directory called `fixtures`, so an unnamed project here would share
+# an identity with another repo's fixture venue and a `down -v` would take that
+# repo's containers with it.
+name: xchain-decoder-e2e
+
+services:
+  bitcoind-test:
+    image: bitcoin/bitcoin:28.1
+    command:
+      - bitcoind
+      - -regtest
+      - -server=1
+      - -txindex=1
+      - -listen=0
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -rpcport=18443
+      - -rpcuser=e2efixture
+      - -rpcpassword=e2efixture
+      - -fallbackfee=1.0
+      - -maxtxfee=1.1
+      # The carriers this tier exists to decode are deliberately non-standard: an
+      # XCHN OP_RETURN payload routinely exceeds Core's 83-byte datacarrier cap,
+      # and bare multisig is a carrier in its own right. Without these the node
+      # rejects the fixture's own transactions at broadcast and the failure reads
+      # as a decoder bug. Regtest only; -acceptnonstdtxn is refused on any other
+      # chain.
+      - -acceptnonstdtxn=1
+      - -datacarriersize=1000
+      - -permitbaremultisig=1
+      # Pin the wallet's address shape rather than inheriting whichever default
+      # the Core release ships. The multisig fixtures budget an ACTION string
+      # against a fixed 64-byte payload space, and a longer address type silently
+      # overflows it.
+      - -addresstype=legacy
+      - -printtoconsole=1
+    ports:
+      - "18545:18443"
+    tmpfs:
+      - /home/bitcoin/.bitcoin
+    healthcheck:
+      test: ["CMD", "bitcoin-cli", "-regtest", "-rpcport=18443", "-rpcuser=e2efixture", "-rpcpassword=e2efixture", "getblockchaininfo"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  mariadb-test:
+    image: mariadb:10.11
+    environment:
+      MARIADB_ROOT_PASSWORD: e2efixture
+    ports:
+      - "13319:3306"
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

@@ -43,7 +43,9 @@ describe('Indexer Contract Query', () => {
             assert.strictEqual(row.tx_hash.length, 64, 'tx_hash should be 64-char hex')
             assert.strictEqual(typeof row.source, 'string')
             assert.ok(row.source.length > 0, 'source should be non-empty')
-            assert.strictEqual(row.block_index, blockIndex)
+            // BIGINT columns come back from the mariadb driver as BigInt; the contract
+            // is the value, not its JS representation.
+            assert.strictEqual(Number(row.block_index), blockIndex)
             assert.ok(row.block_time > 0, 'block_time should be positive')
             // destination and amount are null for most ACTIONs
             // vout/output_amount/output_destination are null when no dispenser outputs

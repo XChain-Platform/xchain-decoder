@@ -40,7 +40,15 @@ describe('E2E: DISPENSER Lifecycle', function () {
         it('B1.1: should create dispenser record from DISPENSER|0 action', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
-            const action = `DISPENSER|0|GIVE_E2E||1000||GET_E2E||500||||${expiration}|||`
+            // A create only opens a dispenser when GIVE_COIN and GET_COIN both name
+            // THIS chain's coin (XChainDecoder.dispenserOpensForThisChain). Field
+            // order is DISPENSER|VERSION|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|
+            // GIVE_OWNERSHIP|GIVE_ESCROW|GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|
+            // FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|
+            // MEMO; these fixtures used a shifted map with token-like coin names, so
+            // no dispenser was ever opened and the whole B tier was asserting
+            // against an empty table.
+            const action = `DISPENSER|0|BTC|GIVE_E2E|1000|||BTC||500|||||${expiration}|||`
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
             await txBuilder.waitForDecoder(blockIndex)
             await txBuilder.waitForTransaction(txHash)
@@ -57,7 +65,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
             // Step 1: Create a dispenser
             const dispenserFunded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
-            const dispenserAction = `DISPENSER|0|D_GIVE||100||D_GET||50||||${expiration}|||`
+            const dispenserAction = `DISPENSER|0|BTC|D_GIVE|100|||BTC||50|||||${expiration}|||`
             const { txHash: dispTxHash, blockIndex: dispBlockIndex } = await txBuilder.broadcastOpReturn(dispenserFunded, dispenserAction)
             await txBuilder.waitForDecoder(dispBlockIndex)
             await txBuilder.waitForTransaction(dispTxHash)
@@ -80,7 +88,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
         it('B1.3: dispenser data should appear in indexer contract query', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
-            const action = `DISPENSER|0|CQUERY||200||CGET||100||||${expiration}|||`
+            const action = `DISPENSER|0|BTC|CQUERY|200|||BTC||100|||||${expiration}|||`
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
             await txBuilder.waitForDecoder(blockIndex)
             await txBuilder.waitForTransaction(txHash)
@@ -99,27 +107,43 @@ describe('E2E: DISPENSER Lifecycle', function () {
     // ---------------------------------------------------------------
     describe('dispenser expiration', () => {
 
-        it('B2.1: should delete expired dispensers when a new block is processed', async () => {
+        it('B2.1: should soft-expire a dispenser past its expiration on the next block', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
-            // Set expiration to a timestamp in the past relative to the next block
-            // Block timestamps on regtest are based on system time, so use a past time
+            // Set expiration to a timestamp in the past relative to the next block.
+            // Block timestamps on regtest are based on system time, so use a past time.
             const expiration = Math.floor(Date.now() / 1000) - 10
-            const action = `DISPENSER|0|EXP_GIVE||100||EXP_GET||50||||${expiration}|||`
+            const action = `DISPENSER|0|BTC|EXP_GIVE|100|||BTC||50|||||${expiration}|||`
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
             await txBuilder.waitForDecoder(blockIndex)
             await txBuilder.waitForTransaction(txHash)
 
-            // The dispenser should have been cleaned up immediately since its
-            // expiration is in the past relative to the block timestamp
-            // (deleteOpenDispensers is called with block.timestamp on each new block)
+            // The sweep runs BEFORE a block's own transactions are parsed, so a
+            // create can never be expired by the block that carries it: the next
+            // block is what expires it.
+            const newHeight = await txBuilder.mineBlocks(1)
+            await txBuilder.waitForDecoder(newHeight)
+
+            // Expiry is a SOFT expire, not a delete: db.deleteOpenDispensers stamps
+            // the expiring block height into expired_block_index so a reorg can
+            // resurrect a dispenser that an orphaned block's non-monotonic timestamp
+            // expired. Asserting the row had vanished was asserting the old
+            // hard-delete behaviour.
             const dispensers = await getDispensersForAddress(global.db, funded.address)
-            assert.strictEqual(dispensers.length, 0, 'Expired dispenser should have been cleaned up')
+            assert.strictEqual(dispensers.length, 1, 'The dispenser row should survive expiry')
+            assert.ok(
+                dispensers[0].expired_block_index !== null,
+                'Expired dispenser should carry the expiring block height'
+            )
+            assert.ok(
+                Number(dispensers[0].expired_block_index) > blockIndex,
+                'Expiry should be stamped by a block after the create'
+            )
         })
 
         it('B2.2: should keep dispenser alive when expiration is in the future', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400 // 24 hours from now
-            const action = `DISPENSER|0|ALIVE_GIVE||100||ALIVE_GET||50||||${expiration}|||`
+            const action = `DISPENSER|0|BTC|ALIVE_GIVE|100|||BTC||50|||||${expiration}|||`
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
             await txBuilder.waitForDecoder(blockIndex)
             await txBuilder.waitForTransaction(txHash)
@@ -140,7 +164,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
         it('B3.1: should NOT create dispenser for version != 0', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
-            const action = `DISPENSER|1|GIVE||100||GET||50||||${expiration}|||`
+            const action = `DISPENSER|1|BTC|GIVE|100|||BTC||50|||||${expiration}|||`
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
             await txBuilder.waitForDecoder(blockIndex)
             await txBuilder.waitForTransaction(txHash)
@@ -152,7 +176,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
         it('B3.2: should NOT create dispenser when both giveCoin and getCoin are empty', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
-            const action = `DISPENSER|0|||100||||50||||${expiration}|||`
+            const action = `DISPENSER|0||GIVE|100|||||50|||||${expiration}|||`
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
             await txBuilder.waitForDecoder(blockIndex)
             await txBuilder.waitForTransaction(txHash)
@@ -160,26 +184,34 @@ describe('E2E: DISPENSER Lifecycle', function () {
             await assertDispenserNotExists(global.db, funded.address)
         })
 
-        it('B3.3: should create dispenser when only giveCoin is set', async () => {
+        // B3.3 and B3.4 used to assert that a half-specified create OPENS a
+        // dispenser. It does not, deliberately: dispenserOpensForThisChain requires
+        // BOTH GIVE_COIN and GET_COIN to name this chain's coin, because a decoder
+        // that opened a dispenser the indexer has no record of goes on to misread
+        // ordinary later payments to that address as dispenses. The old assertions
+        // only ever passed because the actions named non-chain coins in the wrong
+        // slots, so nothing opened for either test and neither was checking what its
+        // title claimed.
+        it('B3.3: should NOT create dispenser when only giveCoin is set', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
-            const action = `DISPENSER|0|ONLY_GIVE||100||||50||||${expiration}|||`
+            const action = `DISPENSER|0|BTC|ONLY_GIVE|100|||||50|||||${expiration}|||`
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
             await txBuilder.waitForDecoder(blockIndex)
             await txBuilder.waitForTransaction(txHash)
 
-            await assertDispenserExists(global.db, funded.address)
+            await assertDispenserNotExists(global.db, funded.address)
         })
 
-        it('B3.4: should create dispenser when only getCoin is set', async () => {
+        it('B3.4: should NOT create dispenser when only getCoin is set', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
-            const action = `DISPENSER|0|||100||ONLY_GET||50||||${expiration}|||`
+            const action = `DISPENSER|0|||100|||BTC||50|||||${expiration}|||`
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
             await txBuilder.waitForDecoder(blockIndex)
             await txBuilder.waitForTransaction(txHash)
 
-            await assertDispenserExists(global.db, funded.address)
+            await assertDispenserNotExists(global.db, funded.address)
         })
     })
 })

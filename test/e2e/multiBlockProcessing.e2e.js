@@ -251,10 +251,10 @@ describe('E2E: Multi-Block Processing', function () {
             assert.strictEqual(tx.data, action)
 
             // Get the block hash at this height
-            const blockHash = txBuilder.getBlockHash(blockIndex)
+            const blockHash = await txBuilder.getBlockHash(blockIndex)
 
             // Invalidate this block (simulates a reorg)
-            txBuilder.invalidateBlock(blockHash)
+            await txBuilder.invalidateBlock(blockHash)
 
             // Mine replacement blocks on the new chain
             // We need at least 2 blocks so the decoder detects the hash mismatch

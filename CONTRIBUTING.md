@@ -34,7 +34,8 @@ xchain-decoder/
 
 - **Node.js 22** exactly. The platform pins Node 22 fleet-wide: the `mariadb` driver is ESM-only (Node 18 fails with `ERR_REQUIRE_ESM`), and newer majors are not validated against the stack. `engines.node` declares `>=22.0.0`; use 22.
 - **MariaDB** reachable from the decoder host for anything beyond unit tests.
-- A coin node (`bitcoind` / `litecoind` / `dogecoind`) for integration and e2e runs. For local work, the `xchain-regtest-miner` plus a regtest stack is the easiest path.
+- **Docker** for the integration and e2e tiers. Each brings up its own throwaway regtest node and MariaDB on tmpfs and tears them down again, so neither needs (or touches) a coin node on the host.
+- A coin node (`bitcoind` / `litecoind` / `dogecoind`) only for running the decoder itself against a chain. For local work, the `xchain-regtest-miner` plus a regtest stack is the easiest path.
 
 ### First-time install
 
@@ -67,8 +68,8 @@ The decoder runs a layered suite. Pick the tier that matches your change:
 | Unit | `npm run test:unit` | No |
 | Security | `npm run test:security` | No |
 | CI (unit, fast gate) | `npm run ci` | No |
-| Integration | `npm run test:integration` | bitcoind regtest + MariaDB |
-| End-to-end | `npm run test:e2e` | Full stack |
+| Integration | `npm run test:integration` | Docker (the tier starts its own throwaway regtest node and MariaDB) |
+| End-to-end | `npm run test:e2e` | Docker (its own throwaway regtest node and MariaDB, on separate ports from the integration tier) |
 | Fuzz | `npm run test:fuzz` (`:quick` for 100 iterations) | No |
 | Chaos | `npm run test:chaos` | No |
 | Regression | `npm run test:regression` (`:critical` = P0 only) | No |

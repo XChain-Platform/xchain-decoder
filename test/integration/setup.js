@@ -13,135 +13,150 @@
  **********************************************************************
  * Mocha root hook for integration tests.
  *
- * Sets up: bitcoind regtest, MariaDB decoder DB, XChainDecoder instance.
+ * Sets up: a containerised regtest node, a containerised MariaDB decoder DB,
+ * and an XChainDecoder wired to both.
  * Exposes globals: db, nodeClientTest, mainTestAddress, decoder
+ *
+ * The venue is fixtures/docker-compose.test.yml; `npm run test:integration`
+ * (bin/run-integration.sh) brings it up and tears it down. Both containers keep
+ * their state on tmpfs, so every run starts from an empty chain and an empty
+ * database.
+ *
+ * This fixture owns NOTHING on the host. It used to: it ran `bitcoin-cli
+ * -regtest stop` and then deleted ~/.bitcoin/regtest before any test, which
+ * made the tier unrunnable on any machine that kept a real regtest chain and
+ * silently destructive on the machines where it did run. Both the daemon
+ * lifecycle and the wipe are gone, replaced by RPC against the container, so
+ * there is no longer a host path for this tier to delete.
+ *
+ * Deliberately does NOT load .env. The fixture drops and recreates a database
+ * and mines on the node it is pointed at, so it must not inherit a developer's
+ * real connection settings by accident. The defaults below are the compose
+ * fixture's own throwaway values; the XCHAIN_TEST_* overrides exist for a
+ * differently-published venue, and the regtest assertion in beforeAll is what
+ * keeps an override honest.
  */
 
-const dotenv = require('dotenv')
-dotenv.config()
-
-const { execSync } = require('child_process')
-const fs = require('fs')
-const os = require('os')
-const path = require('path')
+const BitcoinCore = require('bitcoin-core')
 const nodeHelper = require('../nodeHelper')
 const XChainDecoder = require('../../src/XChainDecoder')
 const Database = require('../../src/db.js')
 
-const NETWORK = process.env.NETWORK
-const NODE_URL = process.env.NODE_URL
-const NODE_PORT = process.env.NODE_PORT
-const NODE_USER = process.env.NODE_USER
-const NODE_PASSWORD = process.env.NODE_PASSWORD
-const DB_URL = process.env.DECODER_DB_HOST
-const DB_PORT = process.env.DECODER_DB_PORT
-const DB_NAME = process.env.DECODER_DB_NAME
-const DB_USER = process.env.DECODER_DB_USER
-const DB_PASSWORD = process.env.DECODER_DB_PASS
+// Fixture venue. Must match fixtures/docker-compose.test.yml.
+const NODE_HOST = process.env.XCHAIN_TEST_NODE_HOST || '127.0.0.1'
+const NODE_PORT = process.env.XCHAIN_TEST_NODE_PORT || '18544'
+const NODE_USER = process.env.XCHAIN_TEST_NODE_USER || 'itfixture'
+const NODE_PASSWORD = process.env.XCHAIN_TEST_NODE_PASS || 'itfixture'
+const DB_HOST = process.env.XCHAIN_TEST_DB_HOST || '127.0.0.1'
+const DB_PORT = process.env.XCHAIN_TEST_DB_PORT || '13318'
+const DB_USER = process.env.XCHAIN_TEST_DB_USER || 'root'
+const DB_PASSWORD = process.env.XCHAIN_TEST_DB_PASS || 'itfixture'
+const DB_NAME = 'xchain_decoder_integration_regtest'
+const NETWORK = 'bitcoin-regtest'
 
-function exec(cmd) {
-    return execSync(cmd, { stdio: 'pipe' })
-}
+// Blocks mined to make the coinbase spendable (100 maturity + 1).
+const FUNDING_BLOCKS = 101
 
-function checkNode() {
-    try {
-        const info = JSON.parse(exec('bitcoin-cli -regtest getnetworkinfo'))
-        return info.networkactive === true
-    } catch (e) {
-        return false
-    }
-}
+// Let the shared node helper, and therefore the tx builders that sit on it,
+// reach the same containerised node. Set before any helper call rather than at
+// require time so the helper's host-node defaults stay intact for the older
+// host-based tests that also use it.
+process.env.XCHAIN_TEST_NODE_HOST = NODE_HOST
+process.env.XCHAIN_TEST_NODE_PORT = NODE_PORT
+process.env.XCHAIN_TEST_NODE_USER = NODE_USER
+process.env.XCHAIN_TEST_NODE_PASS = NODE_PASSWORD
 
 async function wait(ms) {
     return new Promise(r => setTimeout(r, ms))
 }
 
+// Wait for the node container to answer RPC, and return its chain info. Bounded:
+// a node that never comes up is a venue failure and should say so, not hang the
+// suite until mocha's (disabled) timeout.
+async function waitForNode(timeoutMs) {
+    const probe = new BitcoinCore({
+        host: 'http://' + NODE_HOST + ':' + NODE_PORT,
+        username: NODE_USER,
+        password: NODE_PASSWORD
+    })
+    const deadline = Date.now() + timeoutMs
+    let lastError = null
+    while (Date.now() < deadline) {
+        try {
+            return await probe.getBlockchainInfo()
+        } catch (e) {
+            lastError = e
+            await wait(1000)
+        }
+    }
+    throw new Error(
+        'integration venue: no RPC response from the regtest node at ' + NODE_HOST + ':' + NODE_PORT +
+        ' after ' + Math.round(timeoutMs / 1000) + 's. Start it with `npm run test:integration:up`. ' +
+        'Last error: ' + (lastError ? lastError.message : 'none'))
+}
+
 exports.mochaHooks = {
     async beforeAll() {
+        this.timeout(180000)
         console.log('[integration] Setting up regtest environment')
 
+        // Connect to the node first and refuse anything that is not regtest. This
+        // fixture mines blocks and drops a database, so the one thing it must never
+        // do is that against a real chain. The old host-wipe guard covered the same
+        // hazard for the host datadir; this covers the endpoint, which is the only
+        // thing left that a misconfiguration can redirect.
+        const chainInfo = await waitForNode(60000)
+        if (chainInfo.chain !== 'regtest') {
+            throw new Error(
+                'integration setup REFUSES to run: the node at ' + NODE_HOST + ':' + NODE_PORT +
+                ' reports chain "' + chainInfo.chain + '", not regtest. This fixture mines blocks and ' +
+                'drops its database; point it at the throwaway container from ' +
+                'test/integration/fixtures/docker-compose.test.yml.')
+        }
+
         // Prepare DB
-        const dbName = DB_NAME + '_regtest'
-        global.db = new Database(DB_URL, DB_PORT, dbName, DB_USER, DB_PASSWORD)
+        global.db = new Database(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+        await global.db.createDatabase()
         await global.db.dropDatabase()
         await global.db.verifyTables()
 
-        // Prepare node
-        //
-        // SAFETY GATE. This fixture takes over the HOST bitcoind: it stops any running
-        // regtest node and then deletes ~/.bitcoin/regtest outright. On a machine that
-        // keeps a real regtest chain, running this tier is silent, unrecoverable data
-        // loss, and nothing in the tier's name or output warns about it. So refuse
-        // rather than wipe, unless the operator states that this machine's regtest data
-        // is disposable. A machine with no regtest datadir (a container, CI, a fresh
-        // checkout) is unaffected and never sees this.
-        const REGTEST_DIR = path.join(os.homedir(), '.bitcoin', 'regtest')
-        if (fs.existsSync(REGTEST_DIR) && process.env.DECODER_IT_ALLOW_REGTEST_WIPE !== '1') {
-            throw new Error(
-                'integration setup REFUSES to run: it would stop any running regtest bitcoind and ' +
-                'DELETE ' + REGTEST_DIR + '. Set DECODER_IT_ALLOW_REGTEST_WIPE=1 if this machine\'s ' +
-                'regtest chain is disposable, or run the tier inside a container that has its own.')
-        }
-
-        // bitcoind must be on PATH. Without this check `checkNode()` swallows the
-        // failure and returns false, and the run dies further down on an opaque
-        // execSync error from `bitcoind -regtest -daemon` that reads as a test failure
-        // rather than as a missing dependency.
-        try {
-            exec('bitcoin-cli -version')
-        } catch (e) {
-            throw new Error(
-                'integration setup requires bitcoind and bitcoin-cli on PATH: this fixture runs its ' +
-                'own regtest daemon on the host rather than connecting to NODE_URL. Without them the ' +
-                'run fails later with an unrelated-looking execSync error.')
-        }
-
-        if (checkNode()) {
-            console.log('[integration] Stopping existing bitcoind')
-            exec('bitcoin-cli -regtest stop')
-            await wait(2000)
-        }
-
-        console.log('[integration] Cleaning regtest data')
-        exec('rm -rf ' + JSON.stringify(REGTEST_DIR))
-
-        console.log('[integration] Starting bitcoind regtest')
-        exec('bitcoind -regtest -daemon -fallbackfee=1.0 -maxtxfee=1.1')
-
-        await wait(1000)
-        while (!checkNode()) {
-            console.log('[integration] Waiting for node...')
-            await wait(3000)
-        }
-
-        console.log('[integration] Creating wallet and funding')
+        console.log('[integration] Funding test wallet')
         global.nodeClientTest = await nodeHelper.getWalletConnection('test-wallet')
         global.mainTestAddress = await global.nodeClientTest.getNewAddress()
-        await global.nodeClientTest.generateToAddress(101, global.mainTestAddress)
+        await global.nodeClientTest.generateToAddress(FUNDING_BLOCKS, global.mainTestAddress)
 
         const balance = await global.nodeClientTest.getBalance()
         console.log(`[integration] Wallet funded: ${balance} BTC`)
 
         // Start decoder
         global.decoder = new XChainDecoder(
-            NETWORK, DB_URL, DB_PORT, dbName, DB_USER, DB_PASSWORD,
-            NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD
+            NETWORK, DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD,
+            NODE_HOST, NODE_PORT, NODE_USER, NODE_PASSWORD
         )
         global.decoder.start()
 
-        // Wait for decoder to sync initial blocks
-        console.log('[integration] Waiting for decoder to sync...')
-        const deadline = Date.now() + 60000
+        // Wait for the decoder to catch up to the funding blocks. The chain can be
+        // taller than FUNDING_BLOCKS when the venue is reused without a teardown, so
+        // target the node's own height rather than a constant.
+        const targetHeight = await global.nodeClientTest.getBlockCount()
+        console.log(`[integration] Waiting for decoder to sync to block ${targetHeight}...`)
+        const deadline = Date.now() + 120000
+        let lastBlock = -1
         while (Date.now() < deadline) {
-            const lastBlock = await global.db.getLastBlockIndex()
-            if (lastBlock >= 101) break
+            lastBlock = await global.db.getLastBlockIndex()
+            if (lastBlock >= targetHeight) break
             await wait(1000)
         }
-        console.log('[integration] Decoder synced, ready for tests')
+        if (lastBlock < targetHeight) {
+            throw new Error(`Decoder did not sync. Last block: ${lastBlock}, expected >= ${targetHeight}`)
+        }
+        console.log(`[integration] Decoder synced at block ${lastBlock}, ready for tests`)
     },
 
     async afterAll() {
+        this.timeout(30000)
         console.log('[integration] Tearing down')
         if (global.decoder) global.decoder.stop()
+        await wait(1000)
     }
 }

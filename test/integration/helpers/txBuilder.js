@@ -27,6 +27,7 @@ const { BIP32Factory } = require('bip32')
 const bip39 = require('bip39')
 const { ECPairFactory } = require('ecpair')
 const nodeHelper = require('../../nodeHelper')
+const bufferutils = require('bitcoinjs-lib/src/bufferutils')
 
 bitcoin.initEccLib(ecc)
 const bip32 = BIP32Factory(ecc)
@@ -34,6 +35,9 @@ const ECPair = ECPairFactory(ecc)
 const network = bitcoin.networks.regtest
 
 const MNEMONIC = 'erase average powder march guess lemon basic eight arena world once puzzle'
+
+// A MULTISIGN carrier holds its payload in two 32-byte data pubkeys.
+const MULTISIG_SLOT_BYTES = 64
 
 // Derivation counter, incremented to get fresh addresses per test
 let derivationIndex = 100
@@ -69,6 +73,36 @@ function buildXchnPayload(actionString, txid, rawData) {
     const scriptPayload = bitcoin.script.compile(parts)
     const plainBuf = Buffer.concat([Buffer.from('XCHN'), scriptPayload])
     return obfuscate(plainBuf, txid)
+}
+
+/**
+ * Add an input to a PSBT with the stock Number-valued 64-bit reader in force.
+ *
+ * bitcoinjs-lib parses a legacy input's nonWitnessUtxo transaction once, here at
+ * addInput time, and caches the result for signing and for the amount arithmetic
+ * inside extractTransaction. These fixtures load the decoder into the same
+ * process, and the decoder patches bitcoinjs-lib's 64-bit reader to return BigInt
+ * so Dogecoin outputs above 2^53 survive (src/applyBufferutilsPatch.js). PSBT's
+ * own amount arithmetic starts from a Number, so a cached BigInt output value
+ * makes extractTransaction throw "Cannot mix BigInt and other types" on every
+ * legacy input. Parsing the previous transaction with the stock reader keeps the
+ * cache in Numbers; regtest values are nowhere near the 2^53 ceiling the patch
+ * exists for. The swap spans a single synchronous call, so the decoder polling in
+ * this same process can never observe it.
+ */
+function addPsbtInput(psbt, inputData) {
+    const proto = bufferutils.BufferReader.prototype
+    const patchedReader = proto.readUInt64
+    proto.readUInt64 = function readUInt64AsNumber() {
+        const value = this.buffer.readBigUInt64LE(this.offset)
+        this.offset += 8
+        return Number(value)
+    }
+    try {
+        return psbt.addInput(inputData)
+    } finally {
+        proto.readUInt64 = patchedReader
+    }
 }
 
 /**
@@ -147,7 +181,7 @@ async function broadcastOpReturn(funded, actionString, rawData) {
     const psbt = new bitcoin.Psbt({ network })
 
     if (funded.addressType === 'taproot') {
-        psbt.addInput({
+        addPsbtInput(psbt, {
             hash: funded.txid,
             index: funded.voutIndex,
             sequence: 0x00000001,
@@ -156,14 +190,14 @@ async function broadcastOpReturn(funded, actionString, rawData) {
         })
     } else if (funded.addressType === 'segwit') {
         const p2wpkh = bitcoin.payments.p2wpkh({ pubkey: funded.key.publicKey, network })
-        psbt.addInput({
+        addPsbtInput(psbt, {
             hash: funded.txid,
             index: funded.voutIndex,
             sequence: 0x00000001,
             witnessUtxo: { value: funded.satoshis, script: p2wpkh.output }
         })
     } else {
-        psbt.addInput({
+        addPsbtInput(psbt, {
             hash: funded.txid,
             index: funded.voutIndex,
             sequence: 0x00000001,
@@ -212,7 +246,7 @@ async function broadcastMultisig(funded, actionString) {
     const psbt = new bitcoin.Psbt({ network })
 
     // Only legacy inputs for multisig outputs
-    psbt.addInput({
+    addPsbtInput(psbt, {
         hash: funded.txid,
         index: funded.voutIndex,
         sequence: 0x00000001,
@@ -223,12 +257,25 @@ async function broadcastMultisig(funded, actionString) {
     const parts = [Buffer.from(actionString)]
     const scriptPayload = bitcoin.script.compile(parts)
     const plainBuf = Buffer.concat([Buffer.from('XCHN'), scriptPayload])
-    const encrypted = obfuscate(plainBuf, funded.txid)
+    if (plainBuf.length > MULTISIG_SLOT_BYTES) {
+        throw new Error(
+            `multisig ACTION payload is ${plainBuf.length} bytes, over the ` +
+            `${MULTISIG_SLOT_BYTES}-byte two-pubkey slot: use a shorter action string`)
+    }
 
-    // Pad to 64 bytes, split into two 32-byte pubkeys
-    const padded = Buffer.concat([encrypted, Buffer.alloc(64 - encrypted.length, 0)])
-    const pubkey1 = Buffer.concat([Buffer.from([0x02]), padded.subarray(0, 32)])
-    const pubkey2 = Buffer.concat([Buffer.from([0x02]), padded.subarray(32, 64)])
+    // Zero-pad the PLAINTEXT to fill the 64-byte slot, then obfuscate, which is
+    // what the encoder does. Padding the CIPHERTEXT instead (the original shape
+    // here) decrypts to keystream garbage rather than to zeroes, and the decoder
+    // deliberately does not strip a trailing tail before decompiling: the garbage
+    // then either parsed as junk opcodes or made bitcoin.script.decompile return
+    // null, in which case the transaction was never recorded at all. The shorter
+    // the action string, the more garbage and the likelier the silent drop.
+    const padded = Buffer.concat([plainBuf, Buffer.alloc(MULTISIG_SLOT_BYTES - plainBuf.length, 0)])
+    const encrypted = obfuscate(padded, funded.txid)
+
+    // Split the 64-byte slot into two data pubkeys
+    const pubkey1 = Buffer.concat([Buffer.from([0x02]), encrypted.subarray(0, 32)])
+    const pubkey2 = Buffer.concat([Buffer.from([0x02]), encrypted.subarray(32, 64)])
     const pubkey3 = Buffer.alloc(33, 0x03)
 
     const multisigScript = bitcoin.script.compile([
@@ -261,7 +308,7 @@ async function broadcastPlainTransaction(funded) {
     const fee = 10000
     const psbt = new bitcoin.Psbt({ network })
 
-    psbt.addInput({
+    addPsbtInput(psbt, {
         hash: funded.txid,
         index: funded.voutIndex,
         sequence: 0x00000001,
@@ -289,7 +336,7 @@ async function broadcastNonXchnOpReturn(funded, rawBytes) {
     const fee = 10000
     const psbt = new bitcoin.Psbt({ network })
 
-    psbt.addInput({
+    addPsbtInput(psbt, {
         hash: funded.txid,
         index: funded.voutIndex,
         sequence: 0x00000001,

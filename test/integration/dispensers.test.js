@@ -44,7 +44,14 @@ describe('DISPENSER Integration', () => {
         it('should create a dispenser record in the dispensers table', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
-            const action = `DISPENSER|0|GIVE||100||GET||50||||${expiration}|||`
+            // A create only opens a dispenser when GIVE_COIN and GET_COIN both name
+            // THIS chain's coin (XChainDecoder.dispenserOpensForThisChain): a decoder
+            // that opened a foreign-coin dispenser held a row the indexer had no record
+            // of and misread later ordinary payments to that address as dispenses.
+            // Field order is DISPENSER|VERSION|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|
+            // GIVE_OWNERSHIP|GIVE_ESCROW|GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|
+            // FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO.
+            const action = `DISPENSER|0|BTC|GIVETICK|100|||BTC||50|||||${expiration}|||`
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
             await txBuilder.waitForDecoder(blockIndex)
             await txBuilder.waitForTransaction(txHash)

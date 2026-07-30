@@ -228,14 +228,19 @@ describe('E2E: ACTION Decoding', function () {
             assert.strictEqual(tx.data, action)
         })
 
-        it('A1.20:should decode TRANSFER action', async () => {
+        it('A1.20:should decode TRANSFER action and store it under its canonical SEND name', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
-            const action = 'TRANSFER|0|E2ETOKEN|500|' + global.mainTestAddress + '|'
-            const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
+            const params = '|0|E2ETOKEN|500|' + global.mainTestAddress + '|'
+            const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, 'TRANSFER' + params)
             await txBuilder.waitForDecoder(blockIndex)
 
+            // TRANSFER is a short-form ALIAS of SEND (XChainDecoder.ACTION_ALIASES).
+            // The decoder deliberately rewrites the stored payload to the canonical
+            // name so the DB never holds two spellings of one action, so the row
+            // reads SEND. Asserting the raw wire string back was asserting the
+            // absence of a feature the decoder documents.
             const tx = await txBuilder.waitForTransaction(txHash)
-            assert.strictEqual(tx.data, action)
+            assert.strictEqual(tx.data, 'SEND' + params)
         })
     })
 
