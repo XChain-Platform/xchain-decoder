@@ -420,14 +420,18 @@ describe('Taproot envelope recognition ( S2)', function () {
             }
         })
 
-        it('BTC/LTC mainnet carry the disarmed far-future sentinel', function () {
+        // ARMED 2026-08-01 (operator §7 cohort call): BTC 961000, LTC 3160000. This
+        // was the disarmed-sentinel case; it is kept as a boundary test on the real
+        // heights, because the off-by-one at a flag height is a fleet fork.
+        it('BTC/LTC mainnet activate at their armed cohort heights, exclusive below', function () {
             const decoder = createDecoder()
             decoder.consensusNetwork = 'mainnet'
-            for (const tick of ['BTC', 'LTC']){
+            for (const [tick, height] of [['BTC', 961000], ['LTC', 3160000]]){
                 decoder.coinTick = tick
-                assert.strictEqual(decoder.envelopeRecognitionHeight(), 999999999)
-                assert.strictEqual(decoder.envelopeActiveAt(999999998), false)
-                assert.strictEqual(decoder.envelopeActiveAt(999999999), true)
+                assert.strictEqual(decoder.envelopeRecognitionHeight(), height)
+                assert.strictEqual(decoder.envelopeActiveAt(height - 1), false)
+                assert.strictEqual(decoder.envelopeActiveAt(height), true)
+                assert.strictEqual(decoder.envelopeActiveAt(height + 1), true)
             }
         })
 
@@ -741,10 +745,14 @@ describe('Taproot envelope recognition ( S2)', function () {
             assert.deepStrictEqual(XChainDecoder.ENVELOPE_RECOGNITION_ACTIVATION, CONSTANTS.ENVELOPE_RECOGNITION_ACTIVATION)
         })
 
-        it('the recognition map is exactly the §7 shape: BTC/LTC sentinel-disarmed mainnet, genesis-active test networks, DOGE never', function () {
+        // Pins the ARMED map exactly (operator §7 cohort call, 2026-08-01). Every value
+        // here is consensus-visible: a decoder that flips at a different height than its
+        // peers forks the fleet on the first envelope, so this assertion is deliberately
+        // literal rather than derived. DOGE stays null forever (no segwit, no Taproot).
+        it('the recognition map is exactly the §7 shape: BTC/LTC armed mainnet cohorts, genesis-active test networks, DOGE never', function () {
             assert.deepStrictEqual(CONSTANTS.ENVELOPE_RECOGNITION_ACTIVATION, {
-                BTC:  { mainnet: 999999999, testnet: 0, regtest: 0 },
-                LTC:  { mainnet: 999999999, testnet: 0, regtest: 0 },
+                BTC:  { mainnet: 961000, testnet: 0, regtest: 0 },
+                LTC:  { mainnet: 3160000, testnet: 0, regtest: 0 },
                 DOGE: { mainnet: null, testnet: null, regtest: null },
             })
         })

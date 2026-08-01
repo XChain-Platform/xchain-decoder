@@ -367,14 +367,22 @@ const ENVELOPE_MAX_PAYLOAD = 390000;
 // pre-flag tx containing an envelope plus an OP_RETURN action replays as the
 // OP_RETURN action, exactly as the fleet indexed it live.
 //
-// mainnet is a DISABLED far-future sentinel (not armed): the §7 cohort
-// decision (launch cohort vs first post-launch cohort, riding the 
-// launch-baseline sequencing) arms it. testnet/regtest are genesis-active so
-// the e2e/regtest stacks exercise the envelope from block 0. Rollout order
-// within any venue: decoder before encoder, per the standing coupling rule.
+// MAINNET ARMED 2026-08-01 by operator decision (§7 cohort call): BTC 961000,
+// LTC 3160000. BTC rides the existing 961000 cohort (~2026-08-04, the same
+// height ANCHOR/BLOCKHASH-era features already activate at); LTC follows at
+// 3160000 (~2026-08-14), after the BTC gate, per the BTC-gated wire-format
+// policy. testnet/regtest stay genesis-active so those stacks exercise the
+// envelope from block 0.
+//
+// DEPLOY DEADLINE, and it is SHORT: BTC tip was 960601 on 2026-08-01, so
+// 961000 is ~2.8 days out at ~144 blocks/day. EVERY decoder on BTC mainnet
+// MUST be running this constant before that height or the fleet forks on the
+// first envelope (or the first mixed-carrier tx, which the §3.8 rejections
+// start refusing at exactly this height). Rollout order within any venue:
+// decoder before encoder, per the standing coupling rule.
 const ENVELOPE_RECOGNITION_ACTIVATION = {
-    BTC:  { mainnet: 999999999, testnet: 0, regtest: 0 },
-    LTC:  { mainnet: 999999999, testnet: 0, regtest: 0 },
+    BTC:  { mainnet: 961000, testnet: 0, regtest: 0 },
+    LTC:  { mainnet: 3160000, testnet: 0, regtest: 0 },
     DOGE: { mainnet: null, testnet: null, regtest: null },
 };
 
