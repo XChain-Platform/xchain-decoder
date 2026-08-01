@@ -341,11 +341,17 @@ const ORACLE_FEE_OUTPUT_ACTIVATION = {
 // envelope payload byte length after concatenation of the payload pushes,
 // before parse; the envelope's own 520-byte push framing is NOT counted (the
 // legacy constant, by contrast, is framing-inclusive of the single on-chain
-// push). Matched to tapscript standardness reality (~400k WU per transaction).
+// push).
+// DERIVED FROM WEIGHT : the binding limit is Bitcoin Core's
+// MAX_STANDARD_TX_WEIGHT of 400,000 WU, not a round byte count. 400,000 payload
+// bytes build a 402,789 WU reveal, which is non-standard and unrelayable; the
+// true maxima are 397,228 (P2WPKH change) and 397,009 (P2TR change + floor pad).
+// 390,000 sits 7,050 WU under the limit in the worst reveal shape. Re-derive it
+// from the weight limit if it ever changes; do not pick a number.
 // Enforced identically in the decoder's block and mempool paths, mirrored by
 // the encoder validator. Canonical source: xchain-documentation/protocol/
 // constants.js (ENVELOPE_MAX_PAYLOAD).
-const ENVELOPE_MAX_PAYLOAD = 400000;
+const ENVELOPE_MAX_PAYLOAD = 390000;
 
 // ENVELOPE_RECOGNITION_ACTIVATION ( spec §7): the LOCAL block height
 // at/above which the decoder recognizes Taproot-envelope reveals as

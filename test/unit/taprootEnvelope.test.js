@@ -27,7 +27,7 @@
  *     positive, no RPC fetch on any non-recognition;
  *  3. pre-vs-post-flag replay: below the recognition height every rule in
  *     §3.8 is inert and a mixed-carrier tx parses exactly as shipped;
- *  4. the §4 ceiling boundary: 400,000 accepted, 400,001 refused, measured
+ *  4. the §4 ceiling boundary: 390,000 accepted, 390,001 refused, measured
  *     on the REASSEMBLED payload length (a >65,535-byte rawData push is
  *     framed with OP_PUSHDATA4, which the legacy compiledPushSize re-measure
  *     does not model -- the envelope must never route through it);
@@ -557,7 +557,7 @@ describe('Taproot envelope recognition ( S2)', function () {
             return revealTx
         }
 
-        it('a payload of exactly ENVELOPE_MAX_PAYLOAD (400,000) measures at the ceiling and passes the guard', async function () {
+        it('a payload of exactly ENVELOPE_MAX_PAYLOAD (390,000) measures at the ceiling and passes the guard', async function () {
             this.timeout(20000)
             const payload = payloadOfLength(CONSTANTS.ENVELOPE_MAX_PAYLOAD)
             const revealTx = wireFor(makeEnvelopeScript(payload))
@@ -568,12 +568,12 @@ describe('Taproot envelope recognition ( S2)', function () {
             assert.strictEqual(result.data.toString('utf-8'), 'FILE|0|x')
         })
 
-        it('[ADVERSARIAL] a 400,001-byte payload measures OVER the ceiling: the guard drops it in both paths', async function () {
+        it('[ADVERSARIAL] a 390,001-byte payload measures OVER the ceiling: the guard drops it in both paths', async function () {
             this.timeout(20000)
             // The rawData push inside this payload is OP_PUSHDATA4-framed; the
             // legacy compiledPushSize re-measure would under-count it by 2
             // bytes and let it slip under the ceiling. The envelope measurand
-            // is the reassembled length, pinned here at exactly 400,001.
+            // is the reassembled length, pinned here at exactly 390,001.
             const payload = payloadOfLength(CONSTANTS.ENVELOPE_MAX_PAYLOAD + 1)
             const revealTx = wireFor(makeEnvelopeScript(payload))
             const result = await decoder.parseTransaction(revealTx, new Set(), null, POST_FLAG)
@@ -737,7 +737,7 @@ describe('Taproot envelope recognition ( S2)', function () {
     describe('constants conformance', function () {
         it('the decoder exports the vendored constants unchanged', function () {
             assert.strictEqual(XChainDecoder.ENVELOPE_MAX_PAYLOAD, CONSTANTS.ENVELOPE_MAX_PAYLOAD)
-            assert.strictEqual(CONSTANTS.ENVELOPE_MAX_PAYLOAD, 400000)
+            assert.strictEqual(CONSTANTS.ENVELOPE_MAX_PAYLOAD, 390000)
             assert.deepStrictEqual(XChainDecoder.ENVELOPE_RECOGNITION_ACTIVATION, CONSTANTS.ENVELOPE_RECOGNITION_ACTIVATION)
         })
 
