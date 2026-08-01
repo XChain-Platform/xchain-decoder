@@ -4,8 +4,8 @@
 # XChain Platform Decoder
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.11.14-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-500%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-1.11.16-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-1300%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -31,7 +31,8 @@ Transaction extraction service for the XChain Platform. Polls cryptocurrency nod
 - **Source pubkey capture**: records the source address pubkey per transaction in a dedicated table for downstream use by the indexer
 - **Native-coin fee tracking**: when FEE_DESTINATION is set, outputs paying that address are persisted to transaction_outputs for indexer fee validation
 - **Graceful shutdown**: SIGTERM/SIGINT handlers complete in-flight work
-- **500+ tests**: unit, integration, e2e, security, fuzz, chaos, mutation, regression, benchmarks, smoke
+- **Node RPC failover**: rotates through `NODE_URL_FALLBACK` endpoints after `NODE_FAILOVER_THRESHOLD` consecutive connection failures, round-robin, so a recovered primary is retried again if the fallback also dies
+- **1300+ tests**: unit, integration, e2e, security, fuzz, chaos, mutation, regression, benchmarks, smoke
 
 ## Documentation
 
@@ -40,10 +41,10 @@ Full decoder documentation is available in the [xchain-documentation](https://gi
 | Document | Description |
 |---|---|
 | [README](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/README.md) | Overview, installation, quick start, scripts, dependencies |
-| [Architecture](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/ARCHITECTURE.md) | Data pipeline, internal components, polling loop, deobfuscation, reorg handling |
-| [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/CONFIGURATION.md) | Environment variables, internal constants, network-specific settings |
-| [Database](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/DATABASE.md) | Full schema reference: 8 tables covering blocks, transactions, dispensers, indexes, events |
-| [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/OPERATIONS.md) | Running, Docker, API endpoints, reorg handling, mempool, troubleshooting |
+| [Architecture](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/architecture.md) | Data pipeline, internal components, polling loop, deobfuscation, reorg handling |
+| [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/configuration.md) | Environment variables, internal constants, network-specific settings |
+| [Database](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/database.md) | Full schema reference: 8 tables covering blocks, transactions, dispensers, indexes, events |
+| [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/operations.md) | Running, Docker, API endpoints, reorg handling, mempool, troubleshooting |
 
 ## Quick Start
 
@@ -94,17 +95,18 @@ parity gate in `bin/check-observability-parity.js`.
 | Command | Description |
 |---|---|
 | `npm run api` | Start the decoder and API server |
-| `npm run test:smoke` | Smoke tests (52 tests, no external services) |
-| `npm run test:unit` | Unit tests (221 tests, no external services) |
-| `npm run test:security` | Security tests (75 tests, no external services) |
+| `npm run migrate` | Apply pending database migrations (auto + manual; `--file <name>` scopes to specific migration(s)) |
+| `npm run test:smoke` | Smoke tests (58 tests, no external services) |
+| `npm run test:unit` | Unit tests (954 tests, no external services) |
+| `npm run test:security` | Security tests (83 tests, no external services) |
 | `npm run test:integration` | Integration tests (30 tests; brings up its own throwaway regtest node and MariaDB, requires Docker) |
 | `npm run test:e2e` | End-to-end tests (72 tests; brings up its own throwaway regtest node and MariaDB on separate ports, requires Docker) |
-| `npm run test:fuzz` | Fuzz tests (5 harnesses, 1000 iterations each) |
+| `npm run test:fuzz` | Fuzz tests (5 harnesses, 1000-5000 iterations each depending on harness) |
 | `npm run test:fuzz:quick` | Quick fuzz (100 iterations) |
-| `npm run test:chaos` | Chaos engineering tests (50 tests) |
-| `npm run test:regression` | Regression tests P0+P1 (57 tests) |
-| `npm run test:regression:critical` | Regression tests P0 only (47 tests, <1s) |
-| `npm run test:regression:full` | Full regression suite (76 tests) |
+| `npm run test:chaos` | Chaos engineering tests (59 tests) |
+| `npm run test:regression` | Regression tests P0+P1 (85 tests) |
+| `npm run test:regression:critical` | Regression tests P0 only (54 tests, <1s) |
+| `npm run test:regression:full` | Full regression suite (104 tests) |
 | `npm run test:bench` | Performance benchmarks (7 scenarios) |
 | `npm run test:bench:quick` | Quick benchmarks |
 | `npm run test:mutation` | Mutation testing (Stryker Mutator) |
@@ -113,18 +115,18 @@ parity gate in `bin/check-observability-parity.js`.
 
 | Type | Tests | Description |
 |---|---|---|
-| Smoke | 52 | Module loading, network configs, deobfuscation, parsing, API ping, DB init |
-| Unit | 221 | Core modules: BlockchainConnector, CryptoNetworks, parseTransaction, removeObfuscation, XChainBlockDecoder, util, boundary tests |
-| Security | 75 | SQL parameterization, deobfuscation robustness, ACTION validation, DISPENSER field validation, error sanitization, connection handling |
-| Boundary | 78 | AES deobfuscation edge cases, script type detection, multisig zero-trim, DISPENSER parsing, satoshi conversion |
+| Smoke | 58 | Module loading, network configs, deobfuscation, parsing, API ping, DB init |
+| Unit | 954 | Core modules: BlockchainConnector, CryptoNetworks, parseTransaction, removeObfuscation, XChainBlockDecoder, util, boundary tests |
+| Security | 83 | SQL parameterization, deobfuscation robustness, ACTION validation, DISPENSER field validation, error sanitization, connection handling |
+| Boundary | 81 | AES deobfuscation edge cases, script type detection, multisig zero-trim, DISPENSER parsing, satoshi conversion -- subset of Unit, no separate script |
 | Integration | 30 | OP_RETURN, multisig, P2SH, P2WSH, dispensers, malformed data, indexer contract queries (runs against its own containerised regtest node and MariaDB; requires Docker) |
-| E2E | 50+ | Full decoder pipeline: action decoding, dispenser lifecycle, multi-block processing, error handling |
+| E2E | 72 | Full decoder pipeline: action decoding, dispenser lifecycle, multi-block processing, error handling |
 | Fuzz | 42 | 5 harnesses: removeObfuscation, parseTransaction, blockDecoder, dispenserParsing, pipeline |
-| Chaos | 50 | Node unavailability, RPC timeouts, DB pool exhaustion, mid-transaction failures, chain reorgs, signal handling |
-| Regression | 76 | Tiered: P0 critical (47), P1 high (10), P2 standard (19) -- tagged across all suites |
+| Chaos | 59 | Node unavailability, RPC timeouts, DB pool exhaustion, mid-transaction failures, chain reorgs, signal handling |
+| Regression | 104 | Tiered: P0 critical (54), P1 high (31), P2 standard (19) -- tagged across all suites |
 | Benchmarks | 7 | Deobfuscation, parse-transaction, block-processing, sustained-sync, spike-load, large-payload, mempool-stress |
 | Mutation | 2 | Phase 1 (unit) and Phase 2 (unit + security) via Stryker Mutator |
-| **Total** | **500+** | |
+| **Total** | **1300+** | |
 
 ---
 
