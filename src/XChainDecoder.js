@@ -129,6 +129,23 @@ const MAX_ACTION_DATA_LENGTH = require('./protocol/constants.js').MAX_ACTION_DAT
 // (3): compiledPushSize below computed the same +3 inline before this binding.
 const OP_RETURN_PUSH_OVERHEAD = require('./protocol/constants.js').OP_RETURN_PUSH_OVERHEAD
 
+// Taproot envelope ( spec Part A). ENVELOPE_MAX_PAYLOAD is the
+// per-encoding ceiling for the reassembled envelope payload (the legacy lanes
+// keep MAX_ACTION_DATA_LENGTH); ENVELOPE_RECOGNITION_ACTIVATION carries the
+// per-chain, per-network LOCAL block heights at/above which recognition (and
+// the §3.8 rejection rules) are active. Both vendored from
+// ./protocol/constants.js, byte-identical to the canonical copy in
+// xchain-documentation/protocol/constants.js.
+const ENVELOPE_MAX_PAYLOAD = require('./protocol/constants.js').ENVELOPE_MAX_PAYLOAD
+const ENVELOPE_RECOGNITION_ACTIVATION = require('./protocol/constants.js').ENVELOPE_RECOGNITION_ACTIVATION
+// BIP342 tapscript leaf version; also the control block's first byte masked of
+// its output-key parity bit.
+const TAPROOT_LEAF_VERSION = 0xc0
+// BIP341 annex marker: when a witness stack of >= 2 items ends in an item
+// whose first byte is 0x50, that item is an annex and sits outside the
+// script-path elements. An annex-bearing reveal is never recognized (§3.8).
+const TAPROOT_ANNEX_MARKER = 0x50
+
 // Compiled size of a single script push once bitcoin.script.compile adds its
 // length prefix: a direct push opcode for <=75 bytes, OP_PUSHDATA1 (+2) for
 // <=255, or OP_PUSHDATA2 (+3) beyond that. Single source for measuring both
@@ -662,6 +679,156 @@ class XChainDecoder {
         return pushLen >= 2 && pushLen <= 40 && script.length === pushLen + 2
     }
 
+    // Local recognition height for the Taproot envelope on this decoder's
+    // chain+network, or null when the envelope is never active here (DOGE, or
+    // an unknown key). Null-safe by construction so a mis-set env can only
+    // disable recognition, never enable it early.
+    envelopeRecognitionHeight(){
+        const coinMap = ENVELOPE_RECOGNITION_ACTIVATION[this.coinTick]
+        const height = coinMap ? coinMap[this.consensusNetwork] : null
+        return (typeof height === 'number') ? height : null
+    }
+
+    // Whether envelope recognition (and the §3.8 rejection rules, which
+    // activate at the SAME height) applies at `blockHeight`. A missing height
+    // (undefined caller, e.g. a bare parseRawTransaction) resolves to
+    // INACTIVE: the pre-flag behavior is the shipped one, so defaulting closed
+    // can never make replay diverge from history.
+    envelopeActiveAt(blockHeight){
+        const activationHeight = this.envelopeRecognitionHeight()
+        return activationHeight !== null
+            && typeof blockHeight === 'number'
+            && blockHeight >= activationHeight
+    }
+
+    // Pattern-match one input's witness stack against the envelope grammar
+    // ( spec §3.2). Pure and RPC-free by contract (§3.8: recognition is
+    // free pattern-matching; the commit fetch happens once, later, at parse).
+    // Returns { script, payload } or null; NEVER throws (a foreign/fuzzed
+    // witness must not crash the block loop).
+    //
+    // Rules pinned by spec §3.8 and the adversarial vectors:
+    // - witness is indexed from the END per BIP341 (control block last, script
+    //   second-to-last); a stack carrying an annex (last item leading 0x50) is
+    //   NOT recognized, forever;
+    // - the magic and format byte are cleartext; a wrong magic or an unknown
+    //   format byte yields null (invisible, not an invalid action);
+    // - the structure is exact: OP_FALSE OP_IF <"XCHN"> <0x00> <payload push
+    //   1..n> OP_ENDIF <32-byte key> OP_CHECKSIG, nothing more. Any payload
+    //   element that decompiles to a bare opcode (a minimally-encoded 1-byte
+    //   push the encoder's rebalance never emits) breaks the pattern and
+    //   yields null deterministically.
+    detectEnvelopeWitness(witness){
+        try {
+            if (!witness || witness.length < 2) return null
+            let stackTop = witness.length - 1
+            const lastItem = witness[stackTop]
+            if (!Buffer.isBuffer(lastItem) || lastItem.length === 0) return null
+            // Annex present: at least (script, control, annex) would remain,
+            // but the rule is unconditional: annex-bearing => not an envelope.
+            if (lastItem[0] === TAPROOT_ANNEX_MARKER) return null
+            const controlBlock = witness[stackTop]
+            if ((controlBlock[0] & 0xfe) !== TAPROOT_LEAF_VERSION) return null
+            if (controlBlock.length < 33 || ((controlBlock.length - 33) % 32) !== 0) return null
+            const script = witness[stackTop - 1]
+            if (!Buffer.isBuffer(script) || script.length < 8) return null
+
+            const decompiled = bitcoin.script.decompile(script)
+            // Minimum shape: OP_0, OP_IF, magic, format, 1 push, OP_ENDIF, key, OP_CHECKSIG.
+            if (!decompiled || decompiled.length < 8) return null
+            let i = 0
+            if (decompiled[i++] !== bitcoin.opcodes.OP_0) return null
+            if (decompiled[i++] !== bitcoin.opcodes.OP_IF) return null
+            if (!Buffer.isBuffer(decompiled[i]) || !decompiled[i].equals(MAGIC_WORD_BUFFER)) return null
+            i++
+            const formatByte = decompiled[i++]
+            if (!Buffer.isBuffer(formatByte) || formatByte.length !== 1) return null
+            // Unknown format bytes are not recognized: invisible by design,
+            // future formats activate via their own flag heights (§3.2).
+            if (formatByte[0] !== 0x00) return null
+            // The 32-byte internal-key push sits AFTER OP_ENDIF, so this loop
+            // stops exactly at OP_ENDIF for a well-formed envelope; a payload
+            // element that decompiled to a bare opcode stops it early and the
+            // OP_ENDIF check below fails the walk.
+            const payloadPushes = []
+            while (i < decompiled.length && Buffer.isBuffer(decompiled[i])){
+                payloadPushes.push(decompiled[i])
+                i++
+            }
+            if (payloadPushes.length === 0) return null
+            if (decompiled[i++] !== bitcoin.opcodes.OP_ENDIF) return null
+            if (!Buffer.isBuffer(decompiled[i]) || decompiled[i].length !== 32) return null
+            i++
+            if (decompiled[i++] !== bitcoin.opcodes.OP_CHECKSIG) return null
+            if (i !== decompiled.length) return null
+            return { script, payload: Buffer.concat(payloadPushes) }
+        } catch (err){
+            // Fuzzed/hostile witnesses must never crash recognition.
+            return null
+        }
+    }
+
+    // Source attribution for an envelope reveal ( spec §3.4): the
+    // reveal's ins[0] prevout is the commit output, a payload-dependent
+    // one-time P2TR address nothing else references, so the source is the
+    // address FUNDING the commit: the prevout of the COMMIT transaction's
+    // ins[0]. This is structurally the same walk-back getSourceFromOutput
+    // already performs for P2SH/P2WSH data-carrier outputs (fetch the spent
+    // tx, hop to ITS ins[0] prevout), scoped to recognized envelopes only so
+    // ordinary actions spent FROM a taproot address keep their shipped
+    // attribution. Takes the already-fetched commit transaction (the commit is
+    // fetched exactly once per recognized envelope, §3.8); fail-loud contract
+    // matches getSourceFromOutput (rpcLookupFailure tagging).
+    async getEnvelopeSourceFromCommit(commitTransaction){
+        if (!commitTransaction.ins || commitTransaction.ins.length === 0) return null
+        const prevTxHash = util.uint8ArrayToHex(Buffer.from(commitTransaction.ins[0].hash).reverse())
+        const prevOutputIndex = commitTransaction.ins[0].index
+        let prevTransaction
+        try {
+            const prevRawTransaction = await this.connector.getRawTransaction(prevTxHash)
+            if (!prevRawTransaction){
+                throw new Error(`empty getrawtransaction result for confirmed commit-funding tx ${prevTxHash}`)
+            }
+            // transactionFromHex (MWEB-flag-safe), not bitcoin.Transaction.fromHex.
+            prevTransaction = this.xchainBlockDecoder.transactionFromHex(prevRawTransaction)
+        } catch (err){
+            this.rpcErrors++
+            console.error(`getEnvelopeSourceFromCommit: failed to fetch commit-funding tx ${prevTxHash}: `, err)
+            err.rpcLookupFailure = true
+            throw err
+        }
+        const output = prevTransaction.outs[prevOutputIndex]
+        if (output == null) return null
+        let source = null
+        try {
+            if (!this.isFutureSegwitScript(output.script))
+                source = bitcoin.address.fromOutputScript(output.script, this.network)
+        } catch (err){
+            // No representable address (P2PK, bare multisig, ...): null source,
+            // matching getSourceFromOutput.
+        }
+        return source
+    }
+
+    // Fetch + parse the envelope commit transaction, once per recognized
+    // envelope (§3.8). Same fail-loud rpcLookupFailure contract as every other
+    // confirmed-prevout fetch: the commit of a confirmed reveal always exists
+    // on a txindex node, so an empty result is a lookup failure, never absence.
+    async fetchEnvelopeCommitTransaction(commitTxId){
+        try {
+            const rawTransaction = await this.connector.getRawTransaction(commitTxId)
+            if (!rawTransaction){
+                throw new Error(`empty getrawtransaction result for confirmed envelope commit tx ${commitTxId}`)
+            }
+            return this.xchainBlockDecoder.transactionFromHex(rawTransaction)
+        } catch (err){
+            this.rpcErrors++
+            console.error(`fetchEnvelopeCommitTransaction: failed to fetch commit tx ${commitTxId}: `, err)
+            err.rpcLookupFailure = true
+            throw err
+        }
+    }
+
     // For a P2SH/P2WSH reveal, the native-coin fee output lives on the funding (commit) transaction:
     // the wallet/SDK place the fee output on the first tx they generate, and the reveal (this action's
     // tx) spends that commit's P2SH outputs. Fetch the funding tx and return any output paying the
@@ -671,22 +838,28 @@ class XChainDecoder {
     // txid). A FAILED lookup throws (tagged rpcLookupFailure) so the block loop retries the block:
     // treating it as "no fee output" committed fee outputs on some instances and not others, and
     // whether an action paid its fee must never depend on which instance decoded it.
-    async findFundingFeeOutputs(fundingTxId){
+    async findFundingFeeOutputs(fundingTxId, prefetchedFundingTx = null){
         let results = []
         if (!this.feeDestination || !fundingTxId) return results
-        let fundingTx
-        try {
-            let fundingTxHex = await this.connector.getRawTransaction(fundingTxId)
-            if (!fundingTxHex){
-                throw new Error(`empty getrawtransaction result for confirmed funding tx ${fundingTxId}`)
+        // prefetchedFundingTx: the Taproot-envelope path fetches the commit
+        // exactly once (spec §3.8) and hands the parsed tx in here, so the fee
+        // resolver extends to the commit without a second RPC round trip. The
+        // chunk lanes keep the fetch below.
+        let fundingTx = prefetchedFundingTx
+        if (!fundingTx){
+            try {
+                let fundingTxHex = await this.connector.getRawTransaction(fundingTxId)
+                if (!fundingTxHex){
+                    throw new Error(`empty getrawtransaction result for confirmed funding tx ${fundingTxId}`)
+                }
+                // transactionFromHex (MWEB-flag-safe), not bitcoin.Transaction.fromHex; see getSourceFromOutput.
+                fundingTx = this.xchainBlockDecoder.transactionFromHex(fundingTxHex)
+            } catch (err){
+                this.rpcErrors++
+                console.error(`findFundingFeeOutputs: failed to fetch funding tx ${fundingTxId}:`, err.message)
+                err.rpcLookupFailure = true
+                throw err
             }
-            // transactionFromHex (MWEB-flag-safe), not bitcoin.Transaction.fromHex; see getSourceFromOutput.
-            fundingTx = this.xchainBlockDecoder.transactionFromHex(fundingTxHex)
-        } catch (err){
-            this.rpcErrors++
-            console.error(`findFundingFeeOutputs: failed to fetch funding tx ${fundingTxId}:`, err.message)
-            err.rpcLookupFailure = true
-            throw err
         }
         for (let vout = 0; vout < fundingTx.outs.length; vout++){
             let output = fundingTx.outs[vout]
@@ -816,7 +989,12 @@ class XChainDecoder {
         return null
     }
 
-    async parseTransaction(transaction, openDispenserAddresses, db){
+    // blockHeight gates Taproot-envelope recognition ( spec §7): the
+    // confirmed-block path passes the block being parsed, the mempool path
+    // passes its next-block estimate. Omitted/undefined resolves to INACTIVE
+    // (shipped pre-flag behavior), so no caller can accidentally recognize
+    // envelopes below the flag height.
+    async parseTransaction(transaction, openDispenserAddresses, db, blockHeight){
         // openDispenserAddresses is a Set of every open-dispenser address, loaded
         // once per block by the caller. Membership is tested in JS here instead of
         // issuing a DB round-trip per output. Defensive fallback to an empty Set
@@ -849,6 +1027,25 @@ class XChainDecoder {
             let dataBuffer = Buffer.allocUnsafe(0)
             let rawData = null
             let getSource = false
+
+            // Taproot-envelope recognition ( spec §3.8), height-gated:
+            // below the flag height this whole surface is inert and the tx
+            // parses EXACTLY as shipped (a pre-flag mixed-carrier tx replays as
+            // the fleet indexed it live). Recognition is a pure, RPC-free
+            // pattern match over the inputs' witness stacks.
+            const envelopeActive = this.envelopeActiveAt(blockHeight)
+            let envelopeInputs = []
+            if (envelopeActive){
+                for (let txInputIndex = 0; txInputIndex < transaction.ins.length; txInputIndex++){
+                    const detected = this.detectEnvelopeWitness(transaction.ins[txInputIndex].witness)
+                    if (detected) envelopeInputs.push({ index: txInputIndex, payload: detected.payload })
+                }
+            }
+            // Set when this tx's action is carried by a (single, valid)
+            // envelope; routes the per-encoding ceiling, the commit-based
+            // source attribution and the commit fee-output resolution below.
+            let envelopeCarrier = false
+            let envelopeCommitTransaction = null
 
             for (let txOutputIndex=0;txOutputIndex < transaction.outs.length;txOutputIndex++){
                 // Invariant guard: a real on-chain output index must stay below FUNDING_VOUT_BASE
@@ -1025,12 +1222,60 @@ class XChainDecoder {
                 }
             }
             
+            // Carrier arbitration for the Taproot envelope ( spec §3.8),
+            // active only at/above the recognition height. Deterministic rules,
+            // pinned by the adversarial vectors:
+            // - a tx containing an envelope PLUS any other candidate carrier
+            //   (OP_RETURN XCHN data, chunk marker, MULTISIGN outputs -- i.e.
+            //   anything the loop above accumulated or flagged) is NOT a valid
+            //   action;
+            // - a tx with two or more envelope inputs is NOT a valid action;
+            // - an envelope anywhere but ins[0] is NOT a valid action (§3.5:
+            //   reveal input 0 MUST be the commit outpoint; attribution and
+            //   fee resolution assume it).
+            // "Not a valid action" clears the action payload only: dispense and
+            // payment outputs stay recorded, exactly like any other no-action
+            // money-bearing tx.
+            if (envelopeActive && envelopeInputs.length > 0){
+                const otherCarrierPresent = (dataBuffer.length > 0) || (p2shFundingTxId != null)
+                if (envelopeInputs.length >= 2 || otherCarrierPresent || envelopeInputs[0].index !== 0){
+                    this.parseErrors++
+                    console.error(`Tx ${nextTxId}: envelope rejected deterministically (` +
+                        `${envelopeInputs.length} envelope input(s) at [${envelopeInputs.map(e => e.index).join(',')}]` +
+                        `${otherCarrierPresent ? ', mixed with another carrier' : ''}); no action`)
+                    dataBuffer = Buffer.allocUnsafe(0)
+                    p2shFundingTxId = null
+                } else {
+                    // Single valid envelope at ins[0]: it IS the carrier. The
+                    // payload is the reassembled compiled action stream (raw by
+                    // design, §3.3: no deobfuscation step exists for the
+                    // envelope) and feeds the identical decompile below, so the
+                    // indexer stays encoding-blind. ins[0] spends the commit,
+                    // so firstInputTxId IS the commit txid: native fee outputs
+                    // ride it (§3.5), resolved via the same funding-fee
+                    // mechanism as the chunk lanes; the commit is fetched once
+                    // here and reused for attribution + fee resolution.
+                    dataBuffer = envelopeInputs[0].payload
+                    envelopeCarrier = true
+                    envelopeCommitTransaction = await this.fetchEnvelopeCommitTransaction(firstInputTxId)
+                    p2shFundingTxId = firstInputTxId
+                }
+            }
+
             // compiledDataLength starts as the raw accumulated byte count.
             // For P2SH/P2WSH/OP_RETURN this equals the compiled push size (the
             // script already carries the OP_PUSHDATA prefix). For MULTISIGN the
             // slots are zero-padded to 64 bytes each, so this value is inflated
             // by up to 59 bytes of pad on the final chunk. We re-measure below
-            // once the decompile result is available.
+            // once the decompile result is available -- EXCEPT for the
+            // envelope, whose §4 measurand is exactly this initial value: the
+            // reassembled payload byte length before parse. The re-measure
+            // must not run for it: compiledPushSize models push framing only
+            // up to OP_PUSHDATA2 (+3), but an envelope rawData push above
+            // 65,535 bytes is framed with OP_PUSHDATA4 (+5) inside the payload
+            // stream, so re-measuring would under-count by 2 bytes right at
+            // the ENVELOPE_MAX_PAYLOAD boundary and accept a payload the
+            // encoder validator (which measures true compiled length) refuses.
             let compiledDataLength = dataBuffer.length
 
             if (dataBuffer.length > 0){
@@ -1055,7 +1300,11 @@ class XChainDecoder {
                         // result is identical to the pre-decompile measurement: the push overhead
                         // (1 byte direct, 2 bytes OP_PUSHDATA1, 3 bytes OP_PUSHDATA2) is added
                         // back, matching exactly what the encoder's compiled script measured.
-                        compiledDataLength = compiledPushSize(dataBuffer.length)
+                        // Never for the envelope: its §4 measurand is the initial pre-decompile
+                        // value (see the comment above compiledDataLength's binding).
+                        if (!envelopeCarrier){
+                            compiledDataLength = compiledPushSize(dataBuffer.length)
+                        }
                         if (decompiledData.length > 1){
                             // Mirror the Buffer gate on decompiledData[0] above: decompile
                             // returns opcodes as integers, so a payload whose second element
@@ -1071,7 +1320,7 @@ class XChainDecoder {
                             // and validator would have rejected. Add push[1]'s compiled size
                             // (data length + the same OP_PUSH overhead) so the decoder's ceiling
                             // matches the encoder's.
-                            if (Buffer.isBuffer(rawData)){
+                            if (Buffer.isBuffer(rawData) && !envelopeCarrier){
                                 compiledDataLength += compiledPushSize(rawData.length)
                             }
                         }
@@ -1083,9 +1332,14 @@ class XChainDecoder {
             }
             
             //Get the source from the output spent by the first input of this transaction
-            //only if there is data or a dispense and the source was not retrieved before
+            //only if there is data or a dispense and the source was not retrieved before.
+            //Envelope reveals attribute differently (§3.4): ins[0]'s prevout is the
+            //one-time P2TR commit output, so the source is the address funding the
+            //COMMIT (its ins[0] prevout), resolved from the already-fetched commit.
             if (getSource && (source == null)){
-                source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
+                source = envelopeCarrier
+                    ? await this.getEnvelopeSourceFromCommit(envelopeCommitTransaction)
+                    : await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
             }
 
             //Extract and store public key from the first input if source was found
@@ -1102,7 +1356,7 @@ class XChainDecoder {
             //For a P2SH/P2WSH reveal, attribute the native-coin fee output (which lives on the funding
             //commit tx) to this action so the indexer can validate it (see findFundingFeeOutputs).
             if (p2shFundingTxId){
-                let fundingFeeOutputs = await this.findFundingFeeOutputs(p2shFundingTxId)
+                let fundingFeeOutputs = await this.findFundingFeeOutputs(p2shFundingTxId, envelopeCommitTransaction)
                 for (let feeOutput of fundingFeeOutputs){
                     // Remap the FUNDING tx's vout into the reserved funding domain before this output
                     // is stored under the REVEAL's tx_index, so it can never collide on the
@@ -1122,7 +1376,14 @@ class XChainDecoder {
                 source:source,
                 destination:null,
                 dispenseOutputs:dispenseOutputs,
-                paymentOutputs:paymentOutputs
+                paymentOutputs:paymentOutputs,
+                // Per-encoding §4 ceiling for the size guards at both call
+                // sites: the envelope gets ENVELOPE_MAX_PAYLOAD, every legacy
+                // lane keeps MAX_ACTION_DATA_LENGTH. Carried in the result so
+                // the block and mempool guards cannot drift from what was
+                // recognized here.
+                payloadCeiling: envelopeCarrier ? ENVELOPE_MAX_PAYLOAD : MAX_ACTION_DATA_LENGTH,
+                envelope: envelopeCarrier
             }
         } else {
             return null
@@ -1847,7 +2108,7 @@ class XChainDecoder {
 
                     try {
                         nextTransactionHash = nextTransaction.getId()
-                        parseResult = await this.parseTransaction(nextTransaction, openDispenserAddresses)
+                        parseResult = await this.parseTransaction(nextTransaction, openDispenserAddresses, undefined, nextBlockHeight)
                     } catch (e){
                         if (e && e.rpcLookupFailure){
                             // A prevout/fee-output RPC lookup failed even after the
@@ -1923,9 +2184,14 @@ class XChainDecoder {
                                 // continues) - changing tx_index assignment for invalid-action txs
                                 // would diverge from already-decoded history.
                                 let hasOutputs = (dispenseOutputs.length > 0 || parseResult["paymentOutputs"].length > 0)
-                                if (parseResult["compiledDataLength"] > MAX_ACTION_DATA_LENGTH) {
+                                // Per-encoding ceiling ( §4): the envelope's
+                                // payloadCeiling is ENVELOPE_MAX_PAYLOAD, legacy lanes
+                                // report MAX_ACTION_DATA_LENGTH (the || covers results
+                                // from stubs/older shapes without the field).
+                                let payloadCeiling = parseResult["payloadCeiling"] || MAX_ACTION_DATA_LENGTH
+                                if (parseResult["compiledDataLength"] > payloadCeiling) {
                                     this.parseErrors++
-                                    console.error(`Skipping ACTION for tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${MAX_ACTION_DATA_LENGTH})`)
+                                    console.error(`Skipping ACTION for tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${payloadCeiling})`)
                                     if (!hasOutputs) continue
                                     decodedData = ""
                                     parseResult["rawData"] = null
@@ -2385,8 +2651,14 @@ class XChainDecoder {
                     let parseResult = null
                     try {
                         // Pass mempoolDb so the pubkey-capture writes inside parseTransaction also
-                        // stay off the block transaction (M-19).
-                        parseResult = await this.parseTransaction(nextTx, undefined, this.mempoolDb)
+                        // stay off the block transaction (M-19). The envelope
+                        // recognition height is gated on this decoder's own
+                        // next block (lastProcessedBlockIndex + 1): a pending
+                        // tx confirms at the earliest into that block, and the
+                        // mempool view is per-instance and non-consensus, so a
+                        // briefly-lagging instance near the flag boundary is
+                        // acceptable where a forked BLOCK parse would not be.
+                        parseResult = await this.parseTransaction(nextTx, undefined, this.mempoolDb, this.lastProcessedBlockIndex + 1)
                     } catch (err) {
                         // The surrounding try has no catch (only a finally for the busy
                         // flag), so a single undecodable mempool tx would abort the whole
@@ -2412,10 +2684,13 @@ class XChainDecoder {
                         // when there is nothing else to record.
                         let hasOutputs = ((parseResult["dispenseOutputs"]?.length > 0) || (parseResult["paymentOutputs"]?.length > 0))
 
-                        // Guard 1: oversized payloads.
-                        if (parseResult["compiledDataLength"] > MAX_ACTION_DATA_LENGTH) {
+                        // Guard 1: oversized payloads, against the per-encoding
+                        // ceiling the parse reported ( §4: enforced
+                        // identically in the block and mempool paths).
+                        let mempoolPayloadCeiling = parseResult["payloadCeiling"] || MAX_ACTION_DATA_LENGTH
+                        if (parseResult["compiledDataLength"] > mempoolPayloadCeiling) {
                             this.parseErrors++
-                            console.error(`Mempool: tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${MAX_ACTION_DATA_LENGTH})`)
+                            console.error(`Mempool: tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${mempoolPayloadCeiling})`)
                             if (!hasOutputs) continue
                             // Empty buffer (not null) so this decodes to the SAME ''
                             // sentinel the confirmed-block path stores for a rejected
@@ -2525,3 +2800,8 @@ module.exports.AUXPOW_REASSEMBLE_AFTER = AUXPOW_REASSEMBLE_AFTER
 module.exports.canonicalizeActionPayload = canonicalizeActionPayload
 module.exports.VALID_ACTION_NAMES = VALID_ACTION_NAMES
 module.exports.ACTION_ALIASES = ACTION_ALIASES
+// Taproot envelope : the per-encoding payload ceiling and the
+// per-chain recognition-height map, exported for the cross-service
+// conformance suites (encoder/docs copies must stay byte-equal).
+module.exports.ENVELOPE_MAX_PAYLOAD = ENVELOPE_MAX_PAYLOAD
+module.exports.ENVELOPE_RECOGNITION_ACTIVATION = ENVELOPE_RECOGNITION_ACTIVATION

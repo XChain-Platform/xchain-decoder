@@ -333,6 +333,45 @@ const ORACLE_FEE_OUTPUT_ACTIVATION = {
     regtest: 0,
 };
 
+// ── Taproot envelope ( spec, Part A) ──────────────────────────────────
+
+// ENVELOPE_MAX_PAYLOAD: the Taproot-envelope payload ceiling, PER-ENCODING by
+// design (legacy lanes keep MAX_ACTION_DATA_LENGTH; a global raise would
+// multiply the chunk-lane abuse ceiling ~50x). Measures the REASSEMBLED
+// envelope payload byte length after concatenation of the payload pushes,
+// before parse; the envelope's own 520-byte push framing is NOT counted (the
+// legacy constant, by contrast, is framing-inclusive of the single on-chain
+// push). Matched to tapscript standardness reality (~400k WU per transaction).
+// Enforced identically in the decoder's block and mempool paths, mirrored by
+// the encoder validator. Canonical source: xchain-documentation/protocol/
+// constants.js (ENVELOPE_MAX_PAYLOAD).
+const ENVELOPE_MAX_PAYLOAD = 400000;
+
+// ENVELOPE_RECOGNITION_ACTIVATION ( spec §7): the LOCAL block height
+// at/above which the decoder recognizes Taproot-envelope reveals as
+// action-bearing transactions, per host chain and network. Recognition changes
+// what counts as an action (and §3.8's mixed-carrier/multi-envelope rejections
+// activate at the same height), so it is fleet-deterministic: every decoder
+// instance for a given chain+network MUST flip at the same height or the fleet
+// forks on the first envelope (or the first mixed-carrier tx). Keyed on each
+// chain's OWN local block height (like STATE_COMMITMENT_ACTIVATION), because
+// recognition happens while parsing that chain's blocks; DOGE has no segwit,
+// hence no Taproot and no envelope, so its entry is null (never active) and
+// must stay null. Below the height the decoder behaves EXACTLY as shipped: a
+// pre-flag tx containing an envelope plus an OP_RETURN action replays as the
+// OP_RETURN action, exactly as the fleet indexed it live.
+//
+// mainnet is a DISABLED far-future sentinel (not armed): the §7 cohort
+// decision (launch cohort vs first post-launch cohort, riding the 
+// launch-baseline sequencing) arms it. testnet/regtest are genesis-active so
+// the e2e/regtest stacks exercise the envelope from block 0. Rollout order
+// within any venue: decoder before encoder, per the standing coupling rule.
+const ENVELOPE_RECOGNITION_ACTIVATION = {
+    BTC:  { mainnet: 999999999, testnet: 0, regtest: 0 },
+    LTC:  { mainnet: 999999999, testnet: 0, regtest: 0 },
+    DOGE: { mainnet: null, testnet: null, regtest: null },
+};
+
 // VALID_FIAT_CODES: the accepted FIAT_CODE allow-list for PRICE actions. The indexer's
 // config['FIATS'] keys (xchain-indexer/src/config.js) are the on-chain arbiter; this list
 // mirrors them in the indexer's insertion order. The SDK validator (VALID_FIAT_CODES) must
@@ -394,6 +433,8 @@ module.exports = {
     ARCHIVE_REWARD_AMOUNT,
     CROSS_CHAIN_ROYALTY_ACTIVATION,
     ORACLE_FEE_OUTPUT_ACTIVATION,
+    ENVELOPE_MAX_PAYLOAD,
+    ENVELOPE_RECOGNITION_ACTIVATION,
     VALID_FIAT_CODES,
     GAS_TICK,
     PRICE_MAX,
