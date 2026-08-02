@@ -15,16 +15,44 @@ const XChainDecoder = require('../../src/XChainDecoder')
 // Pre-built OP_RETURN tx hex from unit test fixtures
 const OP_RETURN_TX_HEX = '0200000001aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011010000006b4830303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303021020202020202020202020202020202020202020202020202020202020202020202ffffffff020000000000000000166a145ed141846fd6cbef65cb28316aff11ba07152fcf00e1f505000000001976a914aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88ac00000000'
 
+// The prevout the fixture tx spends: its input references output index 1,
+// so output 1 here is a standard P2PKH the decoder can resolve a source
+// address from. Output 0 is junk, to prove the index is honoured.
+const PREVOUT_TX_HEX = '020000000111111111111111111111111111111111111111111111111111111111111111110000000000ffffffff020000000000000000076a0548656c6c6f0065cd1d000000001976a914bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb88ac00000000'
+
+// THE PREVOUT LOOKUP HAS TO SUCCEED, and it used to be stubbed to reject
+// with `new Error('mocked')`. That was survivable when a failed lookup was
+// swallowed into `source = null`, which is how these tests were written.
+// It is not survivable now, and deliberately so: swallowing the failure let
+// one instance skip or mis-source a transaction every healthy instance
+// accepts, so `getSourceFromOutput` tags the error `rpcLookupFailure` and
+// rethrows, and the block loop retries the block (XChainDecoder.js).
+//
+// The consensus fix was right; this file was left behind by it. Every test
+// below then failed with `Error: mocked` - seven of them - which reads as a
+// decoder defect and is not one. Resolving a real prevout makes them
+// exercise what their names claim: an OP_RETURN transaction decoded end to
+// end, source address included.
 function createDecoder() {
     const decoder = new XChainDecoder(
         'bitcoin-regtest', null, null, null, null, null,
         '127.0.0.1', 18443, 'rpc', 'rpc', false
     )
+    // Resolving a source reaches the pubkey-recording path, which the db
+    // stub predates: `parseTransaction` looks the source address up with
+    // `getAddressId` and records the input's pubkey against it. `null`
+    // means "address not seen yet", which short-circuits before any write,
+    // so the smoke exercises the lookup without asserting a storage shape
+    // it does not own. The two writers are stubbed anyway, so a change that
+    // starts calling them fails here loudly rather than on a missing method.
     decoder.db = {
-        isThereADispenserForAddress: sinon.stub().resolves(false)
+        isThereADispenserForAddress: sinon.stub().resolves(false),
+        getAddressId: sinon.stub().resolves(null),
+        hasPubkey: sinon.stub().resolves(false),
+        insertPubkey: sinon.stub().resolves()
     }
     decoder.connector = {
-        getRawTransaction: sinon.stub().rejects(new Error('mocked'))
+        getRawTransaction: sinon.stub().resolves(PREVOUT_TX_HEX)
     }
     return decoder
 }

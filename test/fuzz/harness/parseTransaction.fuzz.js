@@ -63,6 +63,34 @@ function isBitcoinjsParseError(err) {
            msg.includes('Expected') // bitcoinjs-lib format errors
 }
 
+// THE INJECTED RPC FAILURE IS THE CONTRACT WORKING, NOT A CRASH.
+//
+// `createDecoder` stubs `connector.getRawTransaction` to reject, on purpose:
+// every fuzz input runs without a node. Any input whose parse needs a prevout
+// (P2SH/P2WSH source resolution, envelope commit/reveal, dispenser funding)
+// therefore hits that rejection.
+//
+// The decoder's documented answer to an RPC lookup failure is to tag it
+// `rpcLookupFailure = true` and RETHROW, so the block loop rolls the block
+// back and retries rather than committing a tx sourced from a failed lookup
+// (XChainDecoder.js: "A prevout lookup that FAILS is not a prevout that does
+// not exist"). Swallowing it would be the consensus bug.
+//
+// Counting that rethrow as a crash is what this function used to do, and the
+// cost was not cosmetic: a `FUZZ_ITERATIONS=100` run reported 411 crashes, of
+// which 411 were this mock. Across every crash file the suite has ever
+// written, 7693 of 7704 were. Real findings do not survive that ratio - the
+// two genuine ones in that pile (a `no_inputs` TypeError, since fixed) sat
+// unread for a month.
+//
+// Keyed on the TAG rather than on the stub's message, so this stays a real
+// assertion: if the decoder ever stops tagging an RPC failure, these stop
+// being expected and the suite goes red, which is exactly the signal the
+// block loop depends on.
+function isInjectedRpcFailure(err) {
+    return err != null && err.rpcLookupFailure === true
+}
+
 // Helper to run one fuzz iteration
 async function fuzzOne(decoder, reporter, txOrHex, mutatorName) {
     try {
@@ -83,6 +111,10 @@ async function fuzzOne(decoder, reporter, txOrHex, mutatorName) {
             reporter.recordTimeout(txOrHex, mutatorName)
         } else if (typeof txOrHex === 'string' && isBitcoinjsParseError(err)) {
             // Expected: bitcoinjs-lib rejects malformed hex before decoder code runs
+            reporter.recordSuccess()
+        } else if (isInjectedRpcFailure(err)) {
+            // Expected: this harness has no node, and the decoder is supposed
+            // to fail loud on a prevout lookup it cannot complete.
             reporter.recordSuccess()
         } else {
             reporter.recordCrash(txOrHex, err, mutatorName)
@@ -285,7 +317,12 @@ describe('Fuzz: parseTransaction', function () {
             const tx = new bitcoin.Transaction()
             tx.version = 2
             tx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
-            // tx.ins is empty; parseTransaction accesses ins[0].hash
+            // tx.ins is empty. This case DID crash: the two genuine crash
+            // records this suite ever produced are both from here, a
+            // `Cannot read properties of undefined (reading 'hash')` out of
+            // parseTransaction. Current code returns null instead, verified
+            // by running exactly this input, so the case now guards a fix
+            // rather than reporting an open bug.
 
             try {
                 const result = await withTimeout(() => decoder.parseTransaction(tx), 5000)
@@ -297,7 +334,11 @@ describe('Fuzz: parseTransaction', function () {
                     reporter.recordSuccess()
                 }
             } catch (err) {
-                reporter.recordCrash(tx, err, 'no_inputs')
+                if (isInjectedRpcFailure(err)) {
+                    reporter.recordSuccess()
+                } else {
+                    reporter.recordCrash(tx, err, 'no_inputs')
+                }
             }
         })
     })

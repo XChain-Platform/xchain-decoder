@@ -509,9 +509,30 @@ class XChainDecoder {
     //This function is used to decipher the data inside xchain transaction
     async removeObfuscation(data, txid){
         var decryptedData = null
-        
+
+        // A txid too short to yield a 16-byte key AND a 16-byte IV is not a
+        // decryptable input, and until now it did not fail like one: a null
+        // or undefined txid threw TypeError out of `.substr`, and anything
+        // shorter than 32 characters reached crypto with a truncated IV and
+        // threw `Invalid initialization vector`. The catch below deliberately
+        // rethrows everything that is not a padding/decrypt error, so both
+        // escaped as raw exceptions.
+        //
+        // THIS CANNOT CHANGE ANY REACHABLE BEHAVIOUR, which is why it is
+        // returning null rather than failing loud the way an RPC lookup does.
+        // Both callers pass `firstInputTxId`, which is
+        // `uint8ArrayToHex(transaction.ins[0].hash reversed)` - a 32-byte hash
+        // hex-encoded, so always exactly 64 characters. No input that reaches
+        // this function from a parsed transaction can take this branch, so it
+        // cannot mask a misparse; it only makes the function total for
+        // callers outside that path, which is what the fuzz suite exercises
+        // (H1: "should not crash with txid=...").
+        if (typeof txid !== 'string' || txid.length < 32){
+            return null
+        }
+
         if (Buffer.isBuffer(data)){
-        
+
             try {
                 var cipherKey = txid.substr(0,16)
                 var iv = txid.substr(16,16)
