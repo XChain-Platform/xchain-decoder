@@ -367,22 +367,33 @@ const ENVELOPE_MAX_PAYLOAD = 390000;
 // pre-flag tx containing an envelope plus an OP_RETURN action replays as the
 // OP_RETURN action, exactly as the fleet indexed it live.
 //
-// MAINNET ARMED 2026-08-01 by operator decision (§7 cohort call): BTC 961000,
-// LTC 3160000. BTC rides the existing 961000 cohort (~2026-08-04, the same
-// height ANCHOR/BLOCKHASH-era features already activate at); LTC follows at
-// 3160000 (~2026-08-14), after the BTC gate, per the BTC-gated wire-format
-// policy. testnet/regtest stay genesis-active so those stacks exercise the
-// envelope from block 0.
+// MAINNET HEIGHTS PULLED IN 2026-08-02 by operator decision: BTC 961000 ->
+// 960850, LTC 3160000 -> 3153500. The 08-01 arming rode the existing 961000
+// cohort (~08-04) and put LTC ~11.5 days out at 3160000 (~08-14), which is a
+// pre-launch feature waiting on a date for no benefit. 's standing
+// pre-launch policy is that only post-launch features get activation dates
+// ("fixes ship plain"), and its own  contrast names the cheap remedy for
+// a cohort that is ALREADY deployed and armed: move the constant, do not
+// rebase. That is this change. The fleet has carried the envelope code since
+// the 08-01 train, so nothing is wiped, replayed or rescanned; only the height
+// moves, and it moves to ~6 hours out on both chains rather than 2 and 12 days.
 //
-// DEPLOY DEADLINE, and it is SHORT: BTC tip was 960601 on 2026-08-01, so
-// 961000 is ~2.8 days out at ~144 blocks/day. EVERY decoder on BTC mainnet
-// MUST be running this constant before that height or the fleet forks on the
-// first envelope (or the first mixed-carrier tx, which the §3.8 rejections
+// Both new heights were chosen against a MEASURED tip (BTC 960812, LTC 3153356
+// on 2026-08-02) with ~6 hours of margin over a redeploy train that takes about
+// an hour. testnet/regtest stay genesis-active, as they always were: this gate
+// only ever applied to mainnet, and the testnet stacks have been running the
+// envelope live since 08-01.
+//
+// DEPLOY DEADLINE, and it is SHORTER THAN IT WAS: EVERY decoder on BTC and LTC
+// mainnet MUST be running this constant before its height or the fleet forks on
+// the first envelope (or the first mixed-carrier tx, which the §3.8 rejections
 // start refusing at exactly this height). Rollout order within any venue:
-// decoder before encoder, per the standing coupling rule.
+// decoder before encoder, per the standing coupling rule. Verify the whole
+// fleet with claude/bin/xc990-mainnet-activation-verify.js, which reads the
+// armed map out of each RUNNING container rather than out of this file.
 const ENVELOPE_RECOGNITION_ACTIVATION = {
-    BTC:  { mainnet: 961000, testnet: 0, regtest: 0 },
-    LTC:  { mainnet: 3160000, testnet: 0, regtest: 0 },
+    BTC:  { mainnet: 960850, testnet: 0, regtest: 0 },
+    LTC:  { mainnet: 3153500, testnet: 0, regtest: 0 },
     DOGE: { mainnet: null, testnet: null, regtest: null },
 };
 

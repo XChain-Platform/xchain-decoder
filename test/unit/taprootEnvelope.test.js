@@ -420,13 +420,18 @@ describe('Taproot envelope recognition ( S2)', function () {
             }
         })
 
-        // ARMED 2026-08-01 (operator §7 cohort call): BTC 961000, LTC 3160000. This
-        // was the disarmed-sentinel case; it is kept as a boundary test on the real
-        // heights, because the off-by-one at a flag height is a fleet fork.
+        // This was the disarmed-sentinel case; it is kept as a boundary test on the
+        // real heights, because the off-by-one at a flag height is a fleet fork.
+        // The heights come from CONSTANTS rather than literals ON PURPOSE: this
+        // test asserts the BOUNDARY PROPERTY, which holds at whatever height is
+        // armed, and the heights have already moved once (961000/3160000 pulled in
+        // to 960850/3153500 on 2026-08-02). The literal values are pinned once, in
+        // the parity test below, which is where a surprise change should trip.
         it('BTC/LTC mainnet activate at their armed cohort heights, exclusive below', function () {
             const decoder = createDecoder()
             decoder.consensusNetwork = 'mainnet'
-            for (const [tick, height] of [['BTC', 961000], ['LTC', 3160000]]){
+            for (const tick of ['BTC', 'LTC']){
+                const height = CONSTANTS.ENVELOPE_RECOGNITION_ACTIVATION[tick].mainnet
                 decoder.coinTick = tick
                 assert.strictEqual(decoder.envelopeRecognitionHeight(), height)
                 assert.strictEqual(decoder.envelopeActiveAt(height - 1), false)
@@ -751,8 +756,8 @@ describe('Taproot envelope recognition ( S2)', function () {
         // literal rather than derived. DOGE stays null forever (no segwit, no Taproot).
         it('the recognition map is exactly the §7 shape: BTC/LTC armed mainnet cohorts, genesis-active test networks, DOGE never', function () {
             assert.deepStrictEqual(CONSTANTS.ENVELOPE_RECOGNITION_ACTIVATION, {
-                BTC:  { mainnet: 961000, testnet: 0, regtest: 0 },
-                LTC:  { mainnet: 3160000, testnet: 0, regtest: 0 },
+                BTC:  { mainnet: 960850, testnet: 0, regtest: 0 },
+                LTC:  { mainnet: 3153500, testnet: 0, regtest: 0 },
                 DOGE: { mainnet: null, testnet: null, regtest: null },
             })
         })
