@@ -272,7 +272,7 @@ describe('DISPENSER PRICE v1 oracle-fee output capture ', function () {
             assert.strictEqual(ORACLE_FEE_OUTPUT_ACTIVATION.testnet, 0)
             // Must equal the indexer's FIX_OUTPUT_FANOUT timestamp: capturing a second
             // output below that flag-day halts the block as a fan-out fault.
-            assert.strictEqual(ORACLE_FEE_OUTPUT_ACTIVATION.mainnet, 1786924800)
+            assert.strictEqual(ORACLE_FEE_OUTPUT_ACTIVATION.mainnet, 1786060800)
         })
 
         it('captures nothing on mainnet below the flag-day', async () => {
@@ -280,7 +280,7 @@ describe('DISPENSER PRICE v1 oracle-fee output capture ', function () {
             const decoder = buildDecoder([{
                 id: 'create01', action: createWith(ORACLE), source: SOURCE,
                 outputs: [{ destinationAddress: ORACLE, vout: 0, amount: '0.00001000' }],
-            }], model, { network: 'bitcoin-mainnet', blockTime: 1786924799, feeDestination: null })
+            }], model, { network: 'bitcoin-mainnet', blockTime: 1786060799, feeDestination: null })
 
             await decoder.start()
 
@@ -293,7 +293,7 @@ describe('DISPENSER PRICE v1 oracle-fee output capture ', function () {
             const decoder = buildDecoder([{
                 id: 'create01', action: createWith(ORACLE), source: SOURCE,
                 outputs: [{ destinationAddress: ORACLE, vout: 0, amount: '0.00001000' }],
-            }], model, { network: 'bitcoin-mainnet', blockTime: 1786924800, feeDestination: null })
+            }], model, { network: 'bitcoin-mainnet', blockTime: 1786060800, feeDestination: null })
 
             await decoder.start()
 
@@ -302,8 +302,8 @@ describe('DISPENSER PRICE v1 oracle-fee output capture ', function () {
         })
 
         it('fails closed on an unrecognized network rather than capturing from genesis', function () {
-            assert.strictEqual(isOracleFeeCaptureActive('mainnet', 1786924800), true)
-            assert.strictEqual(isOracleFeeCaptureActive('mainnet', 1786924799), false)
+            assert.strictEqual(isOracleFeeCaptureActive('mainnet', 1786060800), true)
+            assert.strictEqual(isOracleFeeCaptureActive('mainnet', 1786060799), false)
             assert.strictEqual(isOracleFeeCaptureActive('regtest', 0), true)
             assert.strictEqual(isOracleFeeCaptureActive('signet', 4000000000), false)
             assert.strictEqual(isOracleFeeCaptureActive(undefined, 4000000000), false)

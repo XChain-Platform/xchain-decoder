@@ -277,7 +277,7 @@ const ANCHOR_REWARD_AMOUNT = '10.00000000';
 // ANCHOR_REWARD_ACTIVATION; kept byte-identical to the local copies in
 // xchain-{hub,indexer}/src/anchor_reward_activation.js by the cross-service regression suite.
 const ARCHIVE_REWARD_ACTIVATION = {
-    mainnet: 969500,      // ARMED 2026-07-16 : BTC snapshot_block ~2026-08-17 (ratified anchor; derived from tip 957062 on 07-07 at ~144 blocks/day); deploy every consumer before this era
+    mainnet: 969500,      // ARMED 2026-07-16 : BTC snapshot_block ~2026-08-07 (ratified anchor; derived from tip 957062 on 07-07 at ~144 blocks/day); deploy every consumer before this era
     testnet: 0,
     regtest: 0,
 };
@@ -317,7 +317,7 @@ const CROSS_CHAIN_ROYALTY_ACTIVATION = {
 //
 // The mainnet value is NOT free to choose: capturing a second output on a data-bearing
 // transaction makes it fan out to two rows in getDecoderBlockData, and BELOW the indexer's
-// FIX_OUTPUT_FANOUT flag-day (protocol_changes.js, mainnet block_time 1786924800) such a
+// FIX_OUTPUT_FANOUT flag-day (protocol_changes.js, mainnet block_time 1786060800) such a
 // transaction is a consensus-critical fault that HALTS the block. This gate must therefore
 // never precede FIX_OUTPUT_FANOUT; it is armed to exactly the same instant so capture begins
 // in the same block the collapse does. Below it a Mode B create against a fee-bearing oracle
@@ -328,7 +328,7 @@ const CROSS_CHAIN_ROYALTY_ACTIVATION = {
 // Vendored byte-equal into xchain-decoder/src/protocol/constants.js; the parity suites keep
 // the two copies and the indexer's FIX_OUTPUT_FANOUT timestamp in lockstep.
 const ORACLE_FEE_OUTPUT_ACTIVATION = {
-    mainnet: 1786924800,  // 2026-08-17 00:00:00 UTC, the contract-era flag-day FIX_OUTPUT_FANOUT rides
+    mainnet: 1786060800,  // 2026-08-07 00:00:00 UTC, the contract-era flag-day FIX_OUTPUT_FANOUT rides
     testnet: 0,
     regtest: 0,
 };

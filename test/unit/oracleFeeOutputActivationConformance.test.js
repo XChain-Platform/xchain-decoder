@@ -34,8 +34,8 @@ const path   = require('path');
 
 const { ORACLE_FEE_OUTPUT_ACTIVATION } = require('../../src/protocol/constants.js');
 
-// 2026-08-17 00:00:00 UTC, the contract-era flag-day the fan-out collapse rides.
-const PINNED_MAINNET_ACTIVATION = 1786924800;
+// 2026-08-07 00:00:00 UTC, the contract-era flag-day the fan-out collapse rides.
+const PINNED_MAINNET_ACTIVATION = 1786060800;
 
 const DOCS_CONSTANTS = process.env.XCHAIN_DOCS_DIR
     ? path.join(process.env.XCHAIN_DOCS_DIR, 'protocol', 'constants.js')
