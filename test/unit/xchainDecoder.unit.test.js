@@ -102,6 +102,89 @@ describe('XChainDecoder status methods', () => {
     })
 })
 
+// ─── isStalled (the liveness signal /live reports) ───────────────────────────
+//
+// The block loop never skips a block on a fetch/parse fault, so a deterministic
+// fault at one height retries forever with the process alive and the DB
+// reachable. /status cannot see that; isStalled() is what /live adds.
+
+describe('XChainDecoder#isStalled()', () => {
+    let decoder
+    const STALL_MS = 900000   // must track STALL_ALERT_MS in XChainDecoder.js
+
+    beforeEach(() => {
+        decoder = createDecoder()
+    })
+
+    // A wedged decoder: tip fresh and 50 blocks ahead, no advance in 16 minutes.
+    function wedged() {
+        decoder.lastProcessedBlockIndex = 100
+        decoder.blockchainInfoLastBlock = 150
+        decoder.blockchainInfoLastRefreshAt = Date.now()
+        decoder.lastAdvanceAt = Date.now() - (STALL_MS + 60000)
+    }
+
+    it('is false before the block loop has started', () => {
+        assert.strictEqual(decoder.lastAdvanceAt, 0)
+        assert.strictEqual(decoder.isStalled(), false)
+    })
+
+    it('is true when the tip is fresh and ahead but nothing advanced', () => {
+        wedged()
+        assert.strictEqual(decoder.isStalled(), true)
+    })
+
+    it('is false while the loop is still advancing', () => {
+        wedged()
+        decoder.lastAdvanceAt = Date.now()
+        assert.strictEqual(decoder.isStalled(), false)
+    })
+
+    it('is false when caught up (no blocks to advance to)', () => {
+        wedged()
+        decoder.blockchainInfoLastBlock = 100
+        assert.strictEqual(decoder.isStalled(), false)
+    })
+
+    it('is false during a node outage (frozen tip): a restart fixes nothing', () => {
+        wedged()
+        decoder.blockchainInfoLastRefreshAt = Date.now() - (3 * 30000)
+        assert.strictEqual(decoder.isStalled(), false)
+    })
+
+    it('is true once one height has failed to fetch enough times in a row', () => {
+        // The self-resetting counter is a FASTER path to the same verdict, not a
+        // bypass: it still requires a started loop and a tip that is fresh and ahead,
+        // and it then flags the wedge without waiting out the elapsed-time window.
+        wedged()
+        decoder.lastAdvanceAt = Date.now()  // too recent for the elapsed-time path
+        decoder._fetchErrorCount = 20
+        assert.strictEqual(decoder.isStalled(), true)
+        decoder._fetchErrorCount = 0        // a successful fetch clears it
+        assert.strictEqual(decoder.isStalled(), false)
+    })
+
+    // Regression guard for . The counter is bumped by the catch around
+    // getBlockHash/fetchBlockHex, which a TRANSPORT fault also trips (that catch's own
+    // comment records a Dogecoin 1.14 node under RPC-queue pressure arriving as a bare
+    // ECONNRESET). While such a fault lasts the tip goes stale, and the healthcheck
+    // this feeds is autoheal-armed, so a counter ranked ABOVE the freshness gate would
+    // restart the container roughly every two minutes for the whole outage and fix
+    // nothing. These two cases pin the ordering.
+    it('is false during a node outage even with the fetch counter maxed', () => {
+        wedged()
+        decoder.blockchainInfoLastRefreshAt = Date.now() - (3 * 30000)   // frozen tip
+        decoder._fetchErrorCount = 20
+        assert.strictEqual(decoder.isStalled(), false)
+    })
+
+    it('is false before the loop has started even with the fetch counter maxed', () => {
+        decoder._fetchErrorCount = 20
+        assert.strictEqual(decoder.lastAdvanceAt, 0)
+        assert.strictEqual(decoder.isStalled(), false)
+    })
+})
+
 // ─── millisecondsToTimeString ────────────────────────────────────────────────
 
 describe('XChainDecoder#millisecondsToTimeString()', () => {

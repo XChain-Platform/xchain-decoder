@@ -232,10 +232,9 @@ async function startApi(){
             // db.ping() uses its own pooled connection; see the health method note.
             try { dbOk = await decoder.db.ping() } catch (_) {}
         }
-        // Latent halt marker , reported here too so an operator running the
-        // same probe the Docker healthcheck runs can see it. The HTTP code stays keyed
-        // on running+db for the reason given in health() above: a dormant halt must not
-        // make an advancing decoder look dead to autoheal.
+        // Latent halt marker , reported here too so an operator can see it on
+        // the cheap probe. The HTTP code stays keyed on running+db for the reason given
+        // in health() above: a dormant halt must not make an advancing decoder look dead.
         let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
         if (dbOk && typeof decoder.checkReorgHalt === 'function'){
             try { reorgHalt = await decoder.checkReorgHalt() } catch (_) {}
@@ -248,6 +247,39 @@ async function startApi(){
             reorg_halted:      reorgHalt.halted,
             reorg_halt_reason: reorgHalt.reason,
             reorg_halted_at:   reorgHalt.at
+        })
+    })
+
+    // GET /live: the LIVENESS probe, and the route the Docker HEALTHCHECK runs (see
+    // SERVICE_HEALTHCHECK[XCHAIN_DECODER] in xchain-node's ModuleService, which sets
+    // path:'/live'). It is /status plus the one thing /status structurally cannot see:
+    // the block loop retrying a block forever. decoderRunning only goes false when
+    // start() REJECTS, and the loop is written never to reject on a fetch/parse fault
+    // (skipping a block would corrupt the index), so a wedged decoder kept answering
+    // /status with 200 while lag grew without bound and autoheal, whose only input is
+    // docker inspect's Health.Status, never saw a thing.
+    //
+    // Kept separate from /status rather than folded into it: /status is the
+    // load-balancer / uptime signal and its running+db semantics are relied on
+    // elsewhere. Same split, same reason, as sync's /health override.
+    app.get('/live', async (req, res) => {
+        let dbOk = false
+        if (decoder.db) {
+            try { dbOk = await decoder.db.ping() } catch (_) {}
+        }
+        const stalled = typeof decoder.isStalled === 'function' ? decoder.isStalled() : false
+        const syncStatus = decoder.getSyncStatus()
+        const healthy = decoderRunning && dbOk && !stalled
+        res.status(healthy ? 200 : 503).json({
+            status: healthy ? 'healthy' : 'unhealthy',
+            db: dbOk,
+            running: decoderRunning,
+            stalled,
+            last_processed_block: syncStatus.last_processed_block,
+            node_height: syncStatus.node_height,
+            lag: syncStatus.lag,
+            parse_errors: decoder.parseErrors,
+            rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors
         })
     })
 

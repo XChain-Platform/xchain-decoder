@@ -44,6 +44,20 @@ const MEMPOOL_INTERVAL = 60000 //60 seconds between mempool checks
 // the cache is that an unauthenticated health endpoint must not turn into one DB query
 // per request.
 const REORG_HALT_PROBE_INTERVAL_MS = 60000
+// How long the block loop may make no forward progress, while the node tip is fresh and
+// visibly ahead, before isStalled() calls the decoder wedged. The loop never skips a
+// block on a fetch/parse fault (skipping would corrupt the index), so a deterministic
+// fault at one height retries forever with the process alive and the DB reachable; this
+// window is what makes that visible to a liveness probe. Deliberately generous: it must
+// clear the slowest legitimate single-block commit and a deep reorg rollback on the
+// slowest host, because the consumer of the signal restarts the container. Override per
+// host with DECODER_STALL_ALERT_MS.
+const STALL_ALERT_MS = Number(process.env.DECODER_STALL_ALERT_MS) || 900000
+// Consecutive failed fetch attempts at ONE height (3s apart) that count as wedged on
+// their own. _fetchErrorCount resets to 0 on any successful fetch and on a height
+// change, so unlike the elapsed-time window it cannot be tripped by slow-but-working
+// block processing. 20 attempts is ~1 minute of retrying the same height.
+const STALL_FETCH_ATTEMPTS = Number(process.env.DECODER_STALL_FETCH_ATTEMPTS) || 20
 const MEMPOOL_BATCH_SIZE = 1000
 
 const MAGIC_WORD = "XCHN"
@@ -320,6 +334,10 @@ class XChainDecoder {
         // flag a frozen tip so callers can distinguish a genuine zero lag from an
         // outage where the cached tip stopped advancing.
         this.blockchainInfoLastRefreshAt = 0
+        // Timestamp (ms) of the most recent FORWARD advance of lastProcessedBlockIndex,
+        // set at the top of the block loop and again on every committed block. Zero
+        // means the loop has not started, which isStalled() reads as "not stalled".
+        this.lastAdvanceAt = 0
         this.mempoolInterval = null
         this.mempoolBusy = false
 
@@ -407,6 +425,42 @@ class XChainDecoder {
             return false
         }
         return this.synced
+    }
+
+    // True when the block loop is wedged: alive and retrying, but no longer making
+    // progress the chain is waiting on. This is the signal the retry loop's own comment
+    // promises ("escalate ... so the stall is visible to monitoring"); until now nothing
+    // a probe could reach ever read it, so a wedged decoder reported healthy forever.
+    //
+    // Fail-QUIET by construction, because the consumer restarts the container:
+    //   - a fresh process (lastAdvanceAt 0) is never stalled;
+    //   - a caught-up decoder is never stalled (it advances only when blocks arrive), so
+    //     the node tip must be visibly AHEAD;
+    //   - the tip must be FRESH (same 2x-refresh test isSynced uses). During a node
+    //     outage both sides freeze, and restarting the decoder fixes nothing.
+    // The pinned-height fetch counter is a FASTER path to the same verdict, not an
+    // independent one: it self-resets on any successful fetch, so once the gates above
+    // pass it flags a wedge in about a minute instead of waiting out the elapsed-time
+    // window. It sits BELOW those gates deliberately, and moving it back above them
+    // re-opens a restart loop (). `_fetchErrorCount` is bumped by the catch
+    // around getBlockHash/fetchBlockHex, whose own comment records that a Dogecoin 1.14
+    // node under RPC-queue pressure surfaces as a bare ECONNRESET, i.e. a TRANSPORT
+    // fault rather than a bad block. Ungated, a decoder that is merely BEHIND the tip
+    // reaches that fetch every iteration and climbs STALL_FETCH_ATTEMPTS in roughly a
+    // minute at the 3s sleep; the xchain-node healthcheck descriptor (interval 15s,
+    // retries 3, startPeriod 60s, autoheal true) then restarts the container about
+    // every two minutes, for the whole duration of a fault that restarting cannot fix,
+    // against a coin node already under pressure. The accepted flap trade-off was
+    // scoped to a deterministically bad BLOCK, never to a transport fault.
+    isStalled() {
+        if (!this.lastAdvanceAt) return false
+        if (this.blockchainInfoLastBlock < 0 || this.lastProcessedBlockIndex < 0) return false
+        if ((this.blockchainInfoLastBlock - this.lastProcessedBlockIndex) <= 1) return false
+        const tipStale = this.blockchainInfoLastRefreshAt > 0
+            && (Date.now() - this.blockchainInfoLastRefreshAt) > 2 * BLOCKCHAIN_INFO_REFRESH_MS
+        if (tipStale) return false
+        if (this._fetchErrorCount >= STALL_FETCH_ATTEMPTS) return true
+        return (Date.now() - this.lastAdvanceAt) > STALL_ALERT_MS
     }
 
     getSyncStatus() {
@@ -1710,6 +1764,9 @@ class XChainDecoder {
         
         let lastProcessedBlockIndex = this.lastProcessedBlockIndex = await this.db.getLastBlockIndex()
         let lastProcessedTxIndex = await this.db.getLastTxIndex()
+        // Start the stall clock here, not in the constructor: a long pre-loop phase
+        // (DB connect, txindex probe) must not count as time spent not advancing.
+        this.lastAdvanceAt = Date.now()
 
         if (lastProcessedBlockIndex < this.startBlockIndex - 1){
             lastProcessedBlockIndex = this.lastProcessedBlockIndex = this.startBlockIndex - 1
@@ -2590,6 +2647,10 @@ class XChainDecoder {
                 
                 blocksQuantity = blocksQuantity + 1
                 lastProcessedBlockIndex = this.lastProcessedBlockIndex = nextBlockHeight
+                // The one forward-progress site: a block is committed and the cursor
+                // moved. Every other assignment to lastProcessedBlockIndex re-reads the
+                // cursor after a rollback, which is recovery, not progress.
+                this.lastAdvanceAt = Date.now()
             }
         }
     }
