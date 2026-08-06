@@ -149,6 +149,27 @@ describe('migrate.js operator CLI @regression', function () {
         assert.match(err, /migrate: FAILED: .*duplicate column boom/);
     });
 
+    it('lock-skip path: reports SKIPPED and exits 2 instead of a false done @regression', async function () {
+        // #3162 parity with the indexer: a contended run examines nothing, so
+        // reporting 'done. applied=[] still-pending=[]' with exit 0 tells the
+        // operator the schema is migrated when it may not be.
+        process.env.DECODER_DB_HOST = 'db.test';
+        process.env.DECODER_DB_NAME = 'decoder_test';
+        process.env.DECODER_DB_USER = 'tester';
+        const fake = makeFakeDb({
+            runMigrations: async () => ({ applied: [], pending: [], lockSkipped: true })
+        });
+        loadMigrateWith(fake.FakeDatabase);
+        await fake.done;
+        assert.strictEqual(process.exitCode, 2, 'a contended run must exit 2');
+        assert.strictEqual(fake.poolEnded, true, 'pool closed in finally');
+        const out = consoleLogStub.getCalls().map((c) => c.args[0]).join('\n');
+        assert.doesNotMatch(out, /migrate: done\./, 'must not claim the run completed');
+        const err = consoleErrStub.getCalls().map((c) => c.args[0]).join('\n');
+        assert.match(err, /migrate: SKIPPED/);
+        assert.match(err, /xchain_migrate_decoder_test/);
+    });
+
     it('--file: scopes the run to the named migration (passes opts.only) @regression', async function () {
         process.env.DECODER_DB_HOST = 'db.test';
         process.env.DECODER_DB_NAME = 'decoder_test';

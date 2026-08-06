@@ -267,15 +267,17 @@ class Database {
     // unrelated tree quirk can never block the targeted rollout. An unknown target
     // (name matching no committed migration) fails loudly rather than applying nothing.
     // Public entry point. Runs the migration body on every path, then always verifies the
-    // dispensers.expiration schema contract, so the fail-closed guard fires even when the
-    // body early-returns (no migrations dir, empty dir, or lock contention during a fleet
-    // rollout). If the inner body throws, the error propagates and the assertion is skipped
-    // (already failing loudly); on any normal return the assertion runs exactly once. The
-    // assertion is a no-op when the dispensers table is absent, so no-dir/empty paths stay
+    // schema contracts a mode=manual migration owns and the drift reconciler cannot heal
+    // (dispensers.expiration type, pubkeys.pubkey width), so the fail-closed guards fire
+    // even when the body early-returns (no migrations dir, empty dir, or lock contention
+    // during a fleet rollout). If the inner body throws, the error propagates and the
+    // assertions are skipped (already failing loudly); on any normal return each runs
+    // exactly once. Both are no-ops when their table is absent, so no-dir/empty paths stay
     // cheap and safe.
     async runMigrations(opts = {}){
         const result = await this._runMigrationsInner(opts);
         await this._assertDispenserExpirationIsInteger();
+        await this._assertPubkeyColumnIsUncompressedWide();
         return result;
     }
 
@@ -285,7 +287,7 @@ class Database {
         const only          = (opts.only == null) ? null
             : new Set([].concat(opts.only).map(s => String(s).trim()).filter(Boolean));
         const dir           = this.sqlPath + '/migrations';
-        const result        = { applied: [], pending: [] };
+        const result        = { applied: [], pending: [], lockSkipped: false };
 
         let files = [];
         try { files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort(); }
@@ -311,6 +313,10 @@ class Database {
             const got = await conn.query('SELECT GET_LOCK(?, 30) AS l', [lockName]);
             if(!got || !got[0] || String(got[0].l) !== '1'){
                 console.warn('runMigrations: could not acquire lock ' + lockName + ' (another process is migrating). Skipping this run.');
+                // #3162: flag the skip so callers do NOT read the empty applied/pending shape as
+                // a completed run. The operator CLI must not print "done" and exit 0 when nothing
+                // was even examined - the schema may still be un-migrated.
+                result.lockSkipped = true;
                 return result;
             }
             try {
@@ -462,6 +468,45 @@ class Database {
             if(!isInt){
                 throw new Error(
                     'dispensers.expiration has type ' + dataType.toUpperCase() + ' but BIGINT UNSIGNED is required. ' +
+                    'Run the pending migration: node src/migrate.js'
+                );
+            }
+        } finally {
+            if(conn && this.transactionConnection == null){
+                try { await conn.release(); } catch(_){}
+            }
+        }
+    }
+
+    // Assert that pubkeys.pubkey is wide enough for an UNCOMPRESSED key (65 bytes ->
+    // 130 hex chars). extractPubkeyFromInput emits both forms, so a DB still at the
+    // pre-#3195 VARCHAR(66) either fails the INSERT (errno 1406 under a strict
+    // sql_mode) or truncates to 66 chars under a lax one, and the decoder->indexer
+    // seam field source_pubkey ends up NULL or corrupted with the branch chosen by
+    // the server's sql_mode rather than by chain data. The widen is mode=manual, so
+    // the startup drift reconciler cannot heal it (alterTableForDrift only ADDS
+    // columns and RELAXES nullability, never changes width) and a scoped --file
+    // rollout can leave a fleet half-migrated with no operator signal. Fail closed
+    // here, exactly as the dispensers.expiration contract does. Skips silently when
+    // the column is absent (table not created yet).
+    async _assertPubkeyColumnIsUncompressedWide(){
+        const UNCOMPRESSED_PUBKEY_HEX_LENGTH = 130;
+        let conn;
+        try {
+            conn = await this.getConnection();
+            const rows = await conn.query(
+                "SELECT CHARACTER_MAXIMUM_LENGTH AS len FROM information_schema.columns WHERE table_schema = ? AND table_name = 'pubkeys' AND column_name = 'pubkey'",
+                [this.dbName]
+            );
+            if(!rows.length) return;  // column absent: table may not exist yet
+            const len = rows[0].len == null ? null : Number(rows[0].len);
+            // A non-character type reports NULL here; that is a schema shape this
+            // guard cannot reason about, so leave it to the column's own contract.
+            if(len == null || Number.isNaN(len)) return;
+            if(len < UNCOMPRESSED_PUBKEY_HEX_LENGTH){
+                throw new Error(
+                    'pubkeys.pubkey holds ' + len + ' chars but VARCHAR(' + UNCOMPRESSED_PUBKEY_HEX_LENGTH + ') is required ' +
+                    'for uncompressed keys; narrower silently NULLs or truncates the source_pubkey seam field. ' +
                     'Run the pending migration: node src/migrate.js'
                 );
             }

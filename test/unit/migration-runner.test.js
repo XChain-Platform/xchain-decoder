@@ -362,7 +362,7 @@ describe('runMigrations() checksum re-bless path @regression', function () {
         const { db, updates } = makeDb(root, [{ name: FILE, checksum: OLD_B }]);
         const res = await db.runMigrations({ includeManual: true });
         assert.deepStrictEqual(updates, [[NEW_SUM, FILE]], 'expected exactly one ledger heal UPDATE');
-        assert.deepStrictEqual(res, { applied: [], pending: [] });
+        assert.deepStrictEqual(res, { applied: [], pending: [], lockSkipped: false });
     });
 
     it('heals from a single-string `from` (indexer-parity form)', async function () {
@@ -387,7 +387,7 @@ describe('runMigrations() checksum re-bless path @regression', function () {
         const { db, updates } = makeDb(root, [{ name: FILE, checksum: NEW_SUM }]);
         const res = await db.runMigrations({ includeManual: true });
         assert.deepStrictEqual(updates, []);
-        assert.deepStrictEqual(res, { applied: [], pending: [] });
+        assert.deepStrictEqual(res, { applied: [], pending: [], lockSkipped: false });
     });
 });
 
@@ -545,5 +545,64 @@ describe('Database.splitSqlStatements() @regression', function () {
         // A genuine trailing DROP TABLE is still caught.
         const offender = scanSql("INSERT INTO notes (body) VALUES ('ok'); DROP TABLE x;");
         assert.ok(offender && /DROP TABLE x/i.test(offender));
+    });
+});
+
+describe('Database schema-contract guards @regression', function () {
+
+    // Both guards read information_schema through the pool, so a fake connection
+    // is enough to exercise the contract without a live DB.
+    function contextReturning(rows){
+        let released = 0;
+        const ctx = {
+            dbName: 'decoder_test',
+            transactionConnection: null,
+            getConnection: async () => ({
+                query: async () => rows,
+                release: async () => { released++; }
+            }),
+            releasedCount: () => released
+        };
+        return ctx;
+    }
+
+    const pubkeyGuard = Database.prototype._assertPubkeyColumnIsUncompressedWide;
+
+    it('accepts a pubkeys.pubkey wide enough for an uncompressed key', async function () {
+        await pubkeyGuard.call(contextReturning([{ len: 130 }]));
+    });
+
+    it('rejects the pre-widen VARCHAR(66), naming the seam field it would corrupt', async function () {
+        await assert.rejects(
+            pubkeyGuard.call(contextReturning([{ len: 66 }])),
+            /pubkeys\.pubkey holds 66 chars.*source_pubkey/s);
+    });
+
+    it('is a no-op when the pubkeys table does not exist yet', async function () {
+        await pubkeyGuard.call(contextReturning([]));
+    });
+
+    it('releases the pooled connection on both the pass and the throw path', async function () {
+        const ok = contextReturning([{ len: 130 }]);
+        await pubkeyGuard.call(ok);
+        assert.strictEqual(ok.releasedCount(), 1);
+
+        const bad = contextReturning([{ len: 66 }]);
+        await assert.rejects(pubkeyGuard.call(bad));
+        assert.strictEqual(bad.releasedCount(), 1);
+    });
+
+    it('runs the pubkey guard on every runMigrations exit path, lock-skip included', async function () {
+        // The guard rides the public wrapper, not the body, so a contended run
+        // (which applies nothing) still fails loud on a half-migrated schema.
+        const calls = [];
+        const ctx = {
+            _runMigrationsInner: async () => ({ applied: [], pending: [], lockSkipped: true }),
+            _assertDispenserExpirationIsInteger: async () => { calls.push('dispenser'); },
+            _assertPubkeyColumnIsUncompressedWide: async () => { calls.push('pubkey'); }
+        };
+        const result = await Database.prototype.runMigrations.call(ctx);
+        assert.deepStrictEqual(calls, ['dispenser', 'pubkey']);
+        assert.strictEqual(result.lockSkipped, true);
     });
 });
