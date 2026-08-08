@@ -19,6 +19,8 @@
  * xchain-utxo-tracker/src/undo-blocks.js when that sibling repo is checked
  * out (conformance read, skip-if-absent per the ConsensusPrimitiveConformance
  * convention), with a hand-copied floor kept as the always-on baseline.
+ * It also pins the tracker's own MAX_SAFE_UNDO_BLOCKS equal to this constant,
+ * which the one-directional runtime warning in resolveUndoBlocks() cannot do.
  */
 
 'use strict';
@@ -74,6 +76,20 @@ describe('DISPENSER_EXPIRE_SAFE_DEPTH', function () {
             assert.strictEqual(
                 DEEPEST_UNDO_WINDOW, deepest,
                 'update DEEPEST_UNDO_WINDOW in this test to match undo-blocks.js'
+            );
+        });
+
+        // Pins the tracker's hand-mirrored ceiling to the decoder's constant in BOTH
+        // directions. resolveUndoBlocks() only warns when the resolved window EXCEEDS
+        // MAX_SAFE_UNDO_BLOCKS, so LOWERING DISPENSER_EXPIRE_SAFE_DEPTH alone is silent
+        // at runtime; this equality is the only thing that catches it (#3883).
+        it('tracker MAX_SAFE_UNDO_BLOCKS equals the decoder SAFE_DEPTH', function () {
+            const { MAX_SAFE_UNDO_BLOCKS } = require(UNDO);
+            assert.strictEqual(
+                MAX_SAFE_UNDO_BLOCKS, XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH,
+                `tracker MAX_SAFE_UNDO_BLOCKS (${MAX_SAFE_UNDO_BLOCKS}) must EQUAL ` +
+                `DISPENSER_EXPIRE_SAFE_DEPTH (${XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH}); ` +
+                'a split lets the decoder abort reorg recovery at one depth while the tracker auto-recovers to another'
             );
         });
     });
