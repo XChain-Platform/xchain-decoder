@@ -599,10 +599,54 @@ describe('Database schema-contract guards @regression', function () {
         const ctx = {
             _runMigrationsInner: async () => ({ applied: [], pending: [], lockSkipped: true }),
             _assertDispenserExpirationIsInteger: async () => { calls.push('dispenser'); },
-            _assertPubkeyColumnIsUncompressedWide: async () => { calls.push('pubkey'); }
+            _assertPubkeyColumnIsUncompressedWide: async () => { calls.push('pubkey'); },
+            _assertActionDataIsUtf8mb4: async () => { calls.push('utf8mb4'); }
         };
         const result = await Database.prototype.runMigrations.call(ctx);
-        assert.deepStrictEqual(calls, ['dispenser', 'pubkey']);
+        assert.deepStrictEqual(calls, ['dispenser', 'pubkey', 'utf8mb4']);
         assert.strictEqual(result.lockSkipped, true);
+    });
+
+    // The action-text charset is a mode=manual widen (a charset conversion rewrites every
+    // row), and alterTableForDrift never retypes an existing column, so nothing heals a
+    // missed node. `transactions` is replicated by xchain-sync, so an un-migrated node
+    // quarantines a non-BMP ACTION that a migrated node stores: a fleet divergence, which
+    // is why this fails closed rather than warning.
+    const utf8Guard = Database.prototype._assertActionDataIsUtf8mb4;
+
+    it('accepts both action-text columns already at utf8mb4', async function () {
+        await utf8Guard.call(contextReturning([
+            { tbl: 'transactions', cs: 'utf8mb4' },
+            { tbl: 'mempool_transactions', cs: 'utf8mb4' }
+        ]));
+    });
+
+    it('rejects a transactions.data still at utf8mb3, naming the quarantine it causes', async function () {
+        await assert.rejects(
+            utf8Guard.call(contextReturning([{ tbl: 'transactions', cs: 'utf8mb3' }])),
+            /transactions\.data uses charset utf8mb3.*1366.*quarantined/s);
+    });
+
+    it('rejects a half-migrated pair where only the mempool column lagged', async function () {
+        await assert.rejects(
+            utf8Guard.call(contextReturning([
+                { tbl: 'transactions', cs: 'utf8mb4' },
+                { tbl: 'mempool_transactions', cs: 'utf8mb3' }
+            ])),
+            /mempool_transactions\.data uses charset utf8mb3/);
+    });
+
+    it('is a no-op when the tables do not exist yet', async function () {
+        await utf8Guard.call(contextReturning([]));
+    });
+
+    it('releases the pooled connection on the utf8mb4 pass and throw paths', async function () {
+        const ok = contextReturning([{ tbl: 'transactions', cs: 'utf8mb4' }]);
+        await utf8Guard.call(ok);
+        assert.strictEqual(ok.releasedCount(), 1);
+
+        const bad = contextReturning([{ tbl: 'transactions', cs: 'utf8mb3' }]);
+        await assert.rejects(utf8Guard.call(bad));
+        assert.strictEqual(bad.releasedCount(), 1);
     });
 });

@@ -2779,6 +2779,10 @@ class XChainDecoder {
                             // ACTION on a money-bearing tx; a null would persist as SQL
                             // NULL and break pending/confirmed content-correlation.
                             mempoolData = new Uint8Array(0)
+                            // Drop the raw payload with the action it belonged to, exactly as
+                            // the confirmed-block path does; a rejected ACTION must not leave
+                            // a stale raw_data on the pending row.
+                            parseResult["rawData"] = null
                         } else {
                             // Guard 2: unknown ACTION names (expand aliases first so an
                             // alias-named tx doesn't show as pending and then silently vanish).
@@ -2792,6 +2796,8 @@ class XChainDecoder {
                                 // Empty buffer (not null): decodes to '' matching the
                                 // confirmed-block path, not SQL NULL. See guard 1 above.
                                 mempoolData = new Uint8Array(0)
+                                // Same parity as guard 1: no action stored means no raw payload.
+                                parseResult["rawData"] = null
                             } else {
                                 mempoolData = canonical.buffer
                             }
@@ -2824,7 +2830,8 @@ class XChainDecoder {
                         destination: parseResult["destination"],
                         amount: parseResult["amount"],
                         fee: 0,
-                        data: mempoolDataString
+                        data: mempoolDataString,
+                        raw_data: parseResult["rawData"] || null
 
                     }))) {
                         await this.sleep(3000)

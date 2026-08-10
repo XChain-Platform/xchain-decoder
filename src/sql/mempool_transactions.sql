@@ -19,7 +19,15 @@ CREATE TABLE mempool_transactions (
     destination VARCHAR(120),     -- raw destination address (NOT an index_addresses id)
     amount      BIGINT,           -- BTC amount sent
     fee         BIGINT,           -- BTC Fee paid (miners fee)
-    data        MEDIUMTEXT        -- Decoded data
+    -- utf8mb4 per column, mirroring transactions.data: a pending row must accept exactly
+    -- what its confirmed twin accepts, or a non-BMP ACTION fails the mempool INSERT with
+    -- errno 1366 and the tx is skipped on every poll. The table default stays utf8mb3 so
+    -- the indexed tx_hash VARCHAR(250) stays at 750 bytes, under InnoDB's 767-byte key
+    -- limit on a COMPACT-row-format table. Migration: 2026-08-10-action-data-utf8mb4.sql.
+    data        MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,   -- Decoded data
+    -- Mirrors transactions.raw_data so the pending row carries the encoder's second push
+    -- (FILE bytes, gated ciphertext) instead of only revealing it at confirmation.
+    raw_data    MEDIUMBLOB
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
 -- Mempool rows hold raw strings rather than index_addresses/index_transactions ids.

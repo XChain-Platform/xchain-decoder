@@ -268,16 +268,17 @@ class Database {
     // (name matching no committed migration) fails loudly rather than applying nothing.
     // Public entry point. Runs the migration body on every path, then always verifies the
     // schema contracts a mode=manual migration owns and the drift reconciler cannot heal
-    // (dispensers.expiration type, pubkeys.pubkey width), so the fail-closed guards fire
-    // even when the body early-returns (no migrations dir, empty dir, or lock contention
-    // during a fleet rollout). If the inner body throws, the error propagates and the
-    // assertions are skipped (already failing loudly); on any normal return each runs
-    // exactly once. Both are no-ops when their table is absent, so no-dir/empty paths stay
-    // cheap and safe.
+    // (dispensers.expiration type, pubkeys.pubkey width, action-data charset), so the
+    // fail-closed guards fire even when the body early-returns (no migrations dir, empty
+    // dir, or lock contention during a fleet rollout). If the inner body throws, the error
+    // propagates and the assertions are skipped (already failing loudly); on any normal
+    // return each runs exactly once. Each is a no-op when its table is absent, so
+    // no-dir/empty paths stay cheap and safe.
     async runMigrations(opts = {}){
         const result = await this._runMigrationsInner(opts);
         await this._assertDispenserExpirationIsInteger();
         await this._assertPubkeyColumnIsUncompressedWide();
+        await this._assertActionDataIsUtf8mb4();
         return result;
     }
 
@@ -509,6 +510,46 @@ class Database {
                     'for uncompressed keys; narrower silently NULLs or truncates the source_pubkey seam field. ' +
                     'Run the pending migration: node src/migrate.js'
                 );
+            }
+        } finally {
+            if(conn && this.transactionConnection == null){
+                try { await conn.release(); } catch(_){}
+            }
+        }
+    }
+
+    // Assert that the decoded-ACTION text columns hold the full UTF-8 range. The encoder
+    // validates and emits any valid UTF-8 (a four-byte emoji in a MEMO), and a utf8mb3
+    // column rejects that with errno 1366, which DETERMINISTIC_WRITE_ERRNOS classifies as
+    // POISON_ROW, so the fee-paid tx is quarantined with no ACTION row. `transactions` is
+    // part of the xchain-sync replicated set, so an un-migrated node quarantines what a
+    // migrated node stores and the fleet diverges on chain state rather than merely
+    // lagging. The widen is mode=manual (a charset conversion rewrites every row), and
+    // alterTableForDrift never changes an existing column's type, so nothing heals this
+    // automatically. Fail closed here, exactly as the pubkeys.pubkey contract does. Skips
+    // silently when a column is absent (table not created yet).
+    async _assertActionDataIsUtf8mb4(){
+        let conn;
+        try {
+            conn = await this.getConnection();
+            const rows = await conn.query(
+                "SELECT table_name AS tbl, character_set_name AS cs FROM information_schema.columns " +
+                "WHERE table_schema = ? AND column_name = 'data' AND table_name IN ('transactions', 'mempool_transactions')",
+                [this.dbName]
+            );
+            for(const row of rows){
+                // A non-character type reports NULL here; that is a shape this guard
+                // cannot reason about, so leave it to the column's own contract.
+                const cs = row.cs == null ? null : String(row.cs).toLowerCase();
+                if(cs == null) continue;
+                if(cs !== 'utf8mb4'){
+                    throw new Error(
+                        String(row.tbl) + '.data uses charset ' + cs + ' but utf8mb4 is required; a non-BMP ' +
+                        'ACTION (e.g. an emoji MEMO) is rejected with errno 1366 and the fee-paid transaction ' +
+                        'is quarantined with no ACTION row, diverging this node from a migrated one. ' +
+                        'Run the pending migration: node src/migrate.js'
+                    );
+                }
             }
         } finally {
             if(conn && this.transactionConnection == null){
@@ -1499,8 +1540,9 @@ class Database {
             destination,
             amount,
             fee,
-            data
-        ) VALUES (?, ?, ?, ?, ?, ?);
+            data,
+            raw_data
+        ) VALUES (?, ?, ?, ?, ?, ?, ?);
         `;
 
         let connection = await this.getConnection()
@@ -1524,7 +1566,11 @@ class Database {
                 tx.destination,
                 tx.amount,
                 tx.fee,
-                tx.data
+                tx.data,
+                // Mirror insertTransaction: the encoder's second push (FILE bytes, gated
+                // ciphertext) belongs on the pending row too, or the payload only appears
+                // at confirmation and a pending row cannot be correlated with its twin.
+                tx.raw_data || null
             ])
 
             return true

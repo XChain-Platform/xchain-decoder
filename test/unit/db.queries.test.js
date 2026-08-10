@@ -808,7 +808,30 @@ describe('Database#insertMempoolTransaction()', () => {
         assert.ok(createTx.notCalled, 'insertMempoolTransaction must not call createTransaction');
         assert.ok(createAddr.notCalled, 'insertMempoolTransaction must not call createAddress');
         const params = q.firstCall.args[1];
-        assert.deepStrictEqual(params, ['rawhash', 'rawsrc', 'rawdst', 7, 0, 'd']);
+        assert.deepStrictEqual(params, ['rawhash', 'rawsrc', 'rawdst', 7, 0, 'd', null]);
+    });
+
+    // Parity with insertTransaction: the encoder emits a second Latin-1 push (FILE bytes,
+    // gated ciphertext) that the confirmed path stores in transactions.raw_data. A pending
+    // row that drops it cannot be content-correlated with its confirmed twin.
+    it('binds raw_data as the 7th param, null when absent', async () => {
+        const db = makeDb();
+        const q = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+        const payload = Buffer.from([0x00, 0xff, 0x10]);
+        await db.insertMempoolTransaction({
+            hash: 'h', source: 's', destination: 'd', amount: 0, fee: 0, data: 'x', raw_data: payload
+        });
+        assert.deepStrictEqual(q.firstCall.args[1][6], payload);
+        assert.match(q.firstCall.args[0], /raw_data/, 'the INSERT column list must name raw_data');
+
+        const q2 = sinon.stub().resolves([]);
+        const { pool: pool2 } = withConn(q2);
+        const db2 = makeDb();
+        injectPool(db2, pool2);
+        await db2.insertMempoolTransaction({ hash: 'h', source: 's', destination: 'd', amount: 0, fee: 0, data: 'x' });
+        assert.strictEqual(q2.firstCall.args[1][6], null);
     });
 
     it('returns DUPLICATED_TRANSACTION on errno 1062', async () => {

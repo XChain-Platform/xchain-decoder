@@ -1,0 +1,63 @@
+--********************************************************************
+--
+-- Copyright © 2025-2026 Dankest, LLC
+-- Based on XChain Platform by Dankest, LLC - https://dankest.llc
+--
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- This file is part of XChain Platform. Licensed under the GNU Affero
+-- General Public License v3.0 or later; see LICENSE.md. A commercial
+-- license (without AGPL source-disclosure terms) is available -
+-- contact legal@dankest.llc.
+--
+--********************************************************************
+
+-- xchain:migration mode=manual
+-- (manual: a charset conversion re-encodes and rewrites every row of `transactions`,
+--  which can be large. Never run that unattended at startup on a validator fleet.)
+--
+-- Migration: transactions.data and mempool_transactions.data  utf8mb3 -> utf8mb4.
+--
+-- WHY
+-- ---
+-- The encoder accepts every string in validateDataParam and emits it as UTF-8, so a
+-- MEMO carrying an emoji (or any other non-BMP character) reaches the chain as valid
+-- four-byte UTF-8. The decoder reconstructs that string correctly, but both `data`
+-- columns were MEDIUMTEXT under the table default CHARSET=utf8 (utf8mb3), which holds
+-- at most three bytes per character. Under a strict sql_mode MariaDB rejects the
+-- INSERT with errno 1366; db.js lists 1366 in DETERMINISTIC_WRITE_ERRNOS, so the block
+-- loop classifies it POISON_ROW and quarantines the fee-paid transaction with no ACTION
+-- row at all. The mempool path fails the same INSERT and re-skips the tx on every poll.
+-- Under a lax sql_mode the write truncates instead, which loses the value just as
+-- silently. Rejecting these characters in the encoder is not the fix: a decoder must be
+-- able to store any valid on-chain value regardless of which encoder produced it.
+--
+-- COLUMN-LEVEL, NOT `CONVERT TO CHARACTER SET`
+-- --------------------------------------------
+-- Only the two `data` columns move. The table defaults stay utf8mb3 deliberately:
+-- mempool_transactions.tx_hash is an indexed VARCHAR(250), which is 750 bytes under
+-- utf8mb3 and 1000 under utf8mb4, past InnoDB's 767-byte key limit on a table still in
+-- COMPACT or REDUNDANT row format. Neither `data` column is indexed, so this conversion
+-- has no key-length consequence at all.
+--
+-- FLEET ORDERING: APPLY EVERYWHERE BEFORE ANY NON-BMP TRANSACTION IS PROCESSED
+-- ---------------------------------------------------------------------------
+-- xchain-sync replicates the decoder set to validator followers, and `transactions` is
+-- part of that set. A node that has NOT applied this migration quarantines a transaction
+-- that a migrated node stores, so a half-migrated fleet diverges on chain state rather
+-- than merely lagging. Apply it fleet-wide in one coordinated window with the decoders
+-- stopped, before any non-BMP ACTION can be mined. db.js `_assertActionDataIsUtf8mb4`
+-- fails decoder startup while either column is still utf8mb3, so a missed node is loud
+-- instead of silently divergent; that guard is the reason a forgotten rollout cannot
+-- turn into a quiet fork.
+--
+-- The `transactions` table can be large and this is a full-table rewrite; budget the
+-- window accordingly. Fresh installs get utf8mb4 straight from src/sql/*.sql and never
+-- run this migration.
+--
+-- NOT COVERED HERE: mempool_transactions.raw_data. That column is purely additive, so
+-- the startup drift reconciler (verifyTables -> alterTableForDrift) adds it on its own;
+-- per src/sql/migrations/README.md additive drift does not get a migration.
+
+ALTER TABLE transactions         MODIFY data MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE mempool_transactions MODIFY data MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

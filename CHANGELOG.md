@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Action text columns are utf8mb4, so a valid non-BMP MEMO is stored instead of quarantining the fee-paid transaction with no ACTION row ().
+- Pending mempool rows carry `raw_data`, so FILE content and gated ciphertext appear immediately instead of only after confirmation ().
 - Corrected a protocol-constants header that claimed a cross-repo tripwire which does not exist ().
 - Reorg-depth ceiling and the UTXO-tracker undo window are reconciled rather than hand-mirrored ().
 - review review-round fixes: reorg verify errors propagate on the equal-height branch, start() fails fast with bounded DB retries, coin-prefixed cadence logs, pubkeys widened to VARCHAR(130) with migration, migration guard on early returns, manifest alias conformance test, safe-depth changelog correction.
