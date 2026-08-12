@@ -21,6 +21,7 @@ const assert = require('assert')
 const sinon = require('sinon')
 const XChainDecoder = require('../../src/XChainDecoder')
 const { createMockDatabase, createMockConnector, captureConsole } = require('./helpers')
+const { waitUntil } = require('../helpers/waitUntil')
 
 describe('CE-08: Signal Handling and Graceful Shutdown', function () {
     let decoder
@@ -44,7 +45,11 @@ describe('CE-08: Signal Handling and Graceful Shutdown', function () {
         mockConnector.getBlockchainInfo.resolves({ blocks: 0, verificationprogress: 1.0 })
         mockDb.getLastBlockIndex.resolves(0)
 
-        setTimeout(() => decoder.stop(), 100)
+        // Stop once the main loop is actually running (it has polled the node at
+        // least once) rather than after a fixed wall-clock delay.
+        waitUntil(() => mockConnector.getBlockchainInfo.called, { timeout: 5000 })
+            .then(() => decoder.stop())
+            .catch(() => {})
 
         await captureConsole(async () => {
             await decoder.start()
@@ -57,10 +62,11 @@ describe('CE-08: Signal Handling and Graceful Shutdown', function () {
         mockConnector.getBlockchainInfo.resolves({ blocks: 0, verificationprogress: 1.0 })
         mockDb.getLastBlockIndex.resolves(0)
 
-        // Let it run long enough to start mempool interval
-        setTimeout(() => {
-            decoder.stop()
-        }, 500)
+        // Stop once the mempool interval has actually been created (the signal the
+        // test is really waiting for) rather than after a fixed wall-clock delay.
+        waitUntil(() => decoder.mempoolInterval != null, { timeout: 5000 })
+            .then(() => decoder.stop())
+            .catch(() => {})
 
         const { logs } = await captureConsole(async () => {
             await decoder.start()
@@ -77,7 +83,11 @@ describe('CE-08: Signal Handling and Graceful Shutdown', function () {
         mockConnector.getBlockchainInfo.resolves({ blocks: 0, verificationprogress: 1.0 })
         mockDb.getLastBlockIndex.resolves(0)
 
-        setTimeout(() => decoder.stop(), 300)
+        // Stop once the decoder has actually caught up to the chain tip rather
+        // than after a fixed wall-clock delay.
+        waitUntil(() => decoder.isSynced(), { timeout: 5000 })
+            .then(() => decoder.stop())
+            .catch(() => {})
 
         await captureConsole(async () => {
             await decoder.start()

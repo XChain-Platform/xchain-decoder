@@ -30,10 +30,10 @@ describe('Malformed Data Integration', () => {
         it('should not store a plain BTC transfer (no OP_RETURN)', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const { txHash, blockIndex } = await txBuilder.broadcastPlainTransaction(funded)
+            // waitForDecoder blocks until the decoder has committed this block (and
+            // any transactions in it) to the DB, so a would-be row is already present
+            // by the time it returns: no fixed settle delay is needed.
             await txBuilder.waitForDecoder(blockIndex)
-
-            // Give decoder a moment to process
-            await new Promise(r => setTimeout(r, 2000))
 
             // The plain tx should NOT appear in the decoder's transactions table
             const tx = await global.db.getTransaction(txHash)
@@ -46,8 +46,6 @@ describe('Malformed Data Integration', () => {
             const { txHash, blockIndex } = await txBuilder.broadcastNonXchnOpReturn(funded)
             await txBuilder.waitForDecoder(blockIndex)
 
-            await new Promise(r => setTimeout(r, 2000))
-
             const tx = await global.db.getTransaction(txHash)
             assert.strictEqual(tx, null, 'Non-XCHN OP_RETURN tx should not be in decoder DB')
         })
@@ -57,8 +55,6 @@ describe('Malformed Data Integration', () => {
             const textData = Buffer.from('HELLO WORLD THIS IS NOT XCHN', 'utf-8')
             const { txHash, blockIndex } = await txBuilder.broadcastNonXchnOpReturn(funded, textData)
             await txBuilder.waitForDecoder(blockIndex)
-
-            await new Promise(r => setTimeout(r, 2000))
 
             const tx = await global.db.getTransaction(txHash)
             assert.strictEqual(tx, null, 'Text OP_RETURN should not be stored')
