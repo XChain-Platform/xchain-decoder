@@ -96,6 +96,7 @@ parity gate in `bin/check-observability-parity.js`.
 |---|---|
 | `npm run api` | Start the decoder and API server |
 | `npm run migrate` | Apply pending database migrations (auto + manual; `--file <name>` scopes to specific migration(s)) |
+| `npm run ci` | The full no-external-services gate: unit, security, smoke, regression, chaos, and a 100-iteration fuzz pass (about a minute) |
 | `npm run test:smoke` | Smoke tests (58 tests, no external services) |
 | `npm run test:unit` | Unit tests (954 tests, no external services) |
 | `npm run test:security` | Security tests (83 tests, no external services) |
@@ -127,6 +128,10 @@ parity gate in `bin/check-observability-parity.js`.
 | Benchmarks | 7 | Deobfuscation, parse-transaction, block-processing, sustained-sync, spike-load, large-payload, mempool-stress |
 | Mutation | 2 | Phase 1 (unit) and Phase 2 (unit + security) via Stryker Mutator |
 | **Total** | **1300+** | |
+
+Which tier runs in which gate is recorded in `test/tier-manifest.json`, including the
+written reason the benchmark and mutation tiers are gated by nothing. The mapping is
+enforced by `test/unit/tierManifest.test.js`, so a tier cannot quietly drop out of CI.
 
 ---
 

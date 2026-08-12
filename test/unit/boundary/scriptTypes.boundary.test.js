@@ -122,6 +122,67 @@ describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
         assert.strictEqual(result.data.length, 0)
     })
 
+    // S-1c: same non-Buffer branch as S-1b, but the empty leading push is followed by
+    // a second push (the rawData the sender paid to carry). The decoder still blanks
+    // the payload and never reads that push; 's visibility-only change makes
+    // that loss observable (parse_errors + a distinct log line) without changing what
+    // the decoder accepts. End-to-end acceptance of this wire shape is owned by the
+    // cross-service flag-day spec that also governs xchain-encoder's validator.
+    it('[REGRESSION P1] R-SCR-005 S-1c: empty leading push with a trailing rawData push is reported, not silently blanked', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+
+        const rawDataPush = Buffer.from('rawData the decoder never reads')
+        const scriptPayload = bitcoin.script.compile([Buffer.alloc(0), rawDataPush])
+        const cipher = encryptBuf(Buffer.concat([Buffer.from('XCHN'), scriptPayload]))
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
+        addP2PKHOutput(tx)
+
+        const errorLog = sinon.stub(console, 'error')
+        const parseErrorsBefore = decoder.parseErrors
+        const result = await decoder.parseTransaction(tx)
+        const messages = errorLog.getCalls().map(call => String(call.args[0]))
+        errorLog.restore()
+
+        // Reported distinctly: monitoring counter bumped and the shape named in the log.
+        assert.strictEqual(decoder.parseErrors, parseErrorsBefore + 1, 'parse_errors must count the empty leading push')
+        const reported = messages.filter(message => message.includes('empty leading push (OP_0)'))
+        assert.strictEqual(reported.length, 1, `expected one empty-leading-push report, got: ${JSON.stringify(messages)}`)
+        assert.ok(reported[0].includes(tx.getId()), 'report must name the transaction')
+        assert.ok(reported[0].includes(String(rawDataPush.length)), 'report must name the dropped push size')
+
+        // Acceptance unchanged: payload still blanked, rawData still never read.
+        assert.ok(result)
+        assert.ok(Buffer.isBuffer(result.data), 'result.data must stay a Buffer')
+        assert.strictEqual(result.data.length, 0, 'acceptance must not change: payload stays blanked')
+        assert.strictEqual(result.rawData, null, 'acceptance must not change: rawData stays unread')
+    })
+
+    // S-1d: the inert case the blanking was written for (a lone OP_0 payload, S-1b's
+    // shape) must stay silent, so the new report cannot become monitoring noise.
+    it('[REGRESSION P1] R-SCR-006 S-1d: a lone OP_0 payload stays silent (no false parse error)', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+
+        const cipher = buildXchnPayload(Buffer.alloc(0))
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
+        addP2PKHOutput(tx)
+
+        const errorLog = sinon.stub(console, 'error')
+        const parseErrorsBefore = decoder.parseErrors
+        const result = await decoder.parseTransaction(tx)
+        const messages = errorLog.getCalls().map(call => String(call.args[0]))
+        errorLog.restore()
+
+        assert.strictEqual(decoder.parseErrors, parseErrorsBefore, 'a lone OP_0 payload must not bump parse_errors')
+        assert.strictEqual(messages.filter(message => message.includes('empty leading push (OP_0)')).length, 0,
+            `lone OP_0 must not be reported, got: ${JSON.stringify(messages)}`)
+        assert.ok(Buffer.isBuffer(result.data))
+        assert.strictEqual(result.data.length, 0)
+    })
+
     // S-2: OP_RETURN with 76-byte push (max single-byte push opcode)
     it('S-2: OP_RETURN with 76-byte push: full deobfuscation path', async () => {
         const tx = new bitcoin.Transaction()

@@ -57,6 +57,18 @@ class CryptoNetworks {
         return p.tick;
     }
 
+    // Pinned block-0 hash of the CHAIN this network key names, or null when the
+    // registry leaves it unpinned (every regtest, and any mainnet/testnet whose real
+    // hash an operator has not yet captured off the fleet's own node). The decoder
+    // asserts it against `getblockhash 0` to refuse a same-tier foreign endpoint,
+    // which `chain` alone cannot detect (chainIdentity.js). Not part of any consensus
+    // hash: it identifies the endpoint, not how bytes are read.
+    static getChainGenesisHash(networkName){
+        const p = parseNetworkName(networkName);
+        if(!p) throw new TypeError(`Unknown network: "${networkName}". Supported: ${SUPPORTED}`);
+        return coins.getCoinConfig(p.tick, p.net).chainGenesisHash || null;
+    }
+
     // Indexing start height (not part of any consensus hash). Unknown/regtest -> 0.
     static getFirstBlock(networkName){
         const p = parseNetworkName(networkName);

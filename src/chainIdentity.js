@@ -22,27 +22,39 @@
  * half of the identity decision so it is testable outside the loop, mirroring
  * how oracleFeeOutput.js holds the capture decisions.
  *
- * SCOPE, and what is deliberately NOT closed here. `chain` distinguishes the
- * network TIER, never the coin: a Bitcoin-mainnet node and a Dogecoin-mainnet
- * node both report chain="main". Closing the cross-COIN case needs a block-0
- * genesis-hash pin per coin/network, and those constants belong in the coin
- * registry (src/coins/{BTC,LTC,DOGE}.js), which is vendored byte-identically
- * from canonical xchain-hub/src/coins into ten repos and guarded by
- * test/unit/coins-conformance.test.js. That is a cross-repo sync wave, not a
- * decoder-local edit, so it is tracked separately and this file covers the
- * wrong-TIER half only.
+ * TWO independent decisions live here, because the endpoint lies about two
+ * different things and the evidence for each is different.
  *
- * A SECOND hole survives inside the tier, and it is not the coin axis: `test`,
- * `testnet3` and `testnet4` all map to `testnet` below, yet Bitcoin testnet3 and
- * testnet4 are DIFFERENT chains with different genesis blocks and different
- * history. A testnet4 node under a testnet3-configured decoder therefore agrees
- * with this gate and still walks the finding's whole failure path: its blocks
- * decode under the configured rules and its tip drives the reorg branch. The
- * collapse is deliberate, because `chain` carries no evidence that separates
- * them - the address rules are identical and the only distinguishing constant is
- * the block-0 hash, i.e. the same registry pin the cross-COIN half waits on. Read
- * "wrong-TIER half closed" as "a recognized chain string proving a different
- * tier is refused", never as "the endpoint is proven to be on our chain".
+ * 1. TIER (chainTierMismatch). `chain` from getblockchaininfo distinguishes the
+ *    network TIER, never the coin: a Bitcoin-mainnet node and a Dogecoin-mainnet
+ *    node both report chain="main". So this decision can prove "wrong tier" and
+ *    nothing more. Read "wrong-TIER half closed" as "a recognized chain string
+ *    proving a different tier is refused", never as "the endpoint is proven to be
+ *    on our chain".
+ *
+ *    A hole survives INSIDE the tier even for one coin: `test`, `testnet3` and
+ *    `testnet4` all map to `testnet` below, yet Bitcoin testnet3 and testnet4 are
+ *    DIFFERENT chains with different genesis blocks and different history. A
+ *    testnet4 node under a testnet3-configured decoder agrees with this gate and
+ *    still walks the finding's whole failure path. The collapse is deliberate:
+ *    `chain` carries no evidence that separates them.
+ *
+ * 2. CHAIN (chainGenesisMismatch). The block-0 hash is the only constant that
+ *    separates same-tier chains, so it closes BOTH holes tier cannot reach: the
+ *    cross-COIN one and the testnet3-vs-testnet4 one. The pinned value belongs in
+ *    the coin registry (src/coins/{BTC,LTC,DOGE}.js, `chainGenesisHash` per
+ *    network), which is vendored byte-identically from canonical
+ *    xchain-hub/src/coins into ten repos and guarded by
+ *    test/unit/coins-conformance.test.js; it is deliberately kept OUT of
+ *    consensusSubset(), because it identifies the ENDPOINT rather than deciding
+ *    how a block's bytes are read, so arming one moves no CONSENSUS_CONFIG_PIN
+ *    and needs no flag-day.
+ *
+ *    The pin is null (unpinned) until an operator reads the authoritative hash
+ *    off the fleet's own node (`getblockhash 0`). Unpinned means the check is
+ *    SKIPPED, not that the endpoint passed: a guessed or stale constant would
+ *    fail-close a healthy decoder, which is the one outcome worse than the hole
+ *    it closes. XChainDecoder says the unchecked state out loud at boot.
  *
  * BOTH tip-refresh paths are gated, not just the loop's. getBlockchainInfo() is
  * called in two places: the block loop's throttled refresh, and verifyReorg's
@@ -104,4 +116,47 @@ function chainFieldMissing(reportedChain){
     return typeof reportedChain !== 'string' || reportedChain === '';
 }
 
-module.exports = { CHAIN_TO_NETWORK, chainTierMismatch, chainFieldMissing };
+// Does the node's own block-0 hash contradict the one pinned for this
+// coin/network (coins registry, chainGenesisHash)? Returns a human reason string
+// on a DEFINITE mismatch, else null. This is the decision the tier gate above
+// cannot make: it is the only evidence that separates BTC-mainnet from
+// DOGE-mainnet, or Bitcoin testnet3 from testnet4.
+//
+// Fails OPEN in two cases, both deliberate, mirroring chainTierMismatch:
+//
+//   1. Nothing is pinned. Until an operator captures the real hash off the
+//      fleet's own node the registry carries null, and an unpinned coin/network
+//      must run exactly as it did before this gate existed rather than halt.
+//   2. The node returned nothing usable (RPC error, trimmed proxy, empty
+//      string). Inability to READ the hash is not evidence of a foreign chain,
+//      and turning an RPC blip into a halt would be a self-inflicted outage.
+//
+// It fails CLOSED on the case it can actually prove: two hashes that are both
+// present and differ. There the endpoint is demonstrably a different chain, and
+// continuing decodes foreign blocks under our address rules while a foreign tip
+// drives deleteBlockByIndex() over valid local state.
+//
+// Compared case-insensitively: the pin is operator-entered, and Core prints the
+// hash lowercase, so a pasted uppercase pin must not read as a foreign chain.
+function chainGenesisMismatch(pinnedHash, reportedHash){
+    if (typeof pinnedHash !== 'string' || pinnedHash === '') return null;
+    if (typeof reportedHash !== 'string' || reportedHash === '') return null;
+    if (pinnedHash.toLowerCase() === reportedHash.toLowerCase()) return null;
+    return 'node block-0 hash is ' + reportedHash + ', but this decoder is pinned to ' +
+        pinnedHash + ', so the endpoint is serving a different chain';
+}
+
+// True when no block-0 hash is pinned for this coin/network, so the cross-coin
+// and testnet3/testnet4 identity check cannot run at all. Lets the caller say the
+// unchecked state out loud once instead of letting a skip read as a pass.
+function chainGenesisUnpinned(pinnedHash){
+    return typeof pinnedHash !== 'string' || pinnedHash === '';
+}
+
+module.exports = {
+    CHAIN_TO_NETWORK,
+    chainTierMismatch,
+    chainFieldMissing,
+    chainGenesisMismatch,
+    chainGenesisUnpinned,
+};

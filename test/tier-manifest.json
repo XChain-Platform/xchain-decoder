@@ -1,0 +1,75 @@
+{
+    "$comment": [
+        "Gate map for every test tier in this repo .",
+        "Before this file existed, `npm run ci` ran the unit and security tiers only, so the",
+        "e2e, integration, chaos, fuzz and regression suites were gated by nothing: they could",
+        "rot red for months without any gate noticing. Each tier below is now either wired into",
+        "a gate or carries a written reason it is not, and test/unit/tierManifest.test.js proves",
+        "the mapping still matches package.json, the workflow, and the files on disk.",
+        "Adding a tier means adding an entry here, or the enforcement test fails."
+    ],
+    "gates": {
+        "fast": {
+            "entry": "ci",
+            "description": "npm run ci. No external services, runs on every push and pull request via .github/workflows/ci.yml."
+        },
+        "docker": {
+            "workflow": ".github/workflows/ci.yml",
+            "job": "docker-suites",
+            "description": "Tiers that bring up their own throwaway regtest node and MariaDB with docker compose. Structurally un-runnable in the fast tier, so they run in their own workflow job on a runner that has docker."
+        }
+    },
+    "suites": {
+        "unit": {
+            "gate": "ci:unit",
+            "gateKind": "fast",
+            "specs": ["test/unit/**/*.test.js"]
+        },
+        "security": {
+            "gate": "ci:security",
+            "gateKind": "fast",
+            "specs": ["test/security/**/*.security.test.js"]
+        },
+        "smoke": {
+            "gate": "ci:smoke",
+            "gateKind": "fast",
+            "specs": ["test/smoke/**/*.smoke.js"]
+        },
+        "chaos": {
+            "gate": "ci:chaos",
+            "gateKind": "fast",
+            "specs": ["test/chaos/**/*.chaos.js"]
+        },
+        "fuzz": {
+            "gate": "ci:fuzz",
+            "gateKind": "fast",
+            "specs": ["test/fuzz/harness/**/*.fuzz.js"],
+            "note": "The gate runs the harness at FUZZ_ITERATIONS=100, which is a crash/invariant smoke pass over every fuzzer. The long soak (npm run test:fuzz, 300s timeouts) stays operator-run: a gate that takes minutes per push would be routed around."
+        },
+        "regression": {
+            "gate": "ci:regression",
+            "gateKind": "fast",
+            "specs": ["test/regression/**/*.test.js"],
+            "note": "The directory is an empty template today. It is gated anyway so the first regression case landed here is executed by CI on the commit that adds it, rather than on whatever later commit notices the tier was never wired. The graded [REGRESSION Pn] cases living inside the unit and security tiers are already covered by those gates."
+        },
+        "integration": {
+            "gate": "test:integration",
+            "gateKind": "docker",
+            "specs": ["test/integration/**/*.test.js"]
+        },
+        "e2e": {
+            "gate": "test:e2e",
+            "gateKind": "docker",
+            "specs": ["test/e2e/**/*.e2e.js"]
+        },
+        "benchmarks": {
+            "ungated": true,
+            "reason": "Performance measurement, not a pass/fail suite: test/benchmarks/harness.js reports throughput and latency against test/benchmarks/baseline.json on the machine that runs it. Shared CI runners have no stable performance floor, so a gate on these numbers would fail on runner noise rather than on a regression. Run npm run test:bench:compare on a fixed box when changing the parse or block path."
+        },
+        "mutation": {
+            "ungated": true,
+            "reason": "Stryker mutation runs re-execute the unit suite once per mutant, which is hours of runner time for a score that moves only when test quality changes. It is a periodic audit of the tests themselves rather than a gate on the code under change. Run npm run test:mutation locally when reworking a suite."
+        }
+    },
+    "supportDirectories": ["fixtures", "helpers"]
+}

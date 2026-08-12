@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - review review-round fixes: reorg verify errors propagate on the equal-height branch, start() fails fast with bounded DB retries, coin-prefixed cadence logs, pubkeys widened to VARCHAR(130) with migration, migration guard on early returns, manifest alias conformance test, safe-depth changelog correction.
 
 ### Added
+- `npm run ci` now runs the smoke, regression, chaos and fuzz tiers as well as unit and security, and the docker-gated integration and e2e tiers run in a new `docker-suites` CI job .
+- `test/tier-manifest.json` records the gate for every test tier, or a written reason it has none, enforced by `test/unit/tierManifest.test.js`.
 - Bind `OP_RETURN_PUSH_OVERHEAD` by name from the vendored constants, with a conformance test pinning the value against what `compiledPushSize` adds ().
 
 ### Changed
@@ -28,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DISPENSER opens now fail loud on a compacted `^<id>` `GET_ADDRESS` instead of silently registering a dead dispenser. The decoder cannot resolve an `^<id>` index-address reference into its own address id space, so such an open would be keyed on the literal token, never match a payment output, and silently never dispense (while creating a junk address row). The open is now skipped and logged as a parse error identifying the tx index and the unresolved token; the SDK no longer compacts this field, so a residual token indicates a third-party composer or a historical replay.
 - P2SH/P2WSH reveal fee outputs: the native-coin fee output attributed from a reveal's funding (commit) transaction is now stored at `vout + FUNDING_VOUT_BASE` under the reveal's `tx_index`, a domain disjoint from the reveal tx's own vouts. Previously it kept the funding tx's raw vout and could collide on the `transaction_outputs` `(tx_index, vout)` primary key with a reveal-tx dispense/COINPAY output at the same vout number; the duplicate insert was silently dropped, so the indexer saw no fee output and wrongly rejected the action on LTC/DOGE (or fell back to XCHAIN balance deduction on BTC) even though the fee was paid on-chain. Forward-only: block ranges already processed with a dropped fee row must be re-indexed to recover them.
 - Database gains a `_createConnection` test seam so verifyDatabase/createDatabase unit tests stub it instead of mariadb's non-configurable `createConnection` export (5 sinon failures fixed).
+- Removed `test/XChainDecoder.test.js`, a pre-fork file no gate ran whose four fixtures were encrypted under a superseded obfuscation scheme; the same cases are covered in the unit tier .
 - Prevout/fee-output RPC lookup failures now throw tagged errors and the block loop retries the block indefinitely, so committed block contents can no longer depend on which instance's RPC happened to succeed.
 - The block loop aborts and retries on every rollback-signalling `false` db return, re-deriving its block/tx cursors from the DB so a retried block assigns the same `tx_index` values as a clean instance.
 - `getAllOpenDispenserAddresses` returns null on query error so a failed read can no longer decode a block against a silently-empty dispenser set.

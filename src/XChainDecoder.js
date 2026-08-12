@@ -30,7 +30,7 @@ const BlockchainConnector = require('./BlockchainConnector')
 const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
 const { isOracleFeeCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress } = require('./oracleFeeOutput')
-const { chainTierMismatch, chainFieldMissing } = require('./chainIdentity')
+const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./chainIdentity')
 const strictTextDecoder = new TextDecoder('utf-8', { fatal: true })
 const lenientTextDecoder = new TextDecoder('utf-8')
 
@@ -324,6 +324,16 @@ class XChainDecoder {
         this.dbUser = dbUser
         this.dbPassword = dbPassword
         this.startBlockIndex = CryptoNetworks.getFirstBlock(network)
+        // Pinned block-0 hash of this chain, or null when the registry leaves it
+        // unpinned (). It is the ONLY value that separates a same-tier foreign
+        // endpoint from ours - BTC-mainnet and DOGE-mainnet both report chain="main" -
+        // so start() and the throttled tip refresh assert it against `getblockhash 0`.
+        this.chainGenesisHash = CryptoNetworks.getChainGenesisHash(network)
+        // Timestamp (ms) of the last SUCCESSFUL block-0 read. Zero means never read, so
+        // the first refresh always checks. Throttled on its own clock rather than riding
+        // the getblockchaininfo refresh: a caught-up loop re-polls the tip every
+        // iteration, and block 0 cannot change under a chain that is still the same chain.
+        this.chainGenesisCheckedAt = 0
         // Default EXPIRATION window (days) for v0 dispenser opens that omit the
         // EXPIRATION field; must match the indexer's default-expiration rule.
         this.expirationFeeDefaultDays = CryptoNetworks.getExpirationFeeDefaultDays(network)
@@ -1461,6 +1471,29 @@ class XChainDecoder {
                     // hex-encoding paths). No valid payload is zero-length, so this is inert
                     // for real data.
                     if (!Buffer.isBuffer(decompiledData[0])){
+                        // Visibility only . One shape inside this branch is not the
+                        // inert zero-length case the blanking was written for: an EMPTY LEADING
+                        // PUSH (OP_0, which decompiles to the integer 0) followed by more payload.
+                        // The action push is empty but a second push -- the rawData the sender
+                        // paid to carry -- is still sitting in the stream, and the blanking below
+                        // discards it without a trace, so an operator seeing no action for the tx
+                        // has nothing to correlate. Report it distinctly and count it toward
+                        // parse_errors (a monitoring counter only; see decoderMetrics/api).
+                        // ACCEPTANCE IS DELIBERATELY UNCHANGED: the payload is still blanked and
+                        // rawData/getSource are still left untouched. Whether this wire shape
+                        // should be accepted end-to-end is owned by the cross-service flag-day
+                        // spec that also governs xchain-encoder/src/validator.js, and must not
+                        // change from this lane alone.
+                        if (decompiledData[0] === 0 && (decompiledData.length > 1 || dataBuffer.length > 1)){
+                            this.parseErrors++
+                            const droppedPushBytes = decompiledData
+                                .slice(1)
+                                .reduce((total, push) => total + (Buffer.isBuffer(push) ? push.length : 0), 0)
+                            console.error(`Tx ${nextTxId}: empty leading push (OP_0) in a ${dataBuffer.length}-byte ` +
+                                `payload carrying ${decompiledData.length - 1} further element(s) totalling ` +
+                                `${droppedPushBytes} data byte(s); payload blanked and the trailing push(es), ` +
+                                `including any rawData, are NOT read (acceptance unchanged, )`)
+                        }
                         dataBuffer = Buffer.allocUnsafe(0)
                     } else {
                         dataBuffer = decompiledData[0]
@@ -1778,6 +1811,41 @@ class XChainDecoder {
         return this.connector.getBlockWithoutAuxPow(blockHash)
     }
 
+    // Read the node's own block-0 hash and compare it against the registry pin for this
+    // coin/network (). Returns a mismatch reason when the endpoint is PROVEN to
+    // be a different chain, else null - which covers three different situations on
+    // purpose: nothing pinned, nothing readable, and agreement. Never throws; the caller
+    // decides what a proven mismatch costs (start() halts, the block loop refuses and
+    // re-polls). This is the check `chain` cannot make: block 0 is the only constant that
+    // separates BTC-mainnet from DOGE-mainnet, or Bitcoin testnet3 from testnet4.
+    async verifyChainGenesis(){
+        if (chainGenesisUnpinned(this.chainGenesisHash)) return null
+        // Optional-call guard, matching the probeTxIndex call in start(): tests stub
+        // this.connector with plain objects carrying only the methods under test.
+        if (typeof this.connector.getBlockHash !== 'function') return null
+
+        let reported = null
+        try {
+            reported = await this.connector.getBlockHash(0)
+        } catch (e){
+            // Unreadable is not proof of a foreign chain. chainGenesisCheckedAt stays put
+            // so the next refresh retries at once rather than waiting out the throttle.
+            this.log('Could not read the node block-0 hash to verify chain identity (' +
+                ((e && e.message) ? e.message : e) + '); the pin stays unverified for now.')
+            return null
+        }
+        if (typeof reported !== 'string' || reported === ''){
+            this.log('Node returned no usable block-0 hash, so chain identity stays unverified.')
+            return null
+        }
+
+        const mismatch = chainGenesisMismatch(this.chainGenesisHash, reported)
+        // Only an actual comparison counts as a check; a mismatch deliberately does NOT
+        // refresh the timestamp, so the refusal is re-proved on every retry.
+        if (!mismatch) this.chainGenesisCheckedAt = Date.now()
+        return mismatch
+    }
+
     async start(){
         // Verify the bundled canonical coin files against CONSENSUS_CONFIG_PIN
         // before touching the DB or processing any block, mirroring the indexer
@@ -1786,6 +1854,32 @@ class XChainDecoder {
         // cannot parse on-chain bytes with divergent network params (fail-closed,
         // deliberately not wrapped in try/catch).
         require('./coins').verifyConsensusPin(this.consensusNetwork)
+
+        // Refuse an endpoint that is provably a DIFFERENT CHAIN before the DB is touched
+        // or a single block is read (). The tier gate in the block loop can only
+        // prove "wrong tier"; this proves "wrong chain", which is the case that actually
+        // corrupts state: a same-tier foreign node's blocks decode under our address rules
+        // and its tip drives deleteBlockByIndex() over valid local history.
+        //
+        // Fail-closed on a PROVEN mismatch only (deliberately not wrapped in try/catch,
+        // matching verifyConsensusPin above): an unreachable node or an unpinned
+        // coin/network returns null from verifyChainGenesis and start() continues, so a
+        // node that is merely still booting never turns this into a crash loop.
+        const genesisMismatch = await this.verifyChainGenesis()
+        if (genesisMismatch)
+            throw new Error('Refusing to start: ' + genesisMismatch + '. Point the decoder at a ' +
+                this.coinTick + '/' + this.consensusNetwork + ' node, or correct the pinned ' +
+                'chainGenesisHash in the coin registry.')
+
+        // An unpinned network is UNCHECKED, not verified. Say so once at boot rather than
+        // letting a silent skip read as proof the endpoint is ours (same discipline as the
+        // absent-`chain` line in the block loop). Regtest is excluded because it is
+        // unpinnable by design: every stack mines its own chain.
+        if (chainGenesisUnpinned(this.chainGenesisHash) && this.consensusNetwork !== 'regtest')
+            this.log('No chainGenesisHash is pinned for ' + this.coinTick + '/' + this.consensusNetwork +
+                ', so this endpoint is not proven to be on our chain: a same-tier foreign node ' +
+                '(another coin, or Bitcoin testnet3 vs testnet4) would still be decoded. Pin the ' +
+                "value from the node's own `getblockhash 0` to close it.")
 
         if (!this.db) {
             this.db = new Database(this.dbUrl, this.dbPort, this.dbName, this.dbUser, this.dbPassword)
@@ -1901,6 +1995,10 @@ class XChainDecoder {
         // Wrong-chain endpoint latch (), same shape as nodeSyncedProblem: the
         // refusal repeats every 3-second retry, so log it on the transition only.
         let wrongChainProblem = false
+        // Wrong-CHAIN latch (block-0 pin, ). Separate from wrongChainProblem
+        // above because the two prove different things and can fire independently: a
+        // same-tier foreign endpoint passes the tier gate and fails this one.
+        let wrongGenesisProblem = false
         // Said once per process, not per transition: an endpoint that omits `chain` omits
         // it every poll, so a latch here would be a per-transition line that never toggles.
         let chainFieldMissingLogged = false
@@ -2022,6 +2120,30 @@ class XChainDecoder {
                         chainFieldMissingLogged = true
                         this.log("getblockchaininfo carries no 'chain' field, so the endpoint's network tier cannot be verified; " +
                             'endpoint-to-network binding rests on deployment config alone.')
+                    }
+
+                    // Re-prove the CHAIN, not just the tier, on the same throttled cadence
+                    // (). Boot-time verification alone is not enough: NODE_URL_FALLBACK
+                    // can move this decoder onto a different endpoint mid-run, and the failover
+                    // target is exactly where a wrong-coin URL hides. Its own timestamp keeps
+                    // this to one extra getblockhash per BLOCKCHAIN_INFO_REFRESH_MS instead of
+                    // one per loop iteration (a caught-up loop re-polls the tip constantly, and
+                    // block 0 cannot move under a chain that is still the same chain).
+                    if (!chainGenesisUnpinned(this.chainGenesisHash)
+                        && (Date.now() - this.chainGenesisCheckedAt >= BLOCKCHAIN_INFO_REFRESH_MS)){
+                        const genesisMismatch = await this.verifyChainGenesis()
+                        if (genesisMismatch){
+                            if (!wrongGenesisProblem){
+                                this.logError('Refusing to decode: ' + genesisMismatch +
+                                    '. Point the decoder at a ' + this.coinTick + '/' + this.consensusNetwork +
+                                    ' node and restart.')
+                            }
+                            wrongGenesisProblem = true
+                            lastBlockchainInfo = null
+                            await this.sleep(3000)
+                            continue
+                        }
+                        wrongGenesisProblem = false
                     }
 
                     if (lastBlockchainInfo["verificationprogress"] < MIN_VERIFICATION_PROGRESS_TO_PARSE){

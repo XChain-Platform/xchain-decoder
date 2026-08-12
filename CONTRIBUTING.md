@@ -62,19 +62,36 @@ npm run migrate    # apply database migrations
 
 The decoder runs a layered suite. Pick the tier that matches your change:
 
-| Tier | Command | Needs external services |
-|---|---|---|
-| Smoke | `npm run test:smoke` | No |
-| Unit | `npm run test:unit` | No |
-| Security | `npm run test:security` | No |
-| CI (unit, fast gate) | `npm run ci` | No |
-| Integration | `npm run test:integration` | Docker (the tier starts its own throwaway regtest node and MariaDB) |
-| End-to-end | `npm run test:e2e` | Docker (its own throwaway regtest node and MariaDB, on separate ports from the integration tier) |
-| Fuzz | `npm run test:fuzz` (`:quick` for 100 iterations) | No |
-| Chaos | `npm run test:chaos` | No |
-| Regression | `npm run test:regression` (`:critical` = P0 only) | No |
+| Tier | Command | Needs external services | Gated by |
+|---|---|---|---|
+| Smoke | `npm run test:smoke` | No | `npm run ci` |
+| Unit | `npm run test:unit` | No | `npm run ci` |
+| Security | `npm run test:security` | No | `npm run ci` |
+| Regression | `npm run test:regression` (`:critical` = P0 only) | No | `npm run ci` |
+| Chaos | `npm run test:chaos` | No | `npm run ci` |
+| Fuzz | `npm run test:fuzz` (`:quick` for 100 iterations) | No | `npm run ci` (100-iteration pass) |
+| Integration | `npm run test:integration` | Docker (the tier starts its own throwaway regtest node and MariaDB) | CI job `docker-suites` |
+| End-to-end | `npm run test:e2e` | Docker (its own throwaway regtest node and MariaDB, on separate ports from the integration tier) | CI job `docker-suites` |
+| Benchmarks | `npm run test:bench` | No | Nothing, on purpose (see below) |
+| Mutation | `npm run test:mutation` | No | Nothing, on purpose (see below) |
 
-Run the no-external-services tiers before every commit; the README documents the full script catalogue. New parsing or deobfuscation logic should come with fuzz and security coverage, since this service's entire input surface is attacker-controlled.
+`npm run ci` is the whole no-external-services gate and takes about a minute: unit,
+security, smoke, regression, chaos, and a 100-iteration fuzz pass. Run it before every
+commit. The docker tiers cannot run inside it (each brings its own containers up), so
+they run as their own workflow job instead.
+
+Benchmarks and mutation runs are deliberately ungated: benchmarks measure throughput
+against a baseline that shared CI runners cannot reproduce, and a Stryker run re-executes
+the unit suite once per mutant. Both are periodic audits you run on a fixed machine, not
+per-push gates.
+
+`test/tier-manifest.json` is the authoritative map of tier to gate, and
+`test/unit/tierManifest.test.js` enforces it: adding a tier without wiring it into a gate
+(or writing down why it has none) fails CI, and so does a gate glob that has stopped
+matching its files. Add the manifest entry in the same commit as the tier.
+
+New parsing or deobfuscation logic should come with fuzz and security coverage, since
+this service's entire input surface is attacker-controlled.
 
 ---
 
@@ -102,9 +119,9 @@ Match the existing log style: a concise subject line, then a short body explaini
 
 ## Pull requests
 
-CI is the smoke + unit gate. Before opening a PR:
+CI runs the no-external-services gate, the docker tiers, the cross-repo drift guards, and the coverage ratchet. Before opening a PR:
 
-1. Run the no-external-services tiers (`npm run ci`, `npm run test:security`) and confirm they pass.
+1. Run `npm run ci` and confirm it passes.
 2. Update `CHANGELOG.md` with a terse entry for your change.
 3. Make sure `git status` is clean apart from intended changes (no `node_modules/`, no editor leftovers, no `.env`).
 4. Open the PR with a clear title and a description of what changed and why.

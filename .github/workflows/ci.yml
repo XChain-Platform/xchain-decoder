@@ -58,6 +58,36 @@ jobs:
             console.log("consensus pin conformance OK (testnet, regtest)");
           '
 
+  # Docker-gated tiers : the integration and e2e suites each bring up
+  # their own throwaway regtest node and MariaDB with docker compose, so they are
+  # structurally un-runnable inside `npm run ci` and used to be gated by nothing.
+  # They run here instead, on a runner that has docker, as their own job so a slow
+  # or flaky venue cannot hold up the fast tier's signal. The map of which tier is
+  # gated where lives in test/tier-manifest.json and is enforced by
+  # test/unit/tierManifest.test.js.
+  docker-suites:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      # Each script owns its venue lifecycle (up --wait, run, down -v on any exit),
+      # so no compose teardown step is needed here.
+      - name: Integration tier
+        run: npm run test:integration
+
+      - name: End-to-end tier
+        run: npm run test:e2e
+
   # Coverage ratchet : re-run the unit suite under c8 and fail if line or
   # branch coverage drops below this repo's floor in bin/coverage-thresholds.json
   # (mirrored into the `coverage:check` npm script). Catches silent coverage
