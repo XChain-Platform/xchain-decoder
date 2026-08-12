@@ -326,8 +326,12 @@ describe('runMigrations() checksum re-bless path @regression', function () {
                 if (/RELEASE_LOCK/.test(sql))   return [];
                 if (/CREATE TABLE/.test(sql))   return [];
                 if (/SELECT name, checksum FROM schema_migrations/.test(sql)) return ledgerRows;
-                // Post-run schema-contract assertion (dispensers.expiration type check).
-                if (/information_schema\.columns/.test(sql)) return [{ DATA_TYPE: 'bigint' }];
+                // Post-run schema-contract assertion (dispensers.expiration BIGINT UNSIGNED).
+                // Tested first: that query names information_schema.tables AND .columns.
+                if (/information_schema\.tables/.test(sql))  return [{ dataType: 'bigint', columnType: 'bigint(20) unsigned' }];
+                // Migration-precondition probe (no precondition file is used here, so this
+                // only ever answers an unrelated lookup).
+                if (/information_schema\.columns/.test(sql)) return [{ dataType: 'bigint' }];
                 if (/^UPDATE schema_migrations SET checksum/.test(sql)) { updates.push(params); return []; }
                 throw new Error('unexpected query in fake conn: ' + sql);
             },
@@ -362,7 +366,7 @@ describe('runMigrations() checksum re-bless path @regression', function () {
         const { db, updates } = makeDb(root, [{ name: FILE, checksum: OLD_B }]);
         const res = await db.runMigrations({ includeManual: true });
         assert.deepStrictEqual(updates, [[NEW_SUM, FILE]], 'expected exactly one ledger heal UPDATE');
-        assert.deepStrictEqual(res, { applied: [], pending: [], lockSkipped: false });
+        assert.deepStrictEqual(res, { applied: [], pending: [], baselined: [], lockSkipped: false });
     });
 
     it('heals from a single-string `from` (indexer-parity form)', async function () {
@@ -387,7 +391,7 @@ describe('runMigrations() checksum re-bless path @regression', function () {
         const { db, updates } = makeDb(root, [{ name: FILE, checksum: NEW_SUM }]);
         const res = await db.runMigrations({ includeManual: true });
         assert.deepStrictEqual(updates, []);
-        assert.deepStrictEqual(res, { applied: [], pending: [], lockSkipped: false });
+        assert.deepStrictEqual(res, { applied: [], pending: [], baselined: [], lockSkipped: false });
     });
 });
 
@@ -413,7 +417,10 @@ describe('runMigrations() --file / opts.only scoping @regression', function () {
                 if (/RELEASE_LOCK/.test(sql))                                  return [];
                 if (/CREATE TABLE (IF NOT EXISTS )?schema_migrations/.test(sql)) return [];
                 if (/SELECT name, checksum FROM schema_migrations/.test(sql))  return ledgerRows.slice();
-                if (/information_schema\.columns/.test(sql))                   return [{ DATA_TYPE: 'bigint' }];
+                // The BIGINT UNSIGNED contract assertion names both tables, so it is
+                // matched first; the bare .columns lookup is the precondition probe.
+                if (/information_schema\.tables/.test(sql))                    return [{ dataType: 'bigint', columnType: 'bigint(20) unsigned' }];
+                if (/information_schema\.columns/.test(sql))                   return [{ dataType: 'bigint' }];
                 if (/^INSERT INTO schema_migrations/.test(sql)) { applied.push(params[0]); return []; }
                 if (/^UPDATE schema_migrations SET checksum/.test(sql))        return [];
                 // Anything else is a migration body statement.
@@ -440,7 +447,10 @@ describe('runMigrations() --file / opts.only scoping @regression', function () {
         return root;
     }
 
-    const FILE_A = '2026-06-13-dispensers-expiration-bigint.sql';
+    // Deliberately NOT the real 2026-06-13 filename: that file carries a
+    // MIGRATION_PRECONDITIONS entry, so using its name here would make this suite
+    // (which is about --file scoping) depend on that predicate's verdict.
+    const FILE_A = '2026-06-13-some-targeted-manual.sql';
     const FILE_B = '2026-06-14-some-other-manual.sql';
     const BODY_A = '-- xchain:migration mode=manual\nALTER TABLE dispensers MODIFY expiration BIGINT UNSIGNED;\n';
     const BODY_B = '-- xchain:migration mode=manual\nALTER TABLE t ADD COLUMN unrelated INT;\n';
@@ -500,6 +510,140 @@ describe('runMigrations() --file / opts.only scoping @regression', function () {
         const root = tmpMigrationsDir({ [FILE_A]: BODY_A });
         const { db } = makeDb(root, []);
         await assert.rejects(() => db.runMigrations({ includeManual: true, only: [] }), /empty/);
+    });
+});
+
+// Migration applicability preconditions (). The 2026-06-13 file converts a
+// legacy DATETIME expiration to BIGINT UNSIGNED. It is mode=manual, so on a database
+// created from the current dispensers.sql - already BIGINT UNSIGNED - it stays PENDING,
+// and the blanket `npm run migrate` its own header advertises applies every pending
+// manual file. Run there, UNIX_TIMESTAMP() reads raw epoch seconds as a date-form number
+// and yields NULL, after which the file drops the good column and renames the all-NULL
+// holding column over it. These drive the REAL committed file through the REAL runner.
+describe('runMigrations() migration preconditions @regression', function () {
+
+    const crypto = require('crypto');
+    const os     = require('os');
+
+    const FILE = '2026-06-13-dispensers-expiration-bigint.sql';
+    const REAL = fs.readFileSync(
+        path.join(__dirname, '..', '..', 'src', 'sql', 'migrations', FILE), 'utf8');
+
+    // `expirationType` is what information_schema reports for dispensers.expiration:
+    // the precondition probe and the post-run contract guard both read it.
+    function makeDb(sqlPath, expirationType) {
+        const ledgered = [];   // filenames INSERTed into schema_migrations
+        const executed = [];   // migration body statements actually run
+        const conn = {
+            async query(sql, params) {
+                if (/GET_LOCK/.test(sql))                                        return [{ l: '1' }];
+                if (/RELEASE_LOCK/.test(sql))                                    return [];
+                if (/CREATE TABLE (IF NOT EXISTS )?schema_migrations/.test(sql))  return [];
+                if (/SELECT name, checksum FROM schema_migrations/.test(sql))     return [];
+                // Contract guard first: its query names both information_schema tables.
+                if (/information_schema\.tables/.test(sql))
+                    return [{ dataType: expirationType,
+                              columnType: expirationType === 'bigint' ? 'bigint(20) unsigned' : expirationType }];
+                // A real information_schema.columns lookup returns NO ROW for an absent
+                // column, which is what expirationType === null models here.
+                if (/information_schema\.columns/.test(sql))
+                    return (expirationType == null) ? [] : [{ dataType: expirationType }];
+                if (/^INSERT INTO schema_migrations/.test(sql)) { ledgered.push(params[0]); return []; }
+                executed.push(sql);
+                return [];
+            },
+            async release() {},
+        };
+        const db = Object.create(Database.prototype);
+        db.sqlPath = sqlPath;
+        db.dbName  = 'fake_db';
+        db.getConnection = async () => conn;
+        db._ensureMigrationsLedger = async () => {};
+        return { db, ledgered, executed };
+    }
+
+    function tmpDirWithRealFile() {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'decoder-precond-'));
+        fs.mkdirSync(path.join(root, 'migrations'));
+        fs.writeFileSync(path.join(root, 'migrations', FILE), REAL);
+        return root;
+    }
+
+    it('the committed file still carries the UNCONDITIONAL conversion the precondition guards', function () {
+        // Sensitivity anchor: if the SQL is ever made self-guarding, this precondition
+        // becomes belt-and-braces and this suite should be revisited rather than trusted.
+        assert.match(REAL, /UPDATE dispensers SET expiration_unix = UNIX_TIMESTAMP\(expiration\)/);
+        assert.match(REAL, /DROP COLUMN IF EXISTS expiration/);
+    });
+
+    it('baselines the DATETIME converter on a BIGINT database instead of destroying it', async function () {
+        const { db, ledgered, executed } = makeDb(tmpDirWithRealFile(), 'bigint');
+        const res = await db.runMigrations({ includeManual: true });
+
+        assert.deepStrictEqual(res.baselined, [FILE], 'the file is reported as baselined, not applied');
+        assert.deepStrictEqual(res.applied, [], 'nothing was applied');
+        assert.deepStrictEqual(res.pending, [], 'and it is not left pending to bite the next run');
+        assert.deepStrictEqual(ledgered, [FILE], 'schema_migrations records it so it never re-enters this path');
+        assert.deepStrictEqual(executed, [], 'NO statement ran: no UNIX_TIMESTAMP, no DROP COLUMN');
+    });
+
+    it('still applies the conversion on a legacy DATETIME database', async function () {
+        // Teeth for the case above: the precondition must not disarm the migration on the
+        // schema it was written for.
+        const { db, ledgered, executed } = makeDb(tmpDirWithRealFile(), 'datetime');
+        // The post-run contract guard fails closed on DATETIME (the fake reports the type
+        // unchanged because nothing really altered it), so assert on what the body ran.
+        await assert.rejects(() => db.runMigrations({ includeManual: true }), /BIGINT UNSIGNED is required/);
+
+        assert.ok(executed.some((s) => /UNIX_TIMESTAMP\(expiration\)/.test(s)), 'the conversion ran');
+        assert.ok(executed.some((s) => /DROP COLUMN IF EXISTS expiration/.test(s)), 'the drop ran');
+        assert.deepStrictEqual(ledgered, [FILE], 'and it was recorded as genuinely applied');
+    });
+
+    it('a targeted --file rollout is guarded too, not just the blanket run', async function () {
+        // The header advertises the blanket run, but the fleet path is --file; an operator
+        // aiming this file at the wrong node must not be able to run it either.
+        const { db, executed, ledgered } = makeDb(tmpDirWithRealFile(), 'bigint');
+        const res = await db.runMigrations({ includeManual: true, only: FILE });
+        assert.deepStrictEqual(res.baselined, [FILE]);
+        assert.deepStrictEqual(executed, [], 'a targeted run on a BIGINT column still runs nothing');
+        assert.deepStrictEqual(ledgered, [FILE]);
+    });
+
+    it('an unattended startup baselines it before an operator can reach for migrate', async function () {
+        // includeManual is false at startup, so the old code left the file pending and the
+        // hazard armed. The precondition runs ahead of the mode gate for exactly this.
+        const { db, executed } = makeDb(tmpDirWithRealFile(), 'bigint');
+        const res = await db.runMigrations();
+        assert.deepStrictEqual(res.baselined, [FILE]);
+        assert.deepStrictEqual(res.pending, [], 'no longer pending, so no later blanket run can apply it');
+        assert.deepStrictEqual(executed, []);
+    });
+
+    it('does NOT baseline when the expiration column is missing (half-applied run needs an operator)', async function () {
+        const { db, executed } = makeDb(tmpDirWithRealFile(), null);
+        // An absent column is an absent ANSWER, not a "already converted" verdict: the
+        // predicate must decline to baseline, so the body runs and the contract guard then
+        // fails closed on the dropped column instead of quietly recording the file as done.
+        await assert.rejects(() => db.runMigrations({ includeManual: true }), /has no `expiration` column/);
+        assert.ok(executed.some((s) => /UNIX_TIMESTAMP\(expiration\)/.test(s)),
+            'the migration body ran rather than being baselined away');
+    });
+
+    it('every precondition entry names a committed migration file', function () {
+        const dir = path.join(__dirname, '..', '..', 'src', 'sql', 'migrations');
+        for (const name of Object.keys(Database.MIGRATION_PRECONDITIONS)) {
+            assert.ok(fs.existsSync(path.join(dir, name)),
+                name + ': precondition pins a migration that is not in the tree');
+        }
+    });
+
+    it('a file with no precondition entry is never baselined', function () {
+        const db = Object.create(Database.prototype);
+        db.dbName = 'fake_db';
+        const conn = { query: async () => { throw new Error('must not query'); } };
+        return db._migrationPreconditionSkip('2026-06-15-events-data-mediumtext.sql', conn)
+            .then((r) => assert.strictEqual(r, null, 'unlisted files short-circuit without a query'));
     });
 });
 
@@ -566,6 +710,76 @@ describe('Database schema-contract guards @regression', function () {
         return ctx;
     }
 
+    // dispensers.expiration must be exactly BIGINT UNSIGNED (). The old guard
+    // matched the whole integer family on DATA_TYPE alone, so a signed or narrower
+    // column passed a check whose own error text demanded BIGINT UNSIGNED. Its query is
+    // a LEFT JOIN from information_schema.tables, so an empty result means the table is
+    // absent while a NULL dataType means the table exists without the column.
+    const expirationGuard = Database.prototype._assertDispenserExpirationIsBigintUnsigned;
+
+    it('accepts dispensers.expiration at BIGINT UNSIGNED', async function () {
+        await expirationGuard.call(contextReturning([{ dataType: 'bigint', columnType: 'bigint(20) unsigned' }]));
+    });
+
+    it('rejects a SIGNED bigint, which the old DATA_TYPE-only guard let through', async function () {
+        await assert.rejects(
+            expirationGuard.call(contextReturning([{ dataType: 'bigint', columnType: 'bigint(20)' }])),
+            /SIGNED BIGINT\(20\).*BIGINT UNSIGNED is required/s);
+    });
+
+    it('rejects a narrower INT UNSIGNED, naming the truncation against the indexer', async function () {
+        await assert.rejects(
+            expirationGuard.call(contextReturning([{ dataType: 'int', columnType: 'int(10) unsigned' }])),
+            /4294967295 does not fit.*xchain-indexer/s);
+    });
+
+    it('rejects a narrower signed INT too', async function () {
+        await assert.rejects(
+            expirationGuard.call(contextReturning([{ dataType: 'int', columnType: 'int(11)' }])),
+            /BIGINT UNSIGNED is required/);
+    });
+
+    it('rejects the pre-migration DATETIME and names the migration that converts it', async function () {
+        await assert.rejects(
+            expirationGuard.call(contextReturning([{ dataType: 'datetime', columnType: 'datetime' }])),
+            /2026-06-13-dispensers-expiration-bigint\.sql/);
+    });
+
+    it('never points a drifted INTEGER column at the DATETIME converter migration', async function () {
+        // Naming that file here would tell an operator to run UNIX_TIMESTAMP() over raw
+        // epoch seconds, which NULLs every row: the exact loss of .
+        for (const row of [{ dataType: 'bigint', columnType: 'bigint(20)' },
+                           { dataType: 'int',    columnType: 'int(10) unsigned' }]) {
+            const err = await expirationGuard.call(contextReturning([row])).then(
+                () => null, (e) => e);
+            assert.ok(err, 'expected a throw for ' + row.columnType);
+            assert.ok(!/2026-06-13-dispensers-expiration-bigint\.sql/.test(err.message),
+                'a drifted integer column must not be sent to the DATETIME converter: ' + err.message);
+            assert.match(err.message, /ALTER TABLE dispensers MODIFY expiration BIGINT UNSIGNED/);
+        }
+    });
+
+    it('distinguishes a dropped column (drift, throws) from an absent table (skip)', async function () {
+        // The LEFT JOIN yields one row with a NULL dataType when dispensers exists but
+        // has no expiration column: a half-applied migration, which the old guard's
+        // `if(!rows.length) return` silently treated as a fresh install.
+        await assert.rejects(
+            expirationGuard.call(contextReturning([{ dataType: null, columnType: null }])),
+            /has no `expiration` column.*CHANGE COLUMN expiration_unix/s);
+        // No row at all: the table itself does not exist yet.
+        await expirationGuard.call(contextReturning([]));
+    });
+
+    it('releases the pooled connection on the expiration pass and throw paths', async function () {
+        const ok = contextReturning([{ dataType: 'bigint', columnType: 'bigint(20) unsigned' }]);
+        await expirationGuard.call(ok);
+        assert.strictEqual(ok.releasedCount(), 1);
+
+        const bad = contextReturning([{ dataType: 'bigint', columnType: 'bigint(20)' }]);
+        await assert.rejects(expirationGuard.call(bad));
+        assert.strictEqual(bad.releasedCount(), 1);
+    });
+
     const pubkeyGuard = Database.prototype._assertPubkeyColumnIsUncompressedWide;
 
     it('accepts a pubkeys.pubkey wide enough for an uncompressed key', async function () {
@@ -598,7 +812,7 @@ describe('Database schema-contract guards @regression', function () {
         const calls = [];
         const ctx = {
             _runMigrationsInner: async () => ({ applied: [], pending: [], lockSkipped: true }),
-            _assertDispenserExpirationIsInteger: async () => { calls.push('dispenser'); },
+            _assertDispenserExpirationIsBigintUnsigned: async () => { calls.push('dispenser'); },
             _assertPubkeyColumnIsUncompressedWide: async () => { calls.push('pubkey'); },
             _assertActionDataIsUtf8mb4: async () => { calls.push('utf8mb4'); }
         };

@@ -19,8 +19,18 @@
 --
 -- Applies to databases created from an older schema whose dispensers.expiration
 -- was a DATETIME populated via FROM_UNIXTIME(). Fresh installs already get
--- BIGINT UNSIGNED from src/sql/dispensers.sql and never need this migration
--- (which is why it is mode=manual: it stays pending and harmless on fresh DBs).
+-- BIGINT UNSIGNED from src/sql/dispensers.sql and never need this migration.
+--
+-- Do NOT read mode=manual as a safety property (). It withholds this
+-- file from the unattended startup run only; the blanket `npm run migrate` this
+-- header used to advertise applies every PENDING manual file, and on a column
+-- that is already BIGINT the UPDATE below reads raw epoch seconds as a date-form
+-- number, yields NULL for ordinary 10-digit values, and the drop plus rename then
+-- replace the good column with those NULLs. What actually makes the file safe on
+-- such a database is the runner-side entry in Database.MIGRATION_PRECONDITIONS
+-- (src/db.js): it reads information_schema before applying and records the file
+-- as applied without running a statement when the column is already an integer
+-- type. Keep that entry. This header is not the guard.
 --
 -- WHY
 -- ---
@@ -44,15 +54,23 @@
 --      still-open dispensers, so on a live node this set is typically empty.
 --   3. Drop the old DATETIME column.
 --   4. Rename the holding column to `expiration`.
--- Guarded with IF [NOT] EXISTS so a partial run is safe to resume. The
--- schema_migrations ledger records it once per DB, so it does not re-run (which
--- also protects an already-converted DB from UNIX_TIMESTAMP() on a BIGINT).
+-- The IF [NOT] EXISTS guards make each statement individually re-runnable, which
+-- is NOT the same as the sequence being resumable. The ledger row is written only
+-- after the last statement, so a crash after step 4 leaves a database whose
+-- `expiration` is already BIGINT with this file still PENDING, and a bare re-run
+-- would add an empty holding column and NULL it over the converted data. The
+-- precondition entry named above is what makes that state safe, by baselining the
+-- file rather than re-running it. A crash between steps 3 and 4 leaves no
+-- `expiration` column at all; that state is deliberately NOT baselined, and it
+-- needs an operator.
 --
 -- HOW TO RUN
 -- ----------
---   npm run migrate        # node src/migrate.js — reads DECODER_DB_* from .env
+--   node src/migrate.js --file 2026-06-13-dispensers-expiration-bigint.sql
 --
--- Take a backup first. Run while the decoder process is stopped.
+-- Scope the run to this file so a fleet rollout does not also apply every other
+-- pending manual migration in the tree. Take a backup first, and run while the
+-- decoder process is stopped.
 --
 -- Validator note: xchain-sync replicates the decoder database to validator
 -- nodes, so validator operators should run this same migration against their

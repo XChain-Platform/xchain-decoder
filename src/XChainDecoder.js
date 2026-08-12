@@ -30,6 +30,7 @@ const BlockchainConnector = require('./BlockchainConnector')
 const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
 const { isOracleFeeCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress } = require('./oracleFeeOutput')
+const { chainTierMismatch, chainFieldMissing } = require('./chainIdentity')
 const strictTextDecoder = new TextDecoder('utf-8', { fatal: true })
 const lenientTextDecoder = new TextDecoder('utf-8')
 
@@ -53,6 +54,15 @@ const REORG_HALT_PROBE_INTERVAL_MS = 60000
 // slowest host, because the consumer of the signal restarts the container. Override per
 // host with DECODER_STALL_ALERT_MS.
 const STALL_ALERT_MS = Number(process.env.DECODER_STALL_ALERT_MS) || 900000
+// How long the parse loop may go without completing an ITERATION before /live calls the
+// decoder dead. Distinct from STALL_ALERT_MS, which measures chain PROGRESS: a caught-up
+// decoder makes no progress for hours and is perfectly healthy, so only iteration count
+// can tell "idle because there is nothing to do" from "the loop is gone". Deliberately
+// twice the stall window, because the consumer restarts the container: every normal path
+// through the loop, including the outage path (catch -> sleep(3000) -> continue) and the
+// slowest single-block commit, returns to the loop top far inside it. Override per host
+// with DECODER_POLL_SILENT_MS.
+const POLL_SILENT_MS = Number(process.env.DECODER_POLL_SILENT_MS) || (2 * STALL_ALERT_MS)
 // Consecutive failed fetch attempts at ONE height (3s apart) that count as wedged on
 // their own. _fetchErrorCount resets to 0 on any successful fetch and on a height
 // change, so unlike the elapsed-time window it cannot be tripped by slow-but-working
@@ -338,19 +348,37 @@ class XChainDecoder {
         // set at the top of the block loop and again on every committed block. Zero
         // means the loop has not started, which isStalled() reads as "not stalled".
         this.lastAdvanceAt = 0
+        // Timestamp (ms) of the most recent parse-loop ITERATION, set at the loop top
+        // whether or not a block arrived. Independent of chain progress on purpose:
+        // it is the only signal that separates a loop that is idle because it is
+        // caught up from a loop that is no longer running. Zero means the loop has
+        // not iterated yet (still in initial sync), which isPollSilent() reads as
+        // "not silent" so a booting decoder is never called dead.
+        this.lastPollAt = 0
+        // Structured logger from the observability shim, injected by api.js once
+        // installObservability has run. Null until then, and every use falls back to
+        // this.log, so a caller that never wires one (tests, migrate) still warns.
+        this.obsLogger = null
+        // Last logged value of isNodeHeightStale(), so the tip-stale warn is EDGE
+        // triggered. The block loop re-evaluates roughly every 3s during a node
+        // outage, so a level-triggered line would emit ~20 a minute for its duration.
+        this._nodeHeightStaleLogged = false
         this.mempoolInterval = null
         this.mempoolBusy = false
 
         this.stopFlag = false
 
-        // Force the AuxPoW-stripping fetch path on for merge-mined chains regardless
-        // of the AUX_POW env flag: an 'auxpow' coin (Dogecoin) carries a merged-mining
-        // AuxPoW section between the 80-byte header and the tx count, so the plain
-        // getBlock path would hand that hex to the bitcoinjs parser and wedge/misparse
-        // at the first merged-mined block. The branch is now keyed on the coin's
-        // declared wireFormat from the canonical registry (via xchainBlockDecoder, built
-        // above), not a coin-name literal, so chain identity, not operator env, decides it.
-        this.auxPow = this.xchainBlockDecoder.wireFormat === 'auxpow' ? true : auxPow
+        // Key the AuxPoW-stripping fetch path on coin identity ALONE, never on the
+        // AUX_POW env flag: an 'auxpow' coin (Dogecoin) carries a merged-mining AuxPoW
+        // section between the 80-byte header and the tx count, so the plain getBlock
+        // path would wedge/misparse at the first merged-mined block, and a non-auxpow
+        // coin (BTC, LTC) carries no such section, so stripping one truncates a valid
+        // block whenever its version signals bit 0x100 (). Both directions are
+        // read off the coin's declared wireFormat in the canonical registry (via
+        // xchainBlockDecoder, built above), matching bulk-sync/dump.js. The `auxPow`
+        // constructor parameter is retained for call-site stability (FEE_DESTINATION
+        // follows it positionally) and is deliberately no longer consulted.
+        this.auxPow = this.xchainBlockDecoder.wireFormat === 'auxpow'
 
         this.rpcErrors = 0
         this.parseErrors = 0
@@ -417,13 +445,66 @@ class XChainDecoder {
         return days+"d"+ hours + "h" + minutes + "m" + seconds + "." + milliseconds+"s";
     }
     
+    // True when the cached node tip is frozen: we have polled at least once and the
+    // last successful getBlockchainInfo() was more than 2x the refresh interval ago,
+    // i.e. at least two consecutive polls failed. The single definition of the test
+    // isSynced(), isStalled() and getSyncStatus() each used to spell out inline;
+    // three copies of one threshold is three chances to drift.
+    //
+    // Never-polled (blockchainInfoLastRefreshAt 0) is NOT stale: a booting decoder
+    // has no frozen tip, it has no tip.
+    isNodeHeightStale(){
+        return this.blockchainInfoLastRefreshAt > 0
+            && (Date.now() - this.blockchainInfoLastRefreshAt) > 2 * BLOCKCHAIN_INFO_REFRESH_MS
+    }
+
+    // Age (seconds) of the last successful tip poll, or null before the first one.
+    // Exported as a Prometheus gauge so an alert can fire on tip age directly rather
+    // than on the boolean's 2x-interval threshold.
+    nodeTipAgeSeconds(){
+        if (!(this.blockchainInfoLastRefreshAt > 0)) return null
+        return (Date.now() - this.blockchainInfoLastRefreshAt) / 1000
+    }
+
+    // Emit ONE warn when the node tip goes stale and one info when it recovers.
+    // Called from the block loop, which iterates every ~3s during an outage, so the
+    // edge latch is what keeps this from becoming log spam. Never throws: an
+    // instrumentation fault must not wedge the parse loop.
+    noteNodeTipStaleTransition(){
+        try {
+            const stale = this.isNodeHeightStale()
+            if (stale === this._nodeHeightStaleLogged) return
+            this._nodeHeightStaleLogged = stale
+            const logger = this.obsLogger
+            const ageSeconds = this.nodeTipAgeSeconds()
+            const fields = {
+                coin: this.coinTick,
+                network: this.consensusNetwork,
+                tip_age_seconds: ageSeconds,
+                node_height: this.blockchainInfoLastBlock,
+                last_processed_block: this.lastProcessedBlockIndex
+            }
+            if (stale){
+                const message = 'node tip stale: getblockchaininfo has not refreshed'
+                if (logger && typeof logger.warn === 'function') logger.warn(message, fields)
+                else this.log(message, JSON.stringify(fields))
+            } else {
+                const message = 'node tip recovered: getblockchaininfo refreshing again'
+                if (logger && typeof logger.info === 'function') logger.info(message, fields)
+                else this.log(message, JSON.stringify(fields))
+            }
+        } catch (_) { /* instrumentation must never break the block loop */ }
+    }
+
+    // Wire the observability log shim in after construction (api.js owns the handle).
+    setObservabilityLogger(logger){
+        this.obsLogger = logger || null
+    }
+
     isSynced(){
         // A frozen tip during a node outage must not read as synced: the chain may
         // have advanced far past the last cached tip, so synced:true would be false-healthy.
-        if (this.blockchainInfoLastRefreshAt > 0
-            && (Date.now() - this.blockchainInfoLastRefreshAt) > 2 * BLOCKCHAIN_INFO_REFRESH_MS) {
-            return false
-        }
+        if (this.isNodeHeightStale()) return false
         return this.synced
     }
 
@@ -456,11 +537,26 @@ class XChainDecoder {
         if (!this.lastAdvanceAt) return false
         if (this.blockchainInfoLastBlock < 0 || this.lastProcessedBlockIndex < 0) return false
         if ((this.blockchainInfoLastBlock - this.lastProcessedBlockIndex) <= 1) return false
-        const tipStale = this.blockchainInfoLastRefreshAt > 0
-            && (Date.now() - this.blockchainInfoLastRefreshAt) > 2 * BLOCKCHAIN_INFO_REFRESH_MS
-        if (tipStale) return false
+        if (this.isNodeHeightStale()) return false
         if (this._fetchErrorCount >= STALL_FETCH_ATTEMPTS) return true
         return (Date.now() - this.lastAdvanceAt) > STALL_ALERT_MS
+    }
+
+    // True when the parse loop has stopped ITERATING. isStalled() cannot see this and
+    // is not meant to: every one of its gates above is a statement about chain
+    // progress, and it returns false for a caught-up decoder and false again on a
+    // stale tip (deliberately, ). So a loop that dies while caught up leaves
+    // decoderRunning true, dbOk true and stalled false, and /live answers 200 forever
+    // while nothing parses. Three modes reach that state: the loop throws its way out
+    // of a caught-up idle, it hangs inside an await, or SIGTERM breaks it. Only an
+    // iteration counter independent of the chain covers all three.
+    //
+    // Fail-quiet in the same style as isStalled(), because the consumer restarts the
+    // container: lastPollAt 0 (loop has not iterated yet, e.g. a long initial sync)
+    // is never silent.
+    isPollSilent() {
+        if (!this.lastPollAt) return false
+        return (Date.now() - this.lastPollAt) > POLL_SILENT_MS
     }
 
     getSyncStatus() {
@@ -472,8 +568,7 @@ class XChainDecoder {
         // i.e. at least two consecutive poll attempts have failed (node outage).
         // In that window blockchainInfoLastBlock is frozen, so a zero lag does not
         // mean caught-up; it means we cannot see how far the chain has advanced.
-        const nodeHeightStale = this.blockchainInfoLastRefreshAt > 0
-            && (Date.now() - this.blockchainInfoLastRefreshAt) > 2 * BLOCKCHAIN_INFO_REFRESH_MS
+        const nodeHeightStale = this.isNodeHeightStale()
 
         const status = {
             last_processed_block: this.lastProcessedBlockIndex,
@@ -1609,7 +1704,19 @@ class XChainDecoder {
                 // existing sleep-and-retry outage tolerance (retry-forever) unchanged.
                 try {
                     const info = await this.connector.getBlockchainInfo()
-                    if (info && typeof info.blocks === 'number') nodeTip = info.blocks
+                    // Apply the block loop's chain-identity gate here too (). This is
+                    // the SECOND path a node tip reaches nodeTip, and nodeTip is exactly what
+                    // the above-tip branch deletes valid local blocks against, so a foreign
+                    // endpoint answering this refresh reopens the data-loss path the loop-top
+                    // gate closes. On a proven mismatch keep the call-time tip and fall through
+                    // to the existing sleep-and-retry: refusing to move the tip is the
+                    // recoverable direction, deleting against another chain's height is not.
+                    const reorgChainMismatch = info ? chainTierMismatch(this.consensusNetwork, info["chain"]) : null
+                    if (reorgChainMismatch){
+                        this.logError('reorg: ignoring a tip refresh from a foreign endpoint: ' + reorgChainMismatch)
+                    } else if (info && typeof info.blocks === 'number') {
+                        nodeTip = info.blocks
+                    }
                 } catch (refreshErr) { /* node unreachable; retry with the existing tip */ }
                 await this.sleep(3000)
                 continue
@@ -1791,6 +1898,13 @@ class XChainDecoder {
         
         let nodeSyncedProblem = false
 
+        // Wrong-chain endpoint latch (), same shape as nodeSyncedProblem: the
+        // refusal repeats every 3-second retry, so log it on the transition only.
+        let wrongChainProblem = false
+        // Said once per process, not per transition: an endpoint that omits `chain` omits
+        // it every poll, so a latch here would be a per-transition line that never toggles.
+        let chainFieldMissingLogged = false
+
         // Transaction-level parse-failure tracking for the block currently being
         // retried (see TX_PARSE_MAX_RETRIES).
         let txParseRetryHeight = -1
@@ -1824,6 +1938,12 @@ class XChainDecoder {
 
         main_parsing:
         while (true){
+            // Liveness heartbeat, first statement in the loop so every path back to the
+            // top refreshes it, `continue main_parsing` and the outage retry included.
+            // Unlike lastAdvanceAt this records that the loop RAN, not that the chain
+            // moved, which is what lets /live tell a caught-up decoder from a dead one.
+            this.lastPollAt = Date.now()
+
             if (this.stopFlag){
                 if (this.mempoolInterval != null){
                     console.log("Mempool updates stopped!")
@@ -1832,7 +1952,13 @@ class XChainDecoder {
                 }   
                 break
             }
-            
+
+            // Edge-triggered stale-tip warn (). Evaluated every iteration
+            // because the outage path below is `catch -> sleep(3000) -> continue`,
+            // which never reaches the code that would otherwise notice; the latch
+            // inside makes it one line per transition, not one per poll.
+            this.noteNodeTipStaleTransition()
+
             //Getting network info to retrieve the last block index.
             //Refresh when we have no info yet, when we have caught up to the
             //previously-seen tip, OR periodically on a wall-clock interval; the
@@ -1859,6 +1985,43 @@ class XChainDecoder {
                         lastBlockchainInfo = null
                         await this.sleep(3000)
                         continue
+                    }
+
+                    // Reject an endpoint serving a different chain BEFORE its numbers are
+                    // used (). The shape gate above proves the response is
+                    // well-formed, never that it came from this decoder's chain, and every
+                    // consumer downstream trusts it: `blocks` drives ingestion under the
+                    // configured address rules and start height, and the same refresh feeds
+                    // the reorg-reconcile branches, where a foreign tip reads as a deep
+                    // reorg and deleteBlockByIndex() removes valid local blocks. So a
+                    // misconfigured primary, or a failover endpoint on another chain,
+                    // silently corrupted state and could destroy it.
+                    //
+                    // Treated exactly like the malformed branch: null the info, sleep and
+                    // re-poll. That is the recoverable direction - the decoder stops
+                    // advancing and says why, and an operator fixes the endpoint - whereas
+                    // continuing is the one path that loses data. The latch keeps it one
+                    // line per transition rather than one per 3-second retry.
+                    const chainMismatch = chainTierMismatch(this.consensusNetwork, lastBlockchainInfo["chain"])
+                    if (chainMismatch){
+                        if (!wrongChainProblem){
+                            this.logError('Refusing to decode: ' + chainMismatch +
+                                '. Point the decoder at a ' + this.consensusNetwork + ' node and restart.')
+                        }
+                        wrongChainProblem = true
+                        lastBlockchainInfo = null
+                        await this.sleep(3000)
+                        continue
+                    }
+                    wrongChainProblem = false
+
+                    // `chain` absent is NOT read as agreement. It fails open (a trimmed RPC
+                    // proxy must not stall the fleet over a hazard only a misconfiguration
+                    // creates), so the unchecked state is said out loud once instead.
+                    if (chainFieldMissing(lastBlockchainInfo["chain"]) && !chainFieldMissingLogged){
+                        chainFieldMissingLogged = true
+                        this.log("getblockchaininfo carries no 'chain' field, so the endpoint's network tier cannot be verified; " +
+                            'endpoint-to-network binding rests on deployment config alone.')
                     }
 
                     if (lastBlockchainInfo["verificationprogress"] < MIN_VERIFICATION_PROGRESS_TO_PARSE){
@@ -2463,7 +2626,18 @@ class XChainDecoder {
                                             expiration = Number(expirationToken)
                                         }
 
-                                        if (isNaN(expiration) || expiration < 0 || expiration > 4294967295) {
+                                        // Require an INTEGER, matching the indexer, which rejects any
+                                        // non-integer EXPIRATION outright (isInteger, see
+                                        // xchain-indexer/src/actions/dispenser.js). dispensers.expiration
+                                        // is BIGINT UNSIGNED, so a fractional value like 1700000000.5
+                                        // either fails the write under a strict sql_mode - wedging the
+                                        // block loop, which then retries the same deterministic tx
+                                        // forever - or truncates under a lax one, leaving the decoder
+                                        // holding a dispenser the indexer never registered.
+                                        // Number.isInteger already excludes NaN and Infinity, so it
+                                        // subsumes the isNaN test it replaces; the default expiration is
+                                        // integral by construction (block timestamp + whole days).
+                                        if (!Number.isInteger(expiration) || expiration < 0 || expiration > 4294967295) {
                                             this.parseErrors++
                                             console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[14]}'`)
                                         } else if (this.dispenserOpensForThisChain(giveCoin, getCoin)){
@@ -2557,9 +2731,39 @@ class XChainDecoder {
                                         if (editSource && editSource.length > 0 &&
                                             editExpirationToken !== undefined && editExpirationToken !== ""){
                                             const newExpiration = Number(editExpirationToken)
-                                            if (!isNaN(newExpiration) && newExpiration >= 0 &&
+                                            // Same integer contract as the create guard above: the edit
+                                            // path writes through extendOpenDispenserExpirationBySource
+                                            // into the same BIGINT UNSIGNED column, and the indexer
+                                            // rejects a fractional edit EXPIRATION with the identical
+                                            // isInteger test.
+                                            if (Number.isInteger(newExpiration) && newExpiration >= 0 &&
                                                 newExpiration <= 4294967295 && newExpiration > block.timestamp){
-                                                if ((await this.db.extendOpenDispenserExpirationBySource(editSource, newExpiration)) === false){
+                                                // nextBlockHeight lets the mirror also clear a soft-expiry
+                                                // THIS block stamped (): deleteOpenDispensers ran
+                                                // before this loop, so without it the `IS NULL` filter
+                                                // silently skipped exactly the row a same-block extend is
+                                                // for, and the decoder went dark on a dispenser the indexer
+                                                // keeps open. The row is open again from the next block's
+                                                // load, which ends the PERSISTENT divergence.
+                                                //
+                                                // RESIDUAL, and it is NOT benign (). This restores
+                                                // the DB row, not this block's in-memory capture set, so
+                                                // outputs paying that dispenser in the REST of this block
+                                                // are still missed - and under-capture is the money-bearing
+                                                // direction #3119 names, not the safe one (see db.js, above
+                                                // getOpenDispenserOracleAddressBySource, which corrects the
+                                                // identical mis-statement about capture). Re-seeding is not
+                                                // blocked by the guessed-target rule - the extend already
+                                                // acts on EVERY open row of the source, so reading those
+                                                // rows' operating addresses back is set membership with no
+                                                // ranking - it is blocked because widening the captured set
+                                                // changes the persisted output set mid-block, which that
+                                                // same header states needs its own activation flag-day with
+                                                // the legacy set preserved below it so a from-genesis
+                                                // re-decode stays byte-identical. Outputs BEFORE the edit
+                                                // tx in this block are unreachable by any re-seed and need
+                                                // the end-of-block expiry realignment instead.
+                                                if ((await this.db.extendOpenDispenserExpirationBySource(editSource, newExpiration, nextBlockHeight)) === false){
                                                     // extendOpenDispenserExpirationBySource's error path already rolled the block back.
                                                     await resetAfterRollback()
                                                     continue main_parsing

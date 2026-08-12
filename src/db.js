@@ -276,7 +276,7 @@ class Database {
     // no-dir/empty paths stay cheap and safe.
     async runMigrations(opts = {}){
         const result = await this._runMigrationsInner(opts);
-        await this._assertDispenserExpirationIsInteger();
+        await this._assertDispenserExpirationIsBigintUnsigned();
         await this._assertPubkeyColumnIsUncompressedWide();
         await this._assertActionDataIsUtf8mb4();
         return result;
@@ -288,7 +288,7 @@ class Database {
         const only          = (opts.only == null) ? null
             : new Set([].concat(opts.only).map(s => String(s).trim()).filter(Boolean));
         const dir           = this.sqlPath + '/migrations';
-        const result        = { applied: [], pending: [], lockSkipped: false };
+        const result        = { applied: [], pending: [], baselined: [], lockSkipped: false };
 
         let files = [];
         try { files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort(); }
@@ -399,6 +399,33 @@ class Database {
                     }
 
                     const mode = this._migrationMode(raw);
+
+                    // Precondition gate: a migration listed in MIGRATION_PRECONDITIONS is
+                    // applicable only to a schema in a particular shape, and running it on
+                    // any other shape destroys data rather than converting it. Evaluate the
+                    // predicate against the LIVE schema and, when it says the migration does
+                    // not apply, record it as applied WITHOUT executing a statement.
+                    //
+                    // Baselining rather than merely skipping is what makes it stick: a skip
+                    // leaves the file pending forever, so every later blanket run re-enters
+                    // this branch and one runner change or one direct-SQL apply puts the
+                    // hazard back. The ledger row states what is already true - the end
+                    // state this migration exists to produce holds on this database.
+                    //
+                    // It runs BEFORE the mode gate deliberately, so an unattended startup
+                    // baselines a pending manual migration and the hazard is gone before an
+                    // operator ever reaches for `npm run migrate` ().
+                    const preconditionSkip = await this._migrationPreconditionSkip(file, conn);
+                    if(preconditionSkip){
+                        await conn.query(
+                            'INSERT INTO schema_migrations (name, checksum, mode, applied_at) VALUES (?, ?, ?, NOW())',
+                            [file, checksum, mode]
+                        );
+                        result.baselined.push(file);
+                        console.log('runMigrations: BASELINED ' + file + ' (recorded as applied, no statement run): ' + preconditionSkip);
+                        continue;
+                    }
+
                     if(mode !== 'auto' && !includeManual){
                         console.log('runMigrations: PENDING (gated, mode=' + mode + '): ' + file + '; apply with `node src/migrate.js`.');
                         result.pending.push(file);
@@ -450,26 +477,84 @@ class Database {
         return result;
     }
 
-    // Assert that dispensers.expiration is an integer-family column. Throws when the
-    // column exists but has a non-integer type (e.g. DATETIME from a pre-migration schema)
-    // so the decoder fails fast at startup rather than silently corrupting dispenser rows.
-    // Skips silently when the table is absent (fresh installs create it via verifyTables
-    // before runMigrations is called, but this guard is defensive against call-order drift).
-    async _assertDispenserExpirationIsInteger(){
+    // Evaluate a migration's declared precondition against the live schema. Returns a
+    // human reason string when the migration does NOT apply to this database (the caller
+    // baselines it), or null when it should run. Files with no entry always run.
+    // Runs on the caller's migration connection so it stays inside the migration lock.
+    async _migrationPreconditionSkip(file, conn){
+        const pre = Database.MIGRATION_PRECONDITIONS[file];
+        if(!pre) return null;
+        const rows = await conn.query(pre.sql, [this.dbName]);
+        return pre.skipWhen(rows || []);
+    }
+
+    // Assert that dispensers.expiration is exactly BIGINT UNSIGNED. The DISPENSER parser
+    // accepts a raw unix expiration up to 4294967295 (year 2106) and xchain-indexer holds
+    // the same field as BIGINT UNSIGNED, so anything narrower or signed is fleet drift the
+    // guard exists to catch: a signed BIGINT loses nothing today but rejects nothing either,
+    // while INT / INT UNSIGNED either fail the write under a strict sql_mode or truncate
+    // under a lax one, on a column xchain-sync replicates to validators. Checking only
+    // DATA_TYPE let all three through while the error text claimed BIGINT UNSIGNED was
+    // required (), so COLUMN_TYPE - which carries the width and the unsigned
+    // attribute - is what is read now.
+    //
+    // The LEFT JOIN from information_schema.tables separates the two skip-shaped cases the
+    // old single-table query merged: no row at all means the dispensers table does not exist
+    // yet (fresh install before verifyTables; skip), while a row with a NULL DATA_TYPE means
+    // the table exists WITHOUT the column, which is real drift (a half-applied
+    // 2026-06-13 expiration migration, dropped-but-not-renamed) and fails closed.
+    async _assertDispenserExpirationIsBigintUnsigned(){
         let conn;
         try {
             conn = await this.getConnection();
             const rows = await conn.query(
-                "SELECT DATA_TYPE FROM information_schema.columns WHERE table_schema = ? AND table_name = 'dispensers' AND column_name = 'expiration'",
+                "SELECT c.DATA_TYPE AS dataType, c.COLUMN_TYPE AS columnType " +
+                "FROM information_schema.tables t " +
+                "LEFT JOIN information_schema.columns c " +
+                "  ON c.table_schema = t.table_schema AND c.table_name = t.table_name AND c.column_name = 'expiration' " +
+                "WHERE t.table_schema = ? AND t.table_name = 'dispensers'",
                 [this.dbName]
             );
-            if(!rows.length) return;  // column absent: table may not exist yet
-            const dataType = String(rows[0].DATA_TYPE || '').toLowerCase();
-            const isInt = /^(tinyint|smallint|mediumint|int|bigint)$/.test(dataType);
-            if(!isInt){
+            if(!rows.length) return;  // dispensers table absent: nothing created yet
+
+            // Each branch names the remedy that actually heals ITS state. The
+            // 2026-06-13 migration converts DATETIME only: pointing a drifted-integer or
+            // dropped-column node at it would run UNIX_TIMESTAMP() over raw epoch seconds
+            // and destroy the values, so only the DATETIME branch may name it.
+            const RETYPE = ' Retype it with the decoder stopped and a backup taken: ' +
+                'ALTER TABLE dispensers MODIFY expiration BIGINT UNSIGNED NULL;';
+            const dataType   = (rows[0].dataType   == null) ? null : String(rows[0].dataType).toLowerCase();
+            const columnType = (rows[0].columnType == null) ? ''   : String(rows[0].columnType).toLowerCase();
+
+            if(dataType === null){
                 throw new Error(
-                    'dispensers.expiration has type ' + dataType.toUpperCase() + ' but BIGINT UNSIGNED is required. ' +
-                    'Run the pending migration: node src/migrate.js'
+                    'dispensers exists but has no `expiration` column - a half-applied expiration ' +
+                    'migration (the old column was dropped before the holding column was renamed). ' +
+                    'Re-running the migration cannot heal this (its UPDATE reads the dropped column). ' +
+                    'Finish the rename by hand: ' +
+                    'ALTER TABLE dispensers CHANGE COLUMN expiration_unix expiration BIGINT UNSIGNED NULL;'
+                );
+            }
+            if(dataType === 'datetime' || dataType === 'timestamp' || dataType === 'date'){
+                throw new Error(
+                    'dispensers.expiration has type ' + columnType.toUpperCase() + ' but BIGINT UNSIGNED is required ' +
+                    '(FROM_UNIXTIME/DATETIME silently NULLs any expiration past 2038, which the decoder then never expires). ' +
+                    'Run the pending migration: node src/migrate.js --file 2026-06-13-dispensers-expiration-bigint.sql'
+                );
+            }
+            if(dataType !== 'bigint'){
+                const narrower = /^(tinyint|smallint|mediumint|int)$/.test(dataType);
+                throw new Error(
+                    'dispensers.expiration has type ' + columnType.toUpperCase() + ' but BIGINT UNSIGNED is required' +
+                    (narrower
+                        ? ' (an expiration up to 4294967295 does not fit, so writes truncate or fail here while xchain-indexer accepts them).'
+                        : '.') + RETYPE
+                );
+            }
+            if(!/\bunsigned\b/.test(columnType)){
+                throw new Error(
+                    'dispensers.expiration is a SIGNED ' + columnType.toUpperCase() + ' but BIGINT UNSIGNED is required ' +
+                    '(it diverges from the xchain-indexer column and from the replica schema xchain-sync feeds).' + RETYPE
                 );
             }
         } finally {
@@ -609,6 +694,15 @@ class Database {
         // ALTER (COLUMN, PARTITION, or a bare column identifier) loses data.
         const SAFE_ALTER_DROP = new Set(['INDEX', 'KEY', 'FOREIGN', 'CONSTRAINT', 'CHECK', 'DEFAULT', 'PRIMARY']);
         for(const raw of (statements || [])){
+            // Executable (versioned) comments are the one /* */ form the server RUNS:
+            // MariaDB/MySQL execute `/*!50000 DROP TABLE balances */` and `/*M! ... */`
+            // verbatim, and splitSqlStatements strips only `--` lines, so the payload
+            // reaches conn.query intact. The block-comment strip below would delete it
+            // before any keyword check, scoring the file safe and auto-running the DROP.
+            // Same class as the PREPARE/EXECUTE/CALL forms below - the server does
+            // something a prefix classifier cannot see - and no committed auto migration
+            // uses one, so treat any statement carrying one as non-auto-eligible.
+            if(/\/\*(?:!|M!)/i.test(String(raw)))                return raw;
             // Belt-and-braces: strip /* */ block comments (line comments are already
             // gone) so a keyword inside comment prose never triggers or hides a hit.
             const stmt = String(raw).replace(/\/\*[\s\S]*?\*\//g, ' ').trim();
@@ -2006,9 +2100,11 @@ class Database {
     // ORDER BY ... LIMIT 1 targeting: both are the defect, not the fix.
     //
     // NOTE the advisory contract stops at the open-view. Output CAPTURE resolution
-    // (getOpenDispenserOracleAddressBySource, ) still resolves by SOURCE, because
-    // there a miss means capturing too little, and capturing too much is the benign side
-    // there as well; that function's own header carries its reasoning.
+    // (getOpenDispenserOracleAddressBySource, ) still resolves by SOURCE and still
+    // picks ONE row with ORDER BY ... LIMIT 1. That ranking has the same defect this block
+    // removed from the open-view and is NOT benign: capture is an equality test, so a wrong
+    // pick captures nothing at all. See that function's own header for the failure and the
+    // flag-day the fix needs ().
 
     // Mirror a DISPENSER format-2 edit that re-dates EXPIRATION, so the block-time
     // soft-expire (deleteOpenDispensers) does not close a decoder row while the indexer
@@ -2029,22 +2125,39 @@ class Database {
     // the create SOURCE, stored only when the two differ, so an edit issued by the
     // creator of a delegated dispenser still reaches its row.
     //
+    // THIS-BLOCK RESTORE (). deleteOpenDispensers runs at block START, before the
+    // transaction loop, while the indexer expires at block END, after it. So on the block
+    // whose header time first passes an expiration, this mirror is handed a row that the
+    // block-start soft-expire has ALREADY stamped, and an `expired_block_index IS NULL`
+    // filter cannot reach it: the extend silently does nothing, the row stays closed
+    // forever, and the decoder stops capturing payments to a dispenser the indexer applies
+    // the same edit to and keeps OPEN. That is the money-bearing direction, and it is the
+    // exact failure the paragraph above says this mirror exists to prevent, so the filter
+    // now admits a row expired by THIS block and clears the mark on it.
+    //
+    // Scoped to `expired_block_index = blockIndex` only. A row expired in an EARLIER block
+    // stays closed: reopening one would be the closing/opening mirror on a GUESSED row that
+    // #3119 removed, and the indexer has long since settled that dispenser's lifecycle.
+    // Same shape as deleteBlockByIndex's reorg clear, which also keys the reset on the
+    // stamping height, so a re-processed block remains idempotent.
+    //
     // The caller has already validated newExpiration is present, in range and future.
     // A stale/unknown SOURCE matches zero rows and is a no-op. Same false/true contract
     // as insertDispenser: false means the query failed and the block transaction was
     // rolled back, so the caller retries the block.
-    async extendOpenDispenserExpirationBySource(sourceAddress, newExpiration) {
+    async extendOpenDispenserExpirationBySource(sourceAddress, newExpiration, blockIndex) {
         const query = `
             UPDATE dispensers
-            SET expiration = GREATEST(expiration, ?)
+            SET expiration = GREATEST(expiration, ?),
+                expired_block_index = CASE WHEN expired_block_index = ? THEN NULL ELSE expired_block_index END
             WHERE (address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
                 OR source_address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1))
-              AND expired_block_index IS NULL;
+              AND (expired_block_index IS NULL OR expired_block_index = ?);
         `;
         let connection = await this.getConnection()
         const ownLease = (this.transactionConnection == null)
         try {
-            await connection.query(query, [newExpiration, sourceAddress, sourceAddress])
+            await connection.query(query, [newExpiration, blockIndex, sourceAddress, sourceAddress, blockIndex])
             return true
         } catch (err) {
             console.error('Error extending dispenser expiration:', err);
@@ -2068,11 +2181,26 @@ class Database {
     // dispenser (paid by its original creator, whose SOURCE is not the operating address)
     // still find its dispenser and capture the oracle-fee output the indexer will look for.
     //
-    // This one KEEPS the ORDER BY ... LIMIT 1 ranking that #3119 removed from the extend
-    // path, and that is deliberate: this resolves ONE address to capture an output against,
-    // not a row to act on, and here a miss captures too little (the indexer then rejects the
-    // refill, fail-closed) while a wrong pick captures an extra output the indexer ignores.
-    // The advisory contract above governs the open-VIEW; it does not extend to this read.
+    // KNOWN DEFECT (): the ORDER BY ... LIMIT 1 ranking that #3119 removed from
+    // the extend path survives here, and it is retained rather than endorsed. Capture is a
+    // single-address EQUALITY test (the block loop's payment-output scan,
+    // `nextOutput.destinationAddress === oracleFeeAddress`), so a wrong pick captures
+    // NOTHING: this lands in the under-capture direction the #3119 block above calls
+    // money-bearing, not the over-capture direction it calls safe. When one source holds
+    // several open Mode B dispensers with DIFFERENT oracle addresses, a refill of any row
+    // but the top-ranked one resolves the wrong oracle, no output is captured, and the
+    // indexer - which resolves the exact DISPENSER_ACTION_INDEX target - rejects a valid
+    // refill for a missing oracle fee after the native payment is already spent.
+    //
+    // Do not restore the claim that a wrong pick is harmless because it captures an extra
+    // output the indexer ignores: a single-equality filter cannot over-capture.
+    //
+    // The fix is set-membership capture over ALL of the source's open-dispenser oracle
+    // addresses, which changes the persisted output set and is therefore consensus-affecting:
+    // it needs its own future activation flag-day beside isOracleFeeCaptureActive, with the
+    // legacy single-pick preserved below the gate so a from-genesis re-decode stays
+    // byte-identical. Widening this query without that gate breaks from-genesis
+    // byte-identity, which is why the ranking stands until the flag-day exists.
     //
     // Returns the address string, null when there is no match or the dispenser named no
     // oracle, and false on a query fault (the caller retries the block rather than
@@ -2394,6 +2522,61 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
             '1aabdd6da22872473ce26757c357dbbb68240fb5681956adce959778203b9caa',  // 6869813..3a1c435
         ],
         to:   '1d8406192690e5a754ec9430fcd9115e907f34944f340a70b776166a62f83868',  // ec36bd4 (HEAD)
+    },
+    // Comment-only edit (): the header claimed mode=manual left the file
+    // "pending and harmless on fresh DBs" and that IF [NOT] EXISTS made a partial
+    // run resumable. Both were false and both invited the corrupting blanket run,
+    // so the header now names MIGRATION_PRECONDITIONS below as the actual guard.
+    // The four statements are unchanged since authorship (63fc384): stripping
+    // `--` comment lines and blank lines leaves the identical residue
+    // 820a0b2ae5b662a4e963dd2301f6ac86d2f67feaa6b59527c23fabec3c1a678c at every
+    // revision pinned here.
+    '2026-06-13-dispensers-expiration-bigint.sql': {
+        from: [
+            '8b163db63932ec7940fc0c4ff83abb6a52d27ab4a192c377ce5195c3ca4b969f',  // 63fc384
+            'c4d622adc34b3190a7cc43954b4c815a3c79bb6c6b7374be39c16d66454d1549',  // ec36bd4 (license header)
+        ],
+        to:   '44901ce7272347e6665ffe29655dbd7b8f3e45ba58b26671e50d07c0c629caef',  // header correction
+    },
+};
+
+// Applicability preconditions the runner evaluates against the LIVE schema before it
+// applies a migration (see _migrationPreconditionSkip). Each entry is a parameterised
+// information_schema query taking the database name, plus a predicate returning a reason
+// string when the migration does not apply to this database and null when it does.
+//
+// The guard lives HERE rather than inside the .sql file on purpose: a migration file's
+// sha256 is its identity in schema_migrations, so adding a guard clause to an already
+// applied file would trip the immutability check on every node that ran it, and healing
+// that needs a MIGRATION_CHECKSUM_REBASELINES entry whose documented contract is that the
+// executable SQL is byte-identical across pinned revisions. A runner-side predicate keeps
+// both properties intact and covers every invocation route (startup, blanket
+// `node src/migrate.js`, and a targeted `--file` rollout), since all three funnel through
+// this loop.
+Database.MIGRATION_PRECONDITIONS = {
+    // DATETIME -> BIGINT UNSIGNED converter. It is mode=manual, so it stays PENDING on a
+    // database created from the current dispensers.sql (already BIGINT UNSIGNED) - and the
+    // documented blanket `npm run migrate` applies every pending manual file. Run against a
+    // BIGINT column, its UNIX_TIMESTAMP() reads raw epoch seconds as a date-form number and
+    // yields NULL for ordinary 10-digit values, after which the file drops the good column
+    // and renames the all-NULL holding column over it: irrecoverable loss, and the decoder
+    // then never soft-expires while the BIGINT-backed indexer still does ().
+    //
+    // Applicable only while the column is still a date/time type. A column that is absent
+    // (a crash between the DROP and the rename) is deliberately NOT baselined: that state
+    // needs an operator, and _assertDispenserExpirationIsBigintUnsigned fails closed on it.
+    '2026-06-13-dispensers-expiration-bigint.sql': {
+        sql: "SELECT DATA_TYPE AS dataType FROM information_schema.columns " +
+             "WHERE table_schema = ? AND table_name = 'dispensers' AND column_name = 'expiration'",
+        skipWhen: (rows) => {
+            // No column, or a type we could not read: never baseline on an absent answer,
+            // let the file speak for itself and the contract guard fail closed after it.
+            if(!rows.length || !rows[0].dataType) return null;
+            const dataType = String(rows[0].dataType).toLowerCase();
+            if(dataType === 'datetime' || dataType === 'timestamp' || dataType === 'date') return null;
+            return 'dispensers.expiration is already ' + dataType.toUpperCase() +
+                   ', so there is no DATETIME to convert and UNIX_TIMESTAMP() would NULL every row.';
+        }
     },
 };
 

@@ -33,9 +33,11 @@ describe('Bug-Fix Regressions', () => {
     // Add regression tests here as bugs are fixed.
     // Each test must fail without the fix and pass with it.
 
-    // Placeholder deliberately carries no [REGRESSION P1] tag so grep-based tier
-    // selection does not count it as a real regression guard.
-    it('R-BUG-000: placeholder (untagged): regression suite is loadable', () => {
-        assert.ok(true)
+    // Untagged on purpose: grep-based tier selection must not count a placeholder
+    // as a real regression guard. Asserts the subject loads, not a constant truth,
+    // so the case can still fail on behavior (quality rubric `tautology`).
+    it('R-BUG-000: placeholder (untagged): the decoder under regression loads', () => {
+        const XChainDecoder = require('../../src/XChainDecoder')
+        assert.strictEqual(typeof XChainDecoder, 'function')
     })
 })

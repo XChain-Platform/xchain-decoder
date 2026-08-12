@@ -74,9 +74,14 @@ class DispenserModel {
     // operating-address matches ranked first, then most recent. Since #3119 only the
     // oracle-address read uses the ranking - the extend path deliberately takes the whole
     // set (no ORDER BY, no LIMIT), because ranking is the guess that closed wrong rows.
-    _openFor(actingAddress) {
+    // `thisBlock` () widens the candidate set by exactly the rows THIS block's
+    // soft-expire stamped, matching the extend UPDATE's
+    // `(expired_block_index IS NULL OR expired_block_index = ?)`. Omitted by the readers,
+    // which see only genuinely-open rows.
+    _openFor(actingAddress, thisBlock) {
         return this.rows
-            .filter(r => r.expiredBlockIndex === null &&
+            .filter(r => (r.expiredBlockIndex === null ||
+                          (thisBlock !== undefined && r.expiredBlockIndex === thisBlock)) &&
                          (r.address === actingAddress || r.sourceAddress === actingAddress))
             .sort((a, b) => {
                 const aKeyed = (a.address === actingAddress) ? 1 : 0
@@ -94,10 +99,14 @@ class DispenserModel {
     // Mirrors extendOpenDispenserExpirationBySource (#3119):
     //   UPDATE ... SET expiration = GREATEST(expiration, ?) ... (no ORDER BY, no LIMIT)
     // over EVERY open row the acting address may act on. Never shortens, never picks.
-    async extendOpenDispenserExpirationBySource(sourceAddress, newExpiration) {
-        this.calls.extend.push({ sourceAddress, newExpiration: Number(newExpiration) })
-        for (const r of this._openFor(sourceAddress))
+    // : the candidate set also admits a row THIS block soft-expired, and clears
+    // that stamp, because deleteOpenDispensers ran before the transaction loop.
+    async extendOpenDispenserExpirationBySource(sourceAddress, newExpiration, blockIndex) {
+        this.calls.extend.push({ sourceAddress, newExpiration: Number(newExpiration), blockIndex })
+        for (const r of this._openFor(sourceAddress, blockIndex)) {
             r.expiration = Math.max(Number(r.expiration), Number(newExpiration))
+            if (r.expiredBlockIndex === blockIndex) r.expiredBlockIndex = null
+        }
         return true
     }
     // Mirrors deleteOpenDispensers: soft-expire open rows whose expiration < minExpiration.
@@ -172,7 +181,7 @@ function buildDecoder(txSpecs, model) {
         DUPLICATED_TRANSACTION: 1,
         // Dispenser lifecycle surface -> the in-memory model.
         insertDispenser:                     (d) => model.insertDispenser(d),
-        extendOpenDispenserExpirationBySource: (s, e) => model.extendOpenDispenserExpirationBySource(s, e),
+        extendOpenDispenserExpirationBySource: (s, e, b) => model.extendOpenDispenserExpirationBySource(s, e, b),
         deleteOpenDispensers:                (b, m) => model.deleteOpenDispensers(b, m),
         purgeExpiredDispensers:              (h) => model.purgeExpiredDispensers(h),
         getAllOpenDispenserAddresses:        () => model.getAllOpenDispenserAddresses(),
@@ -242,13 +251,70 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
         await decoder.start()
 
         assert.strictEqual(model.calls.extend.length, 1)
-        assert.deepStrictEqual(model.calls.extend[0], { sourceAddress: ADDR, newExpiration: extended })
+        // blockIndex rides along since #4223 so the mirror can clear a same-block stamp.
+        assert.deepStrictEqual(model.calls.extend[0],
+            { sourceAddress: ADDR, newExpiration: extended, blockIndex: 0 })
         assert.strictEqual(model.rows[0].expiration, extended, 'the stored expiry moved out')
 
         // Past the ORIGINAL expiry the dispenser is still open, matching the indexer.
         await model.deleteOpenDispensers(1, (T0 + 1000000) + 1)
         const open = await model.getAllOpenDispenserAddresses()
         assert.ok(open.has(ADDR), 'the extended dispenser is still captured past its old expiry')
+    })
+
+    // : the ORDERING case the mirror was missing.
+    //
+    // The decoder soft-expires at block START (deleteOpenDispensers, before the tx loop);
+    // the indexer expires at block END (processExpirations, after it). So on the first
+    // block whose header time passes an expiration, the indexer applies a same-block
+    // format-2 extension BEFORE its expiry pass and keeps the dispenser open, while the
+    // decoder had already stamped expired_block_index and its `IS NULL`-only extend filter
+    // could not reach the row. The extend no-oped, the decoder row stayed closed FOREVER,
+    // and payments to a dispenser the indexer still honours stopped being captured. That is
+    // the money-bearing direction, and it is the exact failure this mirror exists to
+    // prevent, so a stamp from THIS block is cleared.
+    it('a same-block extend REOPENS a row this block soft-expired (#4223)', async () => {
+        const model = new DispenserModel()
+        // Pre-existing row, already past its expiry at this block's header time, so the
+        // block-start soft-expire stamps it before any transaction is seen.
+        model.rows.push({ txIndex: 1, address: ADDR, expiration: T0 - 10,
+                          expiredBlockIndex: null, oracleAddress: null, sourceAddress: null })
+        const extended = T0 + 2000000
+        const decoder = buildDecoder([
+            { id: 'edit01', action: `DISPENSER|2|7||${extended}||`, source: ADDR },
+        ], model)
+
+        await decoder.start()
+
+        assert.strictEqual(model.calls.extend.length, 1, 'the edit must reach the mirror')
+        assert.strictEqual(model.rows[0].expiredBlockIndex, null,
+            'the soft-expiry stamp from THIS block must be cleared, not left to close the row forever');
+        assert.strictEqual(model.rows[0].expiration, extended, 'and the expiry moved out')
+        const open = await model.getAllOpenDispenserAddresses()
+        assert.ok(open.has(ADDR),
+            'a validly-extended dispenser must be back in the open-view, matching the indexer')
+    })
+
+    it('a same-block extend does NOT reopen a row an EARLIER block expired (#4223 scope)', async () => {
+        // Reopening a row closed in an earlier block would be exactly the guessed-target
+        // row surgery #3119 removed, and the indexer settled that lifecycle long ago.
+        const model = new DispenserModel()
+        // The harness processes height 0, so a stamp of -1 is "some other, earlier block".
+        // deleteOpenDispensers only stamps rows still at NULL, so it stays -1.
+        model.rows.push({ txIndex: 1, address: ADDR, expiration: T0 - 10,
+                          expiredBlockIndex: -1, oracleAddress: null, sourceAddress: null })
+        const extended = T0 + 2000000
+        const decoder = buildDecoder([
+            { id: 'edit01', action: `DISPENSER|2|7||${extended}||`, source: ADDR },
+        ], model)
+
+        await decoder.start()
+
+        assert.strictEqual(model.rows[0].expiredBlockIndex, -1,
+            'a row closed by another block stays closed')
+        assert.strictEqual(model.rows[0].expiration, T0 - 10, 'and its expiry is untouched')
+        const open = await model.getAllOpenDispenserAddresses()
+        assert.ok(!open.has(ADDR), 'it must not return to the open-view')
     })
 
     it('a format 2 edit that SHORTENS the expiry is deliberately NOT mirrored', async () => {
@@ -461,5 +527,61 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
         assert.strictEqual(model.calls.extend.length, 0, 'a pure escrow refill does not move the decoder open-view')
         const open = await model.getAllOpenDispenserAddresses()
         assert.ok(open.has(ADDR), 'the dispenser stays open regardless of the refill accept/reject verdict')
+    })
+
+    // -- Fractional EXPIRATION (). dispensers.expiration is BIGINT UNSIGNED on
+    //    BOTH sides, and the indexer rejects any non-integer EXPIRATION outright
+    //    (xchain-indexer/src/actions/dispenser.js, isInteger). A decoder that accepts one
+    //    either wedges the block loop (a strict sql_mode fails the write, so the loop
+    //    retries the same deterministic tx forever) or truncates it, leaving an open row
+    //    for a dispenser the indexer never registered. Both write sites refuse it at parse
+    //    time.
+
+    it('a CREATE with a fractional EXPIRATION is skipped before the BIGINT write', async () => {
+        const model = new DispenserModel()
+        const fractionalCreate = `DISPENSER|0|BTC|TICK|1||10|BTC||1|||||${T0 + 1000000}.5`
+        const decoder = buildDecoder([
+            { id: 'create01', action: fractionalCreate, source: ADDR },
+        ], model)
+
+        await decoder.start()
+
+        assert.strictEqual(model.calls.insert.length, 0,
+            'a fractional EXPIRATION must never reach insertDispenser')
+        assert.strictEqual(decoder.parseErrors, 1, 'the skip is counted as a parse error')
+        const open = await model.getAllOpenDispenserAddresses()
+        assert.strictEqual(open.size, 0, 'no open row exists for an indexer-invalid dispenser')
+    })
+
+    it('an EDIT with a fractional EXPIRATION does not extend anything', async () => {
+        const model = new DispenserModel()
+        const decoder = buildDecoder([
+            { id: 'create01', action: CREATE,                               source: ADDR },
+            { id: 'edit01',   action: `DISPENSER|2|7||${T0 + 2000000}.25||`, source: ADDR },
+        ], model)
+
+        await decoder.start()
+
+        assert.strictEqual(model.calls.extend.length, 0,
+            'a fractional edit EXPIRATION must never reach extendOpenDispenserExpirationBySource')
+        assert.strictEqual(model.rows[0].expiration, T0 + 1000000, 'the stored expiry is unchanged')
+    })
+
+    it('an integral EXPIRATION still passes both guards unchanged', async () => {
+        // Teeth for the two cases above: the same wire shapes with integral values must
+        // still create and still extend, so the guard rejects fractions and nothing else.
+        const model = new DispenserModel()
+        const extended = T0 + 2000000
+        const decoder = buildDecoder([
+            { id: 'create01', action: CREATE,                        source: ADDR },
+            { id: 'edit01',   action: `DISPENSER|2|7||${extended}||`, source: ADDR },
+        ], model)
+
+        await decoder.start()
+
+        assert.strictEqual(model.calls.insert.length, 1, 'an integral create still registers')
+        assert.strictEqual(model.calls.extend.length, 1, 'an integral edit still extends')
+        assert.strictEqual(decoder.parseErrors, 0, 'no parse error on the valid path')
+        assert.strictEqual(model.rows[0].expiration, extended)
     })
 })

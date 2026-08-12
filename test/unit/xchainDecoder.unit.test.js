@@ -185,6 +185,61 @@ describe('XChainDecoder#isStalled()', () => {
     })
 })
 
+// ─── isPollSilent (the dead-loop signal isStalled structurally cannot give) ───
+//
+// Every isStalled() gate above is a statement about CHAIN PROGRESS, so a decoder
+// that is caught up is never stalled by construction, and one on a stale tip is
+// deliberately never stalled (). A parse loop that dies while caught up
+// therefore leaves running+db true and stalled false, and /live answered 200
+// forever while nothing parsed. Only an iteration counter independent of the
+// chain closes that.
+
+describe('XChainDecoder#isPollSilent()', () => {
+    let decoder
+    const SILENT_MS = 2 * 900000   // must track POLL_SILENT_MS in XChainDecoder.js
+
+    beforeEach(() => {
+        decoder = createDecoder()
+    })
+
+    it('is false before the loop has iterated, so a long initial sync is not called dead', () => {
+        assert.strictEqual(decoder.lastPollAt, 0)
+        assert.strictEqual(decoder.isPollSilent(), false)
+    })
+
+    it('is false while the loop is iterating', () => {
+        decoder.lastPollAt = Date.now()
+        assert.strictEqual(decoder.isPollSilent(), false)
+    })
+
+    it('is true once the loop has not iterated for longer than the window', () => {
+        decoder.lastPollAt = Date.now() - (SILENT_MS + 60000)
+        assert.strictEqual(decoder.isPollSilent(), true)
+    })
+
+    // The case isStalled() is blind to, and the reason this signal exists: caught
+    // up (lag 0) with a fresh tip, so every stall gate passes, but the loop is gone.
+    it('catches a dead loop on a caught-up decoder that isStalled() reports healthy', () => {
+        decoder.lastProcessedBlockIndex = 100
+        decoder.blockchainInfoLastBlock = 100          // caught up: lag 0
+        decoder.blockchainInfoLastRefreshAt = Date.now()
+        decoder.lastAdvanceAt = Date.now() - (2 * SILENT_MS)
+        decoder.lastPollAt = Date.now() - (SILENT_MS + 60000)
+
+        assert.strictEqual(decoder.isStalled(), false, 'isStalled is blind here by design')
+        assert.strictEqual(decoder.isPollSilent(), true, 'the heartbeat must catch it')
+    })
+
+    // The loop sets the heartbeat at its very top, so `continue main_parsing` and the
+    // outage path (catch -> sleep -> continue) both refresh it. A node outage must
+    // NOT read as a dead loop: restarting fixes nothing ().
+    it('is false during a node outage, because the retry path still iterates', () => {
+        decoder.blockchainInfoLastRefreshAt = Date.now() - (3 * 30000)   // frozen tip
+        decoder.lastPollAt = Date.now()
+        assert.strictEqual(decoder.isPollSilent(), false)
+    })
+})
+
 // ─── millisecondsToTimeString ────────────────────────────────────────────────
 
 describe('XChainDecoder#millisecondsToTimeString()', () => {
@@ -511,10 +566,14 @@ describe('XChainDecoder auxPow chain-identity forcing', () => {
         assert.strictEqual(makeDecoder('dogecoin-mainnet', false).auxPow, true)
     })
 
-    it('leaves the env-driven value untouched for non-DOGE chains', () => {
+    // : a non-auxpow chain must NEVER reach getBlockWithoutAuxPow. BTC/LTC
+    // blocks carry no AuxPoW section, so stripping one whose version signals bit
+    // 0x100 truncates a valid block. The passed flag is inert in both directions.
+    it('forces auxPow=false for non-DOGE chains even when AUX_POW is set (true)', () => {
         assert.strictEqual(makeDecoder('bitcoin-regtest', false).auxPow, false)
         assert.strictEqual(makeDecoder('litecoin-regtest', false).auxPow, false)
-        assert.strictEqual(makeDecoder('bitcoin-regtest', true).auxPow, true)
+        assert.strictEqual(makeDecoder('bitcoin-regtest', true).auxPow, false)
+        assert.strictEqual(makeDecoder('litecoin-regtest', true).auxPow, false)
     })
 })
 

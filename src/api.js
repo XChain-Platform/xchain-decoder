@@ -31,6 +31,7 @@ const XChainDecoder  = require('./XChainDecoder');
 const { resolveFeeDestination } = require('./feeDestination');
 const jsonRouter = require('express-json-rpc-router')
 const { installObservability } = require('./observability');   // : default-off /metrics + structured log shim
+const { registerDecoderMetrics } = require('./decoderMetrics'); // : decoder feed-freshness gauges
 
 
 const NETWORK = process.env.NETWORK
@@ -70,6 +71,66 @@ function makeRpcBatchGuard(maxBatch){
     }
 }
 
+// Registers GET /live, the LIVENESS probe and the route the Docker HEALTHCHECK runs
+// (see SERVICE_HEALTHCHECK[XCHAIN_DECODER] in xchain-node's ModuleService, which sets
+// path:'/live'). It is /status plus the one thing /status structurally cannot see:
+// the block loop retrying a block forever. decoderRunning only goes false when
+// start() REJECTS, and the loop is written never to reject on a fetch/parse fault
+// (skipping a block would corrupt the index), so a wedged decoder kept answering
+// /status with 200 while lag grew without bound and autoheal, whose only input is
+// docker inspect's Health.Status, never saw a thing.
+//
+// Kept separate from /status rather than folded into it: /status is the
+// load-balancer / uptime signal and its running+db semantics are relied on
+// elsewhere. Same split, same reason, as sync's /health override.
+//
+// A module-scope registrar rather than an inline route so a test can mount and drive
+// THIS handler (test/unit/decoderLiveHeartbeat.test.js). The states it exists to
+// answer 503 in are exactly the ones a reimplementation of the route inside a test
+// would get wrong, so a copy proves nothing about the probe that ships.
+//
+// isDecoderRunning is a getter, not a boolean: the flag it reads flips from start()'s
+// settle and from shutdown(), long after this route is registered.
+function registerLiveRoute(app, decoder, isDecoderRunning){
+    app.get('/live', async (req, res) => {
+        const decoderRunning = isDecoderRunning()
+        let dbOk = false
+        if (decoder.db) {
+            try { dbOk = await decoder.db.ping() } catch (_) {}
+        }
+        const stalled = typeof decoder.isStalled === 'function' ? decoder.isStalled() : false
+        // The parse loop has stopped ITERATING, which every other field here is
+        // structurally blind to: isStalled() reports chain progress, and a caught-up
+        // decoder makes none while being perfectly healthy. So a loop that dies while
+        // caught up, or hangs inside an await, left running+db true and stalled false
+        // and /live answered 200 forever. GATES health, unlike node_height_stale
+        // below: a dead loop is exactly the wedge a restart does fix.
+        const pollSilent = typeof decoder.isPollSilent === 'function' ? decoder.isPollSilent() : false
+        const syncStatus = decoder.getSyncStatus()
+        const healthy = decoderRunning && dbOk && !stalled && !pollSilent
+        res.status(healthy ? 200 : 503).json({
+            status: healthy ? 'healthy' : 'unhealthy',
+            db: dbOk,
+            running: decoderRunning,
+            stalled,
+            poll_silent: pollSilent,
+            last_poll_at: decoder.lastPollAt || null,
+            // A frozen node tip, reported but deliberately NOT gating ().
+            // isStalled() returns false while the tip is stale on purpose: restarting
+            // the container cannot fix an upstream node outage, and gating on it
+            // re-opens the restart flap  closed. So the outage stays invisible
+            // to autoheal by design and visible HERE, as a stable boolean a dashboard
+            // or watchdog can read (getSyncStatus omits the key entirely when fresh).
+            node_height_stale: syncStatus.node_height_stale === true,
+            last_processed_block: syncStatus.last_processed_block,
+            node_height: syncStatus.node_height,
+            lag: syncStatus.lag,
+            parse_errors: decoder.parseErrors,
+            rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors
+        })
+    })
+}
+
 async function startApi(){
     // Validate required env vars that have no safe default: a missing port causes Node to
     // bind a random OS-assigned port, making the container appear healthy while every
@@ -82,7 +143,15 @@ async function startApi(){
     const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DECODER_DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD, AUX_POW, FEE_DESTINATION);
     let decoderRunning = true
     let decoderError = null
-    decoder.start().catch((err) => {
+    decoder.start().then(() => {
+        // start() awaits the parse loop, so it RESOLVES only when the loop breaks:
+        // the SIGTERM/stopFlag path, or any fall-through out of `while (true)`.
+        // Without this, decoderRunning only ever went false on a REJECTION, so a
+        // cleanly-stopped decoder kept answering /live with 200 while parsing
+        // nothing. Reported immediately, ahead of the poll-silence window.
+        console.log('Decoder parse loop exited; reporting not-running.')
+        decoderRunning = false
+    }).catch((err) => {
         console.error('Decoder crashed:', err)
         decoderRunning = false
         decoderError = err
@@ -98,6 +167,10 @@ async function startApi(){
     // Graceful shutdown on process signals
     const shutdown = () => {
         console.log('Received shutdown signal, stopping decoder...')
+        // Flip BEFORE stop(): stop() only sets stopFlag, and the loop may take a
+        // whole iteration to notice. A drain must not answer /live with 200 in the
+        // window between the signal and the loop actually breaking.
+        decoderRunning = false
         decoder.stop()
     }
     process.on('SIGTERM', shutdown)
@@ -129,7 +202,7 @@ async function startApi(){
     // See src/observability/README.md.
     let decoderVersion = '';
     try { decoderVersion = require('../package.json').version; } catch { /* version label is cosmetic */ }
-    installObservability(app, {
+    const observability = installObservability(app, {
         service: 'xchain-decoder',
         version: decoderVersion,
         // The decoder has no coin env of its own (chain identity comes from the
@@ -138,6 +211,15 @@ async function startApi(){
         coin:    process.env.COIN || '',
         network: NETWORK || ''
     });
+
+    // The log shim is a console passthrough when shipping is off, so the stale-tip
+    // warn works in every deployment; only its DESTINATION depends on the env.
+    decoder.setObservabilityLogger(observability.logger)
+
+    // Decoder feed-freshness gauges (). registry is null unless
+    // METRICS_ENABLED, and registerDecoderMetrics is then a no-op: nothing is
+    // registered and no collector runs, matching the module's default-off contract.
+    registerDecoderMetrics(observability.registry, decoder)
 
 
     const jsonRpcController = {
@@ -250,38 +332,7 @@ async function startApi(){
         })
     })
 
-    // GET /live: the LIVENESS probe, and the route the Docker HEALTHCHECK runs (see
-    // SERVICE_HEALTHCHECK[XCHAIN_DECODER] in xchain-node's ModuleService, which sets
-    // path:'/live'). It is /status plus the one thing /status structurally cannot see:
-    // the block loop retrying a block forever. decoderRunning only goes false when
-    // start() REJECTS, and the loop is written never to reject on a fetch/parse fault
-    // (skipping a block would corrupt the index), so a wedged decoder kept answering
-    // /status with 200 while lag grew without bound and autoheal, whose only input is
-    // docker inspect's Health.Status, never saw a thing.
-    //
-    // Kept separate from /status rather than folded into it: /status is the
-    // load-balancer / uptime signal and its running+db semantics are relied on
-    // elsewhere. Same split, same reason, as sync's /health override.
-    app.get('/live', async (req, res) => {
-        let dbOk = false
-        if (decoder.db) {
-            try { dbOk = await decoder.db.ping() } catch (_) {}
-        }
-        const stalled = typeof decoder.isStalled === 'function' ? decoder.isStalled() : false
-        const syncStatus = decoder.getSyncStatus()
-        const healthy = decoderRunning && dbOk && !stalled
-        res.status(healthy ? 200 : 503).json({
-            status: healthy ? 'healthy' : 'unhealthy',
-            db: dbOk,
-            running: decoderRunning,
-            stalled,
-            last_processed_block: syncStatus.last_processed_block,
-            node_height: syncStatus.node_height,
-            lag: syncStatus.lag,
-            parse_errors: decoder.parseErrors,
-            rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors
-        })
-    })
+    registerLiveRoute(app, decoder, () => decoderRunning)
 
     // Bound JSON-RPC batch size (see makeRpcBatchGuard). Must run after bodyParser
     // (req.body parsed) and before the router (dispatch).
@@ -305,4 +356,4 @@ async function startApi(){
 // tests without opening a DB connection / listening socket.
 if (require.main === module) startApi()
 
-module.exports = { makeRpcBatchGuard }
+module.exports = { makeRpcBatchGuard, registerLiveRoute }

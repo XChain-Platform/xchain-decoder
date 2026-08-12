@@ -65,7 +65,7 @@ describe('Database#extendOpenDispenserExpirationBySource() (#3119)', () => {
         const { pool } = withConn(q);
         injectPool(db, pool);
 
-        const ok = await db.extendOpenDispenserExpirationBySource('bcrt1qsource', 1700050000);
+        const ok = await db.extendOpenDispenserExpirationBySource('bcrt1qsource', 1700050000, 900);
 
         assert.strictEqual(ok, true);
         assert.ok(q.calledOnce, 'exactly one query is issued');
@@ -76,9 +76,38 @@ describe('Database#extendOpenDispenserExpirationBySource() (#3119)', () => {
         assert.doesNotMatch(sql, /SET\s+expiration\s*=\s*\?/i,
             'an unconditional SET would let a shortening edit close the row early');
         assert.match(sql, /expired_block_index\s+IS\s+NULL/i);
-        // Args: the new expiration, then the acting address once per key subquery. The
-        // third bind of the pre-#3119 query was the ranking term, which no longer exists.
-        assert.deepStrictEqual(args, [1700050000, 'bcrt1qsource', 'bcrt1qsource']);
+        // Args: the new expiration, this block's height (the soft-expiry stamp the CASE
+        // clears, ), the acting address once per key subquery, then the height
+        // again for the WHERE's this-block admission. The third bind of the pre-#3119
+        // query was the ranking term, which no longer exists.
+        assert.deepStrictEqual(args, [1700050000, 900, 'bcrt1qsource', 'bcrt1qsource', 900]);
+    });
+
+    // . deleteOpenDispensers stamps expired_block_index at block START, before
+    // the transaction loop that applies a format-2 edit, so an `IS NULL`-only filter could
+    // not reach the very row a same-block extend exists for: the extend no-oped, the
+    // decoder row stayed closed forever, and it stopped capturing payments to a dispenser
+    // the indexer applied the same edit to and kept open. The restore is scoped to THIS
+    // block's stamp; an earlier block's close stays closed, since reopening one would be
+    // the guessed-target row surgery #3119 removed.
+    it('reopens a row soft-expired by THIS block, and only this block', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+
+        await db.extendOpenDispenserExpirationBySource('bcrt1qsource', 1700050000, 900);
+
+        const [sql, args] = q.firstCall.args;
+        assert.match(sql, /expired_block_index\s*=\s*CASE\s+WHEN\s+expired_block_index\s*=\s*\?\s+THEN\s+NULL\s+ELSE\s+expired_block_index\s+END/i,
+            'the soft-expiry mark must be cleared, not merely stepped over');
+        assert.match(sql, /\(\s*expired_block_index\s+IS\s+NULL\s+OR\s+expired_block_index\s*=\s*\?\s*\)/i,
+            'the WHERE must admit a row this block expired');
+        assert.doesNotMatch(sql, /expired_block_index\s+IS\s+NOT\s+NULL/i,
+            'a blanket reopen would resurrect dispensers closed in earlier blocks');
+        // Both height binds are the CURRENT block, never a range or a constant.
+        assert.strictEqual(args[1], 900);
+        assert.strictEqual(args[4], 900);
     });
 
     it('picks no row: no ORDER BY and no LIMIT, so every open row of the source is covered', async () => {
@@ -90,7 +119,7 @@ describe('Database#extendOpenDispenserExpirationBySource() (#3119)', () => {
         const { pool } = withConn(q);
         injectPool(db, pool);
 
-        await db.extendOpenDispenserExpirationBySource('bcrt1qsource', 1700050000);
+        await db.extendOpenDispenserExpirationBySource('bcrt1qsource', 1700050000, 900);
 
         const sql = q.firstCall.args[0];
         assert.doesNotMatch(sql, /ORDER\s+BY/i, 'no ranking: ranking is how the wrong row got picked');
@@ -113,7 +142,7 @@ describe('Database#extendOpenDispenserExpirationBySource() (#3119)', () => {
         // Not inside a block transaction, so the error path must not try to end one.
         db.endTransaction = sinon.stub().resolves();
 
-        const ok = await db.extendOpenDispenserExpirationBySource('bcrt1qsource', 1700050000);
+        const ok = await db.extendOpenDispenserExpirationBySource('bcrt1qsource', 1700050000, 900);
 
         assert.strictEqual(ok, false, 'a failed write signals rollback to the block loop');
         assert.ok(db.endTransaction.notCalled, 'no open block transaction to end');

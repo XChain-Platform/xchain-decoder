@@ -97,4 +97,40 @@ describe('CE-08: Signal Handling and Graceful Shutdown', function () {
         assert.ok(apiSource.includes('decoderRunning'), 'Health should report decoder running state')
         assert.ok(apiSource.includes('.catch('), 'decoder.start() should have .catch() handler')
     })
+
+    // The loop must WRITE the heartbeat, not merely have a field for it. A unit test
+    // over isPollSilent() alone would pass against a lastPollAt nothing ever sets,
+    // which is the exact shape of the bug: a liveness field that never updates.
+    it('the parse loop writes the lastPollAt heartbeat on every iteration', async function () {
+        mockConnector.getBlockchainInfo.resolves({ blocks: 0, verificationprogress: 1.0 })
+        mockDb.getLastBlockIndex.resolves(0)
+
+        assert.strictEqual(decoder.lastPollAt, 0, 'heartbeat starts unset before the loop runs')
+
+        setTimeout(() => decoder.stop(), 200)
+        await captureConsole(async () => {
+            await decoder.start()
+        })
+
+        assert.ok(decoder.lastPollAt > 0, 'the loop must stamp lastPollAt')
+        assert.strictEqual(decoder.isPollSilent(), false, 'a loop that just ran is not silent')
+    })
+
+    // start() resolves only when the loop breaks, so the SIGTERM path must report
+    // not-running immediately rather than waiting out the poll-silence window.
+    it('api.js flips decoderRunning false when the loop exits and on shutdown', function () {
+        const fs = require('fs')
+        const apiSource = fs.readFileSync(require.resolve('../../src/api.js'), 'utf-8')
+
+        assert.ok(/decoder\.start\(\)\s*\.then\(/.test(apiSource),
+            'decoder.start() should have a .then() that observes a clean loop exit')
+        const shutdownBody = apiSource.slice(apiSource.indexOf('const shutdown = () =>'),
+                                             apiSource.indexOf("process.on('SIGTERM'"))
+        assert.ok(shutdownBody.includes('decoderRunning = false'),
+            'shutdown() should mark the decoder not-running before stopping it')
+        // Whether /live actually turns 503 on a silent heartbeat is pinned
+        // behaviourally against the shipped route in
+        // test/unit/decoderLiveHeartbeat.test.js. A grep for `isPollSilent` here would
+        // pass just as happily on a handler that read the field and ignored it.
+    })
 })

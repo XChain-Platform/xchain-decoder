@@ -131,7 +131,12 @@ describe('Security: Connection Handling', () => {
             const p2 = db._acquireTransactionLock().then(() => order.push(2))
             const p3 = db._acquireTransactionLock().then(() => order.push(3))
 
-            await new Promise(resolve => setTimeout(resolve, 10))
+            // Poll for the three waiters to enqueue rather than sleeping a fixed 10ms ():
+            // the wait is on an observable condition, so a loaded machine cannot under-sleep it.
+            const deadline = Date.now() + 2000
+            while (db._transactionLockQueue.length < 3 && Date.now() < deadline) {
+                await new Promise(resolve => setImmediate(resolve))
+            }
             assert.strictEqual(db._transactionLockQueue.length, 3)
 
             db._releaseTransactionLock()

@@ -135,18 +135,21 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
     })
 
     describe('XChainDecoder.fetchBlockHex', function () {
-        function makeDecoder(auxPow, connector) {
-            // litecoin so the constructor's force-auxPow-for-dogecoin rule does not
-            // override the auxPow argument in the non-AuxPoW case.
-            const decoder = new XChainDecoder('litecoin-regtest', '127.0.0.1', 3306, 'db', 'u', 'p',
-                '127.0.0.1', 0, 'u', 'p', auxPow, null)
+        // Select the strip path by NETWORK, not by a flag: since  the
+        // constructor derives auxPow solely from the coin's declared wireFormat, so
+        // dogecoin-* is the only way to reach getBlockWithoutAuxPow and litecoin-*
+        // the only way to reach plain getBlock. The trailing constructor argument is
+        // the now-inert auxPow parameter, passed false to prove it is not consulted.
+        function makeDecoder(network, connector) {
+            const decoder = new XChainDecoder(network, '127.0.0.1', 3306, 'db', 'u', 'p',
+                '127.0.0.1', 0, 'u', 'p', false, null)
             decoder.connector = connector
             return decoder
         }
 
         it('uses getBlockWithoutAuxPow below the failure threshold', async function () {
             const calls = []
-            const decoder = makeDecoder(true, {
+            const decoder = makeDecoder('dogecoin-regtest', {
                 getBlockWithoutAuxPow: async () => { calls.push('strip'); return 'aa' },
                 getBlockReassembled: async () => { calls.push('reassemble'); return 'bb' },
             })
@@ -157,7 +160,7 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
 
         it('falls back to getBlockReassembled at the failure threshold', async function () {
             const calls = []
-            const decoder = makeDecoder(true, {
+            const decoder = makeDecoder('dogecoin-regtest', {
                 getBlockWithoutAuxPow: async () => { calls.push('strip'); throw new Error('malformed AuxPoW') },
                 getBlockReassembled: async () => { calls.push('reassemble'); return 'bb' },
             })
@@ -168,7 +171,7 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
 
         it('never reassembles on a non-AuxPoW chain', async function () {
             const calls = []
-            const decoder = makeDecoder(false, {
+            const decoder = makeDecoder('litecoin-regtest', {
                 getBlock: async () => { calls.push('getBlock'); return 'cc' },
                 getBlockReassembled: async () => { calls.push('reassemble'); return 'bb' },
             })
@@ -183,7 +186,7 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
         // per-tx getrawtransaction fan-out at the very node that was already saturated.
         it('does not reassemble when transport faults, not content faults, drove the count', async function () {
             const calls = []
-            const decoder = makeDecoder(true, {
+            const decoder = makeDecoder('dogecoin-regtest', {
                 getBlockWithoutAuxPow: async () => { calls.push('strip'); return 'aa' },
                 getBlockReassembled: async () => { calls.push('reassemble'); return 'bb' },
             })
