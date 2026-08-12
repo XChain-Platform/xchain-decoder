@@ -15,10 +15,9 @@
  * XChain Decoder - Crypto Networks Class
  *
  * Thin adapter over the canonical coin registry (src/coins). The bitcoinjs
- * network object and the indexing start height now come from the single source
- * of truth instead of an in-file switch. The legacy getFirstBlock TODO ("this
- * config data should come from xchain-hub") is resolved: the canonical files are
- * the hub-authored source, vendored into each service.
+ * network object and the indexing start height come from that single source of
+ * truth rather than an in-file switch, so a coin's parameters cannot differ
+ * between the services that vendor the registry.
  *
  ********************************************************************/
 

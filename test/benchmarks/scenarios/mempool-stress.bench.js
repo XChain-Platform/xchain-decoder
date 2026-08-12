@@ -29,12 +29,10 @@ module.exports = {
         const results = {}
 
         for (const mempoolSize of MEMPOOL_SIZES) {
-            // Generate mempool entries
             const entries = generator.generateMempoolEntries(mempoolSize, {
                 xchnRatio: XCHN_RATIO
             })
 
-            // Set up mock connector with mempool data
             decoder.connector.mempoolTxIds = []
             for (const entry of entries) {
                 decoder.connector.mempoolTxIds.push(entry.txId)
@@ -45,7 +43,6 @@ module.exports = {
             }
             decoder.connector.mempoolTxIds.sort()
 
-            // Reset state
             decoder.db.resetCounts()
             decoder.connector.resetCounts()
             decoder.mempoolBusy = false
@@ -53,7 +50,6 @@ module.exports = {
             const startMem = process.memoryUsage()
             const startTime = process.hrtime.bigint()
 
-            // Run the actual updateMempool() method
             await decoder.updateMempool()
 
             const elapsed = Number(process.hrtime.bigint() - startTime) / 1e6

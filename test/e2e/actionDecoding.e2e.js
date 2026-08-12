@@ -29,9 +29,6 @@ const {
 describe('E2E: ACTION Decoding', function () {
     this.timeout(0)
 
-    // ---------------------------------------------------------------
-    // A1: All ACTION types via OP_RETURN
-    // ---------------------------------------------------------------
     describe('ACTION types via OP_RETURN', () => {
 
         it('A1.1: should decode SEND action', async () => {
@@ -244,9 +241,6 @@ describe('E2E: ACTION Decoding', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // A2: All encoding types (same ACTION, different encoding)
-    // ---------------------------------------------------------------
     describe('encoding types', () => {
 
         it('A2.1:should decode ACTION via direct OP_RETURN', async () => {
@@ -282,9 +276,6 @@ describe('E2E: ACTION Decoding', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // A3: Source address resolution across address types
-    // ---------------------------------------------------------------
     describe('source address resolution', () => {
 
         it('A3.1:should resolve Legacy (P2PKH) source address', async () => {
@@ -342,20 +333,15 @@ describe('E2E: ACTION Decoding', function () {
             await txBuilder.waitForDecoder(r3.blockIndex)
             const tx3 = await txBuilder.waitForTransaction(r3.txHash)
 
-            // All three should decode to the same ACTION string
             assert.strictEqual(tx1.data, action)
             assert.strictEqual(tx2.data, action)
             assert.strictEqual(tx3.data, action)
 
-            // But each should have a different source address
             assert.notStrictEqual(tx1.source, tx2.source)
             assert.notStrictEqual(tx2.source, tx3.source)
         })
     })
 
-    // ---------------------------------------------------------------
-    // A4: Edge cases in ACTION payloads
-    // ---------------------------------------------------------------
     describe('ACTION payload edge cases', () => {
 
         it('A4.1:should handle ACTION with empty memo field', async () => {

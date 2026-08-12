@@ -18,7 +18,6 @@
  *
  ********************************************************************/
 
-// Load required libraries
 const util = require('./util')
 const crypto = require('crypto');
 const bs58check = require('bs58check')
@@ -40,9 +39,9 @@ bitcoin.initEccLib(ecc);
 const CHECK_BLOCK_DELAY_MS = 1000 //1 second to continously ask for new block when all has been parsed
 const BLOCKCHAIN_INFO_REFRESH_MS = 30000 //Re-poll the node tip at least this often during catch-up so reported lag stays accurate
 const MEMPOOL_INTERVAL = 60000 //60 seconds between mempool checks
-// How often a health surface may re-probe the durable REORG_HALT marker . The
-// marker changes at most once in a decoder's life, so a slow TTL is ample; the point of
-// the cache is that an unauthenticated health endpoint must not turn into one DB query
+// How often a health surface may re-probe the durable REORG_HALT marker. The marker
+// changes at most once in a decoder's life, so a slow TTL is ample; the point of the
+// cache is that an unauthenticated health endpoint must not turn into one DB query
 // per request.
 const REORG_HALT_PROBE_INTERVAL_MS = 60000
 // How long the block loop may make no forward progress, while the node tip is fresh and
@@ -105,59 +104,49 @@ const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // Purging deeper is the conservative direction (rows are merely retained longer
 // before hard-purge; expiry semantics and action evaluation are unchanged).
 const DISPENSER_EXPIRE_SAFE_DEPTH = 126 // 120 (DOGE undo window) + 6 margin
-// DISPENSER_CLOSE_DELAY (a twin of the indexer's, xchain-indexer/src/config.js) used to
-// live here so the decoder could close a cancelled dispenser's row at exactly the height
-// the indexer's DISPENSER_CLOSE fires. It is GONE with the cancel mirror (#3119): the
-// decoder no longer closes anything on a cancel, so it no longer needs the indexer's
-// close-delay value, and keeping a pinned cross-repo twin for a relationship this repo
-// does not have would document a rule that is not enforced anywhere. Its drift guard
-// (test/unit/dispenserCloseDelayConformance.test.js, ) went with it. The indexer
-// keeps its own value; nothing here reads it. Reintroducing a closing mirror would need
-// the twin back, and would first need the decoder to resolve targets exactly rather than
-// by SOURCE - see db.js above extendOpenDispenserExpirationBySource.
+// There is deliberately no DISPENSER_CLOSE_DELAY twin of the indexer's here: the decoder
+// does not mirror dispenser cancels, so it never needs to close a row at the height the
+// indexer's DISPENSER_CLOSE fires. Reintroducing a closing mirror would need that pinned
+// cross-repo value back, and would first need the decoder to resolve cancel targets
+// exactly rather than by SOURCE (see db.js above extendOpenDispenserExpirationBySource).
 const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node need to have to start parsing
 
-// Maximum compiled on-chain ACTION push, in bytes (measured before
+// Maximum compiled on-chain ACTION push, in bytes, measured before
 // bitcoin.script.decompile strips the OP_PUSHDATA prefix (see compiledDataLength).
-// This is the protocol arbiter for ACTION size: any tx whose compiled push
-// exceeds this is dropped. Vendored single source of truth: ./protocol/constants.js
-// (byte-identical to xchain-documentation/protocol/constants.js,
-// MAX_ACTION_DATA_LENGTH); the encoder's matching guard is
-// xchain-encoder validator MAX_COMPILED_ACTION_DATA_LENGTH. Kept equal by the
-// cross-service regression suite.
+// This is the protocol arbiter for ACTION size: any tx whose compiled push exceeds
+// this is dropped. Vendored single source of truth: ./protocol/constants.js
+// (byte-identical to xchain-documentation/protocol/constants.js); the encoder's
+// matching guard is xchain-encoder validator MAX_COMPILED_ACTION_DATA_LENGTH, kept
+// equal by the cross-service regression suite.
 //
-// What this cap does NOT bound (item 2740): the STORED record. Both gates
-// (confirmed-block and mempool) compare compiledDataLength, the on-chain wire
-// bytes, and canonicalizeActionPayload runs AFTER the gate, so an expanding alias
-// grows the persisted payload past this number: CAST -> BROADCAST adds 5 bytes,
-// MSG -> MESSAGE 4, ADDR -> ADDRESS and DROP -> AIRDROP 3 each. A payload compiled
-// to exactly 8192 bytes is therefore stored as an 8197-byte BROADCAST string. That
-// is intended and harmless here (transactions.data is MEDIUMTEXT, nothing
-// truncates), and it is deliberately NOT "fixed" by re-measuring the canonical
-// buffer at the gate: the decoder is the protocol arbiter, so tightening this gate
-// would drop transactions whose on-chain push is legal and that other nodes accept,
-// forking the fleet and retroactively invalidating already-decoded near-cap alias
-// history. Moving the measurement point is a consensus change and would need a
-// flag-day (a *_ACTIVATION entry in ./protocol/constants.js keyed on block height
-// and network, deployed fleet-wide before its anchor), not an in-place edit.
-// aliasExpansionBoundary.test.js pins the measured behavior.
+// The cap bounds the WIRE bytes, not the STORED record. Both gates (confirmed-block
+// and mempool) compare compiledDataLength, and canonicalizeActionPayload runs AFTER
+// the gate, so an expanding alias grows the persisted payload past this number
+// (CAST -> BROADCAST adds 5 bytes, MSG -> MESSAGE 4, ADDR -> ADDRESS and
+// DROP -> AIRDROP 3 each). That is intended and harmless (transactions.data is
+// MEDIUMTEXT), and deliberately not "fixed" by re-measuring the canonical buffer at
+// the gate: tightening it would drop transactions whose on-chain push is legal and
+// that other nodes accept, forking the fleet and retroactively invalidating
+// already-decoded near-cap alias history. Moving the measurement point is a
+// consensus change needing a flag-day (a *_ACTIVATION entry in
+// ./protocol/constants.js keyed on block height and network, deployed fleet-wide
+// before its anchor), not an in-place edit. aliasExpansionBoundary.test.js pins the
+// measured behavior.
 const MAX_ACTION_DATA_LENGTH = require('./protocol/constants.js').MAX_ACTION_DATA_LENGTH
 
 // Bytes the OP_PUSHDATA2 prefix adds to a compiled push (1-byte opcode + 2-byte
 // little-endian length), i.e. the overhead for any payload above 255 bytes.
 // Vendored single source of truth: ./protocol/constants.js (byte-identical to
-// xchain-documentation/protocol/constants.js, OP_RETURN_PUSH_OVERHEAD); the
-// encoder's copy is xchain-encoder/src/validator.js. Bound to the canonical NAME
-// rather than inlined as a literal so a cross-service drift check can key on the
-// symbol the way it already can for MAX_ACTION_DATA_LENGTH. Value is unchanged
-// (3): compiledPushSize below computed the same +3 inline before this binding.
+// xchain-documentation/protocol/constants.js); the encoder's copy is
+// xchain-encoder/src/validator.js. Bound to the canonical NAME rather than inlined
+// as a literal so a cross-service drift check can key on the symbol.
 const OP_RETURN_PUSH_OVERHEAD = require('./protocol/constants.js').OP_RETURN_PUSH_OVERHEAD
 
-// Taproot envelope ( spec Part A). ENVELOPE_MAX_PAYLOAD is the
-// per-encoding ceiling for the reassembled envelope payload (the legacy lanes
-// keep MAX_ACTION_DATA_LENGTH); ENVELOPE_RECOGNITION_ACTIVATION carries the
+// Taproot envelope encoding. ENVELOPE_MAX_PAYLOAD is the per-encoding ceiling
+// for the reassembled envelope payload (the legacy lanes keep
+// MAX_ACTION_DATA_LENGTH); ENVELOPE_RECOGNITION_ACTIVATION carries the
 // per-chain, per-network LOCAL block heights at/above which recognition (and
-// the §3.8 rejection rules) are active. Both vendored from
+// the envelope rejection rules) are active. Both vendored from
 // ./protocol/constants.js, byte-identical to the canonical copy in
 // xchain-documentation/protocol/constants.js.
 const ENVELOPE_MAX_PAYLOAD = require('./protocol/constants.js').ENVELOPE_MAX_PAYLOAD
@@ -177,7 +166,7 @@ const TAPROOT_ANNEX_MARKER = 0x50
 // the protocol-arbiter side of the encoder's identical compiledPushSize
 // (xchain-encoder/src/validator.js), and the compiledPushSizeConformance test
 // pins both against bitcoin.script.compile byte-for-byte across the 75/255
-// prefix boundaries. Do not fork this logic inline again. Only the OP_PUSHDATA2
+// prefix boundaries. Do not fork this logic inline. Only the OP_PUSHDATA2
 // branch names a constant: the +1/+2 branches are different opcodes that
 // OP_RETURN_PUSH_OVERHEAD does not describe.
 function compiledPushSize(byteLength){
@@ -210,31 +199,23 @@ const ACTION_ALIASES = {
 }
 
 // Canonicalize the ACTION name in a raw payload buffer, expanding a short-form
-// alias to its canonical form. Single source for the alias-canonicalization
-// tokenize+lookup logic shared by the confirmed-block and mempool decode
-// paths (: those two sites had drifted into structurally different
-// implementations -- string split/join vs byte splice -- that happened to
-// agree only because every encoder-producible payload is valid UTF-8; do not
-// fork this logic inline again, same rule as compiledPushSize above).
+// alias to its canonical form. Single source for the tokenize+lookup logic
+// shared by the confirmed-block and mempool decode paths: those two sites had
+// drifted into structurally different implementations (string split/join vs
+// byte splice) that happened to agree only because every encoder-producible
+// payload is valid UTF-8. Do not fork this logic inline.
 //
 // Tokenizes on the FIRST 0x7C ('|') byte only, matching the on-chain wire
 // format (ACTION|param|param|...). The name portion is lenient-decoded ONLY
-// for the alias lookup (so invalid UTF-8 in the name cannot throw); every
-// byte after the first pipe is returned verbatim, untouched -- callers that
-// need a string (the confirmed-block path) decode the returned buffer
-// themselves with their own strict/lenient fallback, so U+FFFD substitution
-// for invalid UTF-8 in the payload is applied exactly once, at the same call
-// site and under the same conditions as before this helper existed.
+// for the alias lookup, so invalid UTF-8 in the name cannot throw; every byte
+// after the first pipe is returned verbatim. Callers that need a string decode
+// the returned buffer themselves, so U+FFFD substitution for invalid UTF-8 is
+// applied exactly once, at the call site.
 //
-// Returns { buffer, rawActionName, actionName, isKnown }:
-//   buffer        - payload with the name portion rewritten to the canonical
-//                    ASCII spelling when it was a recognized alias; the
-//                    original buffer reference, unmodified, otherwise
-//                    (including when the name is unknown).
-//   rawActionName - the lenient-decoded name exactly as it appeared on-chain
-//                    (for logging).
-//   actionName    - the alias-expanded name.
-//   isKnown       - whether actionName is a member of VALID_ACTION_NAMES.
+// Returns { buffer, rawActionName, actionName, isKnown }. `buffer` is the
+// original reference, unmodified, unless the name was a recognized alias
+// (unknown names are left alone too); `rawActionName` is the name exactly as
+// it appeared on-chain, for logging.
 function canonicalizeActionPayload(buffer) {
     const pipeIndex = buffer.indexOf(0x7C) // '|'
     const nameEnd = pipeIndex === -1 ? buffer.length : pipeIndex
@@ -262,9 +243,9 @@ const TX_PARSE_MAX_RETRIES = 3
 
 // After this many consecutive fetch failures at one height on an AuxPoW chain,
 // treat the failure as deterministic (e.g. an AuxPoW section skipAuxPow cannot
-// traverse, ) and switch to getBlockReassembled, which rebuilds the pure
-// block from getblockheader + verbose getblock + per-txid getrawtransaction and
-// so never reads the AuxPoW bytes at all. The block is never skipped, and the
+// traverse) and switch to getBlockReassembled, which rebuilds the pure block
+// from getblockheader + verbose getblock + per-txid getrawtransaction and so
+// never reads the AuxPoW bytes at all. The block is never skipped, and the
 // reassembled bytes equal the stripped bytes, so instances stay convergent.
 const AUXPOW_REASSEMBLE_AFTER = 5
 
@@ -325,9 +306,9 @@ class XChainDecoder {
         this.dbPassword = dbPassword
         this.startBlockIndex = CryptoNetworks.getFirstBlock(network)
         // Pinned block-0 hash of this chain, or null when the registry leaves it
-        // unpinned (). It is the ONLY value that separates a same-tier foreign
-        // endpoint from ours - BTC-mainnet and DOGE-mainnet both report chain="main" -
-        // so start() and the throttled tip refresh assert it against `getblockhash 0`.
+        // unpinned. It is the ONLY value that separates a same-tier foreign endpoint
+        // from ours (BTC-mainnet and DOGE-mainnet both report chain="main"), so
+        // start() and the throttled tip refresh assert it against `getblockhash 0`.
         this.chainGenesisHash = CryptoNetworks.getChainGenesisHash(network)
         // Timestamp (ms) of the last SUCCESSFUL block-0 read. Zero means never read, so
         // the first refresh always checks. Throttled on its own clock rather than riding
@@ -383,7 +364,7 @@ class XChainDecoder {
         // section between the 80-byte header and the tx count, so the plain getBlock
         // path would wedge/misparse at the first merged-mined block, and a non-auxpow
         // coin (BTC, LTC) carries no such section, so stripping one truncates a valid
-        // block whenever its version signals bit 0x100 (). Both directions are
+        // block whenever its version signals bit 0x100. Both directions are
         // read off the coin's declared wireFormat in the canonical registry (via
         // xchainBlockDecoder, built above), matching bulk-sync/dump.js. The `auxPow`
         // constructor parameter is retained for call-site stability (FEE_DESTINATION
@@ -395,22 +376,22 @@ class XChainDecoder {
 
         // Consecutive block-fetch failures at _fetchErrorHeight. _fetchErrorCount counts
         // every failure (operator visibility); _auxPowParseErrorCount counts only the
-        // AuxPoW-header-strip content faults that may escalate to  per-tx
-        // reassembly (item 2731). Both reset on a height change and on any success.
+        // AuxPoW-header-strip content faults that may escalate to per-tx block
+        // reassembly. Both reset on a height change and on any success.
         this._fetchErrorHeight = null
         this._fetchErrorCount = 0
         this._auxPowParseErrorCount = 0
 
-        // Latent REORG_HALT marker state . The durable marker written by
-        // verifyReorg is only ever READ by verifyReorg, so a decoder carrying one
-        // looks perfectly healthy right up until the next reorg trips it - which
-        // can be weeks later and then reads as a sudden unexplained outage (
-        // sat dormant for at least a week, and the weekly bootstrap cron published
-        // the halted database as the newest "good" archive in the meantime). These
-        // fields cache a periodic probe so health()/GET /status can report the
-        // marker BEFORE a reorg finds it. reorgHaltCheckedAt is the epoch-ms of the
-        // last successful probe (0 = never probed), which also drives the TTL that
-        // keeps a hot monitoring loop from issuing one query per request.
+        // Latent REORG_HALT marker state. The durable marker written by verifyReorg
+        // used to be read only by verifyReorg, so a decoder carrying one looked
+        // perfectly healthy right up until the next reorg tripped it, which can be
+        // weeks later and then reads as a sudden unexplained outage. Worse, a
+        // bootstrap-snapshot job published such a halted database as the newest
+        // "good" archive in the meantime. These fields cache a periodic probe so
+        // health()/GET /status can report the marker BEFORE a reorg finds it.
+        // reorgHaltCheckedAt is the epoch-ms of the last successful probe
+        // (0 = never probed), which also drives the TTL that keeps a hot monitoring
+        // loop from issuing one query per request.
         this.reorgHalted = false
         this.reorgHaltReason = null
         this.reorgHaltAt = null
@@ -519,9 +500,8 @@ class XChainDecoder {
     }
 
     // True when the block loop is wedged: alive and retrying, but no longer making
-    // progress the chain is waiting on. This is the signal the retry loop's own comment
-    // promises ("escalate ... so the stall is visible to monitoring"); until now nothing
-    // a probe could reach ever read it, so a wedged decoder reported healthy forever.
+    // progress the chain is waiting on. Without it a wedged decoder reports healthy
+    // forever, because nothing a probe can reach reads the retry loop's own counters.
     //
     // Fail-QUIET by construction, because the consumer restarts the container:
     //   - a fresh process (lastAdvanceAt 0) is never stalled;
@@ -532,17 +512,17 @@ class XChainDecoder {
     // The pinned-height fetch counter is a FASTER path to the same verdict, not an
     // independent one: it self-resets on any successful fetch, so once the gates above
     // pass it flags a wedge in about a minute instead of waiting out the elapsed-time
-    // window. It sits BELOW those gates deliberately, and moving it back above them
-    // re-opens a restart loop (). `_fetchErrorCount` is bumped by the catch
-    // around getBlockHash/fetchBlockHex, whose own comment records that a Dogecoin 1.14
-    // node under RPC-queue pressure surfaces as a bare ECONNRESET, i.e. a TRANSPORT
-    // fault rather than a bad block. Ungated, a decoder that is merely BEHIND the tip
-    // reaches that fetch every iteration and climbs STALL_FETCH_ATTEMPTS in roughly a
-    // minute at the 3s sleep; the xchain-node healthcheck descriptor (interval 15s,
-    // retries 3, startPeriod 60s, autoheal true) then restarts the container about
-    // every two minutes, for the whole duration of a fault that restarting cannot fix,
-    // against a coin node already under pressure. The accepted flap trade-off was
-    // scoped to a deterministically bad BLOCK, never to a transport fault.
+    // window. It sits BELOW those gates deliberately, and moving it above them re-opens
+    // a restart loop: `_fetchErrorCount` is bumped by the catch around
+    // getBlockHash/fetchBlockHex, and a Dogecoin 1.14 node under RPC-queue pressure
+    // surfaces as a bare ECONNRESET, i.e. a TRANSPORT fault rather than a bad block.
+    // Ungated, a decoder that is merely BEHIND the tip reaches that fetch every
+    // iteration and climbs STALL_FETCH_ATTEMPTS in roughly a minute at the 3s sleep;
+    // the container healthcheck (15s interval, 3 retries, 60s start period, autoheal)
+    // then restarts it about every two minutes for the whole duration of a fault that
+    // restarting cannot fix, against a coin node already under pressure. The accepted
+    // flap trade-off was scoped to a deterministically bad BLOCK, never to a transport
+    // fault.
     isStalled() {
         if (!this.lastAdvanceAt) return false
         if (this.blockchainInfoLastBlock < 0 || this.lastProcessedBlockIndex < 0) return false
@@ -554,8 +534,8 @@ class XChainDecoder {
 
     // True when the parse loop has stopped ITERATING. isStalled() cannot see this and
     // is not meant to: every one of its gates above is a statement about chain
-    // progress, and it returns false for a caught-up decoder and false again on a
-    // stale tip (deliberately, ). So a loop that dies while caught up leaves
+    // progress, and it deliberately returns false for a caught-up decoder and false
+    // again on a stale tip. So a loop that dies while caught up leaves
     // decoderRunning true, dbOk true and stalled false, and /live answers 200 forever
     // while nothing parses. Three modes reach that state: the loop throws its way out
     // of a caught-up idle, it hangs inside an await, or SIGTERM breaks it. Only an
@@ -589,14 +569,11 @@ class XChainDecoder {
         return status
     }
 
-    // Probe the durable REORG_HALT marker and cache the answer .
-    //
-    // The marker is written by verifyReorg and, until now, read ONLY by verifyReorg:
-    // a decoder carrying one keeps parsing blocks and reports "healthy" until the
-    // next reorg trips it, at which point a week-old fault presents as a sudden
-    // outage. Worse, the bootstrap publisher snapshotted such a database and shipped
-    // it as the newest "good" archive. This probe runs on a TTL so every
-    // operator-facing surface can report a LATENT halt.
+    // Probe the durable REORG_HALT marker and cache the answer, on a TTL, so every
+    // operator-facing surface can report a LATENT halt. The marker is written by
+    // verifyReorg; if only verifyReorg read it, a decoder carrying one would keep
+    // parsing blocks and report "healthy" until the next reorg tripped it, so a
+    // week-old fault would present as a sudden outage.
     //
     // Never throws: a probe fault leaves the last known state in place and is logged
     // once per transition, because a DB blip must not flap a health surface. Fails
@@ -670,22 +647,15 @@ class XChainDecoder {
         var decryptedData = null
 
         // A txid too short to yield a 16-byte key AND a 16-byte IV is not a
-        // decryptable input, and until now it did not fail like one: a null
-        // or undefined txid threw TypeError out of `.substr`, and anything
-        // shorter than 32 characters reached crypto with a truncated IV and
-        // threw `Invalid initialization vector`. The catch below deliberately
-        // rethrows everything that is not a padding/decrypt error, so both
-        // escaped as raw exceptions.
+        // decryptable input: without this guard a null/undefined txid throws
+        // TypeError out of `.substr`, and anything under 32 characters reaches
+        // crypto with a truncated IV, both of which the catch below rethrows
+        // because it only swallows padding/decrypt errors.
         //
-        // THIS CANNOT CHANGE ANY REACHABLE BEHAVIOUR, which is why it is
-        // returning null rather than failing loud the way an RPC lookup does.
-        // Both callers pass `firstInputTxId`, which is
-        // `uint8ArrayToHex(transaction.ins[0].hash reversed)` - a 32-byte hash
-        // hex-encoded, so always exactly 64 characters. No input that reaches
-        // this function from a parsed transaction can take this branch, so it
-        // cannot mask a misparse; it only makes the function total for
-        // callers outside that path, which is what the fuzz suite exercises
-        // (H1: "should not crash with txid=...").
+        // Returning null here cannot mask a misparse: both callers pass a
+        // hex-encoded 32-byte hash (always exactly 64 characters), so no input
+        // from a parsed transaction can take this branch. It only makes the
+        // function total for the fuzz suite's out-of-band callers.
         if (typeof txid !== 'string' || txid.length < 32){
             return null
         }
@@ -716,7 +686,6 @@ class XChainDecoder {
         return await this.parseTransaction(this.xchainBlockDecoder.transactionFromHex(rawTransaction))
     }
     
-    //Gets the address from the output specified by the transaction hash id and the output index
     async getSourceFromOutput(txId, outputIndex){
         let source = null
         let output = null
@@ -730,7 +699,6 @@ class XChainDecoder {
         // confirmed tx always exists on a txindex node, so an empty RPC result is a
         // lookup failure too, never "absent".
         try {
-            //Obtaining the output
             let outputRawTransaction = await this.connector.getRawTransaction(txId)
             if (!outputRawTransaction){
                 throw new Error(`empty getrawtransaction result for confirmed prevout tx ${txId}`)
@@ -800,25 +768,8 @@ class XChainDecoder {
                 if (!this.isFutureSegwitScript(output.script))
                     source = bitcoin.address.fromOutputScript(output.script, this.network)
             } catch(err){
-                //Ignoring specific sources
-                /*let decompiledScript = bitcoin.script.decompile(output.script)
-                if ( //P2PK
-                    (decompiledScript.length == 2)
-                    &&(Buffer.isBuffer(decompiledScript[0]))
-                    && (decompiledScript[0].length == 33)
-                    && (decompiledScript[1] == bitcoin.opcodes.OP_CHECKSIG)
-                ){
-                    //Do nothing, null will be returned
-                } else if ( //MULTISIG
-                    (decompiledScript.length > 0)
-                    && (decompiledScript[decompiledScript.length - 1] == bitcoin.opcodes.OP_CHECKMULTISIG)
-                ){
-                    //Do nothing, null will be returned
-                } else {
-                    throw err
-                }*/
-                
-                //Bitcoinjs-lib didn't find a valid address, ignore it, null will be returned
+                // No representable address for this output script (P2PK, bare
+                // multisig, ...): leave source null rather than failing the parse.
             }
         }
         
@@ -882,7 +833,7 @@ class XChainDecoder {
     }
 
     // Pattern-match one input's witness stack against the envelope grammar
-    // ( spec §3.2). Pure and RPC-free by contract (§3.8: recognition is
+    // (envelope spec §3.2). Pure and RPC-free by contract (§3.8: recognition is
     // free pattern-matching; the commit fetch happens once, later, at parse).
     // Returns { script, payload } or null; NEVER throws (a foreign/fuzzed
     // witness must not crash the block loop).
@@ -948,7 +899,7 @@ class XChainDecoder {
         }
     }
 
-    // Source attribution for an envelope reveal ( spec §3.4): the
+    // Source attribution for an envelope reveal (envelope spec §3.4): the
     // reveal's ins[0] prevout is the commit output, a payload-dependent
     // one-time P2TR address nothing else references, so the source is the
     // address FUNDING the commit: the prevout of the COMMIT transaction's
@@ -1105,27 +1056,25 @@ class XChainDecoder {
     }
 
     // The ORACLE_ADDRESS whose native-coin output this transaction's payment-output
-    // capture must persist, or null when there is none .
+    // capture must persist, or null when there is none.
     //
     // A Mode B dispenser pays its PRICE v1 oracle operator up front as a real on-chain
     // output, and the indexer rejects the create/refill when it cannot SEE that output
-    // in `transaction_outputs` (utility.validateOracleFee, ). The decoder stays
+    // in `transaction_outputs` (utility.validateOracleFee). The decoder stays
     // address-keyed and prices nothing: it captures any output paying the oracle address
     // this transaction is associated with and leaves every amount/eligibility question to
     // the indexer, exactly as it does for the protocol FEE_DESTINATION.
     //
     //   v0 (create): the address is in the payload itself (field 13).
-    //   v2 (edit/refill): the payload carries no address - it names the target by
+    //   v2 (edit/refill): the payload carries no address. It names the target by
     //       DISPENSER_ACTION_INDEX, an id in the INDEXER's action space the decoder does
-    //       not maintain - so the oracle address is read back from the open dispenser row
-    //       this decoder registered, resolved by SOURCE address. Since  that matches
-    //       the create SOURCE as well as the operating address, so a delegated
-    //       (GET_ADDRESS) dispenser refilled by its original creator now resolves too.
-    //       This read keeps its single-row ranking even though #3119 removed ranking from
-    //       the open-view mirror: the reasoning differs, and db.js states it at the site.
-    //       An unmatched SOURCE still captures nothing
-    //       and the indexer rejects that refill: fail-closed, and no worse than the
-    //       pre- behavior it replaces.
+    //       not maintain, so the oracle address is read back from the open dispenser row
+    //       this decoder registered, resolved by SOURCE address. That match covers the
+    //       create SOURCE as well as the operating address, so a delegated (GET_ADDRESS)
+    //       dispenser refilled by its original creator resolves too. This read keeps its
+    //       single-row ranking even though the open-view mirror no longer ranks: the
+    //       reasoning differs, and db.js states it at the site. An unmatched SOURCE
+    //       captures nothing and the indexer rejects that refill, which is fail-closed.
     //
     // Returns false on a DB fault so the caller can roll the block back: silently
     // capturing nothing would make this node disagree with a healthy one about what the
@@ -1169,7 +1118,7 @@ class XChainDecoder {
         return null
     }
 
-    // blockHeight gates Taproot-envelope recognition ( spec §7): the
+    // blockHeight gates Taproot-envelope recognition (envelope spec §7): the
     // confirmed-block path passes the block being parsed, the mempool path
     // passes its next-block estimate. Omitted/undefined resolves to INACTIVE
     // (shipped pre-flag behavior), so no caller can accidentally recognize
@@ -1182,7 +1131,7 @@ class XChainDecoder {
         if (!openDispenserAddresses) openDispenserAddresses = new Set()
         // db is the handle used for the pubkey-capture writes below. The block path passes
         // this.db (default); the mempool path passes this.mempoolDb so pubkey writes for a
-        // pending tx never touch the block's open transaction (M-19).
+        // pending tx never touch the block's open transaction.
         if (!db) db = this.db
         // A zero-input transaction has no ins[0] to dereference below (the coinbase/
         // standard_input guard also reads ins[0]). An LTC MWEB/HogEx integration tx can
@@ -1208,7 +1157,7 @@ class XChainDecoder {
             let rawData = null
             let getSource = false
 
-            // Taproot-envelope recognition ( spec §3.8), height-gated:
+            // Taproot-envelope recognition (envelope spec §3.8), height-gated:
             // below the flag height this whole surface is inert and the tx
             // parses EXACTLY as shipped (a pre-flag mixed-carrier tx replays as
             // the fleet indexed it live). Recognition is a pure, RPC-free
@@ -1274,27 +1223,17 @@ class XChainDecoder {
                 }
                 
                 if ((decompiledScript != null) && (decompiledScript.length > 0)){
-                    /*
-                    * OP_RETURN
-                    *
-                    */
-                    
+                    // OP_RETURN carrier
                     if (
                         (decompiledScript.length == 2)
                         && (decompiledScript[0] == bitcoin.opcodes.OP_RETURN)
                     ){
-                        //if (source == null){
-                        //    source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
-                        //}   
                         let dataWithoutObfuscation = await this.removeObfuscation(decompiledScript[1], firstInputTxId)
-                        //let dataWithoutObfuscation = null
-                        
+
                         if (dataWithoutObfuscation != null){
                             if (dataWithoutObfuscation.subarray(0, MAGIC_WORD.length).equals(MAGIC_WORD_BUFFER)){
-                                /*
-                                * P2SH
-                                *
-                                */
+                                // P2SH chunk carrier: the OP_RETURN only flags the encoding,
+                                // the payload chunks live in the inputs' redeem scripts.
                                 if (dataWithoutObfuscation.subarray(MAGIC_WORD.length).equals(P2SH_BUFFER)){
                                     p2shFundingTxId = firstInputTxId // commit tx carrying any native-coin fee output
                                     for (let txInputIndex=0;txInputIndex < transaction.ins.length;txInputIndex++){
@@ -1319,10 +1258,7 @@ class XChainDecoder {
                                         }
                                     }
 
-                                /*
-                                * P2WSH
-                                *
-                                */
+                                // P2WSH chunk carrier: same shape as P2SH, chunks in the witness.
                                 } else if (dataWithoutObfuscation.subarray(MAGIC_WORD.length).equals(P2WSH_BUFFER)){
                                     p2shFundingTxId = firstInputTxId // commit tx carrying any native-coin fee output
                                     for (let txInputIndex=0;txInputIndex < transaction.ins.length;txInputIndex++){
@@ -1351,27 +1287,18 @@ class XChainDecoder {
                             }
                         }
                         
-                    } else 
-                    /*
-                    * MULTISIGN
-                    *
-                    */              
-                    
+                    } else
+                    // MULTISIGN carrier
                     if (
                         (decompiledScript.length == 6)
                         && (decompiledScript[5] == bitcoin.opcodes.OP_CHECKMULTISIG)
                     ){
-                        //if (source == null){
-                        //    source = await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
-                        //}
-                        
                         if (!Buffer.isBuffer(decompiledScript[1]) || !Buffer.isBuffer(decompiledScript[2])) {
                             continue
                         }
 
                         let pubkey1 = decompiledScript[1].subarray(1) //removing the 02 at the beginning
                         let pubkey2 = decompiledScript[2].subarray(1) //removing the 02 at the beginning
-                        //let pubkey3 = decompiledScript[3] //actual pubkey
 
                         let data = Buffer.concat([pubkey1, pubkey2])
 
@@ -1402,11 +1329,11 @@ class XChainDecoder {
                 }
             }
             
-            // Carrier arbitration for the Taproot envelope ( spec §3.8),
+            // Carrier arbitration for the Taproot envelope (envelope spec §3.8),
             // active only at/above the recognition height. Deterministic rules,
             // pinned by the adversarial vectors:
             // - a tx containing an envelope PLUS any other candidate carrier
-            //   (OP_RETURN XCHN data, chunk marker, MULTISIGN outputs -- i.e.
+            //   (OP_RETURN XCHN data, chunk marker, MULTISIGN outputs, i.e.
             //   anything the loop above accumulated or flagged) is NOT a valid
             //   action;
             // - a tx with two or more envelope inputs is NOT a valid action;
@@ -1471,19 +1398,19 @@ class XChainDecoder {
                     // hex-encoding paths). No valid payload is zero-length, so this is inert
                     // for real data.
                     if (!Buffer.isBuffer(decompiledData[0])){
-                        // Visibility only . One shape inside this branch is not the
-                        // inert zero-length case the blanking was written for: an EMPTY LEADING
-                        // PUSH (OP_0, which decompiles to the integer 0) followed by more payload.
-                        // The action push is empty but a second push -- the rawData the sender
-                        // paid to carry -- is still sitting in the stream, and the blanking below
-                        // discards it without a trace, so an operator seeing no action for the tx
-                        // has nothing to correlate. Report it distinctly and count it toward
-                        // parse_errors (a monitoring counter only; see decoderMetrics/api).
-                        // ACCEPTANCE IS DELIBERATELY UNCHANGED: the payload is still blanked and
-                        // rawData/getSource are still left untouched. Whether this wire shape
-                        // should be accepted end-to-end is owned by the cross-service flag-day
-                        // spec that also governs xchain-encoder/src/validator.js, and must not
-                        // change from this lane alone.
+                        // Visibility only. One shape inside this branch is not the inert
+                        // zero-length case the blanking was written for: an EMPTY LEADING
+                        // PUSH (OP_0, which decompiles to the integer 0) followed by more
+                        // payload. The action push is empty but a second push, the rawData
+                        // the sender paid to carry, is still sitting in the stream, and the
+                        // blanking below discards it without a trace, so an operator seeing
+                        // no action for the tx has nothing to correlate. Report it
+                        // distinctly and count it toward parse_errors (a monitoring counter
+                        // only). ACCEPTANCE IS DELIBERATELY UNCHANGED: the payload is still
+                        // blanked and rawData/getSource are still left untouched. Whether
+                        // this wire shape should be accepted end-to-end is a cross-service
+                        // flag-day decision that also governs
+                        // xchain-encoder/src/validator.js, and must not change here alone.
                         if (decompiledData[0] === 0 && (decompiledData.length > 1 || dataBuffer.length > 1)){
                             this.parseErrors++
                             const droppedPushBytes = decompiledData
@@ -1492,7 +1419,7 @@ class XChainDecoder {
                             console.error(`Tx ${nextTxId}: empty leading push (OP_0) in a ${dataBuffer.length}-byte ` +
                                 `payload carrying ${decompiledData.length - 1} further element(s) totalling ` +
                                 `${droppedPushBytes} data byte(s); payload blanked and the trailing push(es), ` +
-                                `including any rawData, are NOT read (acceptance unchanged, )`)
+                                `including any rawData, are NOT read (acceptance unchanged)`)
                         }
                         dataBuffer = Buffer.allocUnsafe(0)
                     } else {
@@ -1598,19 +1525,19 @@ class XChainDecoder {
         let blocksDeleted = []
         let retryCount = 0
 
-        // Restart-durable halt guard (item 1300). The safe-depth ceiling below is a
-        // per-invocation counter over durably-committed per-block deletes: once it
-        // fired the loud abort mid-rollback, nothing persisted the abort, so a plain
-        // process restart re-entered here with a zeroed counter and silently completed
-        // the over-deep rollback past the dispenser purge window (permanent, money-
-        // bearing dispenser-state divergence). Every abort path now persists a durable
+        // Restart-durable halt guard. The safe-depth ceiling below is a per-invocation
+        // counter over durably-committed per-block deletes: once it fired the loud
+        // abort mid-rollback, nothing persisted the abort, so a plain process restart
+        // re-entered here with a zeroed counter and silently completed the over-deep
+        // rollback past the dispenser purge window (permanent, money-bearing
+        // dispenser-state divergence). Every abort path now persists a durable
         // REORG_HALT marker (markReorgHalted); on entry we refuse to proceed while it
         // is set, so a restart cannot resume an over-deep rollback. Recovery is the
         // full resync the abort message demands (rebuilding the schema clears it).
         // Feature-detected so the minimal-mock verifyReorg tests stay unaffected.
         if (typeof this.db.isReorgHalted === 'function' && await this.db.isReorgHalted()){
-            // Mirror the durable marker into the in-memory health state  so the
-            // health surface agrees with the abort even before the next TTL probe.
+            // Mirror the durable marker into the in-memory health state so the health
+            // surface agrees with the abort even before the next TTL probe.
             this.reorgHalted = true
             this.reorgHaltCheckedAt = Date.now()
             const msg = "verifyReorg: decoder is HALTED from a prior over-deep reorg abort. Refusing to "
@@ -1625,9 +1552,9 @@ class XChainDecoder {
         // Persist the durable halt marker before an abort throws (best-effort: swallow
         // write errors so a marker failure never masks the loud abort). Feature-detected.
         const haltReorg = async (reason) => {
-            // Set the in-memory health state first : the durable write is
-            // best-effort, but this decoder is halted either way and every health
-            // surface must say so, including when the marker write itself fails.
+            // Set the in-memory health state first: the durable write is best-effort,
+            // but this decoder is halted either way and every health surface must say
+            // so, including when the marker write itself fails.
             this.reorgHalted = true
             this.reorgHaltReason = reason
             this.reorgHaltAt = new Date().toISOString()
@@ -1640,8 +1567,8 @@ class XChainDecoder {
             }
         }
 
-        // Fail-closed reorg-depth ceiling (parity with xchain-utxo-tracker's
-        // UNDO_BLOCKS guard, XChainUtxoTracker.js verifyReorg). Soft-expired
+        // Fail-closed reorg-depth ceiling, parity with xchain-utxo-tracker's
+        // UNDO_BLOCKS guard (XChainUtxoTracker.js verifyReorg). Soft-expired
         // dispensers are hard-purged once DISPENSER_EXPIRE_SAFE_DEPTH blocks
         // deep (purgeExpiredDispensers), and deleteBlockByIndex can only
         // resurrect a dispenser whose expired_block_index row still exists, so
@@ -1671,7 +1598,7 @@ class XChainDecoder {
                 lastBlockIndex = await this.db.getLastBlockIndex()
                 lastBlock = await this.db.getBlockByIndex(lastBlockIndex)
             } catch (err){
-                // A FAILED read is not a walk terminator (item 2459). Both helpers retry
+                // A FAILED read is not a walk terminator. Both helpers retry
                 // internally and then throw; letting that throw reach the `!lastBlock`
                 // guard below (as the old error-null did) ended the rollback early and
                 // returned "reorg reconciled" with orphan blocks still above the fork
@@ -1710,7 +1637,7 @@ class XChainDecoder {
                 await assertWithinSafeDepth(lastBlockIndex)
                 try {
                     // Pass the block hash so the delete and its REORG audit marker commit
-                    // atomically (M-12); see deleteBlockByIndex for the durability rationale.
+                    // atomically; see deleteBlockByIndex for the durability rationale.
                     await this.db.deleteBlockByIndex(lastBlockIndex, lastBlock["block_hash"])
                     retryCount = 0
                     blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["block_hash"]})
@@ -1730,14 +1657,14 @@ class XChainDecoder {
                 // The node's tip may have regressed below lastBlockIndex mid-walk (node
                 // restart onto a shorter chain, or a second reorg). Against the frozen
                 // call-time nodeTip that makes getBlockHash(lastBlockIndex) throw "Block
-                // height out of range" on every retry, wedging this walk forever (item
-                // 1301). Best-effort re-read the tip so the above-tip delete branch can
+                // height out of range" on every retry, wedging this walk forever.
+                // Best-effort re-read the tip so the above-tip delete branch can
                 // classify and delete this now-orphaned height on the next pass. If the
                 // node is fully unreachable this refresh also fails and we keep the
                 // existing sleep-and-retry outage tolerance (retry-forever) unchanged.
                 try {
                     const info = await this.connector.getBlockchainInfo()
-                    // Apply the block loop's chain-identity gate here too (). This is
+                    // Apply the block loop's chain-identity gate here too. This is
                     // the SECOND path a node tip reaches nodeTip, and nodeTip is exactly what
                     // the above-tip branch deletes valid local blocks against, so a foreign
                     // endpoint answering this refresh reopens the data-loss path the loop-top
@@ -1759,7 +1686,7 @@ class XChainDecoder {
                 await assertWithinSafeDepth(lastBlockIndex)
                 try {
                     // Pass the block hash so the delete and its REORG audit marker commit
-                    // atomically (M-12); see deleteBlockByIndex for the durability rationale.
+                    // atomically; see deleteBlockByIndex for the durability rationale.
                     await this.db.deleteBlockByIndex(lastBlockIndex, lastBlock["block_hash"])
 
                     // Per-block retry budget: reset after each successful delete so the
@@ -1780,7 +1707,7 @@ class XChainDecoder {
         
         if (blocksDeleted.length > 0){
             // Each rolled-back block already persisted its own REORG marker atomically with its
-            // delete (deleteBlockByIndex, M-12), so there is no separate end-of-run event to write.
+            // delete (deleteBlockByIndex), so there is no separate end-of-run event to write.
             // This is only an ops summary of the completed reorg.
             this.log(`reorg: rolled back ${blocksDeleted.length} block(s): ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
         }
@@ -1791,30 +1718,30 @@ class XChainDecoder {
     // Fetch the (AuxPoW-free) raw block hex for the height the main loop is on.
     // Normal path: getBlock, or getBlockWithoutAuxPow on an AuxPoW chain. Once the
     // AuxPoW header strip has failed AUXPOW_REASSEMBLE_AFTER consecutive times at
-    // this height, fall back to getBlockReassembled : a block whose AuxPoW
-    // section cannot be traversed would otherwise wedge this decoder here forever.
+    // this height, fall back to getBlockReassembled: a block whose AuxPoW section
+    // cannot be traversed would otherwise wedge this decoder here forever.
     //
-    // Item 2731: this reads _auxPowParseErrorCount, NOT the all-errors
-    // _fetchErrorCount. Escalation must fire on a CONTENT fault only. The
-    // reassembly path issues one getrawtransaction per tx in the block, so
-    // escalating on transport faults pointed a per-tx fan-out at the node whose
-    // unavailability caused the failures in the first place.
+    // This reads _auxPowParseErrorCount, NOT the all-errors _fetchErrorCount.
+    // Escalation must fire on a CONTENT fault only: the reassembly path issues one
+    // getrawtransaction per tx in the block, so escalating on transport faults
+    // pointed a per-tx fan-out at the node whose unavailability caused the failures
+    // in the first place.
     async fetchBlockHex(blockHash, blockHeight){
         if (!this.auxPow) {
             return this.connector.getBlock(blockHash)
         }
         if (this._auxPowParseErrorCount >= AUXPOW_REASSEMBLE_AFTER) {
             console.error('AuxPoW header strip at height ' + blockHeight + ' failed ' + this._auxPowParseErrorCount +
-                ' consecutive times; falling back to per-tx block reassembly (malformed-AuxPoW recovery, ).')
+                ' consecutive times; falling back to per-tx block reassembly (malformed-AuxPoW recovery).')
             return this.connector.getBlockReassembled(blockHash)
         }
         return this.connector.getBlockWithoutAuxPow(blockHash)
     }
 
     // Read the node's own block-0 hash and compare it against the registry pin for this
-    // coin/network (). Returns a mismatch reason when the endpoint is PROVEN to
-    // be a different chain, else null - which covers three different situations on
-    // purpose: nothing pinned, nothing readable, and agreement. Never throws; the caller
+    // coin/network. Returns a mismatch reason when the endpoint is PROVEN to be a
+    // different chain, else null, which covers three different situations on purpose:
+    // nothing pinned, nothing readable, and agreement. Never throws; the caller
     // decides what a proven mismatch costs (start() halts, the block loop refuses and
     // re-polls). This is the check `chain` cannot make: block 0 is the only constant that
     // separates BTC-mainnet from DOGE-mainnet, or Bitcoin testnet3 from testnet4.
@@ -1848,16 +1775,16 @@ class XChainDecoder {
 
     async start(){
         // Verify the bundled canonical coin files against CONSENSUS_CONFIG_PIN
-        // before touching the DB or processing any block, mirroring the indexer
-        // (XChainIndexer.js:218). A null pin (mainnet, pre-arm) skips; a mismatch
-        // on an armed network throws and halts startup, so a partial/stale deploy
-        // cannot parse on-chain bytes with divergent network params (fail-closed,
-        // deliberately not wrapped in try/catch).
+        // before touching the DB or processing any block, mirroring the indexer.
+        // A null pin (mainnet, pre-arm) skips; a mismatch on an armed network
+        // throws and halts startup, so a partial/stale deploy cannot parse
+        // on-chain bytes with divergent network params (fail-closed, deliberately
+        // not wrapped in try/catch).
         require('./coins').verifyConsensusPin(this.consensusNetwork)
 
         // Refuse an endpoint that is provably a DIFFERENT CHAIN before the DB is touched
-        // or a single block is read (). The tier gate in the block loop can only
-        // prove "wrong tier"; this proves "wrong chain", which is the case that actually
+        // or a single block is read. The tier gate in the block loop can only prove
+        // "wrong tier"; this proves "wrong chain", which is the case that actually
         // corrupts state: a same-tier foreign node's blocks decode under our address rules
         // and its tip drives deleteBlockByIndex() over valid local history.
         //
@@ -1885,7 +1812,7 @@ class XChainDecoder {
             this.db = new Database(this.dbUrl, this.dbPort, this.dbName, this.dbUser, this.dbPassword)
         }
 
-        // Dedicated DB handle for mempool maintenance (M-19). updateMempool runs on a 60s
+        // Dedicated DB handle for mempool maintenance. updateMempool runs on a 60s
         // timer that fires during the block loop's awaits, while the block loop holds an open
         // per-block transaction on this.db. Every db method resolves its connection via
         // getConnection(), which returns the shared transactionConnection whenever one is open,
@@ -1912,15 +1839,13 @@ class XChainDecoder {
                 'in-process; investigate before running on mainnet.')
         }
 
-        // Verify the Decoder database exists
         let dbStatus   = await this.db.createDatabase();
         let dbVerified = await this.db.verifyDatabase();
         if(!dbVerified){
             // Throw a real Error (not a bare string) so `err.message` is populated for
-            // the api.js start() catch, the health() error field, and the CE09 assertions.
+            // the api.js start() catch and the health() error field.
             util.throwError(new Error("Database " + this.dbName + " doesn't exist!"));
         } else {
-            // Verify the Indexer tables exists
             let tablesVerified = await this.db.verifyTables();
             if(!tablesVerified)
                 util.throwError(new Error("Database " + this.dbName + " tables don't exist!"));
@@ -1932,22 +1857,22 @@ class XChainDecoder {
             await this.db.runMigrations();
         }
 
-        // Report a LATENT reorg halt at boot . A decoder restored from (or
-        // running on) a database that already carries a REORG_HALT marker parses
-        // forward normally and looks healthy; nothing said so until the next reorg
-        // hit the guard in verifyReorg, weeks later. Probe once here so the fault is
-        // in the startup log and in every health response from the first request on.
+        // Report a LATENT reorg halt at boot. A decoder restored from (or running on)
+        // a database that already carries a REORG_HALT marker parses forward normally
+        // and looks healthy; without this nothing says so until the next reorg hits
+        // the guard in verifyReorg, weeks later. Probe once here so the fault is in
+        // the startup log and in every health response from the first request on.
         // Non-fatal by design: the marker only blocks rollbacks, so a halted-but-
         // advancing decoder must not be turned into a crash loop by this check.
         await this.checkReorgHalt({ force: true });
 
-        // Startup txindex probe . The malformed-AuxPoW recovery path
-        // (getBlockReassembled, ) calls getrawtransaction without a
-        // blockhash and so needs txindex=1 on the node. Without it, recovery
-        // fails deterministically forever (a silent permanent wedge at one
-        // height), so surface the misconfiguration loudly at boot instead of
-        // at recovery time. Non-fatal: decoders on such a node still work
-        // until the first malformed-AuxPoW block.
+        // Startup txindex probe. The malformed-AuxPoW recovery path
+        // (getBlockReassembled) calls getrawtransaction without a blockhash and
+        // so needs txindex=1 on the node. Without it, recovery fails
+        // deterministically forever (a silent permanent wedge at one height), so
+        // surface the misconfiguration loudly at boot instead of at recovery
+        // time. Non-fatal: decoders on such a node still work until the first
+        // malformed-AuxPoW block.
         // Optional-call guard: tests stub this.connector with plain objects.
         const txIndexOk = (typeof this.connector.probeTxIndex === 'function')
             ? await this.connector.probeTxIndex()
@@ -1955,7 +1880,7 @@ class XChainDecoder {
         if (txIndexOk === false) {
             console.error('WARNING: node does not appear to have txindex=1 (getrawtransaction on a ' +
                 'confirmed tx returned nothing). The malformed-AuxPoW block recovery path ' +
-                '(getBlockReassembled, ) requires txindex; without it a malformed-AuxPoW ' +
+                '(getBlockReassembled) requires txindex; without it a malformed-AuxPoW ' +
                 'block will wedge this decoder permanently. Restart the node with txindex=1.')
         } else if (txIndexOk === null) {
             console.log('txindex probe inconclusive (empty chain or probe RPC failed); continuing.')
@@ -1992,11 +1917,11 @@ class XChainDecoder {
         
         let nodeSyncedProblem = false
 
-        // Wrong-chain endpoint latch (), same shape as nodeSyncedProblem: the
-        // refusal repeats every 3-second retry, so log it on the transition only.
+        // Wrong-tier endpoint latch, same shape as nodeSyncedProblem: the refusal
+        // repeats every 3-second retry, so log it on the transition only.
         let wrongChainProblem = false
-        // Wrong-CHAIN latch (block-0 pin, ). Separate from wrongChainProblem
-        // above because the two prove different things and can fire independently: a
+        // Wrong-CHAIN latch (block-0 pin). Separate from wrongChainProblem above
+        // because the two prove different things and can fire independently: a
         // same-tier foreign endpoint passes the tier gate and fails this one.
         let wrongGenesisProblem = false
         // Said once per process, not per transition: an endpoint that omits `chain` omits
@@ -2051,7 +1976,7 @@ class XChainDecoder {
                 break
             }
 
-            // Edge-triggered stale-tip warn (). Evaluated every iteration
+            // Edge-triggered stale-tip warn. Evaluated every iteration
             // because the outage path below is `catch -> sleep(3000) -> continue`,
             // which never reaches the code that would otherwise notice; the latch
             // inside makes it one line per transition, not one per poll.
@@ -2086,7 +2011,7 @@ class XChainDecoder {
                     }
 
                     // Reject an endpoint serving a different chain BEFORE its numbers are
-                    // used (). The shape gate above proves the response is
+                    // used. The shape gate above proves the response is
                     // well-formed, never that it came from this decoder's chain, and every
                     // consumer downstream trusts it: `blocks` drives ingestion under the
                     // configured address rules and start height, and the same refresh feeds
@@ -2096,8 +2021,8 @@ class XChainDecoder {
                     // silently corrupted state and could destroy it.
                     //
                     // Treated exactly like the malformed branch: null the info, sleep and
-                    // re-poll. That is the recoverable direction - the decoder stops
-                    // advancing and says why, and an operator fixes the endpoint - whereas
+                    // re-poll. That is the recoverable direction (the decoder stops
+                    // advancing and says why, and an operator fixes the endpoint), whereas
                     // continuing is the one path that loses data. The latch keeps it one
                     // line per transition rather than one per 3-second retry.
                     const chainMismatch = chainTierMismatch(this.consensusNetwork, lastBlockchainInfo["chain"])
@@ -2122,8 +2047,8 @@ class XChainDecoder {
                             'endpoint-to-network binding rests on deployment config alone.')
                     }
 
-                    // Re-prove the CHAIN, not just the tier, on the same throttled cadence
-                    // (). Boot-time verification alone is not enough: NODE_URL_FALLBACK
+                    // Re-prove the CHAIN, not just the tier, on the same throttled
+                    // cadence. Boot-time verification alone is not enough: NODE_URL_FALLBACK
                     // can move this decoder onto a different endpoint mid-run, and the failover
                     // target is exactly where a wrong-coin URL hides. Its own timestamp keeps
                     // this to one extra getblockhash per BLOCKCHAIN_INFO_REFRESH_MS instead of
@@ -2184,7 +2109,7 @@ class XChainDecoder {
                     // state (it only fires when fetching a block ABOVE our height), so
                     // without this branch the decoder loops forever logging the gap while
                     // orphan blocks above the node tip survive, which the indexer then
-                    // inherits (the P0 failure TP-17 exists to prevent). Reconcile now:
+                    // inherits as permanently divergent history. Reconcile now:
                     // verifyReorg(tip) deletes every stored block above the tip via a
                     // deterministic height compare, then walks the hash-compare back to
                     // the fork point. blockchainInfoLastBlock was just refreshed above, so
@@ -2254,7 +2179,8 @@ class XChainDecoder {
 
                 await this.sleep(CHECK_BLOCK_DELAY_MS)
             } else { //If there is a new block, parse it
-                //Put the flag synced false if there are too many blocks behind
+                // Too far behind to serve mempool: drop out of synced mode and stop the
+                // mempool timer until catch-up finishes.
                 if ((this.blockchainInfoLastBlock - lastProcessedBlockIndex) > SYNCED_THRESHOLD){
                     this.synced = false
                     if (this.mempoolInterval != null){
@@ -2264,7 +2190,6 @@ class XChainDecoder {
                     }   
                 }
                 
-                //Getting the raw block
                 let nextBlockHeight = lastProcessedBlockIndex + 1
             
                 let nextBlockHash = null
@@ -2278,12 +2203,12 @@ class XChainDecoder {
                 // chain fetchBlockHex switches to per-tx block reassembly, which
                 // recovers the identical pure block without touching the AuxPoW bytes.
                 //
-                // Item 2731: TWO counters, because they answer different questions.
+                // TWO counters, because they answer different questions.
                 // _fetchErrorCount counts EVERY consecutive failure at this height and
                 // exists purely for operator visibility (the parseErrors bump below), so
                 // a stall stays observable on non-AuxPoW chains too. Only
-                // _auxPowParseErrorCount, which counts content faults, drives the 
-                // reassembly escalation in fetchBlockHex.
+                // _auxPowParseErrorCount, which counts content faults, drives the
+                // per-tx reassembly escalation in fetchBlockHex.
                 if (this._fetchErrorHeight !== nextBlockHeight) {
                     this._fetchErrorHeight = nextBlockHeight
                     this._fetchErrorCount = 0
@@ -2341,13 +2266,12 @@ class XChainDecoder {
                     try {
                         previousBlock = await this.db.getBlockByIndex(nextBlockHeight - 1)
                     } catch (err){
-                        // Since item 2459 getBlockByIndex retries internally and THROWS when
-                        // the read never succeeds, the two cases the old conflated null
-                        // covered are now distinct. Both still warrant the same response
-                        // here: retry this height. The throw must not escape start(), which
-                        // would permanently stop the parse loop (api.js only logs the
-                        // rejection). Same log prefix as the missing-row branch below so the
-                        // existing retry regression coverage still matches.
+                        // getBlockByIndex retries internally and THROWS when the read never
+                        // succeeds, so a failed read and a missing row are distinct cases;
+                        // both warrant the same response here, retry this height. The throw
+                        // must not escape start(), which would permanently stop the parse
+                        // loop (api.js only logs the rejection). Same log prefix as the
+                        // missing-row branch below so the retry regression coverage matches.
                         console.error(`Could not load previous block ${nextBlockHeight - 1} for reorg check, retrying...`, err)
                         await this.sleep(3000)
                         continue
@@ -2388,7 +2312,6 @@ class XChainDecoder {
 
 
 
-                //If there are no blocks pending then start the database transaction
                 if (blocksQuantity == 0){
                     await this.db.beginTransaction()
                 }
@@ -2436,7 +2359,6 @@ class XChainDecoder {
                     continue main_parsing
                 }
 
-                //Loop through the transactions and saving only the ones that have valid data
                 var transactions = block.transactions
                 blocksCount = blocksCount + 1
 
@@ -2537,17 +2459,17 @@ class XChainDecoder {
 
                             let decodedData = ""
                             if (parseResult["data"].length > 0) {
-                                // F5: a tx can carry BOTH an XChain OP_RETURN and money-bearing
+                                // A tx can carry BOTH an XChain OP_RETURN and money-bearing
                                 // dispense/payment outputs. When the ACTION is oversized or names
                                 // an unknown action, do NOT drop those outputs: treat the bad
                                 // action as no-action (empty data, null raw_data) and fall through
                                 // so the dispense/payment outputs are still recorded. Only skip the
                                 // whole tx when there is nothing else to record. The no-output skip
-                                // path is left byte-identical (still consumes a tx_index and
-                                // continues) - changing tx_index assignment for invalid-action txs
-                                // would diverge from already-decoded history.
+                                // path still consumes a tx_index and continues: changing tx_index
+                                // assignment for invalid-action txs would diverge from
+                                // already-decoded history.
                                 let hasOutputs = (dispenseOutputs.length > 0 || parseResult["paymentOutputs"].length > 0)
-                                // Per-encoding ceiling ( §4): the envelope's
+                                // Per-encoding ceiling (envelope spec §4): the envelope's
                                 // payloadCeiling is ENVELOPE_MAX_PAYLOAD, legacy lanes
                                 // report MAX_ACTION_DATA_LENGTH (the || covers results
                                 // from stubs/older shapes without the field).
@@ -2559,7 +2481,7 @@ class XChainDecoder {
                                     decodedData = ""
                                     parseResult["rawData"] = null
                                 } else {
-                                    // : canonicalize (tokenize + alias-expand) at the byte
+                                    // Canonicalize (tokenize + alias-expand) at the byte
                                     // level via the shared helper BEFORE string-decoding, so the
                                     // canonical name (always plain ASCII) rides through the same
                                     // strict/lenient decode as everything else and the DB ends up
@@ -2655,8 +2577,8 @@ class XChainDecoder {
                                 //    validateNativeCoinFee). Captured only when feeDestination is set.
                                 //  • DISPENSER v0/v2: the PRICE v1 oracle-usage-fee output paying
                                 //    the dispenser's ORACLE_ADDRESS, so the indexer can validate it
-                                //    (utility.validateOracleFee, ). Gated on
-                                //    ORACLE_FEE_OUTPUT_ACTIVATION - see resolveOracleFeeAddress.
+                                //    (utility.validateOracleFee). Gated on
+                                //    ORACLE_FEE_OUTPUT_ACTIVATION; see resolveOracleFeeAddress.
                                 let isCoinpay = decodedData.startsWith("COINPAY|")
                                 let oracleFeeAddress = await this.resolveOracleFeeAddress(decodedData, parseResult["source"], block.timestamp, nextTransactionHash)
                                 if (oracleFeeAddress === false){
@@ -2718,12 +2640,12 @@ class XChainDecoder {
                                     // decoder row records BOTH of those addresses (address_id = the
                                     // operating address, source_address_id = the create SOURCE when
                                     // delegated), so a SOURCE-address match reproduces the indexer's
-                                    // authorisation outcome for delegated dispensers too .
+                                    // authorisation outcome for delegated dispensers too.
                                     // What stays approximate is only WHICH dispenser an address's
                                     // cancel targets when that address has several open at once: the
                                     // action_index that would disambiguate is not in the decoder's id
                                     // space, so the row keyed on the operating address wins, then the
-                                    // most recent. The gap this closes is enumerated in
+                                    // most recent. The residual gap is enumerated in
                                     // xchain-indexer/src/dispenserDivergenceMetrics.js.
                                     let commandVersion = decodedDataSplit[1]
                                     let dispenserFormat = parseInt(commandVersion, 10)
@@ -2791,8 +2713,8 @@ class XChainDecoder {
                                                     ? getAddress
                                                     : parseResult["source"]
                                                 // Mode B dispensers carry their PRICE v1 oracle address so a
-                                                // later v2 refill - whose payload names no address - can
-                                                // still have its oracle-fee output captured .
+                                                // later v2 refill, whose payload names no address, can
+                                                // still have its oracle-fee output captured.
                                                 // Compacted `^<id>` tokens resolve to null, same reason as
                                                 // GET_ADDRESS above.
                                                 if (!(await this.db.insertDispenser({
@@ -2803,8 +2725,8 @@ class XChainDecoder {
                                                     // creator of a DELEGATED (GET_ADDRESS) dispenser still
                                                     // resolves to this row, exactly as the indexer's
                                                     // "SOURCE == dispenser SOURCE or GET_ADDRESS" gate
-                                                    // allows . Stored only when it differs from
-                                                    // the operating address.
+                                                    // allows. Stored only when it differs from the
+                                                    // operating address.
                                                     sourceAddress: parseResult["source"],
                                                     oracleAddress: oracleAddressFromCreate(decodedDataSplit),
                                                     expiration: expiration
@@ -2823,11 +2745,11 @@ class XChainDecoder {
                                         }
                                     } else if (dispenserFormat === 1){
                                         // Format 1 = cancel. Wire: VERSION|DISPENSER_ACTION_INDEX|MEMO.
-                                        // NOT MIRRORED (#3119). The decoder's open-dispenser view is
-                                        // advisory and must never close a row on a guessed target: it has
+                                        // NOT MIRRORED. The decoder's open-dispenser view is advisory
+                                        // and must never close a row on a guessed target: it has
                                         // no DISPENSER_ACTION_INDEX, so it could only resolve the cancel
                                         // by SOURCE, and with two open dispensers on one source that
-                                        // closed the wrong one - which stops capturing payments to a
+                                        // closes the wrong one, which stops capturing payments to a
                                         // still-live dispenser (money-bearing). Left unmirrored, a
                                         // cancelled dispenser stays in the decoder's open set until its
                                         // own expiration and the indexer drops the extra triggers.
@@ -2844,7 +2766,7 @@ class XChainDecoder {
                                         // skipped.
                                         //
                                         // EXTEND ONLY, and against every open row of the source rather
-                                        // than a guessed one (#3119): the decoder must not close early,
+                                        // than a guessed one: the decoder must not close early,
                                         // and an edit that lengthens an expiry is exactly the case where
                                         // failing to mirror WOULD close early. An edit that shortens one
                                         // is deliberately not mirrored.
@@ -2861,27 +2783,24 @@ class XChainDecoder {
                                             if (Number.isInteger(newExpiration) && newExpiration >= 0 &&
                                                 newExpiration <= 4294967295 && newExpiration > block.timestamp){
                                                 // nextBlockHeight lets the mirror also clear a soft-expiry
-                                                // THIS block stamped (): deleteOpenDispensers ran
-                                                // before this loop, so without it the `IS NULL` filter
-                                                // silently skipped exactly the row a same-block extend is
-                                                // for, and the decoder went dark on a dispenser the indexer
-                                                // keeps open. The row is open again from the next block's
-                                                // load, which ends the PERSISTENT divergence.
+                                                // THIS block stamped: deleteOpenDispensers ran before this
+                                                // loop, so without it the `IS NULL` filter silently skipped
+                                                // exactly the row a same-block extend is for, and the
+                                                // decoder went dark on a dispenser the indexer keeps open.
+                                                // The row is open again from the next block's load, which
+                                                // ends the PERSISTENT divergence.
                                                 //
-                                                // RESIDUAL, and it is NOT benign (). This restores
-                                                // the DB row, not this block's in-memory capture set, so
-                                                // outputs paying that dispenser in the REST of this block
-                                                // are still missed - and under-capture is the money-bearing
-                                                // direction #3119 names, not the safe one (see db.js, above
-                                                // getOpenDispenserOracleAddressBySource, which corrects the
-                                                // identical mis-statement about capture). Re-seeding is not
-                                                // blocked by the guessed-target rule - the extend already
-                                                // acts on EVERY open row of the source, so reading those
-                                                // rows' operating addresses back is set membership with no
-                                                // ranking - it is blocked because widening the captured set
-                                                // changes the persisted output set mid-block, which that
-                                                // same header states needs its own activation flag-day with
-                                                // the legacy set preserved below it so a from-genesis
+                                                // RESIDUAL, and NOT benign: this restores the DB row, not
+                                                // this block's in-memory capture set, so outputs paying
+                                                // that dispenser in the REST of this block are still
+                                                // missed, and under-capture is the money-bearing direction.
+                                                // Re-seeding the set is not blocked by the guessed-target
+                                                // rule (the extend already acts on EVERY open row of the
+                                                // source, so reading those rows' operating addresses back
+                                                // is set membership with no ranking); it is blocked because
+                                                // widening the captured set changes the persisted output
+                                                // set mid-block, which needs its own activation flag-day
+                                                // with the legacy set preserved below it so a from-genesis
                                                 // re-decode stays byte-identical. Outputs BEFORE the edit
                                                 // tx in this block are unreachable by any re-seed and need
                                                 // the end-of-block expiry realignment instead.
@@ -2907,7 +2826,8 @@ class XChainDecoder {
                 
                 transactionsCount = transactionsCount + transactions.length
                 
-                //If the pendings blocks are enough, then commit the transaction and print statistics
+                // Commit once the batch is full, or immediately on the block that reaches
+                // the node tip so a caught-up decoder never holds a block uncommitted.
                 if ((blocksQuantity == DB_TRANSACTION_BLOCKS_QUANTITY-1) || (nextBlockHeight == this.blockchainInfoLastBlock)){
                     if ((nextBlockHeight % LOG_BLOCK_INTERVAL === 0) || ((this.blockchainInfoLastBlock - nextBlockHeight) <= SYNCED_THRESHOLD)) {
                         this.log("Parsing block "+(nextBlockHeight)+"("+nextBlockHash+") Txs ("+transactionsCount+") Outputs ("+outputCount+")")
@@ -3006,12 +2926,11 @@ class XChainDecoder {
                 return
             }
 
-            //let transactionsCount = 0
             let validTransactionsCount = 0
 
             try {
             // All mempool DB work runs on this.mempoolDb, never this.db, so it stays outside the
-            // block loop's open transaction (M-19). Deletes txs no longer in the node mempool and
+            // block loop's open transaction. Deletes txs no longer in the node mempool and
             // drops txs already stored, leaving rawMempool holding only the new arrivals.
             let deletedInfo = await this.mempoolDb.deleteAndCompareTxsNotInList(rawMempool)
 
@@ -3059,7 +2978,7 @@ class XChainDecoder {
                     let parseResult = null
                     try {
                         // Pass mempoolDb so the pubkey-capture writes inside parseTransaction also
-                        // stay off the block transaction (M-19). The envelope
+                        // stay off the block transaction. The envelope
                         // recognition height is gated on this decoder's own
                         // next block (lastProcessedBlockIndex + 1): a pending
                         // tx confirms at the earliest into that block, and the
@@ -3083,17 +3002,17 @@ class XChainDecoder {
 
                     let mempoolData = parseResult["data"]
                     if (mempoolData != null && mempoolData.length > 0) {
-                        // Mirror the confirmed-block path (F5): apply the same two guards so a
+                        // Mirror the confirmed-block path: apply the same two guards so a
                         // pending tx never shows one thing and then silently vanishes on confirm.
                         // A tx can carry BOTH an invalid/oversized ACTION and money-bearing
-                        // dispense/payment outputs; when it does, do NOT drop the whole tx -
-                        // treat the bad action as no-action (null data) and still record the
-                        // pending tx, exactly as F5 does at confirmation. Only skip the whole tx
-                        // when there is nothing else to record.
+                        // dispense/payment outputs; when it does, do NOT drop the whole tx.
+                        // Treat the bad action as no-action (null data) and still record the
+                        // pending tx, exactly as the block path does at confirmation. Only skip
+                        // the whole tx when there is nothing else to record.
                         let hasOutputs = ((parseResult["dispenseOutputs"]?.length > 0) || (parseResult["paymentOutputs"]?.length > 0))
 
                         // Guard 1: oversized payloads, against the per-encoding
-                        // ceiling the parse reported ( §4: enforced
+                        // ceiling the parse reported (envelope spec §4: enforced
                         // identically in the block and mempool paths).
                         let mempoolPayloadCeiling = parseResult["payloadCeiling"] || MAX_ACTION_DATA_LENGTH
                         if (parseResult["compiledDataLength"] > mempoolPayloadCeiling) {
@@ -3112,7 +3031,7 @@ class XChainDecoder {
                         } else {
                             // Guard 2: unknown ACTION names (expand aliases first so an
                             // alias-named tx doesn't show as pending and then silently vanish).
-                            // : shared with the confirmed-block path via
+                            // Shared with the confirmed-block path via
                             // canonicalizeActionPayload so the two gates cannot drift again.
                             const canonical = canonicalizeActionPayload(mempoolData)
                             if (!canonical.isKnown) {
@@ -3170,7 +3089,6 @@ class XChainDecoder {
                 }
 
                 i = i + MEMPOOL_BATCH_SIZE
-                //await this.sleep(10000)
             }
 
             let mempoolEndTime = Date.now()
@@ -3199,24 +3117,24 @@ module.exports.MAX_ACTION_DATA_LENGTH = MAX_ACTION_DATA_LENGTH
 // against bitcoin.script.compile and the encoder's identical helper.
 module.exports.compiledPushSize = compiledPushSize
 // Exported so the same conformance test can pin the OP_PUSHDATA2 overhead by NAME
-// against the canonical protocol constant (item 2687).
+// against the canonical protocol constant.
 module.exports.OP_RETURN_PUSH_OVERHEAD = OP_RETURN_PUSH_OVERHEAD
 // Exported so a regression test can pin it >= the deepest per-chain reorg window.
 module.exports.DISPENSER_EXPIRE_SAFE_DEPTH = DISPENSER_EXPIRE_SAFE_DEPTH
 // Exported so the funding-fee-output collision regression test can assert attributed
 // funding outputs are stored at vout + FUNDING_VOUT_BASE (never colliding with real vouts).
 module.exports.FUNDING_VOUT_BASE = FUNDING_VOUT_BASE
-// Exported for the F3 regression test (DOGE large-output bufferutils-patch self-check).
+// Exported for the DOGE large-output bufferutils-patch self-check regression test.
 module.exports.bigIntBufferutilsActive = bigIntBufferutilsActive
-// Exported for the  malformed-AuxPoW fallback regression test.
+// Exported for the malformed-AuxPoW fallback regression test.
 module.exports.AUXPOW_REASSEMBLE_AFTER = AUXPOW_REASSEMBLE_AFTER
-// Exported for the alias-canonicalization unit/regression tests () and
-// so the ActionManifestConformance test can pin VALID_ACTION_NAMES/ACTION_ALIASES.
+// Exported for the alias-canonicalization tests and so the
+// ActionManifestConformance test can pin VALID_ACTION_NAMES/ACTION_ALIASES.
 module.exports.canonicalizeActionPayload = canonicalizeActionPayload
 module.exports.VALID_ACTION_NAMES = VALID_ACTION_NAMES
 module.exports.ACTION_ALIASES = ACTION_ALIASES
-// Taproot envelope : the per-encoding payload ceiling and the
-// per-chain recognition-height map, exported for the cross-service
-// conformance suites (encoder/docs copies must stay byte-equal).
+// Taproot envelope: the per-encoding payload ceiling and the per-chain
+// recognition-height map, exported for the cross-service conformance suites
+// (encoder/docs copies must stay byte-equal).
 module.exports.ENVELOPE_MAX_PAYLOAD = ENVELOPE_MAX_PAYLOAD
 module.exports.ENVELOPE_RECOGNITION_ACTIVATION = ENVELOPE_RECOGNITION_ACTIVATION

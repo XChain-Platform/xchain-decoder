@@ -1,6 +1,6 @@
 {
     "$comment": [
-        "Gate map for every test tier in this repo .",
+        "Gate map for every test tier in this repo.",
         "Before this file existed, `npm run ci` ran the unit and security tiers only, so the",
         "e2e, integration, chaos, fuzz and regression suites were gated by nothing: they could",
         "rot red for months without any gate noticing. Each tier below is now either wired into",

@@ -36,23 +36,19 @@ module.exports = {
         ]
 
         for (const scenario of scenarios) {
-            // Reset generator state for clean block chain
             generator.reset()
 
-            // Generate blocks
             const { blocks } = generator.generateBlockChain(blockCount, {
                 xchnTxsPerBlock: scenario.xchnTxsPerBlock,
                 plainTxsPerBlock: scenario.plainTxsPerBlock
             })
 
-            // Load funding txs into mock connector
             for (const block of blocks) {
                 for (const [txid, hex] of block.fundingTxStore) {
                     decoder.connector.transactions.set(txid, hex)
                 }
             }
 
-            // Reset DB mock counts
             decoder.db.resetCounts()
 
             let totalTxsParsed = 0
@@ -66,7 +62,6 @@ module.exports = {
                 }
             }
 
-            // Timed run
             const startTime = process.hrtime.bigint()
             const startMem = process.memoryUsage()
 

@@ -11,24 +11,23 @@
 const assert = require('assert')
 const XChainDecoder = require('../../src/XChainDecoder')
 
-// Regression tests for two consensus-divergence classes in the block loop
-// (platform-stability-deepdive-2026-07-03, H-6 and H-7):
+// Regression tests for two consensus-divergence classes in the block loop.
 //
-// H-6: getSourceFromOutput / findFundingFeeOutputs swallowed RPC failures into
-// source=null / no-fee-output, so a node with a flaky coin-node RPC committed
-// DIFFERENT block contents than a healthy node (a tx silently skipped, or a fee
-// output silently absent). Lookup failures must now throw tagged
-// rpcLookupFailure, and the block loop must retry the block indefinitely
-// (never quarantine: an RPC outage is not a poison tx).
+// RPC lookups: getSourceFromOutput / findFundingFeeOutputs swallowed RPC
+// failures into source=null / no-fee-output, so a node with a flaky coin-node
+// RPC committed DIFFERENT block contents than a healthy node (a tx silently
+// skipped, or a fee output silently absent). Lookup failures must now throw
+// tagged rpcLookupFailure, and the block loop must retry the block
+// indefinitely, never quarantining: an RPC outage is not a poison tx.
 //
-// H-7: the block loop ignored the `false` returns by which db helpers signal
-// "the INSERT/UPDATE failed and the block transaction was already rolled
-// back", and kept writing rows on fresh autocommit connections OUTSIDE any
-// transaction. Every rollback-signalling return must now abort and retry the
-// block, re-deriving the in-memory cursors from the DB (a retried block that
-// reuses the advanced tx counter assigns different tx_index values than a
-// clean instance, which is replicated content).
-describe('XChainDecoder RPC-lookup + rollback-signal hardening (H-6/H-7)', function () {
+// Rollback signals: the block loop ignored the `false` returns by which db
+// helpers signal "the INSERT/UPDATE failed and the block transaction was
+// already rolled back", and kept writing rows on fresh autocommit connections
+// OUTSIDE any transaction. Every rollback-signalling return must now abort and
+// retry the block, re-deriving the in-memory cursors from the DB: a retried
+// block that reuses the advanced tx counter assigns different tx_index values
+// than a clean instance, and tx_index is replicated content.
+describe('XChainDecoder RPC-lookup + rollback-signal hardening', function () {
     this.timeout(0)
 
     const PREV_WIRE = Buffer.from(
@@ -112,7 +111,7 @@ describe('XChainDecoder RPC-lookup + rollback-signal hardening (H-6/H-7)', funct
         return { decoder, calls }
     }
 
-    describe('getSourceFromOutput (H-6)', function () {
+    describe('getSourceFromOutput', function () {
         function bareDecoder() {
             return new XChainDecoder(
                 'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
@@ -141,7 +140,7 @@ describe('XChainDecoder RPC-lookup + rollback-signal hardening (H-6/H-7)', funct
         })
     })
 
-    describe('findFundingFeeOutputs (H-6)', function () {
+    describe('findFundingFeeOutputs', function () {
         function feeDecoder() {
             return new XChainDecoder(
                 'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false,
@@ -181,7 +180,7 @@ describe('XChainDecoder RPC-lookup + rollback-signal hardening (H-6/H-7)', funct
         })
     })
 
-    describe('block loop RPC-failure classification (H-6)', function () {
+    describe('block loop RPC-failure classification', function () {
         it('retries the block past TX_PARSE_MAX_RETRIES on tagged RPC failures, never quarantining', async function () {
             const { decoder, calls } = buildDecoder({ transactions: [fakeTx('cafe01')] })
 
@@ -207,7 +206,7 @@ describe('XChainDecoder RPC-lookup + rollback-signal hardening (H-6/H-7)', funct
         })
     })
 
-    describe('block loop rollback-signal handling (H-7)', function () {
+    describe('block loop rollback-signal handling', function () {
         const ACTION_PARSE_RESULT = () => ({
             data: Buffer.from('SEND|0|BTC|XCHAIN|1|addr2'),
             compiledDataLength: 30,

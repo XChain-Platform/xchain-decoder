@@ -53,7 +53,7 @@
 -- NOT lift that rule for the referenced side: on a legacy DB where both sides are
 -- still INT, widening index_addresses.id fails with errno 1833 ("Cannot change
 -- column 'id': used in a foreign key constraint 'pubkeys_ibfk_1'") even with
--- checks disabled (observed on MariaDB 10.11, test-host mainnet DBs, 2026-07-08).
+-- checks disabled (observed on MariaDB 10.11 with production-sized databases).
 -- The constraint is therefore dropped up front and re-added at the end, once both
 -- sides are BIGINT UNSIGNED. IF EXISTS keeps the drop a no-op on fresh DBs, and
 -- the paired drop before ADD keeps a manual re-run of this file safe.

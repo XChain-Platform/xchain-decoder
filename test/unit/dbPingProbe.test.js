@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Regression coverage for the API health/status DB probe (stability H-4).
+// Regression coverage for the API health/status DB probe.
 //
 // The probes used to call db.getConnection(), which returns the shared
 // this.transactionConnection while a block transaction is open, and then
@@ -37,7 +37,7 @@ function makeTrackedConn() {
     }
 }
 
-describe('Database.ping() health probe isolation (H-4)', () => {
+describe('Database.ping() health probe isolation', () => {
     it('draws a pooled connection even while a block transaction is open', async () => {
         const db = makeDb()
         const txConn = makeTrackedConn()

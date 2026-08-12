@@ -8,19 +8,16 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Unit tests for the litecoin-specific blockFromBuffer path (lines 55-111 of
-// XChainBlockDecoder.js, the custom block parser that handles Litecoin's
-// HogEx / MWEB extension marker bytes.
-//
-// We build minimal valid serialised Litecoin block buffers in-process rather
-// than using live node data, so these remain pure unit tests.
+// Unit tests for the litecoin-specific blockFromBuffer path in
+// XChainBlockDecoder: the custom block parser that handles Litecoin's HogEx /
+// MWEB extension marker bytes, which bitcoinjs-lib's Block.fromBuffer rejects.
+// Block buffers are built in-process rather than pulled from a live node, so
+// these stay pure unit tests.
 
 const assert    = require('assert')
 const bitcoin   = require('bitcoinjs-lib')
 const crypto    = require('crypto')
 const XChainBlockDecoder = require('../../src/XChainBlockDecoder')
-
-// ─── helpers ────────────────────────────────────────────────────────────────
 
 // Build an 80-byte standard block header buffer
 function buildHeader({ version = 2, timestamp = 1700000000 } = {}) {
@@ -46,16 +43,14 @@ function varint(n) {
 function buildMinimalTxBuf({ version = 1, markerFlag = null } = {}) {
     const versionBuf = Buffer.alloc(4)
     versionBuf.writeInt32LE(version, 0)
-    // 0 inputs, 0 outputs, locktime 0
     const locktime = Buffer.alloc(4, 0)
 
     if (markerFlag) {
-        // Segwit / MWEB style: version + 0x00 + flag + 0 inputs + 0 outputs + locktime
+        // Segwit / MWEB style: version + 0x00 marker + flag + inputs + outputs + locktime.
+        // With zero inputs there are no witness stacks to serialize between the two.
         const marker = Buffer.from([0x00, markerFlag])
-        // For segwit: after 0-input 0-output, we need witnesses (one per input = 0) and locktime
         return Buffer.concat([versionBuf, marker, varint(0), varint(0), locktime])
     }
-    // Standard: version + 0 inputs + 0 outputs + locktime
     return Buffer.concat([versionBuf, varint(0), varint(0), locktime])
 }
 
@@ -63,8 +58,6 @@ function buildMinimalTxBuf({ version = 1, markerFlag = null } = {}) {
 function buildBlockBuf(header, txBuffers) {
     return Buffer.concat([header, varint(txBuffers.length), ...txBuffers])
 }
-
-// ─── tests ──────────────────────────────────────────────────────────────────
 
 describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
     let decoder
@@ -107,13 +100,11 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
 
     it('should strip MWEB (0x08) flag from the last transaction', () => {
         const header = buildHeader()
-        // Normal first tx (no flag)
         const tx1 = buildMinimalTxBuf({ version: 1 })
-        // Last tx: v1 + 0x00 (marker) + 0x08 (HogEx) + ... → should have flag stripped
         const tx2 = buildMinimalTxBuf({ version: 1, markerFlag: 0x08 })
         const blockBuf = buildBlockBuf(header, [tx1, tx2])
 
-        // Should not throw: the flag is stripped and bitcoinjs-lib sees a standard tx
+        // Must not throw: the HogEx flag is stripped so bitcoinjs-lib sees a standard tx.
         const block = decoder.blockFromBuffer(blockBuf)
         assert.ok(Array.isArray(block.transactions))
     })
@@ -136,9 +127,9 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
     })
 
     it('should propagate an error when a transaction cannot be parsed (catch+rethrow path)', () => {
-        // A block that claims to have 1 transaction but has no transaction bytes after
-        // the header causes readTransaction() to throw (buffer overread). The catch(err){throw err}
-        // path at lines 104-106 propagates it rather than swallowing it.
+        // A block claiming 1 transaction with no transaction bytes after the header makes
+        // readTransaction() overread the buffer. The parser must rethrow rather than
+        // swallow: a silently truncated transaction list is a consensus divergence.
         const header = buildHeader()
         const blockBuf = Buffer.concat([header, varint(1)])  // says 1 tx, no tx bytes follow
         assert.throws(() => {
@@ -162,7 +153,6 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
         const txBuf  = buildMinimalTxBuf({ version: 1 })
         const blockBuf = buildBlockBuf(header, [txBuf])
 
-        // Bitcoin takes the default path and should parse without error
         const block = btcDecoder.blockFromBuffer(blockBuf)
         assert.ok(block)
         assert.strictEqual(block.version, 2)
@@ -209,8 +199,6 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
         assert.ok(block.witnessCommit.equals(Buffer.alloc(32, 0xab)), 'witnessCommit hash should match embedded value')
     })
 })
-
-// ─── forged transaction count (varint sanity bound) ──────────────────────────
 
 describe('XChainBlockDecoder litecoin blockFromBuffer: forged tx count', () => {
     let decoder

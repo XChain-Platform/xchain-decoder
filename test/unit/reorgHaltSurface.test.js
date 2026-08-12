@@ -8,12 +8,12 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-//  leg 3: a LATENT REORG_HALT marker must be reported before a reorg trips it.
+// A LATENT REORG_HALT marker must be reported before a reorg trips it.
 //
 // The durable marker was written by verifyReorg and read only by verifyReorg, so a
 // decoder carrying one parsed forward, answered "healthy", and got snapshotted by the
-// weekly bootstrap cron as the newest good archive.  sat dormant for a week
-// exactly this way. These tests pin the reporting surface: the cached probe, its TTL,
+// weekly bootstrap cron as the newest good archive. A halted node sat dormant for a
+// week exactly this way. These pin the reporting surface: the cached probe, its TTL,
 // its fail-safe behaviour on a DB fault, and the db-level marker read.
 
 const assert = require('assert')
@@ -26,7 +26,7 @@ function makeDecoder() {
     )
 }
 
-describe('XChainDecoder latent REORG_HALT reporting ', function () {
+describe('XChainDecoder latent REORG_HALT reporting', function () {
 
     it('reports a dormant marker, with its reason, from the cached probe', async function () {
         const decoder = makeDecoder()
@@ -170,7 +170,7 @@ describe('XChainDecoder latent REORG_HALT reporting ', function () {
     })
 })
 
-describe('Database.getReorgHaltMarker ', function () {
+describe('Database.getReorgHaltMarker', function () {
 
     function stubDb(rows) {
         const db = new Database('127.0.0.1', 3306, 'test_db', 'u', 'p')

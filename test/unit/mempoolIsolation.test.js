@@ -11,18 +11,15 @@
 const assert = require('assert')
 const XChainDecoder = require('../../src/XChainDecoder')
 
-// [REGRESSION M-19] Mempool maintenance must run OUTSIDE the block loop's open transaction.
+// Mempool maintenance must run OUTSIDE the block loop's open transaction.
 //
-// Bug: updateMempool used this.db for its DELETE + INSERT, and parseTransaction used this.db
-// for its pubkey-capture writes. this.db resolves every query through getConnection(), which
-// returns the shared block transaction connection whenever a block is mid-commit. So mempool
-// writes landed inside the live block transaction, and a failed mempool insert called
-// endTransaction() and rolled the whole block back mid-parse.
-//
-// Fix: all mempool DB work runs on a dedicated this.mempoolDb instance that never opens a block
-// transaction, so its connection is always an independent autocommit connection. Mempool errors
-// can neither roll back nor block the block loop.
-describe('updateMempool DB isolation (M-19)', function () {
+// Regression guard: updateMempool and its parseTransaction pubkey writes once used this.db,
+// which resolves every query through getConnection() and hands back the shared block-transaction
+// connection whenever a block is mid-commit. Mempool writes therefore landed inside the live
+// block transaction, and a failed mempool insert called endTransaction() and rolled the whole
+// block back mid-parse. All mempool DB work now runs on a dedicated this.mempoolDb that never
+// opens a block transaction, so mempool errors can neither roll back nor block the block loop.
+describe('updateMempool DB isolation', function () {
   this.timeout(0)
 
   // Build a decoder wired with distinct db / mempoolDb spies and just enough connector +

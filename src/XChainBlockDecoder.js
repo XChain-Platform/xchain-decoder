@@ -26,9 +26,9 @@ const LITECOIN_MWEB_SEGWIT_FLAG = 0x09
 // the canonical coin registry (src/coins) rather than a hardcoded coin-name
 // list. A newly-registered merge-mined or MWEB-style coin must declare a
 // wireFormat this decoder handles; a coin absent from the registry or carrying
-// an unimplemented family fails loudly at construction (#2262) instead of
-// silently falling through to the strict default parser and misparsing at its
-// first special block.
+// an unimplemented family fails loudly at construction instead of silently
+// falling through to the strict default parser and misparsing at its first
+// special block.
 const HANDLED_WIRE_FORMATS = new Set(['default', 'mweb', 'auxpow'])
 
 class XChainBlockDecoder {

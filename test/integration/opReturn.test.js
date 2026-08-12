@@ -13,7 +13,6 @@
  **********************************************************************
  * Integration tests: OP_RETURN encoding with real ACTION strings.
  *
- * Covers plan scenarios A1 (OP_RETURN payloads) and A5 (source address types).
  * Broadcasts real transactions to regtest, mines blocks, and verifies the
  * decoder writes correct data to MariaDB.
  */

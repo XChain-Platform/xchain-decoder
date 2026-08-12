@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Round-trip tests for ACTION-name alias canonicalization (#4009).
+// Round-trip tests for ACTION-name alias canonicalization.
 //
 // The decoder accepts five short-form aliases for canonical ACTION names.
 // These aliases are valid on-chain spellings: a spec-following encoder may
@@ -22,9 +22,6 @@
 //       parse layer), and
 //   (b) splitting on '|', looking up the first token in the alias map, and
 //       rejoining produces the canonical DB form byte-for-byte.
-//
-// Run with:
-//   mocha --require ./test/unit/setup.js test/roundtrip.test.js
 
 // Install the mariadb stub before loading XChainDecoder so that the
 // ESM-only mariadb package does not cause a require() failure.
@@ -39,10 +36,6 @@ const XChainDecoder = require('../../src/XChainDecoder')
 const { canonicalizeActionPayload, ACTION_ALIASES } = require('../../src/XChainDecoder')
 
 bitcoin.initEccLib(ecc)
-
-// ---------------------------------------------------------------------------
-// Helpers (same approach as test/unit/parseTransaction.test.js)
-// ---------------------------------------------------------------------------
 
 // The decoder derives AES key/IV from the reversed hex of the first input's
 // prevout hash. All test txs share one hash for simplicity.
@@ -107,20 +100,16 @@ function createDecoder() {
     return decoder
 }
 
-// : this used to re-declare its own ACTION_ALIASES table and its own
+// This helper used to re-declare its own ACTION_ALIASES table and its own
 // split/join canonicalization, a third divergent implementation of the same
-// logic forked across the decoder's two gate sites. Now it exercises the
-// real shared helper (XChainDecoder.js canonicalizeActionPayload) so these
-// tests actually pin the production canonicalization, not a copy of it.
+// logic forked across the decoder's two gate sites. It now exercises the real
+// shared helper (XChainDecoder.js canonicalizeActionPayload) so these tests
+// pin the production canonicalization rather than a copy of it.
 function canonicalize(rawString) {
     return canonicalizeActionPayload(Buffer.from(rawString, 'utf8')).buffer.toString('utf8')
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-describe('ACTION-name alias round-trip (#4009)', () => {
+describe('ACTION-name alias round-trip', () => {
     let decoder
 
     beforeEach(() => {
@@ -185,13 +174,13 @@ describe('ACTION-name alias round-trip (#4009)', () => {
         )
     })
 
-    // : canonicalizeActionPayload is now the single shared
-    // implementation behind both the confirmed-block and mempool decode
-    // gates. These tests pin its byte-level contract directly, including the
-    // case the two forked implementations previously only "agreed" on by
-    // accident (invalid UTF-8 after the first pipe never occurs in an
-    // encoder-producible payload, but the decoder must still handle it
-    // consistently since it decodes arbitrary on-chain bytes).
+    // canonicalizeActionPayload is the single shared implementation behind
+    // both the confirmed-block and mempool decode gates. These pin its
+    // byte-level contract directly, including the case the two forked
+    // implementations previously only "agreed" on by accident: invalid UTF-8
+    // after the first pipe never occurs in an encoder-producible payload, but
+    // the decoder must still handle it consistently because it decodes
+    // arbitrary on-chain bytes.
     describe('canonicalizeActionPayload (shared helper)', () => {
         it('preserves bytes after the first pipe verbatim, including invalid UTF-8', () => {
             const payload = Buffer.concat([

@@ -32,9 +32,6 @@ const {
 describe('E2E: DISPENSER Lifecycle', function () {
     this.timeout(0)
 
-    // ---------------------------------------------------------------
-    // B1: Full dispenser flow
-    // ---------------------------------------------------------------
     describe('full dispenser flow', () => {
 
         it('B1.1: should create dispenser record from DISPENSER|0 action', async () => {
@@ -62,7 +59,6 @@ describe('E2E: DISPENSER Lifecycle', function () {
         })
 
         it('B1.2: should record transaction_output when payment sent to dispenser address', async () => {
-            // Step 1: Create a dispenser
             const dispenserFunded = await txBuilder.createFundedLegacyAddress()
             const expiration = Math.floor(Date.now() / 1000) + 86400
             const dispenserAction = `DISPENSER|0|BTC|D_GIVE|100|||BTC||50|||||${expiration}|||`
@@ -71,14 +67,12 @@ describe('E2E: DISPENSER Lifecycle', function () {
             await txBuilder.waitForTransaction(dispTxHash)
             await assertDispenserExists(global.db, dispenserFunded.address)
 
-            // Step 2: Send a payment (with XCHN data) that has an output to the dispenser address
             const payer = await txBuilder.createFundedLegacyAddress()
             const payAction = 'SEND|0|D_GET|50|' + dispenserFunded.address + '|dispense'
             const { txHash: payTxHash, blockIndex: payBlockIndex } = await txBuilder.broadcastOpReturn(payer, payAction)
             await txBuilder.waitForDecoder(payBlockIndex)
             await txBuilder.waitForTransaction(payTxHash)
 
-            // Step 3: Verify the payment tx appears in getDecoderBlockData
             const rows = await getDecoderBlockData(global.db, payBlockIndex)
             const payRow = rows.find(r => r.tx_hash === payTxHash)
             assert.ok(payRow, 'Payment tx should appear in block data')
@@ -102,9 +96,6 @@ describe('E2E: DISPENSER Lifecycle', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // B2: Dispenser expiration
-    // ---------------------------------------------------------------
     describe('dispenser expiration', () => {
 
         it('B2.1: should soft-expire a dispenser past its expiration on the next block', async () => {
@@ -156,9 +147,6 @@ describe('E2E: DISPENSER Lifecycle', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // B3: Dispenser edge cases
-    // ---------------------------------------------------------------
     describe('dispenser edge cases', () => {
 
         it('B3.1: should NOT create dispenser for version != 0', async () => {

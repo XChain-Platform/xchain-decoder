@@ -20,19 +20,13 @@ const OP_RETURN_TX_HEX = '0200000001aabbccdd11223344eeff556677889900112233445566
 // address from. Output 0 is junk, to prove the index is honoured.
 const PREVOUT_TX_HEX = '020000000111111111111111111111111111111111111111111111111111111111111111110000000000ffffffff020000000000000000076a0548656c6c6f0065cd1d000000001976a914bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb88ac00000000'
 
-// THE PREVOUT LOOKUP HAS TO SUCCEED, and it used to be stubbed to reject
-// with `new Error('mocked')`. That was survivable when a failed lookup was
-// swallowed into `source = null`, which is how these tests were written.
-// It is not survivable now, and deliberately so: swallowing the failure let
-// one instance skip or mis-source a transaction every healthy instance
-// accepts, so `getSourceFromOutput` tags the error `rpcLookupFailure` and
-// rethrows, and the block loop retries the block (XChainDecoder.js).
-//
-// The consensus fix was right; this file was left behind by it. Every test
-// below then failed with `Error: mocked` - seven of them - which reads as a
-// decoder defect and is not one. Resolving a real prevout makes them
-// exercise what their names claim: an OP_RETURN transaction decoded end to
-// end, source address included.
+// A failed prevout lookup used to be swallowed into `source = null`; now
+// `getSourceFromOutput` tags it `rpcLookupFailure` and rethrows so the block
+// loop retries, because swallowing the failure let one instance skip or
+// mis-source a transaction that every healthy instance accepts. This
+// fixture predates that fix and stubbed the lookup to reject, so it must
+// resolve a real prevout to exercise what the tests actually claim: an
+// OP_RETURN transaction decoded end to end, source address included.
 function createDecoder() {
     const decoder = new XChainDecoder(
         'bitcoin-regtest', null, null, null, null, null,

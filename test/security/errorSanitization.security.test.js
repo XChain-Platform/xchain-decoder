@@ -152,11 +152,11 @@ describe('Security: Error Log Sanitization', () => {
             )
         })
 
-        // Item 2731 made getBlockWithoutAuxPow propagate RPC faults UNWRAPPED so the
-        // decoder can read error.code. Until then the rewrap incidentally hid the axios
-        // config; the safety now rests entirely on sanitizeRpcError scrubbing the error
-        // in place inside getBlockHeader/getBlock before they rethrow. Lock that, or the
-        // classification fix becomes a credential leak.
+        // getBlockWithoutAuxPow propagates RPC faults UNWRAPPED so the decoder can
+        // read error.code; the old rewrap incidentally hid the axios config, so the
+        // safety now rests entirely on sanitizeRpcError scrubbing the error in place
+        // inside getBlockHeader/getBlock before they rethrow. Lock that, or the
+        // unwrapped path becomes a credential leak.
         it('[REGRESSION P0] does not leak the RPC password through the unwrapped getBlockWithoutAuxPow path', async () => {
             const util = require('util')
             const axios = require('axios')

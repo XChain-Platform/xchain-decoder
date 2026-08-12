@@ -13,9 +13,9 @@
  **********************************************************************
  * Integration tests: Indexer contract query verification.
  *
- * Covers plan scenarios B1 (transaction record completeness) and B2
- * (normalization tables). These tests verify that the exact JOIN query
- * used by the indexer's getDecoderBlockData() returns correct, complete data.
+ * Verifies that the exact JOIN query used by the indexer's
+ * getDecoderBlockData() returns correct, complete data, and that the
+ * normalization tables it joins against stay consistent.
  */
 
 const assert = require('assert')

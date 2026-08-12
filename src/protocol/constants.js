@@ -64,7 +64,7 @@ const VM_MAX_CALL_DEPTH = 4;
 // caller's own gas budget. Enforced by the VM and the indexer in lockstep.
 const VM_MIN_CALL_GAS = 5000;
 
-// ── Cross-CHAIN contract calls (emit.crossExecute / XCALL) ──────────────────
+// Cross-CHAIN contract calls (emit.crossExecute / XCALL).
 // Enforced by the VM at emit time and re-validated host-side by the indexer
 // (processEmission + actions/xcall.js); the target chain re-validates the
 // signed dispatch row before injecting. See protocol/Cross_Chain_Calls.md.
@@ -97,8 +97,8 @@ const XCALL_MAX_RETURN_BYTES = 1024;
 // forward to the next block in (snapshot_block, call_id) order. Never dropped.
 const XCALL_MAX_CALLS_PER_BLOCK = 25;
 
-// ── ATTEST expiry sweep ─────────────────────────────────────────────────────
-// Deterministic per-block cap on the ATTEST v0 deadline-expiry sweep ().
+// ATTEST expiry sweep.
+// Deterministic per-block cap on the ATTEST v0 deadline-expiry sweep.
 // Each expired request synthesizes an ATTEST v2 action that flips the request to
 // 'expired' and fires its callback, so an unbounded sweep lets a single block
 // inherit an arbitrary backlog: one block's processing time (and its actions
@@ -113,10 +113,10 @@ const XCALL_MAX_CALLS_PER_BLOCK = 25;
 //
 // CONSENSUS-VISIBLE: the cap decides which block an expiry lands in, which moves
 // actions rows, the contract hash and the checkpoint preimage. It ships ungated
-// under the  batch because the fleet-wide replay recomputes all of it.
+// because the pre-launch fleet-wide replay recomputes all of it.
 const ATTEST_MAX_EXPIRIES_PER_BLOCK = 25;
 
-// ── Token-gated content (PC-29) ─────────────────────────────────────────────
+// Token-gated content.
 // Fixed fractional scale for comparing FILE.GATE_MIN_AMOUNT thresholds against a
 // holder's balance. The wallet scales both sides to this many fractional digits
 // as BigInt (packages/core THRESHOLD_SCALE); the indexer compares with mathjs
@@ -130,7 +130,7 @@ const ATTEST_MAX_EXPIRIES_PER_BLOCK = 25;
 // move together or the disagreement returns.
 const THRESHOLD_SCALE = 18;
 
-// ── Chunked DEPLOY (DEPLOY v4 carriers + DEPLOY v2/v3 assemble) ─────────────
+// Chunked DEPLOY (DEPLOY v4 carriers + DEPLOY v2/v3 assemble).
 // A contract whose base64(code) exceeds the single-tx budget is split across
 // ordered DEPLOY v4 carrier actions and reassembled by a DEPLOY v2/v3 keyed on
 // the CODE_HASH. Enforced by the indexer (deploy_chunk + deploy assembly) and
@@ -148,11 +148,11 @@ const MAX_DEPLOY_CHUNKS = 16;
 // larger part (belt-and-suspenders; the decoder already drops oversize pushes).
 const MAX_DEPLOYCHUNK_PART_BYTES = 7800;
 
-// ── Stake-weighted quorum (STAKE_WEIGHTED_QUORUM / WI-1) ────────────────────
+// Stake-weighted quorum (STAKE_WEIGHTED_QUORUM).
 // Consensus-critical activation: at/above this BTC-anchored snapshot_block the
 // federation quorum becomes stake-WEIGHTED (signers' summed source stake must
 // exceed 2/3 of total active snapshot stake) instead of count-based (2f+1 of the
-// pubkey COUNT). Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md.
+// pubkey COUNT).
 //
 // Keyed on the BTC `snapshot_block` carried by every settlement/checkpoint
 // canonical (NOT each chain's local processing height) so the hub and the BTC,
@@ -178,7 +178,7 @@ const STAKE_WEIGHTED_QUORUM_ACTIVATION = {
     regtest: 0,
 };
 
-// EQUIV_HEADER_ACTIVATION (WI-2 bump 2): the BTC-anchored flag-day at/above which every
+// EQUIV_HEADER_ACTIVATION: the BTC-anchored flag-day at/above which every
 // consensus canonical is prefixed with a uniform signed header
 // `EQUIV|<ENGINE_TAG>|<ROUND_ID>|<VIEW>||<CONTENT>`. This is consensus-breaking (it changes the
 // signed preimage of every settlement/checkpoint/price/attestation signature + the config-change
@@ -240,7 +240,7 @@ const STATE_COMMITMENT_ACTIVATION = {
 // (2026-07-07; BTC anchor ~2026-08-04), not a disabled placeholder.
 const CHECKPOINT_COMMITMENT_ACTIVATION = {
     mainnet: 961000,      // ARMED 2026-07-07: BTC anchor ~2026-08-04; deploy hub + ALL indexers (+ sdk/explorer/sync copies) before this height
-    testnet: 146000,      // ARMED 2026-07-22 ( lead 0e418c8c): first BTC-testnet anchor past all three STATE_COMMITMENT testnet thresholds; was 0, which forced the SPV root suffix from testnet genesis before the indexer computes roots, so the hub refused to sign every testnet checkpoint
+    testnet: 146000,      // ARMED 2026-07-22: first BTC-testnet anchor past all three STATE_COMMITMENT testnet thresholds; was 0, which forced the SPV root suffix from testnet genesis before the indexer computes roots, so the hub refused to sign every testnet checkpoint
     regtest: 0,
 };
 
@@ -267,7 +267,7 @@ const ANCHOR_REWARD_ACTIVATION = {
 // by the hub and re-derived by the indexer (never from the wire). Changing it is itself a flag-day.
 const ANCHOR_REWARD_AMOUNT = '10.00000000';
 
-// ARCHIVE_REWARD_ACTIVATION (archive-reward re-derivation, ): the flag-day at/above which the
+// ARCHIVE_REWARD_ACTIVATION (archive-reward re-derivation): the flag-day at/above which the
 // anchor_archive reward stops riding the key-authenticated `pushvalidatorrewards` rail and is instead
 // DERIVED by every indexer from the on-chain ANCHOR v6 bytes (the v1 archive anchor plus the same
 // PUBLISHER + 2f+1 XANCPUB attestation tail as v4/v5, attested over an 'anchor_archive' canonical
@@ -277,7 +277,7 @@ const ANCHOR_REWARD_AMOUNT = '10.00000000';
 // ANCHOR_REWARD_ACTIVATION; kept byte-identical to the local copies in
 // xchain-{hub,indexer}/src/anchor_reward_activation.js by the cross-service regression suite.
 const ARCHIVE_REWARD_ACTIVATION = {
-    mainnet: 963000,      // ARMED 2026-07-16 , RE-PINNED 2026-08-12  off 969500 onto the  pre-freeze train boundary (tip 959,853 on 07-27 at ~144 blocks/day + 21d); deploy every consumer before this era
+    mainnet: 963000,      // ARMED 2026-07-16, RE-PINNED 2026-08-12 off 969500 onto the pre-launch-freeze train boundary (tip 959,853 on 07-27 at ~144 blocks/day + 21d); deploy every consumer before this era
     testnet: 0,
     regtest: 0,
 };
@@ -308,7 +308,7 @@ const CROSS_CHAIN_ROYALTY_ACTIVATION = {
     regtest: 0,
 };
 
-// ORACLE_FEE_OUTPUT_ACTIVATION ( /  PRICE v1 oracle usage fee): the flag-day
+// ORACLE_FEE_OUTPUT_ACTIVATION (PRICE v1 oracle usage fee): the flag-day
 // at/above which the DECODER persists a native-coin output paying a DISPENSER's
 // ORACLE_ADDRESS into transaction_outputs, so the indexer's validateOracleFee can see the
 // fee that was actually paid. Keyed on BLOCK TIME (not height) because dispensers settle on
@@ -333,7 +333,7 @@ const ORACLE_FEE_OUTPUT_ACTIVATION = {
     regtest: 0,
 };
 
-// ── Taproot envelope ( spec, Part A) ──────────────────────────────────
+// Taproot envelope.
 
 // ENVELOPE_MAX_PAYLOAD: the Taproot-envelope payload ceiling, PER-ENCODING by
 // design (legacy lanes keep MAX_ACTION_DATA_LENGTH; a global raise would
@@ -342,7 +342,7 @@ const ORACLE_FEE_OUTPUT_ACTIVATION = {
 // before parse; the envelope's own 520-byte push framing is NOT counted (the
 // legacy constant, by contrast, is framing-inclusive of the single on-chain
 // push).
-// DERIVED FROM WEIGHT : the binding limit is Bitcoin Core's
+// DERIVED FROM WEIGHT: the binding limit is Bitcoin Core's
 // MAX_STANDARD_TX_WEIGHT of 400,000 WU, not a round byte count. 400,000 payload
 // bytes build a 402,789 WU reveal, which is non-standard and unrelayable; the
 // true maxima are 397,228 (P2WPKH change) and 397,009 (P2TR change + floor pad).
@@ -353,7 +353,7 @@ const ORACLE_FEE_OUTPUT_ACTIVATION = {
 // constants.js (ENVELOPE_MAX_PAYLOAD).
 const ENVELOPE_MAX_PAYLOAD = 390000;
 
-// ENVELOPE_RECOGNITION_ACTIVATION ( spec §7): the LOCAL block height
+// ENVELOPE_RECOGNITION_ACTIVATION (Taproot-envelope spec §7): the LOCAL block height
 // at/above which the decoder recognizes Taproot-envelope reveals as
 // action-bearing transactions, per host chain and network. Recognition changes
 // what counts as an action (and §3.8's mixed-carrier/multi-envelope rejections
@@ -367,30 +367,18 @@ const ENVELOPE_MAX_PAYLOAD = 390000;
 // pre-flag tx containing an envelope plus an OP_RETURN action replays as the
 // OP_RETURN action, exactly as the fleet indexed it live.
 //
-// MAINNET HEIGHTS PULLED IN 2026-08-02 by operator decision: BTC 961000 ->
-// 960850, LTC 3160000 -> 3153500. The 08-01 arming rode the existing 961000
-// cohort (~08-04) and put LTC ~11.5 days out at 3160000 (~08-14), which is a
-// pre-launch feature waiting on a date for no benefit. 's standing
-// pre-launch policy is that only post-launch features get activation dates
-// ("fixes ship plain"), and its own  contrast names the cheap remedy for
-// a cohort that is ALREADY deployed and armed: move the constant, do not
-// rebase. That is this change. The fleet has carried the envelope code since
-// the 08-01 train, so nothing is wiped, replayed or rescanned; only the height
-// moves, and it moves to ~6 hours out on both chains rather than 2 and 12 days.
+// The mainnet heights were pinned 2026-08-02 against a MEASURED tip (BTC 960812,
+// LTC 3153356) with ~6 hours of margin over a redeploy train that takes about an
+// hour. Re-pinning an already-deployed, already-armed cohort is done by moving the
+// constant, never by rebasing the code. testnet/regtest stay genesis-active: this
+// gate only ever applied to mainnet.
 //
-// Both new heights were chosen against a MEASURED tip (BTC 960812, LTC 3153356
-// on 2026-08-02) with ~6 hours of margin over a redeploy train that takes about
-// an hour. testnet/regtest stay genesis-active, as they always were: this gate
-// only ever applied to mainnet, and the testnet stacks have been running the
-// envelope live since 08-01.
-//
-// DEPLOY DEADLINE, and it is SHORTER THAN IT WAS: EVERY decoder on BTC and LTC
-// mainnet MUST be running this constant before its height or the fleet forks on
-// the first envelope (or the first mixed-carrier tx, which the §3.8 rejections
-// start refusing at exactly this height). Rollout order within any venue:
-// decoder before encoder, per the standing coupling rule. Verify the whole
-// fleet with claude/bin/xc990-mainnet-activation-verify.js, which reads the
-// armed map out of each RUNNING container rather than out of this file.
+// DEPLOY DEADLINE: EVERY decoder on BTC and LTC mainnet MUST be running this
+// constant before its height or the fleet forks on the first envelope (or the first
+// mixed-carrier tx, which the §3.8 rejections start refusing at exactly this
+// height). Rollout order within any venue: decoder before encoder, per the standing
+// coupling rule. Verify the fleet by reading the armed map out of each RUNNING
+// container rather than out of this file.
 const ENVELOPE_RECOGNITION_ACTIVATION = {
     BTC:  { mainnet: 960850, testnet: 0, regtest: 0 },
     LTC:  { mainnet: 3153500, testnet: 0, regtest: 0 },
@@ -412,12 +400,12 @@ const VALID_FIAT_CODES = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF'
 // field). The cross-service parity test asserts indexer === SDK === this value.
 const GAS_TICK = 'XCHAIN';
 
-// ── Oracle federation (xchain-hub) ───────────────────────────────────────────
+// Oracle federation (xchain-hub).
 // Canonical source: xchain-hub/src/constants.js. Mirrored here by hand and gated by
-// NOTHING (#3888): this repo is in neither the xcall constants guard nor the hub-side
-// oracle mirror list (xchain-hub/test/unit/constants-conformance.test.js, #3886), so a
-// hub-side edit drifts this copy silently. Treat any change as a manual all-copies
-// edit. Nothing here reads either one - they are re-exports for consumers.
+// NOTHING: this repo is in neither the xcall constants guard nor the hub-side oracle
+// mirror list (xchain-hub/test/unit/constants-conformance.test.js), so a hub-side edit
+// drifts this copy silently. Treat any change as a manual all-copies edit. Nothing
+// here reads either one; they are re-exports for consumers.
 
 // Coarse global sanity ceiling on an ingested price_snapshots value (pre-scale,
 // covers pairs like BTC/KRW up to ~$7M BTC with headroom); rejects

@@ -8,16 +8,16 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// DISPENSER lifecycle mirror: ADVISORY open-view (#3119, revising ).
+// DISPENSER lifecycle mirror: ADVISORY open-view.
 //
-//  made the decoder track DISPENSER format 1 (cancel) and format 2 (edit) so its
-// open-dispenser view would CLOSE when the indexer's did. #3119 found that the two sides
-// do not address dispensers the same way at all: the indexer targets a cancel/edit by an
-// explicit DISPENSER_ACTION_INDEX, while the decoder runs UPSTREAM of it and has no such
-// id, so it resolved the target by SOURCE with a most-recent-first guess. Whenever one
-// source held more than one open dispenser that guess could close the WRONG row, which
-// stops capturing payment outputs to a still-live dispenser: money-bearing, and not
-// fixable by any tie-break rule.
+// The decoder once tracked DISPENSER format 1 (cancel) and format 2 (edit) so its
+// open-dispenser view would CLOSE when the indexer's did. The two sides do not address
+// dispensers the same way at all: the indexer targets a cancel/edit by an explicit
+// DISPENSER_ACTION_INDEX, while the decoder runs UPSTREAM of it and has no such id, so
+// it resolved the target by SOURCE with a most-recent-first guess. Whenever one source
+// held more than one open dispenser that guess could close the WRONG row, which stops
+// capturing payment outputs to a still-live dispenser: money-bearing, and not fixable
+// by any tie-break rule.
 //
 // The open-view is therefore explicitly advisory and the indexer is the sole arbiter of
 // closure. What this suite now pins:
@@ -35,8 +35,9 @@
 // over every open row the acting address may act on). The loop's own decision code
 // decides whether to extend; the model reflects it; we then assert the open-view.
 //
-// SENSITIVITY: the cancel and shorten assertions FAIL against the  code they
-// replace, which closed the row at the indexer's close height / re-dated it earlier.
+// SENSITIVITY: the cancel and shorten assertions FAIL against the closing-mirror code
+// they replace, which closed the row at the indexer's close height or re-dated it
+// earlier.
 
 const assert = require('assert')
 const XChainDecoder = require('../../src/XChainDecoder')
@@ -70,12 +71,12 @@ class DispenserModel {
         return true
     }
     // Mirrors getOpenDispenserOracleAddressBySource's target resolution: open rows this
-    // address may act on (operating address OR stored create SOURCE, ),
-    // operating-address matches ranked first, then most recent. Since #3119 only the
-    // oracle-address read uses the ranking - the extend path deliberately takes the whole
-    // set (no ORDER BY, no LIMIT), because ranking is the guess that closed wrong rows.
-    // `thisBlock` () widens the candidate set by exactly the rows THIS block's
-    // soft-expire stamped, matching the extend UPDATE's
+    // address may act on (operating address OR stored create SOURCE), operating-address
+    // matches ranked first, then most recent. Only the oracle-address read uses that
+    // ranking; the extend path deliberately takes the whole set (no ORDER BY, no LIMIT),
+    // because ranking is the guess that closed wrong rows. `thisBlock` widens the
+    // candidate set by exactly the rows THIS block's soft-expire stamped, matching the
+    // extend UPDATE's
     // `(expired_block_index IS NULL OR expired_block_index = ?)`. Omitted by the readers,
     // which see only genuinely-open rows.
     _openFor(actingAddress, thisBlock) {
@@ -90,17 +91,17 @@ class DispenserModel {
                 return b.txIndex - a.txIndex
             })
     }
-    // Mirrors getOpenDispenserOracleAddressBySource : same target resolution as
+    // Mirrors getOpenDispenserOracleAddressBySource: same target resolution as
     // cancel/edit.
     async getOpenDispenserOracleAddressBySource(sourceAddress) {
         const open = this._openFor(sourceAddress)
         return (open.length && open[0].oracleAddress) ? open[0].oracleAddress : null
     }
-    // Mirrors extendOpenDispenserExpirationBySource (#3119):
+    // Mirrors extendOpenDispenserExpirationBySource:
     //   UPDATE ... SET expiration = GREATEST(expiration, ?) ... (no ORDER BY, no LIMIT)
     // over EVERY open row the acting address may act on. Never shortens, never picks.
-    // : the candidate set also admits a row THIS block soft-expired, and clears
-    // that stamp, because deleteOpenDispensers ran before the transaction loop.
+    // The candidate set also admits a row THIS block soft-expired, and clears that
+    // stamp, because deleteOpenDispensers ran before the transaction loop.
     async extendOpenDispenserExpirationBySource(sourceAddress, newExpiration, blockIndex) {
         this.calls.extend.push({ sourceAddress, newExpiration: Number(newExpiration), blockIndex })
         for (const r of this._openFor(sourceAddress, blockIndex)) {
@@ -200,12 +201,12 @@ const ADDR = 'bcrt1qtestsource'
 // Fields: DISPENSER|0|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|GIVE_OWNERSHIP|GIVE_ESCROW|
 //         GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS|EXPIRATION
 const CREATE = `DISPENSER|0|BTC|TICK|1||10|BTC||1|||||${T0 + 1000000}`
-// Delegated-dispenser pair : CREATOR signs the create, DELEGATE is the
-// GET_ADDRESS the dispenser then operates on.
+// Delegated-dispenser pair: CREATOR signs the create, DELEGATE is the GET_ADDRESS the
+// dispenser then operates on.
 const CREATOR  = 'bcrt1qtestcreator'
 const DELEGATE = 'bcrt1qtestdelegate'
 
-describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', function () {
+describe('DISPENSER lifecycle mirror: advisory open-view', function () {
     this.timeout(0)
 
     it('a format 1 cancel is not mirrored at all: no DB call, no closure', async () => {
@@ -230,7 +231,7 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
         let open = await model.getAllOpenDispenserAddresses()
         assert.ok(open.has(ADDR), 'a cancelled dispenser stays in the decoder open-view')
 
-        // It closes only at its OWN expiration - the soft-expire is the single closer.
+        // It closes only at its OWN expiration: the soft-expire is the single closer.
         await model.deleteOpenDispensers(2, (T0 + 1000000) + 1)
         open = await model.getAllOpenDispenserAddresses()
         assert.ok(!open.has(ADDR), 'the row still closes at its own EXPIRATION')
@@ -251,7 +252,7 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
         await decoder.start()
 
         assert.strictEqual(model.calls.extend.length, 1)
-        // blockIndex rides along since #4223 so the mirror can clear a same-block stamp.
+        // blockIndex rides along so the mirror can clear a same-block soft-expiry stamp.
         assert.deepStrictEqual(model.calls.extend[0],
             { sourceAddress: ADDR, newExpiration: extended, blockIndex: 0 })
         assert.strictEqual(model.rows[0].expiration, extended, 'the stored expiry moved out')
@@ -262,7 +263,7 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
         assert.ok(open.has(ADDR), 'the extended dispenser is still captured past its old expiry')
     })
 
-    // : the ORDERING case the mirror was missing.
+    // The ORDERING case the mirror was missing.
     //
     // The decoder soft-expires at block START (deleteOpenDispensers, before the tx loop);
     // the indexer expires at block END (processExpirations, after it). So on the first
@@ -273,7 +274,7 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
     // and payments to a dispenser the indexer still honours stopped being captured. That is
     // the money-bearing direction, and it is the exact failure this mirror exists to
     // prevent, so a stamp from THIS block is cleared.
-    it('a same-block extend REOPENS a row this block soft-expired (#4223)', async () => {
+    it('a same-block extend REOPENS a row this block soft-expired', async () => {
         const model = new DispenserModel()
         // Pre-existing row, already past its expiry at this block's header time, so the
         // block-start soft-expire stamps it before any transaction is seen.
@@ -295,9 +296,9 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
             'a validly-extended dispenser must be back in the open-view, matching the indexer')
     })
 
-    it('a same-block extend does NOT reopen a row an EARLIER block expired (#4223 scope)', async () => {
+    it('a same-block extend does NOT reopen a row an EARLIER block expired', async () => {
         // Reopening a row closed in an earlier block would be exactly the guessed-target
-        // row surgery #3119 removed, and the indexer settled that lifecycle long ago.
+        // row surgery this mirror removed, and the indexer settled that lifecycle long ago.
         const model = new DispenserModel()
         // The harness processes height 0, so a stamp of -1 is "some other, earlier block".
         // deleteOpenDispensers only stamps rows still at NULL, so it stays -1.
@@ -320,7 +321,7 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
     it('a format 2 edit that SHORTENS the expiry is deliberately NOT mirrored', async () => {
         // The indexer will close at the shortened time; the decoder keeps capturing until
         // the original one. Mirroring the shortening faithfully would mean closing a row
-        // the decoder only guessed at, which is the defect #3119 is about.
+        // the decoder only guessed at, which is the defect the advisory design removes.
         const model = new DispenserModel()
         const shortened = T0 + 100  // future (indexer requires EXPIRATION > BLOCK_TIME), earlier than create
         const decoder = buildDecoder([
@@ -368,7 +369,7 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
 
     it('an extend from an address that owns no dispenser at all is a no-op', async () => {
         // The extend still resolves by acting address (operating address OR recorded
-        // create SOURCE, ). An address that is neither matches zero rows, exactly as
+        // create SOURCE). An address that is neither matches zero rows, exactly as
         // the indexer rejects it with "invalid: SOURCE (not owner)". Nothing is guessed at,
         // and in this direction a miss is harmless anyway.
         const model = new DispenserModel()
@@ -383,13 +384,12 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
         assert.strictEqual(model.rows[0].expiration, T0 + 1000000, 'an unauthorised edit moves nothing')
     })
 
-    // ── Delegated (GET_ADDRESS) dispensers, . The indexer authorises a cancel/edit
-    //    from the dispenser SOURCE *or* its GET_ADDRESS
-    //    (xchain-indexer/src/actions/dispenser.js, "invalid: SOURCE (not owner)"). The
-    //    decoder keys the open row on the operating address (GET_ADDRESS when delegated)
-    //    and stores the create SOURCE beside it, so a creator-issued edit still reaches
-    //    its row.  wired that up to close delegated rows; #3119 keeps the reach and
-    //    drops the closing.
+    // Delegated (GET_ADDRESS) dispensers. The indexer authorises a cancel/edit from the
+    // dispenser SOURCE *or* its GET_ADDRESS (xchain-indexer/src/actions/dispenser.js,
+    // "invalid: SOURCE (not owner)"). The decoder keys the open row on the operating
+    // address (GET_ADDRESS when delegated) and stores the create SOURCE beside it, so a
+    // creator-issued edit still reaches its row. That reach is kept here; only the
+    // closing behaviour it once drove is gone.
 
     it('a delegated dispenser is NOT closed by a cancel from its original creator', async () => {
         const model = new DispenserModel()
@@ -416,7 +416,7 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
         assert.ok(open.has(DELEGATE), 'the delegated dispenser stays in the decoder open-view')
     })
 
-    it('a creator-issued lengthening edit still reaches the delegated dispenser ( reach kept)', async () => {
+    it('a creator-issued lengthening edit still reaches the delegated dispenser', async () => {
         const model = new DispenserModel()
         const delegatedCreate = `DISPENSER|0|BTC|TICK|1||10|BTC||1|${DELEGATE}||||${T0 + 1000000}`
         const extended = T0 + 3000000
@@ -438,8 +438,8 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
     it('an extend covers EVERY open row of the source, so no row is guessed at', async () => {
         // An address can hold its own dispenser AND be the creator of a delegated one.
         // The action_index that would disambiguate is not in the decoder's id space, and
-        // the pre-#3119 code therefore picked ONE row (operating address first, then most
-        // recent) - the guess that could act on the wrong dispenser. Extending BOTH is what
+        // the old code therefore picked ONE row (operating address first, then most
+        // recent): the guess that could act on the wrong dispenser. Extending BOTH is what
         // removes the guess: the correct row is always covered, and the other one is merely
         // held open longer, which the indexer authoritatively absorbs.
         const model = new DispenserModel()
@@ -462,11 +462,11 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
         assert.notStrictEqual(delegatedRow.expiration, T0 + 1000000)
     })
 
-    // ── DISPENSER caps twin (, Leg F). At/after the caps flag-day
-    //    (dispenser_caps_activation.js, mainnet block_time 1786060800, testnet/regtest
-    //    genesis) the INDEXER closes a dispenser at MAX_DISPENSES and rejects the 6th
-    //    refill (MAX_REFILLS). Below assess/pin what the recognition-only decoder can
-    //    mirror in lockstep, and document what it structurally cannot.
+    // DISPENSER caps. At/after the caps flag-day (dispenser_caps_activation.js, mainnet
+    // block_time 1786060800, testnet/regtest genesis) the INDEXER closes a dispenser at
+    // MAX_DISPENSES and rejects the 6th refill (MAX_REFILLS). The cases below pin what
+    // the recognition-only decoder can mirror in lockstep, and document what it
+    // structurally cannot.
 
     it('documented residual: the decoder cannot mirror the MAX_DISPENSES auto-close', async () => {
         // The indexer closes a dispenser once it has served MAX_DISPENSES (1000) VALID
@@ -529,13 +529,12 @@ describe('DISPENSER lifecycle mirror: advisory open-view (#3119, revising )', fu
         assert.ok(open.has(ADDR), 'the dispenser stays open regardless of the refill accept/reject verdict')
     })
 
-    // -- Fractional EXPIRATION (). dispensers.expiration is BIGINT UNSIGNED on
-    //    BOTH sides, and the indexer rejects any non-integer EXPIRATION outright
-    //    (xchain-indexer/src/actions/dispenser.js, isInteger). A decoder that accepts one
-    //    either wedges the block loop (a strict sql_mode fails the write, so the loop
-    //    retries the same deterministic tx forever) or truncates it, leaving an open row
-    //    for a dispenser the indexer never registered. Both write sites refuse it at parse
-    //    time.
+    // Fractional EXPIRATION. dispensers.expiration is BIGINT UNSIGNED on BOTH sides, and
+    // the indexer rejects any non-integer EXPIRATION outright
+    // (xchain-indexer/src/actions/dispenser.js, isInteger). A decoder that accepts one
+    // either wedges the block loop (a strict sql_mode fails the write, so the loop
+    // retries the same deterministic tx forever) or truncates it, leaving an open row for
+    // a dispenser the indexer never registered. Both write sites refuse it at parse time.
 
     it('a CREATE with a fractional EXPIRATION is skipped before the BIGINT write', async () => {
         const model = new DispenserModel()

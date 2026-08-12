@@ -13,9 +13,9 @@
  **********************************************************************
  * Integration tests: Multisig encoding.
  *
- * Covers plan scenario A2. Verifies the decoder correctly extracts
- * XCHN data from 1-of-3 multisig outputs, strips trailing zeros,
- * and writes the decoded ACTION string to the database.
+ * Verifies the decoder correctly extracts XCHN data from 1-of-3 multisig
+ * outputs, strips trailing zeros, and writes the decoded ACTION string to
+ * the database.
  */
 
 const assert = require('assert')

@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// ORACLE_FEE_OUTPUT_ACTIVATION drift guard .
+// ORACLE_FEE_OUTPUT_ACTIVATION drift guard.
 //
 // The decoder begins persisting a DISPENSER's oracle-usage-fee output at this gate. That
 // makes a fee-bearing Mode B transaction carry TWO stored outputs (the protocol fee output
@@ -53,7 +53,7 @@ function siblingOrSkip(ctx, file){
     return false;
 }
 
-describe('ORACLE_FEE_OUTPUT_ACTIVATION conformance ', function () {
+describe('ORACLE_FEE_OUTPUT_ACTIVATION conformance', function () {
 
     it('pins the mainnet flag-day and keeps testnet/regtest genesis-on', function () {
         assert.strictEqual(ORACLE_FEE_OUTPUT_ACTIVATION.mainnet, PINNED_MAINNET_ACTIVATION);

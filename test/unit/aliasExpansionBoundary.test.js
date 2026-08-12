@@ -8,11 +8,10 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// Item 2740: the alias-at-ceiling cell. The size gate and alias canonicalization
-// are each well covered, but no test combined them: every size-boundary case uses
-// the non-expanding SEND, and every alias case is a tiny payload (the only
-// multi-byte alias pinned, TRANSFER -> SEND, actually SHRINKS). So the direction
-// that matters was structurally untested.
+// Alias expansion at the size ceiling. The size gate and alias canonicalization are
+// each covered elsewhere, but never together: every size-boundary case uses the
+// non-expanding SEND, and every alias case is a tiny payload, so the expanding
+// direction was structurally untested.
 //
 // MAX_ACTION_DATA_LENGTH bounds the COMPILED on-chain push, measured before
 // canonicalizeActionPayload runs, so an expanding alias legitimately produces a
@@ -40,7 +39,7 @@ function maxAliasExpansionBytes() {
     return max
 }
 
-describe('alias expansion at the MAX_ACTION_DATA_LENGTH boundary (item 2740)', function () {
+describe('alias expansion at the MAX_ACTION_DATA_LENGTH boundary', function () {
 
     it('CAST -> BROADCAST is the worst-case expansion, at 5 bytes', function () {
         assert.strictEqual(maxAliasExpansionBytes(), 5,

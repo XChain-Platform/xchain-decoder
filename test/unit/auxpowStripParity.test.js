@@ -8,21 +8,21 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// : the AuxPoW strip primitives are duplicated between
+// The AuxPoW strip primitives are duplicated between
 // xchain-decoder/src/BlockchainConnector.js and the xchain-utxo-tracker twin, and
-// both carry "Keep in sync with ..." comments. Until now nothing enforced that:
-// the seq 2731 fix changed the decoder's error wrapping only, the utxo-tracker
-// factored its strip logic into stripAuxPowFromBlockHex, and the two files drifted
-// apart with the sync comments still claiming otherwise. This guard asserts byte
-// identity of the shared function BODIES (the parts that must agree because a
-// divergence silently changes which bytes each service hashes and decodes).
+// both carry "Keep in sync with ..." comments that nothing used to enforce: the two
+// files drifted apart (one repo rewrapped its errors, the other factored its strip
+// logic into stripAuxPowFromBlockHex) while the sync comments still claimed
+// otherwise. This guard asserts byte identity of the shared function BODIES, the
+// parts that must agree because a divergence silently changes which bytes each
+// service hashes and decodes.
 //
 // Deliberately NOT asserted: whole-function identity of getBlockWithoutAuxPow or
-// getBlockReassembled. Those differ by design - the decoder fetches the header and
+// getBlockReassembled. Those differ by design: the decoder fetches the header and
 // block outside the try (so an RPC fault is not mislabeled a content fault), tags
 // traversal failures with auxPowParseFailure so fetchBlockHex escalates to
-// getBlockReassembled, and reassembles via the bounded-concurrency batch helper
-// . The strip primitives below are the invariant part.
+// getBlockReassembled, and reassembles via the bounded-concurrency batch helper.
+// The strip primitives below are the invariant part.
 //
 // When the sibling xchain-utxo-tracker checkout is absent (standalone deploy) the
 // test skips rather than fails, matching coins-conformance; set
@@ -92,7 +92,7 @@ describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function ()
                     extractFunction(localSource, name),
                     extractFunction(twinSource, name),
                     `${name} has drifted between xchain-decoder and xchain-utxo-tracker; ` +
-                    'apply the change to both copies ')
+                    'apply the change to both copies')
             })
         }
 
@@ -173,8 +173,8 @@ describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function ()
         })
     })
 
-    // The wrapping is the one part that deliberately differs from the twin (seq 2731);
-    // pin it so a "make the copies identical" refactor cannot quietly drop the tag that
+    // The error wrapping is the one part that deliberately differs from the twin; pin it
+    // so a "make the copies identical" refactor cannot quietly drop the tag that
     // fetchBlockHex escalates on.
     describe('getBlockWithoutAuxPow error framing (deliberate divergence)', function () {
         const BlockchainConnector = require('../../src/BlockchainConnector')

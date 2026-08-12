@@ -18,7 +18,6 @@
  *
  ********************************************************************/
 
-// Load required libraries
 const mariadb = require('mariadb');
 const fs      = require('fs');
 const util    = require('./util')
@@ -54,7 +53,6 @@ class Database {
             throw new Error('Invalid database name: must contain only alphanumeric characters and underscores')
         }
         this.sqlPath  = __dirname+'/sql';
-        // Database connection information
         this.host   = host;
         this.port   = port;
         this.dbName = dbName;
@@ -65,7 +63,6 @@ class Database {
         // deterministically cannot be inserted as-is (content/constraint rejection). The
         // block loop quarantines the tx after a few retries instead of retrying forever.
         this.POISON_ROW = 2
-        // Database connection parameters
         this.connectionParams = {
             host:     this.host,
             user:     this.user,
@@ -73,20 +70,16 @@ class Database {
             database: this.dbName,
             port:     this.port
         };
-        // Database pool connection parameters
         this.connectionPoolParams = {
             host:     this.host,
             user:     this.user,
             password: this.pass,
             database: this.dbName,
             port:     this.port,
-            // Connection options
             connectionLimit:  10,
-            //connectTimeout: 0,
             insertIdAsNumber: true,
             queryTimeout:     resolveQueryTimeout(process.env.DB_QUERY_TIMEOUT)
         };
-        // Setup pool of connections
         this.pool = mariadb.createPool(this.connectionPoolParams);
         this.transactionConnection = null;
         this._transactionLock = false;
@@ -98,7 +91,6 @@ class Database {
     }
     
 
-    // Verify a database exists and return true or false
     // Seam over the driver: mariadb's createConnection export is
     // non-configurable, so tests stub this method instead of the module.
     _createConnection(connectionParams){
@@ -131,12 +123,11 @@ class Database {
                 if(attempts >= maxAttempts)
                     throw new Error('Failed to verify database ' + this.dbName + ' after ' + maxAttempts + ' attempts: ' + (e.code || e.message));
                 console.error('Error checking if database ' + this.dbName + ' exists (attempt ' + attempts + '/' + maxAttempts + '):', e)
-                await util.sleep(5000); // Wait 5 seconds
+                await util.sleep(5000);
             }
         }
     }
 
-    // Handle creating a database
     async createDatabase(){
         // First time connecting, do not specify database name or we throw error
         let connectionParams = {
@@ -163,13 +154,12 @@ class Database {
                 if(attempts >= maxAttempts)
                     throw new Error('Failed to create database ' + this.dbName + ' after ' + maxAttempts + ' attempts: ' + (e.code || e.message));
                 console.error('Error creating database ' + this.dbName + ' (attempt ' + attempts + '/' + maxAttempts + '):', e)
-                await util.sleep(5000); // Waiting 5 seconds
+                await util.sleep(5000);
             }
         }
         return true;
     }
     
-    // Handle verifying all database tables exist
     async verifyTables(){
         let path  = this.sqlPath;
         let files = fs.readdirSync(path);
@@ -194,7 +184,6 @@ class Database {
             try { await db.release(); } catch(_){}
             return false;
         }
-        // Loop through SQL files
         try {
             for (file of files){
                 // indexOf returns -1 when '.sql' is absent (e.g. the migrations/ subdirectory).
@@ -238,42 +227,34 @@ class Database {
         return true;
     }
 
-    // Apply tracked, ordered schema migrations from src/sql/migrations/. The changes
-    // the startup drift reconciler deliberately can't/won't make on its own: data
-    // backfills, destructive index/column changes, dedup-then-unique, type changes.
-    // (Additive column/index drift is already auto-reconciled by verifyTables; this is
-    // only for the rest.) Each file is applied at most once and recorded in the
-    // `schema_migrations` ledger, so it is safe to call on every startup.
+    // Apply tracked, ordered schema migrations from src/sql/migrations/: the changes the
+    // startup drift reconciler deliberately will not make on its own (data backfills,
+    // destructive index/column changes, dedup-then-unique, type changes). Each file is
+    // applied at most once and recorded in the `schema_migrations` ledger, so this is safe
+    // to call on every startup.
     //
-    // A migration opts into unattended application with a header tag on any of its
-    // first lines:
-    //   -- xchain:migration mode=auto     → applied automatically at startup
-    //   -- xchain:migration mode=manual   → applied only by an explicit operator run
-    // A file with NO tag is treated as `manual` (unknown DDL never auto-runs). `auto`
-    // migrations must be additive + idempotent (guard with IF [NOT] EXISTS); anything
-    // that can fail on existing data must be `manual`.
+    // A migration opts into unattended application with a header tag in its comment prologue:
+    //   -- xchain:migration mode=auto     applied automatically at startup
+    //   -- xchain:migration mode=manual   applied only by an explicit operator run
+    // An untagged file is treated as `manual` (unknown DDL never auto-runs). `auto` files
+    // must be additive and idempotent (guard with IF [NOT] EXISTS); anything that can fail
+    // on existing data must be `manual`.
     //
-    // opts.includeManual=true also applies pending `manual` migrations (the operator
-    // path: node src/migrate.js). The whole run holds a DB-scoped advisory lock so
-    // concurrent processes can't apply the same file twice. Returns { applied, pending }.
+    // opts.includeManual=true also applies pending `manual` migrations (the operator path,
+    // node src/migrate.js). The run holds a DB-scoped advisory lock so concurrent processes
+    // cannot apply the same file twice. Returns { applied, pending }.
     //
-    // opts.only (string | string[]) scopes the run to specific migration filename(s):
-    // ONLY those files are applied, every other file is left untouched (an untargeted
-    // unapplied file is reported in `pending`, an untargeted applied file is ignored).
-    // This is the per-file fleet-rollout path (migrate.js --file): a single pending
-    // manual migration can be deployed to a fleet DB without a blanket migrate also
-    // applying every other pending manual migration in the tree. A scoped run is
+    // opts.only (string | string[]) scopes the run to specific filenames: the per-file fleet
+    // rollout path (migrate.js --file), where one pending manual migration is deployed
+    // without a blanket run also applying every other pending file. A scoped run is
     // deliberately NOT gated on unrelated files' dated-prefix / checksum state, so an
-    // unrelated tree quirk can never block the targeted rollout. An unknown target
-    // (name matching no committed migration) fails loudly rather than applying nothing.
-    // Public entry point. Runs the migration body on every path, then always verifies the
-    // schema contracts a mode=manual migration owns and the drift reconciler cannot heal
-    // (dispensers.expiration type, pubkeys.pubkey width, action-data charset), so the
-    // fail-closed guards fire even when the body early-returns (no migrations dir, empty
-    // dir, or lock contention during a fleet rollout). If the inner body throws, the error
-    // propagates and the assertions are skipped (already failing loudly); on any normal
-    // return each runs exactly once. Each is a no-op when its table is absent, so
-    // no-dir/empty paths stay cheap and safe.
+    // unrelated tree quirk can never block the targeted rollout; an unknown target fails
+    // loudly rather than applying nothing.
+    //
+    // The wrapper always runs the schema-contract assertions after the body, so the
+    // fail-closed guards a mode=manual migration owns fire even when the body early-returns
+    // (no migrations dir, empty dir, lock contention). A throwing body is already failing
+    // loudly, so the assertions are skipped there.
     async runMigrations(opts = {}){
         const result = await this._runMigrationsInner(opts);
         await this._assertDispenserExpirationIsBigintUnsigned();
@@ -314,9 +295,9 @@ class Database {
             const got = await conn.query('SELECT GET_LOCK(?, 30) AS l', [lockName]);
             if(!got || !got[0] || String(got[0].l) !== '1'){
                 console.warn('runMigrations: could not acquire lock ' + lockName + ' (another process is migrating). Skipping this run.');
-                // #3162: flag the skip so callers do NOT read the empty applied/pending shape as
-                // a completed run. The operator CLI must not print "done" and exit 0 when nothing
-                // was even examined - the schema may still be un-migrated.
+                // Flag the skip so callers do NOT read the empty applied/pending shape as a
+                // completed run. The operator CLI must not print "done" and exit 0 when nothing
+                // was even examined; the schema may still be un-migrated.
                 result.lockSkipped = true;
                 return result;
             }
@@ -383,7 +364,7 @@ class Database {
                                 // MIGRATION_STRICT_CHECKSUM has no effect there - telling the operator to
                                 // clear it just loops them back to the same error. Only the passive
                                 // startup path opted into strict mode via MIGRATION_STRICT_CHECKSUM=1 can
-                                // actually be downgraded by clearing it. ()
+                                // actually be downgraded by clearing it.
                                 const hint = includeManual
                                     ? ' This operator run always fails closed (MIGRATION_STRICT_CHECKSUM has no' +
                                       ' effect here). Either revert ' + file + ' to the content matching the' +
@@ -414,7 +395,7 @@ class Database {
                     //
                     // It runs BEFORE the mode gate deliberately, so an unattended startup
                     // baselines a pending manual migration and the hazard is gone before an
-                    // operator ever reaches for `npm run migrate` ().
+                    // operator ever reaches for `npm run migrate`.
                     const preconditionSkip = await this._migrationPreconditionSkip(file, conn);
                     if(preconditionSkip){
                         await conn.query(
@@ -471,9 +452,6 @@ class Database {
         if(result.applied.length) console.log('runMigrations: ' + result.applied.length + ' migration(s) applied to ' + this.dbName + '.');
         if(result.pending.length) console.log('runMigrations: ' + result.pending.length + ' manual migration(s) pending for ' + this.dbName + '; run `node src/migrate.js` to apply.');
 
-        // NOTE: the dispensers.expiration schema-contract assertion now runs in the public
-        // runMigrations() wrapper so it fires on every exit path, including the early
-        // returns above (no-dir, empty-dir, lock contention).
         return result;
     }
 
@@ -495,8 +473,8 @@ class Database {
     // while INT / INT UNSIGNED either fail the write under a strict sql_mode or truncate
     // under a lax one, on a column xchain-sync replicates to validators. Checking only
     // DATA_TYPE let all three through while the error text claimed BIGINT UNSIGNED was
-    // required (), so COLUMN_TYPE - which carries the width and the unsigned
-    // attribute - is what is read now.
+    // required, so COLUMN_TYPE (which carries the width and the unsigned attribute) is
+    // what is read now.
     //
     // The LEFT JOIN from information_schema.tables separates the two skip-shaped cases the
     // old single-table query merged: no row at all means the dispensers table does not exist
@@ -566,8 +544,8 @@ class Database {
 
     // Assert that pubkeys.pubkey is wide enough for an UNCOMPRESSED key (65 bytes ->
     // 130 hex chars). extractPubkeyFromInput emits both forms, so a DB still at the
-    // pre-#3195 VARCHAR(66) either fails the INSERT (errno 1406 under a strict
-    // sql_mode) or truncates to 66 chars under a lax one, and the decoder->indexer
+    // older compressed-only VARCHAR(66) either fails the INSERT (errno 1406 under a
+    // strict sql_mode) or truncates to 66 chars under a lax one, and the decoder->indexer
     // seam field source_pubkey ends up NULL or corrupted with the branch chosen by
     // the server's sql_mode rather than by chain data. The widen is mode=manual, so
     // the startup drift reconciler cannot heal it (alterTableForDrift only ADDS
@@ -647,16 +625,12 @@ class Database {
     // Defaults to 'manual' when absent (conservative: unknown DDL never auto-runs).
     _migrationMode(raw){
         // The mode tag is a leading-prologue directive: it may only sit in the run of
-        // blank and `--`-comment lines BEFORE the first SQL statement. Scanning the
-        // whole file (the old /m behavior) let a `mode=auto` token buried in body prose
-        // or a data literal silently arm auto-apply for a destructive migration. A fixed
-        // first-N-lines window (the old slice(0,10)) fixed that but was too tight: the
-        // standard multi-line license banner pushes the tag past line 10, so every
-        // banner-prefixed `mode=auto` migration was silently read as the `manual`
-        // default and never auto-applied. Anchoring to the comment prologue keeps the
-        // body-buried protection (the scan stops at the first non-comment, non-blank
-        // line, so no data literal or trailing prose can be seen) while accommodating
-        // any length of leading comment banner.
+        // blank and `--`-comment lines BEFORE the first SQL statement. Scanning the whole
+        // file would let a `mode=auto` token buried in body prose or a data literal arm
+        // auto-apply for a destructive migration; a fixed first-N-lines window is too
+        // tight, because the multi-line license banner pushes the tag past it and the
+        // migration then silently reads as the `manual` default. Anchoring to the
+        // prologue keeps both properties at any banner length.
         const lines    = String(raw).split('\n');
         const prologue = [];
         for(const line of lines){
@@ -783,18 +757,16 @@ class Database {
         return null;
     }
 
-    // True only for the one committed auto UPDATE shape: the AUTO_INCREMENT id
-    // repair `UPDATE <table> SET id = (<subquery>) WHERE id = 0`. The old carve-out
-    // regex was unanchored (`0\b`, no `$`) and used a greedy paren-unaware
-    // `\([\s\S]+\)`, so `... WHERE id = 0 OR 1=1` and a smuggled second assignment
-    // `SET id = (...), amount = (...)` both slipped past the guard and rewrote every
-    // row. This matches the shape structurally instead: (1) a single table then
-    // `SET id = (`; (2) a balanced-paren, quote-aware walk finds the value's true
-    // matching `)`, so no extra assignment or clause can ride inside the wildcard;
-    // (3) the remainder must be exactly `WHERE id = 0`, end-anchored, so nothing
-    // trails. The 2026-06-10-mirror-id-autoincrement-repair.sql migration uses a
-    // NESTED subquery with commas, so a "no inner parens / no commas" rule would
-    // wrongly reject it and hard-fail startup; the balanced scan is required.
+    // True only for the one committed auto UPDATE shape: the AUTO_INCREMENT id repair
+    // `UPDATE <table> SET id = (<subquery>) WHERE id = 0`. The shape is matched
+    // structurally, not by a wildcard regex: (1) a single table then `SET id = (`;
+    // (2) a balanced-paren, quote-aware walk finds the value's true matching `)`, so no
+    // extra assignment or trailing clause can ride inside it; (3) the remainder must be
+    // exactly `WHERE id = 0`, end-anchored. An earlier unanchored regex let both
+    // `... WHERE id = 0 OR 1=1` and a smuggled `SET id = (...), amount = (...)` through,
+    // rewriting every row. The committed repair migration nests a subquery containing
+    // commas, so a "no inner parens / no commas" rule would wrongly reject it and
+    // hard-fail startup; the balanced scan is required.
     // Kept byte-for-byte in sync with the xchain-indexer classifier.
     _isIdRepairUpdate(stmt){
         const head = /^UPDATE\s+(?:`[^`]+`|[A-Za-z0-9_$.]+)\s+SET\s+id\s*=\s*\(/i.exec(stmt);
@@ -1119,10 +1091,8 @@ class Database {
         let query   = null;
         console.log('Creating ' + table + ' table and indexes...');
         try {
-            // Loop through SQL queries
             for(query of queries){
                 query = query.trim();
-                // Ignore empty queries
                 if(query=='')
                     continue;
                 try {
@@ -1171,10 +1141,8 @@ class Database {
         return connection;
     }
 
-    // Handle releasing a connection and freeing it up for additional queries
     async releaseConnection(){
         if(this.transactionConnection != null){
-            // console.log("releasing database connection");
             await this.transactionConnection.release();
             this.transactionConnection = null;
         }
@@ -1332,22 +1300,18 @@ class Database {
             // deletion itself in that same log. The indexer's reorg detection consumes events
             // by ascending id and would misbehave if rows were retroactively removed.
 
-            // M-12 crash-durability: write the REORG audit marker in the SAME transaction that
-            // deletes the block, so the delete and its marker are atomic. The former design wrote
-            // one REORG event once at the END of verifyReorg, after every per-block delete had
-            // already committed. A crash in that window left the blocks gone but no marker, and the
-            // indexer (which detects decoder reorgs solely by reading these events.id rows and
-            // rolling back to the lowest block_index across them) never retracted the orphaned
-            // old-chain rows it had already indexed: a silent, permanent divergence. Per-block
-            // atomic markers close it: every deleted block carries a durable event, and a crash
-            // mid-reorg simply leaves the not-yet-deleted blocks to be re-detected and
-            // re-deleted+marked on restart. The indexer rolls back to the deepest (min) block_index
-            // across all unprocessed markers, so N single-block markers land it at exactly the same
-            // point one combined event would have. Ordering is safe by construction: a marker for
-            // block B becomes visible only once B is actually deleted, so the indexer can never roll
-            // back onto (and re-read) a block still present in a half-deleted decoder. Payload shape
-            // matches the indexer's parser (array of {block_index, block_hash}); reorgBlockHash is
-            // omitted by non-reorg callers, leaving deleteBlockByIndex a plain delete.
+            // Crash durability: the REORG audit marker is written in the SAME transaction that
+            // deletes the block, so the delete and its marker are atomic. A single marker written
+            // once at the end of verifyReorg leaves a crash window where the blocks are gone but no
+            // marker exists, and the indexer (which detects decoder reorgs solely by reading these
+            // events rows and rolling back to the lowest block_index across them) never retracts the
+            // orphaned old-chain rows it already indexed: a silent, permanent divergence. The
+            // indexer rolls back to the deepest block_index across all unprocessed markers, so N
+            // single-block markers land it exactly where one combined event would have, and a marker
+            // for block B becomes visible only once B is actually deleted, so it can never roll back
+            // onto a block still present in a half-deleted decoder. Payload shape matches the
+            // indexer's parser (array of {block_index, block_hash}); reorgBlockHash is omitted by
+            // non-reorg callers, leaving deleteBlockByIndex a plain delete.
             if (reorgBlockHash != null){
                 const eventQuery = `INSERT INTO events (time, code, data) VALUES (?, ?, ?);`
                 const nowString  = new Date().toISOString().slice(0, 19).replace('T', ' ')
@@ -1451,18 +1415,13 @@ class Database {
             WHERE block_index = ?;
         `;
         
-        // Retry-then-throw, same rationale as getLastBlockIndex/getLastTxIndex above
-        // (item 2459). The old `catch { return null }` made a failed query
-        // indistinguishable from "no such row", and the two callers that decide state
-        // on that value read the conflated null as data:
-        //   - verifyReorg's backward walk treats a null row as "table exhausted",
-        //     so ONE failed read ended the rollback walk and returned "reorg
-        //     reconciled" while orphan blocks were still stored above the fork point
-        //     (the same failure the getLastBlockIndex comment above records);
-        //   - the parse loop's reorg trigger retried the height, which was right for
-        //     an error and wrong-but-harmless for a genuinely missing row.
-        // After this change null means exactly "no such row"; a read that never
-        // succeeds throws, and each caller decides what to do with the failure.
+        // Retry-then-throw, same rationale as getLastBlockIndex/getLastTxIndex above.
+        // A `catch { return null }` makes a failed query indistinguishable from "no such
+        // row", and verifyReorg's backward walk treats a null row as "table exhausted":
+        // ONE failed read then ended the rollback walk and reported the reorg reconciled
+        // while orphan blocks were still stored above the fork point. Here null means
+        // exactly "no such row"; a read that never succeeds throws, so each caller decides
+        // what to do with a failure.
         const MAX_ATTEMPTS = 5
         let lastErr = null
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++){
@@ -1502,10 +1461,10 @@ class Database {
         
         let connection = await this.getConnection()
         // Snapshot whether WE acquired this lease. Inside a block transaction
-        // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field, so the
-        // finally must key off this entry-time snapshot, not the mutated field,
-        // or it would release the same pooled socket a second time.
+        // getConnection() returns the shared this.transactionConnection, and the catch
+        // path's endTransaction() releases it and nulls the field, so the finally must key
+        // off this entry-time snapshot, not the mutated field, or it would release the same
+        // pooled socket a second time.
         const ownLease = (this.transactionConnection == null)
         
         try {
@@ -1579,11 +1538,7 @@ class Database {
         `;
 
         let connection = await this.getConnection()
-        // Snapshot whether WE acquired this lease. Inside a block transaction
-        // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field, so the
-        // finally must key off this entry-time snapshot, not the mutated field,
-        // or it would release the same pooled socket a second time.
+        // Entry-time lease snapshot (rationale at insertBlock).
         const ownLease = (this.transactionConnection == null)
 
         try {
@@ -1640,11 +1595,7 @@ class Database {
         `;
 
         let connection = await this.getConnection()
-        // Snapshot whether WE acquired this lease. Inside a block transaction
-        // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field, so the
-        // finally must key off this entry-time snapshot, not the mutated field,
-        // or it would release the same pooled socket a second time.
+        // Entry-time lease snapshot (rationale at insertBlock).
         const ownLease = (this.transactionConnection == null)
 
         try {
@@ -1716,7 +1667,6 @@ class Database {
         await connection.release()
     }
 
-    // Lookup a record in the `index_transactions` table and return record id
     async getTransactionId(hash){
         let id    = null;
         let db    = await this.getConnection();
@@ -1736,13 +1686,12 @@ class Database {
         return id;
     }
 
-    // Create records in the 'index_transactions' table and return record id
     async createTransaction(hash){
-        // Ignore empty hashes and return hardcoded record id
+        // An empty hash resolves to the reserved sentinel row id 1 rather than
+        // interning a blank value.
         if(hash==null||hash=='')
             return 1;
         var id = await this.getTransactionId(hash);
-        // Handle creating record
         if(id==null){
             let db    = await this.getConnection();
             // INSERT IGNORE + refetch is race-safe against the UNIQUE index: if a
@@ -1764,7 +1713,6 @@ class Database {
         return id;
     }
 
-    // Lookup a record in the `index_addresses` table and return record id
     async getAddressId(address){
         let id    = null;
         let db    = await this.getConnection();
@@ -1783,19 +1731,16 @@ class Database {
         return id;
     }
 
-    // Create records in the 'index_addresses' table and return record id
     async createAddress(address){
-        // Ignore empty address and return hardcoded record id
+        // An empty address resolves to the reserved sentinel row id 1 rather than
+        // interning a blank value.
         if(address==null||address=='')
             return 1;
         var id = await this.getAddressId(address);
-        // Handle creating record
         if(id==null){
             let db    = await this.getConnection();
-            // INSERT IGNORE + refetch is race-safe against the UNIQUE index: if a
-            // concurrent caller inserted the same address between our lookup and here,
-            // the IGNORE skips the duplicate and the refetch below resolves to the
-            // canonical row id, so two callers can never create duplicate rows.
+            // INSERT IGNORE + refetch is race-safe against the UNIQUE index, as in
+            // createTransaction above.
             let query = "INSERT IGNORE INTO index_addresses (`address`) values (?)"
             try {
                 await db.query(query, [address]);
@@ -1856,11 +1801,7 @@ class Database {
         `;
 
         let connection = await this.getConnection()
-        // Snapshot whether WE acquired this lease. Inside a block transaction
-        // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field, so the
-        // finally must key off this entry-time snapshot, not the mutated field,
-        // or it would release the same pooled socket a second time.
+        // Entry-time lease snapshot (rationale at insertBlock).
         const ownLease = (this.transactionConnection == null)
 
         try {
@@ -1897,26 +1838,22 @@ class Database {
         }
     }
 
-    // Set-based diff of the stored mempool against the node's current mempool.
-    //  / review finding P20: the previous implementation ran
-    // `SELECT tx_hash FROM mempool_transactions` (a full-table scan) every 60s,
-    // streamed EVERY stored row into Node, and binary-searched each one against
-    // `txidList` in JS. Both the row transfer and the per-row search grew with
-    // mempool depth, so a fee-spike mempool made the poll cycle progressively
-    // more expensive. This version seeds the node's current mempool into a
-    // session-scoped temp table and does the whole diff in SQL against the
-    // unique `tx_hash` index: only the intersection ever crosses the wire.
+    // Set-based diff of the stored mempool against the node's current mempool. The node's
+    // mempool is seeded into a session-scoped temp table and the whole diff runs in SQL
+    // against the unique `tx_hash` index, so only the intersection ever crosses the wire.
+    // Streaming every stored row into Node and searching it in JS instead made the poll
+    // cycle grow with mempool depth, which a fee-spike mempool turns into a real cost.
     //
-    // Two effects, unchanged from before:
-    //   1. stored rows whose tx_hash is no longer in the node mempool are
-    //      DELETEd (they confirmed or were evicted);
-    //   2. txids already stored are removed from `txidList` IN PLACE, so the
-    //      caller is left holding only the new arrivals to fetch and insert.
+    // Two effects:
+    //   1. stored rows whose tx_hash is no longer in the node mempool are DELETEd (they
+    //      confirmed or were evicted);
+    //   2. txids already stored are removed from `txidList` IN PLACE, so the caller is
+    //      left holding only the new arrivals to fetch and insert.
     async deleteAndCompareTxsNotInList(txidList) {
-        // Snapshot the lease ownership: inside a block transaction getConnection()
-        // hands back the shared transaction connection, which we must not release.
-        // Mempool maintenance runs on its own Database handle (M-19), so in
-        // practice ownLease is true here, but keep the guard for correctness.
+        // Snapshot the lease ownership: inside a block transaction getConnection() hands
+        // back the shared transaction connection, which we must not release. Mempool
+        // maintenance runs on its own Database handle, so ownLease is true here in
+        // practice, but keep the guard for correctness.
         const ownLease = (this.transactionConnection == null)
         let connection = await this.getConnection();
 
@@ -2014,11 +1951,7 @@ class Database {
         // (XChainDecoder.js DISPENSER parse). Matches xchain-indexer dispensers.expiration.
         
         let connection = await this.getConnection()
-        // Snapshot whether WE acquired this lease. Inside a block transaction
-        // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field, so the
-        // finally must key off this entry-time snapshot, not the mutated field,
-        // or it would release the same pooled socket a second time.
+        // Entry-time lease snapshot (rationale at insertBlock).
         const ownLease = (this.transactionConnection == null)
         
         try {
@@ -2026,7 +1959,7 @@ class Database {
             let addressId = await this.createAddress(openDispenser.address)
             let expiration = openDispenser.expiration
             // Mode B only: interned so a later v2 refill (whose payload names no address)
-            // can still resolve which oracle-fee output to capture .
+            // can still resolve which oracle-fee output to capture.
             let oracleAddressId = openDispenser.oracleAddress
                 ? await this.createAddress(openDispenser.oracleAddress)
                 : null
@@ -2035,9 +1968,9 @@ class Database {
             // cancel/edit from EITHER the dispenser SOURCE or its GET_ADDRESS
             // (xchain-indexer/src/actions/dispenser.js "SOURCE (not owner)"), and
             // address_id records only the operating address, so without this id a
-            // creator-issued cancel of a delegated dispenser matched no decoder row and
-            // the row stayed open past the indexer's close . A non-delegated
-            // dispenser leaves this NULL, so its rows are unchanged from before.
+            // creator-issued cancel of a delegated dispenser matches no decoder row and the
+            // row stays open past the indexer's close. A non-delegated dispenser leaves
+            // this NULL.
             let sourceAddressId = (openDispenser.sourceAddress &&
                                    openDispenser.sourceAddress !== openDispenser.address)
                 ? await this.createAddress(openDispenser.sourceAddress)
@@ -2069,7 +2002,7 @@ class Database {
         }
     }
 
-    // ── The decoder's open-dispenser view is ADVISORY (#3119) ────────────────────────
+    // The decoder's open-dispenser view is ADVISORY.
     //
     // It exists for ONE purpose: decide which transaction outputs are captured as
     // potential dispense payments. The indexer is the sole arbiter of whether a dispenser
@@ -2077,19 +2010,17 @@ class Database {
     // anything. The two views are allowed to disagree, and the disagreement is only ever
     // safe in one direction:
     //
-    //   decoder open LONGER than the indexer  -> extra captured outputs the indexer drops
+    //   decoder open LONGER than the indexer    -> extra captured outputs the indexer drops
     //   decoder closed EARLIER than the indexer -> payments to a LIVE dispenser are never
     //                                              captured, so real dispenses are lost
     //
     // The second is money-bearing, so the decoder must never close a row on anything less
-    // than certainty. It has no certainty available: the indexer targets a cancel/edit by
-    // an explicit DISPENSER_ACTION_INDEX wire field, and the decoder runs UPSTREAM of the
-    // indexer and has no such id, so it can only resolve a target by SOURCE address. When
-    // one source holds more than one open dispenser that resolution is a GUESS, and a
-    // wrong guess closed the wrong row - the money-bearing direction. No tie-break rule
-    // can fix that, because the two sides are not addressing the same thing at all.
-    //
-    // So the guess is gone rather than refined:
+    // than certainty, and it has no certainty available: the indexer targets a cancel/edit
+    // by an explicit DISPENSER_ACTION_INDEX wire field, while the decoder runs UPSTREAM of
+    // the indexer, holds no such id, and can only resolve a target by SOURCE address. When
+    // one source holds more than one open dispenser that resolution is a GUESS, and a wrong
+    // guess closes the wrong row. No tie-break rule can fix that, because the two sides are
+    // not addressing the same thing at all, so the guess was removed rather than refined:
     //   * The format-1 cancel mirror is RETIRED. It only ever moved an expiration EARLIER
     //     (cancel_block_time + close delay), which is the one thing this view must not do
     //     on a guess. Without it a cancelled dispenser stays in the decoder's open set
@@ -2099,12 +2030,11 @@ class Database {
     // Do NOT re-add a closing mirror here, in either form, and do not reintroduce
     // ORDER BY ... LIMIT 1 targeting: both are the defect, not the fix.
     //
-    // NOTE the advisory contract stops at the open-view. Output CAPTURE resolution
-    // (getOpenDispenserOracleAddressBySource, ) still resolves by SOURCE and still
-    // picks ONE row with ORDER BY ... LIMIT 1. That ranking has the same defect this block
-    // removed from the open-view and is NOT benign: capture is an equality test, so a wrong
-    // pick captures nothing at all. See that function's own header for the failure and the
-    // flag-day the fix needs ().
+    // The advisory contract stops at the open-view. Output CAPTURE resolution
+    // (getOpenDispenserOracleAddressBySource) still resolves by SOURCE and still picks ONE
+    // row with ORDER BY ... LIMIT 1. That ranking carries the same defect and is NOT
+    // benign: capture is an equality test, so a wrong pick captures nothing at all. See
+    // that function's own header for the failure and the activation gate its fix needs.
 
     // Mirror a DISPENSER format-2 edit that re-dates EXPIRATION, so the block-time
     // soft-expire (deleteOpenDispensers) does not close a decoder row while the indexer
@@ -2120,12 +2050,12 @@ class Database {
     //      LIMIT 1 guess could miss - itself an early close), and any other row of the
     //      same source is merely held open longer, which the indexer absorbs.
     //
-    // Matching address_id OR source_address_id keeps the delegated case working :
+    // Matching address_id OR source_address_id keeps the delegated case working:
     // address_id is the operating address (GET_ADDRESS when delegated), source_address_id
     // the create SOURCE, stored only when the two differ, so an edit issued by the
     // creator of a delegated dispenser still reaches its row.
     //
-    // THIS-BLOCK RESTORE (). deleteOpenDispensers runs at block START, before the
+    // THIS-BLOCK RESTORE. deleteOpenDispensers runs at block START, before the
     // transaction loop, while the indexer expires at block END, after it. So on the block
     // whose header time first passes an expiration, this mirror is handed a row that the
     // block-start soft-expire has ALREADY stamped, and an `expired_block_index IS NULL`
@@ -2136,8 +2066,9 @@ class Database {
     // now admits a row expired by THIS block and clears the mark on it.
     //
     // Scoped to `expired_block_index = blockIndex` only. A row expired in an EARLIER block
-    // stays closed: reopening one would be the closing/opening mirror on a GUESSED row that
-    // #3119 removed, and the indexer has long since settled that dispenser's lifecycle.
+    // stays closed: reopening one would be exactly the mirror-on-a-guessed-row the advisory
+    // note above rules out, and the indexer has long since settled that dispenser's
+    // lifecycle.
     // Same shape as deleteBlockByIndex's reorg clear, which also keys the reset on the
     // stamping height, so a re-processed block remains idempotent.
     //
@@ -2173,23 +2104,23 @@ class Database {
     }
 
     // The ORACLE_ADDRESS of the open dispenser a DISPENSER v2 edit/refill targets, so the
-    // block loop can capture that transaction's PRICE v1 oracle-usage-fee output .
-    // The v2 payload names its target by DISPENSER_ACTION_INDEX, an id in the INDEXER's
-    // action space the decoder does not maintain, so the target is resolved by SOURCE
-    // address - the same two-key match (operating address OR stored create SOURCE, )
+    // block loop can capture that transaction's PRICE v1 oracle-usage-fee output. The v2
+    // payload names its target by DISPENSER_ACTION_INDEX, an id in the INDEXER's action
+    // space the decoder does not maintain, so the target is resolved by SOURCE address:
+    // the same two-key match (operating address OR stored create SOURCE) that
     // extendOpenDispenserExpirationBySource uses, which lets a refill of a DELEGATED
     // dispenser (paid by its original creator, whose SOURCE is not the operating address)
     // still find its dispenser and capture the oracle-fee output the indexer will look for.
     //
-    // KNOWN DEFECT (): the ORDER BY ... LIMIT 1 ranking that #3119 removed from
-    // the extend path survives here, and it is retained rather than endorsed. Capture is a
-    // single-address EQUALITY test (the block loop's payment-output scan,
+    // KNOWN DEFECT: the ORDER BY ... LIMIT 1 ranking removed from the extend path survives
+    // here, and it is retained rather than endorsed. Capture is a single-address EQUALITY
+    // test (the block loop's payment-output scan,
     // `nextOutput.destinationAddress === oracleFeeAddress`), so a wrong pick captures
-    // NOTHING: this lands in the under-capture direction the #3119 block above calls
+    // NOTHING: this lands in the under-capture direction the advisory note above calls
     // money-bearing, not the over-capture direction it calls safe. When one source holds
     // several open Mode B dispensers with DIFFERENT oracle addresses, a refill of any row
     // but the top-ranked one resolves the wrong oracle, no output is captured, and the
-    // indexer - which resolves the exact DISPENSER_ACTION_INDEX target - rejects a valid
+    // indexer (which resolves the exact DISPENSER_ACTION_INDEX target) rejects a valid
     // refill for a missing oracle fee after the native payment is already spent.
     //
     // Do not restore the claim that a wrong pick is harmless because it captures an extra
@@ -2247,11 +2178,7 @@ class Database {
         `
         
         let connection = await this.getConnection()
-        // Snapshot whether WE acquired this lease. Inside a block transaction
-        // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field, so the
-        // finally must key off this entry-time snapshot, not the mutated field,
-        // or it would release the same pooled socket a second time.
+        // Entry-time lease snapshot (rationale at insertBlock).
         const ownLease = (this.transactionConnection == null)
         
         try {
@@ -2361,11 +2288,7 @@ class Database {
         `;
 
         let connection = await this.getConnection()
-        // Snapshot whether WE acquired this lease. Inside a block transaction
-        // getConnection() returns the shared this.transactionConnection, and the
-        // catch path's endTransaction() releases it and nulls the field, so the
-        // finally must key off this entry-time snapshot, not the mutated field,
-        // or it would release the same pooled socket a second time.
+        // Entry-time lease snapshot (rationale at insertBlock).
         const ownLease = (this.transactionConnection == null)
 
         try {
@@ -2423,7 +2346,7 @@ class Database {
         }
     }
 
-    // Durable reorg-halt flag (item 1300). verifyReorg's fail-closed safe-depth
+    // Durable reorg-halt flag. verifyReorg's fail-closed safe-depth
     // ceiling is a per-invocation counter: on a reorg deeper than
     // DISPENSER_EXPIRE_SAFE_DEPTH it aborts mid-rollback, but nothing persisted
     // the abort, so a plain process restart re-entered verifyReorg with a zeroed
@@ -2446,7 +2369,7 @@ class Database {
         }
     }
 
-    // Read the durable halt marker WITH its detail . isReorgHalted() above
+    // Read the durable halt marker WITH its detail. isReorgHalted() above
     // answers the one question verifyReorg asks (may I roll back?) and deliberately
     // stays a bare existence probe on the hot reorg path. Operator-facing surfaces
     // (health, GET /status, the bootstrap publisher's source gate) need to say WHEN
@@ -2501,7 +2424,6 @@ class Database {
 // HEAD). Applied fleet-wide through code deploy: both the startup auto-run and
 // `node src/migrate.js` pass through this heal before the mismatch guard, so no
 // direct schema_migrations SQL is ever needed. Mirrors xchain-indexer/src/db.js.
-//  blessing decided 2026-07-16.
 Database.MIGRATION_CHECKSUM_REBASELINES = {
     // Comment-only edits: 3a1c435 rewrote the validator note into the follower
     // ordering note (and dropped an em-dash), ec36bd4 added the license header.
@@ -2523,7 +2445,7 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
         ],
         to:   '1d8406192690e5a754ec9430fcd9115e907f34944f340a70b776166a62f83868',  // ec36bd4 (HEAD)
     },
-    // Comment-only edit (): the header claimed mode=manual left the file
+    // Comment-only edit: the header claimed mode=manual left the file
     // "pending and harmless on fresh DBs" and that IF [NOT] EXISTS made a partial
     // run resumable. Both were false and both invited the corrupting blanket run,
     // so the header now names MIGRATION_PRECONDITIONS below as the actual guard.
@@ -2535,8 +2457,20 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
         from: [
             '8b163db63932ec7940fc0c4ff83abb6a52d27ab4a192c377ce5195c3ca4b969f',  // 63fc384
             'c4d622adc34b3190a7cc43954b4c815a3c79bb6c6b7374be39c16d66454d1549',  // ec36bd4 (license header)
+            '44901ce7272347e6665ffe29655dbd7b8f3e45ba58b26671e50d07c0c629caef',  // header correction
         ],
-        to:   '44901ce7272347e6665ffe29655dbd7b8f3e45ba58b26671e50d07c0c629caef',  // header correction
+        to:   '2e20aceb9a446f03ff8ef7a9fd2cc6dede722c30610de57c0d1ef25a455b4dca',  // comment tidy (HEAD)
+    },
+    // Comment-only edit: the header prose was tidied and a stale operator note
+    // dropped. The executable statements are unchanged since a0f826b, which is
+    // the earliest revision that can be blessed here: 6869813 and older carry a
+    // different statement residue and must still fail the immutability check.
+    '2026-06-02-widen-ids-to-bigint.sql': {
+        from: [
+            'e508ea3bcc4ea4f8f6fd241d93c678245a0ddcb9e582094fe4ddbb636b66d6d7',  // a0f826b
+            '82865499dd2ccc48c0a0a016535409a9201b415395f49c70b41c73a3aeda8847',  // ec36bd4 (license header)
+        ],
+        to:   'b03b41b6fcabef9c959851ede9b75cc9089cef7c015bdd69cfcea74ad5acea7a',  // comment tidy (HEAD)
     },
 };
 
@@ -2560,7 +2494,7 @@ Database.MIGRATION_PRECONDITIONS = {
     // BIGINT column, its UNIX_TIMESTAMP() reads raw epoch seconds as a date-form number and
     // yields NULL for ordinary 10-digit values, after which the file drops the good column
     // and renames the all-NULL holding column over it: irrecoverable loss, and the decoder
-    // then never soft-expires while the BIGINT-backed indexer still does ().
+    // then never soft-expires while the BIGINT-backed indexer still does.
     //
     // Applicable only while the column is still a date/time type. A column that is absent
     // (a crash between the DROP and the rename) is deliberately NOT baselined: that state

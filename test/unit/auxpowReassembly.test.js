@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-//  regression: a DOGE/LTC block whose AuxPoW section skipAuxPow cannot
+// Regression guard: a DOGE/LTC block whose AuxPoW section skipAuxPow cannot
 // traverse used to retry at the same height forever (a permanent wedge). The
 // decoder now falls back, after AUXPOW_REASSEMBLE_AFTER consecutive fetch
 // failures at one height, to reassembling the pure block from getblockheader
@@ -39,7 +39,7 @@ function makeConnector(overrides) {
     return Object.assign(connector, overrides)
 }
 
-describe('malformed-AuxPoW block reassembly fallback ', function () {
+describe('malformed-AuxPoW block reassembly fallback', function () {
 
     describe('encodeVarintHex', function () {
         it('encodes each varint width and refuses >2^32-1', function () {
@@ -75,7 +75,7 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
             assert.strictEqual(await connector.getBlockReassembled('hash'), HEADER_HEX + '01' + TX_HEX)
         })
 
-        it('fetches txs through the bounded batch helper, not serially ', async function () {
+        it('fetches txs through the bounded batch helper, not serially', async function () {
             const batchCalls = []
             const connector = makeConnector({
                 getBlockHeader: async () => HEADER_HEX,
@@ -99,7 +99,7 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
         })
     })
 
-    describe('BlockchainConnector.probeTxIndex ', function () {
+    describe('BlockchainConnector.probeTxIndex', function () {
         it('returns true when the tip coinbase is retrievable without a blockhash', async function () {
             const connector = makeConnector({
                 getBlockchainInfo: async () => ({ blocks: 100, bestblockhash: 'tip' }),
@@ -135,11 +135,11 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
     })
 
     describe('XChainDecoder.fetchBlockHex', function () {
-        // Select the strip path by NETWORK, not by a flag: since  the
-        // constructor derives auxPow solely from the coin's declared wireFormat, so
-        // dogecoin-* is the only way to reach getBlockWithoutAuxPow and litecoin-*
-        // the only way to reach plain getBlock. The trailing constructor argument is
-        // the now-inert auxPow parameter, passed false to prove it is not consulted.
+        // Select the strip path by NETWORK, not by a flag: the constructor derives
+        // auxPow solely from the coin's declared wireFormat, so dogecoin-* is the only
+        // way to reach getBlockWithoutAuxPow and litecoin-* the only way to reach plain
+        // getBlock. The trailing constructor argument is the now-inert auxPow parameter,
+        // passed false to prove it is not consulted.
         function makeDecoder(network, connector) {
             const decoder = new XChainDecoder(network, '127.0.0.1', 3306, 'db', 'u', 'p',
                 '127.0.0.1', 0, 'u', 'p', false, null)
@@ -180,8 +180,8 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
             assert.deepStrictEqual(calls, ['getBlock'])
         })
 
-        // Item 2731: transport faults must never reach the escalation counter. A
-        // Dogecoin 1.14 node that drops the TCP connection when its RPC queue fills
+        // Transport faults must never reach the escalation counter. A Dogecoin 1.14
+        // node that drops the TCP connection when its RPC queue fills
         // surfaces as a bare ECONNRESET; escalating on that pointed getBlockReassembled's
         // per-tx getrawtransaction fan-out at the very node that was already saturated.
         it('does not reassemble when transport faults, not content faults, drove the count', async function () {
@@ -199,9 +199,9 @@ describe('malformed-AuxPoW block reassembly fallback ', function () {
         })
     })
 
-    // Item 2731: the classification seam itself. getBlockWithoutAuxPow used to wrap
-    // every throw (RPC included) in a bare Error, discarding error.code, so the
-    // decoder could not tell node overload from a malformed block.
+    // The classification seam itself. getBlockWithoutAuxPow used to wrap every throw
+    // (RPC included) in a bare Error, discarding error.code, so the decoder could not
+    // tell node overload from a malformed block.
     describe('getBlockWithoutAuxPow fault classification', function () {
         function connErr(code) {
             const e = new Error(code)

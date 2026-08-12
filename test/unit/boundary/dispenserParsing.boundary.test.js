@@ -75,14 +75,9 @@ function buildActionTx(actionString) {
     return tx
 }
 
-// ============================================================================
-// These tests exercise the DISPENSER field extraction logic from the boundary
-// testing plan (scenarios A-1 through A-12, E-1 through E-7).
-//
-// The actual DISPENSER creation happens in the block-processing loop (not in
-// parseTransaction), so we test parseTransaction's output to verify the data
-// field content, and test the DISPENSER parsing logic patterns in isolation.
-// ============================================================================
+// DISPENSER creation happens in the block-processing loop, not in
+// parseTransaction, so these assert parseTransaction's data field content and
+// exercise the DISPENSER field-extraction patterns in isolation.
 
 describe('Boundary: ACTION String Parsing (A-1 through A-12)', () => {
     let decoder
@@ -95,7 +90,6 @@ describe('Boundary: ACTION String Parsing (A-1 through A-12)', () => {
         sinon.restore()
     })
 
-    // A-1: Empty decoded data
     it('A-1: empty payload after XCHN prefix → data is Buffer of length 0', async () => {
         // buildXchnPayload with empty string creates: XCHN + script.compile([Buffer.from('')])
         // The compiled script will have the empty buffer push
@@ -106,7 +100,6 @@ describe('Boundary: ACTION String Parsing (A-1 through A-12)', () => {
         // a Buffer: the data field will be a Buffer (possibly empty or a zero-push)
     })
 
-    // A-2: Single character
     it('A-2: single character ACTION → stored as-is', async () => {
         const tx = buildActionTx('D')
         const result = await decoder.parseTransaction(tx)
@@ -114,7 +107,6 @@ describe('Boundary: ACTION String Parsing (A-1 through A-12)', () => {
         assert.ok(result.data.length > 0)
     })
 
-    // A-3: Only pipes
     it('A-3: pipe-only string → stored as-is, not DISPENSER-prefixed', async () => {
         const tx = buildActionTx('|||||')
         const result = await decoder.parseTransaction(tx)
@@ -124,7 +116,6 @@ describe('Boundary: ACTION String Parsing (A-1 through A-12)', () => {
         assert.ok(!decoded.startsWith('DISPENSER'))
     })
 
-    // A-5: DISPENSER with all 15 fields present (v0 complete happy path)
     it('[REGRESSION P1] R-DSP-001 A-5: DISPENSER v0 with all 15 fields → complete parse', async () => {
         const action = 'DISPENSER|0|BTC|JDOG|1|10|LTC||0.01|bcrt1qaddr|||9999999999|||memo'
         const tx = buildActionTx(action)
@@ -134,7 +125,6 @@ describe('Boundary: ACTION String Parsing (A-1 through A-12)', () => {
         assert.strictEqual(decoded, action)
     })
 
-    // A-6: DISPENSER with extra fields beyond spec
     it('A-6: DISPENSER with extra fields → extra fields ignored', async () => {
         const action = 'DISPENSER|0|BTC|||LTC||||addr|||3600|||extra1|extra2|extra3'
         const tx = buildActionTx(action)
@@ -143,7 +133,6 @@ describe('Boundary: ACTION String Parsing (A-1 through A-12)', () => {
         assert.strictEqual(result.data.toString('utf-8'), action)
     })
 
-    // A-12: Data with embedded null bytes
     it('A-12: data with embedded null bytes → textDecoder handles it', async () => {
         const action = 'DISPENSER|0|BTC\x00||||||||||||||'
         const tx = buildActionTx(action)
@@ -158,7 +147,6 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
     // These test the DISPENSER parsing logic patterns in isolation,
     // since the actual parsing happens in the block-processing loop.
 
-    // A-4: DISPENSER with only 2 fields: now rejected by field-count check
     it('[REGRESSION P1] R-DSP-001 A-4: short DISPENSER string "DISPENSER|0": rejected for having fewer than 14 fields', () => {
         const decodedData = 'DISPENSER|0'
         const decodedDataSplit = decodedData.split('|')
@@ -172,7 +160,6 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         assert.ok(decodedDataSplit.length < 14, 'short string rejected by field-count check')
     })
 
-    // A-7: DISPENSER version non-numeric
     it('[REGRESSION P1] R-DSP-002 A-7: DISPENSER with version "abc": parseInt returns NaN (not equal to 0)', () => {
         const decodedData = 'DISPENSER|abc|BTC|||LTC||||addr|||3600'
         const decodedDataSplit = decodedData.split('|')
@@ -183,7 +170,6 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         assert.ok(parseInt(commandVersion) != 0)
     })
 
-    // A-8: DISPENSER version negative
     it('A-8: DISPENSER with version "-1": parseInt returns -1 (not equal to 0)', () => {
         const decodedData = 'DISPENSER|-1|BTC|||LTC||||addr|||3600'
         const decodedDataSplit = decodedData.split('|')
@@ -193,7 +179,6 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         assert.ok(parseInt(commandVersion) != 0)
     })
 
-    // A-9: DISPENSER version as float "0.5"
     it('A-9: DISPENSER with version "0.5": parseInt returns 0, treated as v0', () => {
         const decodedData = 'DISPENSER|0.5|BTC|||LTC||||addr|||3600'
         const decodedDataSplit = decodedData.split('|')
@@ -213,7 +198,6 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         // No DISPENSER parsing triggered for non-DISPENSER actions
     })
 
-    // DISPENSER with both giveCoin and getCoin empty: should not create dispenser
     it('DISPENSER with both coins empty: skip dispenser creation', () => {
         const decodedData = 'DISPENSER|0||||||||||||||'
         const decodedDataSplit = decodedData.split('|')
@@ -228,7 +212,6 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         assert.ok(!(getCoin != '' || giveCoin != ''))
     })
 
-    // DISPENSER with giveCoin empty but getCoin present.
     // Fields: 0=ACTION 1=version 2=GIVE_COIN 3=GIVE_TICK 4=GIVE_AMOUNT
     //         5=GIVE_OWNERSHIP 6=GIVE_ESCROW 7=GET_COIN 8=GET_TICK 9=GET_AMOUNT
     //         10=GET_ADDRESS 11=FIAT_CODE 12=FIAT_AMOUNT 13=ORACLE_ADDRESS 14=EXPIRATION
@@ -245,7 +228,6 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         assert.ok(getCoin != '' || giveCoin != '')
     })
 
-    // Case sensitivity: "dispenser" (lowercase)
     it('lowercase "dispenser": startsWith("DISPENSER") returns false', () => {
         assert.ok(!'dispenser|0|BTC|...'.startsWith('DISPENSER'))
     })
@@ -266,7 +248,6 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         assert.ok(isUnresolvedCompactedRef, 'a ^<id> GET_ADDRESS must be detected as an unresolved compacted ref')
     })
 
-    // A full delegated GET_ADDRESS is NOT a compacted ref and is registered normally.
     it('DISPENSER with a full delegated GET_ADDRESS: not treated as a compacted ref', () => {
         const fields = ['DISPENSER', '0', 'BTC', '', '', '', '', 'BTC', '', '', 'mzBc4XEFSdzCDcTxAgf6EZXgsZWpztRhef', '', '', '', '3600']
         const decodedDataSplit = fields.join('|').split('|')
@@ -281,7 +262,6 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
     // These test FROM_UNIXTIME behavior at the application/query level.
     // The actual SQL execution requires a DB, but we test the JS-side handling.
 
-    // E-1: Unix epoch
     it('[REGRESSION P1] R-DSP-002 E-1: expiration "0": valid timestamp, FROM_UNIXTIME(0) = 1970-01-01', () => {
         const expiration = '0'
         // This is a valid value that the decoder passes directly to the SQL query
@@ -289,13 +269,11 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
         assert.ok(!isNaN(parseInt(expiration)))
     })
 
-    // E-2: 32-bit max
     it('E-2: expiration "2147483647": max 32-bit value, valid FROM_UNIXTIME', () => {
         const expiration = '2147483647'
         assert.strictEqual(parseInt(expiration), 2147483647)
     })
 
-    // E-3: Beyond 32-bit range. FROM_UNIXTIME returns NULL on some MariaDB versions
     it('E-3: expiration "2147483648": beyond 32-bit boundary', () => {
         const expiration = '2147483648'
         assert.strictEqual(parseInt(expiration), 2147483648)
@@ -303,21 +281,18 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
         // causing the dispenser to have NULL expiration and never expire
     })
 
-    // E-4: Negative timestamp
     it('E-4: expiration "-1": negative value, FROM_UNIXTIME(-1) = NULL', () => {
         const expiration = '-1'
         assert.strictEqual(parseInt(expiration), -1)
         // BOUNDARY FINDING: FROM_UNIXTIME(-1) = NULL on most MariaDB versions
     })
 
-    // E-5: Non-numeric
     it('E-5: expiration "abc": parseInt returns NaN', () => {
         const expiration = 'abc'
         assert.ok(isNaN(parseInt(expiration)))
         // Passed as NaN to SQL: MariaDB may coerce to 0 or NULL
     })
 
-    // E-6: Empty EXPIRATION token: decoder substitutes the block-time default
     it('E-6: expiration "": empty token is defaulted, not skipped', () => {
         const expirationToken = ''
         // Current semantics: an omitted or empty EXPIRATION is replaced with
@@ -326,7 +301,6 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
         assert.ok(defaulted, 'empty EXPIRATION triggers the default-substitution path')
     })
 
-    // E-7: Omitted EXPIRATION (index 14 absent on an otherwise-complete open)
     it('E-7: expiration omitted: defaulted when required fields are present', () => {
         // A complete open through ORACLE_ADDRESS (length 14) with EXPIRATION absent.
         const fields = ['DISPENSER', '0', 'BTC', '', '', '', '', 'LTC', '', '', 'addr', '', '', '']
@@ -339,7 +313,6 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
         // so the dispenser expires on the default window rather than living forever.
     })
 
-    // Additional: very large timestamp
     it('expiration "99999999999": year 5138, beyond MariaDB DATETIME range', () => {
         const expiration = '99999999999'
         assert.strictEqual(parseInt(expiration), 99999999999)
@@ -358,7 +331,6 @@ describe('Boundary: Combinatorial DISPENSER Scenarios', () => {
         sinon.restore()
     })
 
-    // Combo 4: DISPENSER data + source address resolution failure
     it('DISPENSER payload but getSourceFromOutput returns null: tx skipped', async () => {
         decoder.connector.getRawTransaction = sinon.stub().rejects(new Error('not found'))
 
@@ -370,12 +342,10 @@ describe('Boundary: Combinatorial DISPENSER Scenarios', () => {
         assert.ok(result.data.length > 0)
         // source is null because getSourceFromOutput failed
         assert.strictEqual(result.source, null)
-        // In the block-processing loop, this would be skipped at line 620-622:
-        // (data.length > 0 && source != null): source is null, so it's skipped
-        // The DISPENSER is NOT created. This is correct behavior.
+        // The block-processing loop stores a tx only when data.length > 0 AND source
+        // is non-null, so this one is skipped and no DISPENSER is created.
     })
 
-    // Combo 5: BATCH string with DISPENSER as non-first command
     it('BATCH with DISPENSER as second command: decoder does not parse it', async () => {
         const action = 'SEND|0|BTC|100;DISPENSER|0|BTC|||LTC||||addr|||3600|||'
         const tx = buildActionTx(action)
@@ -390,7 +360,6 @@ describe('Boundary: Combinatorial DISPENSER Scenarios', () => {
         // The decoder does NOT create a dispenser for BATCH-embedded DISPENSERs.
     })
 
-    // Combo: DISPENSER as first command in a BATCH (should be caught)
     it('BATCH with DISPENSER as first command: decoder does parse it', async () => {
         const action = 'DISPENSER|0|BTC|||||LTC|||addr||||3600|||;SEND|0|BTC|100'
         const tx = buildActionTx(action)

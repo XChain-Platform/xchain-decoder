@@ -25,8 +25,6 @@ const XChainDecoder = require('../../src/XChainDecoder')
 
 bitcoin.initEccLib(ecc)
 
-// ─── helpers ────────────────────────────────────────────────────────────────
-
 function createDecoder(feeDestination) {
     const decoder = new XChainDecoder(
         'bitcoin-regtest', 'h', 3306, 'db', 'u', 'p',
@@ -51,8 +49,6 @@ function createDecoder(feeDestination) {
 
 // Build a tx whose first input's hash is PREV_HASH (same convention used in parseTransaction.test.js)
 const PREV_HASH = Buffer.from('aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011', 'hex')
-
-// ─── isSynced / getSyncStatus / stop ────────────────────────────────────────
 
 describe('XChainDecoder status methods', () => {
     let decoder
@@ -102,7 +98,7 @@ describe('XChainDecoder status methods', () => {
     })
 })
 
-// ─── isStalled (the liveness signal /live reports) ───────────────────────────
+// isStalled (the liveness signal /live reports)
 //
 // The block loop never skips a block on a fetch/parse fault, so a deterministic
 // fault at one height retries forever with the process alive and the DB
@@ -164,13 +160,12 @@ describe('XChainDecoder#isStalled()', () => {
         assert.strictEqual(decoder.isStalled(), false)
     })
 
-    // Regression guard for . The counter is bumped by the catch around
-    // getBlockHash/fetchBlockHex, which a TRANSPORT fault also trips (that catch's own
-    // comment records a Dogecoin 1.14 node under RPC-queue pressure arriving as a bare
-    // ECONNRESET). While such a fault lasts the tip goes stale, and the healthcheck
-    // this feeds is autoheal-armed, so a counter ranked ABOVE the freshness gate would
-    // restart the container roughly every two minutes for the whole outage and fix
-    // nothing. These two cases pin the ordering.
+    // The fetch-error counter is bumped by the catch around getBlockHash/fetchBlockHex,
+    // which a TRANSPORT fault also trips (a Dogecoin 1.14 node under RPC-queue pressure
+    // arrives as a bare ECONNRESET). While such a fault lasts the tip goes stale, and the
+    // healthcheck this feeds is autoheal-armed, so a counter ranked ABOVE the freshness
+    // gate would restart the container roughly every two minutes for the whole outage and
+    // fix nothing. These two cases pin the ordering.
     it('is false during a node outage even with the fetch counter maxed', () => {
         wedged()
         decoder.blockchainInfoLastRefreshAt = Date.now() - (3 * 30000)   // frozen tip
@@ -185,11 +180,11 @@ describe('XChainDecoder#isStalled()', () => {
     })
 })
 
-// ─── isPollSilent (the dead-loop signal isStalled structurally cannot give) ───
+// isPollSilent (the dead-loop signal isStalled structurally cannot give)
 //
 // Every isStalled() gate above is a statement about CHAIN PROGRESS, so a decoder
 // that is caught up is never stalled by construction, and one on a stale tip is
-// deliberately never stalled (). A parse loop that dies while caught up
+// deliberately never stalled (a restart fixes nothing). A parse loop that dies while caught up
 // therefore leaves running+db true and stalled false, and /live answered 200
 // forever while nothing parsed. Only an iteration counter independent of the
 // chain closes that.
@@ -232,15 +227,13 @@ describe('XChainDecoder#isPollSilent()', () => {
 
     // The loop sets the heartbeat at its very top, so `continue main_parsing` and the
     // outage path (catch -> sleep -> continue) both refresh it. A node outage must
-    // NOT read as a dead loop: restarting fixes nothing ().
+    // NOT read as a dead loop: restarting fixes nothing.
     it('is false during a node outage, because the retry path still iterates', () => {
         decoder.blockchainInfoLastRefreshAt = Date.now() - (3 * 30000)   // frozen tip
         decoder.lastPollAt = Date.now()
         assert.strictEqual(decoder.isPollSilent(), false)
     })
 })
-
-// ─── millisecondsToTimeString ────────────────────────────────────────────────
 
 describe('XChainDecoder#millisecondsToTimeString()', () => {
     let decoder
@@ -294,8 +287,6 @@ describe('XChainDecoder#millisecondsToTimeString()', () => {
         assert.strictEqual(typeof decoder.millisecondsToTimeString(5000), 'string')
     })
 })
-
-// ─── extractPubkeyFromInput ──────────────────────────────────────────────────
 
 describe('XChainDecoder#extractPubkeyFromInput()', () => {
     let decoder
@@ -372,8 +363,6 @@ describe('XChainDecoder#extractPubkeyFromInput()', () => {
     })
 })
 
-// ─── findFundingFeeOutputs ───────────────────────────────────────────────────
-
 describe('XChainDecoder#findFundingFeeOutputs()', () => {
     const FEE_ADDR = 'mzBc4XEFSdzCDcTxAgf6EZXgsZWpztRhef'  // regtest-style, not real
 
@@ -391,7 +380,7 @@ describe('XChainDecoder#findFundingFeeOutputs()', () => {
         assert.deepStrictEqual(result, [])
     })
 
-    it('should throw a tagged rpcLookupFailure when getRawTransaction throws (H-6: fee presence must not depend on RPC health)', async () => {
+    it('should throw a tagged rpcLookupFailure when getRawTransaction throws (fee presence must not depend on RPC health)', async () => {
         const decoder = createDecoder(FEE_ADDR)
         decoder.connector.getRawTransaction = sinon.stub().rejects(new Error('not found'))
         await assert.rejects(
@@ -425,8 +414,6 @@ describe('XChainDecoder#findFundingFeeOutputs()', () => {
         assert.deepStrictEqual(result, [])
     })
 })
-
-// ─── verifyReorg edge cases ──────────────────────────────────────────────────
 
 describe('XChainDecoder#verifyReorg() edge cases', () => {
     // Helper: minimal decoder with stubbed db + connector
@@ -509,7 +496,7 @@ describe('XChainDecoder#verifyReorg() edge cases', () => {
         assert.ok(callCount >= 2, 'should have retried at least once')
     })
 
-    it('should delete a single orphan block and write its REORG marker atomically (M-12)', async () => {
+    it('should delete a single orphan block and write its REORG marker atomically', async () => {
         const decoder = makeReorgDecoder()
         let deletedBlock = null
 
@@ -528,9 +515,9 @@ describe('XChainDecoder#verifyReorg() edge cases', () => {
             deleteBlockByIndex: sinon.stub().callsFake(async (h) => {
                 deletedBlock = h
             }),
-            // Since M-12 the REORG marker is written inside deleteBlockByIndex, atomically with the
-            // delete. verifyReorg must NOT write a separate end-of-run event (that once-at-end write
-            // was the non-crash-durable path this fix removed).
+            // The REORG marker is written inside deleteBlockByIndex, atomically with the delete.
+            // verifyReorg must NOT write a separate end-of-run event: that once-at-end write was
+            // lost entirely when the process died mid-reorg.
             insertEvent: sinon.stub().resolves(true)
         }
         decoder.connector = {
@@ -551,8 +538,6 @@ describe('XChainDecoder#verifyReorg() edge cases', () => {
     })
 })
 
-// ─── DOGE auxPow forcing ────────────────────────────────────────────────────
-
 describe('XChainDecoder auxPow chain-identity forcing', () => {
     function makeDecoder(network, auxPow) {
         return new XChainDecoder(
@@ -566,7 +551,7 @@ describe('XChainDecoder auxPow chain-identity forcing', () => {
         assert.strictEqual(makeDecoder('dogecoin-mainnet', false).auxPow, true)
     })
 
-    // : a non-auxpow chain must NEVER reach getBlockWithoutAuxPow. BTC/LTC
+    // A non-auxpow chain must NEVER reach getBlockWithoutAuxPow. BTC/LTC
     // blocks carry no AuxPoW section, so stripping one whose version signals bit
     // 0x100 truncates a valid block. The passed flag is inert in both directions.
     it('forces auxPow=false for non-DOGE chains even when AUX_POW is set (true)', () => {
@@ -576,8 +561,6 @@ describe('XChainDecoder auxPow chain-identity forcing', () => {
         assert.strictEqual(makeDecoder('litecoin-regtest', true).auxPow, false)
     })
 })
-
-// ─── MAX_ACTION_DATA_LENGTH export ──────────────────────────────────────────
 
 describe('XChainDecoder.MAX_ACTION_DATA_LENGTH', () => {
     it('should be exported as a numeric constant', () => {

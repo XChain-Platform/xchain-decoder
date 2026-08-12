@@ -120,7 +120,7 @@ describe('Database._destructiveAutoStatement() @regression', function () {
             scanSql('UPDATE mirror SET id = (SELECT MAX(id)+1 FROM t) WHERE id = 0;'), null);
     });
 
-    it('flags UPDATE bypasses that smuggle past the id-repair carve-out (#1861)', function () {
+    it('flags UPDATE bypasses that smuggle past the id-repair carve-out', function () {
         // Unanchored/paren-greedy carve-out let these rewrite every row; now flagged.
         assert.ok(scanSql('UPDATE mirror SET id = (SELECT 1) WHERE id = 0 OR 1=1;'));
         assert.ok(scanSql('UPDATE mirror SET id = (SELECT id), amount = (SELECT \'0\') WHERE id = 0;'));
@@ -279,19 +279,20 @@ describe('Database.MIGRATION_CHECKSUM_REBASELINES @regression', function () {
         }
     });
 
-    it('the  blessed files are pinned toward the committed content', function () {
-        // The two files whose fleet-recorded checksums predate the comment-only
-        // edits (follower-ordering note, header-comment fix, license header).
-        // If a rebaseline entry is ever dropped, un-healed fleet DBs go back to
-        // failing every operator migrate run; pin their presence.
+    it('the blessed files are pinned toward the committed content', function () {
+        // These files' fleet-recorded checksums predate a series of comment-only
+        // edits. If a rebaseline entry or one of its historical hashes is ever
+        // dropped, un-healed fleet DBs go back to failing every operator migrate
+        // run, so pin that each keeps at least its two original revisions. The
+        // list only grows: a later comment edit appends another `from` hash.
         const blessed = [
             '2026-06-15-events-data-mediumtext.sql',
             '2026-06-17-pubkeys-add-monotonic-id.sql',
         ];
         for (const file of blessed) {
             const r = Database.MIGRATION_CHECKSUM_REBASELINES[file];
-            assert.ok(r, file + ': expected an  rebaseline entry');
-            assert.strictEqual([].concat(r.from).length, 2,
+            assert.ok(r, file + ': expected a rebaseline entry');
+            assert.ok([].concat(r.from).length >= 2,
                 file + ': expected both historical revisions pinned');
         }
     });
@@ -310,9 +311,9 @@ describe('Database.MIGRATION_CHECKSUM_REBASELINES @regression', function () {
 // Functional coverage of the heal path: drive the real runMigrations() against a
 // fake connection whose ledger records a pinned historical checksum, and assert it
 // UPDATEs schema_migrations to the blessed hash instead of tripping the
-// immutability guard. This is the fleet-wide re-bless path : the same code
-// runs at decoder startup and under `node src/migrate.js`, so the heal deploys
-// through code, never through direct SQL.
+// immutability guard. The same code runs at decoder startup and under
+// `node src/migrate.js`, so a fleet-wide re-bless deploys through code rather
+// than through direct SQL against each node.
 describe('runMigrations() checksum re-bless path @regression', function () {
 
     const crypto = require('crypto');
@@ -398,9 +399,9 @@ describe('runMigrations() checksum re-bless path @regression', function () {
 // Functional coverage of the per-file scoping (--file / opts.only): drive the real
 // runMigrations() against a fake connection over a tmp migrations dir holding several
 // pending manual files, and assert only the targeted file is applied while the others
-// are left pending and untouched. This is the fleet per-file rollout path :
-// a single pending manual migration deploys to a fleet DB without a blanket migrate
-// also applying every other pending manual migration in the tree.
+// are left pending and untouched. This is the per-file rollout path: a single pending
+// manual migration deploys to a fleet DB without a blanket migrate also applying every
+// other pending manual migration in the tree.
 describe('runMigrations() --file / opts.only scoping @regression', function () {
 
     const crypto = require('crypto');
@@ -513,8 +514,8 @@ describe('runMigrations() --file / opts.only scoping @regression', function () {
     });
 });
 
-// Migration applicability preconditions (). The 2026-06-13 file converts a
-// legacy DATETIME expiration to BIGINT UNSIGNED. It is mode=manual, so on a database
+// Migration applicability preconditions. The 2026-06-13 file converts a legacy
+// DATETIME expiration to BIGINT UNSIGNED. It is mode=manual, so on a database
 // created from the current dispensers.sql - already BIGINT UNSIGNED - it stays PENDING,
 // and the blanket `npm run migrate` its own header advertises applies every pending
 // manual file. Run there, UNIX_TIMESTAMP() reads raw epoch seconds as a date-form number
@@ -710,7 +711,7 @@ describe('Database schema-contract guards @regression', function () {
         return ctx;
     }
 
-    // dispensers.expiration must be exactly BIGINT UNSIGNED (). The old guard
+    // dispensers.expiration must be exactly BIGINT UNSIGNED. The old guard
     // matched the whole integer family on DATA_TYPE alone, so a signed or narrower
     // column passed a check whose own error text demanded BIGINT UNSIGNED. Its query is
     // a LEFT JOIN from information_schema.tables, so an empty result means the table is
@@ -747,7 +748,8 @@ describe('Database schema-contract guards @regression', function () {
 
     it('never points a drifted INTEGER column at the DATETIME converter migration', async function () {
         // Naming that file here would tell an operator to run UNIX_TIMESTAMP() over raw
-        // epoch seconds, which NULLs every row: the exact loss of .
+        // epoch seconds, which NULLs every row: the exact data loss the precondition
+        // guard above exists to prevent.
         for (const row of [{ dataType: 'bigint', columnType: 'bigint(20)' },
                            { dataType: 'int',    columnType: 'int(10) unsigned' }]) {
             const err = await expirationGuard.call(contextReturning([row])).then(

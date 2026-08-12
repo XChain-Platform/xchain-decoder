@@ -11,38 +11,36 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
-/* XChain Indexer Utility Class */
+/* XChain Decoder Utility Class */
 
 const crypto = require('crypto');
 
 module.exports = {
 
-    // Handle sleeping for a given number of milliseconds
     sleep: function(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
     },
 
-    // Throw an error and log to console
     throwError: function(error){
         console.error('throwError:', error);
         throw error;
     },
 
-    // Get a SHA256 hash of a given data object
+    // SHA256 over the JSON serialization, so the digest depends on key INSERTION
+    // ORDER: two objects with the same entries added in a different order hash
+    // differently. Callers that compare hashes must build the object identically.
     getDataHash: function(data){
-        let obj  = Object.assign({}, data); // Convert data to object if not already
-        let json = JSON.stringify(obj);     // Convert object to JSON string
+        let obj  = Object.assign({}, data);
+        let json = JSON.stringify(obj);
         let hash = crypto.createHash('sha256').update(json).digest('hex');
         return hash;
     },
 
-    // Start a debug timer
     startTimer: function(){
         let now = Date.now();
         return now;
     },
 
-    // Log a timer using a given name
     logTimer: function(timer, timeName){
         let now = Date.now();
         let ms  = now - timer;
@@ -54,18 +52,18 @@ module.exports = {
         console.log(niceString);
     },
 
-    // Create nice human readable time string based on miliiseconds
+    // Human-readable duration. `milliseconds` below is really TENTHS of a second
+    // (it is only ever printed as one digit after the seconds), and `days` wraps
+    // at 365, so this is for log lines and not for durations of a year or more.
     millisecondsToTimeString: function(ms){
         var milliseconds = Math.floor((ms % 1000) / 100),
             seconds      = Math.floor((ms / 1000) % 60),
             minutes      = Math.floor((ms / (1000 * 60)) % 60),
             hours        = Math.floor((ms / (1000 * 60 * 60)) % 24),
             days         = Math.floor((ms / (1000 * 60 * 60 * 24)) % 365);
-        // Display time in XX format
         hours   = (hours < 10)   ? "0" + hours : hours;
         minutes = (minutes < 10) ? "0" + minutes : minutes;
         seconds = (seconds < 10) ? "0" + seconds : seconds;
-        // Build out time string to nicely display time
         var str = '';
         if(days    > 0) str += days + 'd ';
         if(hours   > 0) str += hours + 'h ';

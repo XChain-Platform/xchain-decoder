@@ -14,15 +14,14 @@
 
 'use strict';
 
-// : the decoder computed node-tip staleness and surfaced it
-// nowhere an operator or Prometheus could reach.
+// The decoder computed node-tip staleness and surfaced it nowhere an operator or
+// Prometheus could reach.
 //
-// getSyncStatus() has flagged a frozen tip since 3a1c435, and /live shipped later
-// (1217336) reporting height, lag and `stalled` but never that flag, while
-// isStalled() returns false on a stale tip ON PURPOSE (restarting the container
-// cannot fix an upstream node outage; gating on it re-opens the  restart
-// flap). So a node-tip outage answered the Docker healthcheck 200 with
-// last-known-good heights and nothing anywhere said why.
+// getSyncStatus() flagged a frozen tip, and /live reported height, lag and
+// `stalled` but never that flag, while isStalled() returns false on a stale tip ON
+// PURPOSE (restarting the container cannot fix an upstream node outage, and gating
+// on it restarts the whole fleet during one). So a node-tip outage answered the
+// Docker healthcheck 200 with last-known-good heights and nothing said why.
 //
 // These tests pin the three surfaces the fix adds, and pin the safety property it
 // must NOT change: a stale tip still leaves isStalled() false and /live's healthy
@@ -55,7 +54,7 @@ function makeRunningDecoder() {
     return decoder;
 }
 
-describe('XChainDecoder#isNodeHeightStale() ()', function () {
+describe('XChainDecoder#isNodeHeightStale()', function () {
 
     it('is false before the first tip poll, so a booting decoder is never stale', function () {
         const decoder = makeDecoder();
@@ -86,7 +85,7 @@ describe('XChainDecoder#isNodeHeightStale() ()', function () {
         assert.strictEqual(decoder.getSyncStatus().node_height_stale, true);
     });
 
-    // The anti-restart-flap property the fix must leave alone ().
+    // The anti-restart-flap property the fix must leave alone.
     it('leaves isStalled() false on a stale tip, so autoheal still does not restart', function () {
         const decoder = makeRunningDecoder();
         decoder.lastAdvanceAt = Date.now() - (60 * 60 * 1000);
@@ -97,7 +96,7 @@ describe('XChainDecoder#isNodeHeightStale() ()', function () {
     });
 });
 
-describe('XChainDecoder stale-tip warn is edge-triggered ()', function () {
+describe('XChainDecoder stale-tip warn is edge-triggered', function () {
 
     function captureLogger() {
         const lines = { warn: [], info: [] };
@@ -169,7 +168,7 @@ describe('XChainDecoder stale-tip warn is edge-triggered ()', function () {
     });
 });
 
-describe('registerDecoderMetrics() feed-freshness gauges ()', function () {
+describe('registerDecoderMetrics() feed-freshness gauges', function () {
 
     it('is a no-op when metrics are off, matching the default-off contract', function () {
         // installObservability returns registry:null unless METRICS_ENABLED.
@@ -236,7 +235,7 @@ describe('registerDecoderMetrics() feed-freshness gauges ()', function () {
     });
 });
 
-describe('/live reports the stale tip without gating on it ()', function () {
+describe('/live reports the stale tip without gating on it', function () {
 
     // The route body is rebuilt here from the same shape api.js serves, so the
     // assertions run against a real express response; the source assertions below
@@ -278,7 +277,7 @@ describe('/live reports the stale tip without gating on it ()', function () {
         const decoder = makeRunningDecoder();
         decoder.blockchainInfoLastRefreshAt = Date.now() - (3 * REFRESH_MS);
         const res = await getLive(liveApp(decoder));
-        assert.strictEqual(res.status, 200, 'the healthy gate is unchanged ()');
+        assert.strictEqual(res.status, 200, 'the healthy gate is unchanged');
         assert.strictEqual(res.body.stalled, false);
         assert.strictEqual(res.body.node_height_stale, true);
     });
@@ -301,7 +300,7 @@ describe('/live reports the stale tip without gating on it ()', function () {
         assert.ok(
             /const healthy = decoderRunning && dbOk && !stalled/.test(live),
             'the liveness gate must stay running+db+!stalled: adding node_height_stale to it ' +
-            'restarts containers during a coin-node outage ()'
+            'restarts containers during a coin-node outage'
         );
     });
 });

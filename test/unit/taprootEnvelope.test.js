@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Taproot envelope recognition corpus ( spec §3.8, stage S2).
+ * Taproot envelope recognition corpus (protocol spec §3.8).
  *
  * Pins, against the frozen golden vectors (xchain-documentation/protocol/
  * test-vectors/taproot_envelope.json, inlined here so this suite runs
@@ -52,11 +52,9 @@ const CONSTANTS = require('../../src/protocol/constants.js')
 
 bitcoin.initEccLib(ecc)
 
-// ---------------------------------------------------------------------------
 // Frozen golden bytes (taproot_envelope.json). Inlined: recognition tests must
 // not depend on a sibling checkout; the conformance block below asserts these
 // stay byte-equal to the vector file whenever it is present.
-// ---------------------------------------------------------------------------
 const GOLDEN = {
     action: 'FILE|0|golden.txt|text/plain|Golden vector||||||',
     rawDataUtf8: 'XChain taproot envelope golden vector payload',
@@ -90,10 +88,6 @@ const POST_FLAG = 100
 // Dummy 64-byte schnorr signature: recognition never verifies it, and its
 // first byte must not be 0x50 (the annex marker check reads the LAST item).
 const DUMMY_SIG = Buffer.alloc(64, 0x01)
-
-// ---------------------------------------------------------------------------
-// Builders
-// ---------------------------------------------------------------------------
 
 // Manual push framing that never canonicalizes a 1-byte push to a bare opcode
 // (bitcoin.script.compile would turn <0x00> into OP_0 and break the format
@@ -233,13 +227,11 @@ function payloadOfLength(n){
     return payload
 }
 
-describe('Taproot envelope recognition ( S2)', function () {
+describe('Taproot envelope recognition', function () {
 
     afterEach(() => sinon.restore())
 
-    // -----------------------------------------------------------------------
     // detectEnvelopeWitness: pure pattern matching, never throws
-    // -----------------------------------------------------------------------
     describe('detectEnvelopeWitness()', function () {
         let decoder
         beforeEach(() => { decoder = createDecoder() })
@@ -393,9 +385,7 @@ describe('Taproot envelope recognition ( S2)', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
     // Activation gating
-    // -----------------------------------------------------------------------
     describe('envelopeRecognitionHeight() / envelopeActiveAt()', function () {
         it('BTC regtest is genesis-active (height 0)', function () {
             const decoder = createDecoder()
@@ -451,9 +441,7 @@ describe('Taproot envelope recognition ( S2)', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
     // Golden end-to-end parse
-    // -----------------------------------------------------------------------
     describe('parseTransaction: golden envelope reveal', function () {
         let decoder, fundingTx, commitTx, revealTx, rpc, sourceAddr
 
@@ -547,9 +535,7 @@ describe('Taproot envelope recognition ( S2)', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
     // §4 ceiling boundary (the OP_PUSHDATA4 measurand trap)
-    // -----------------------------------------------------------------------
     describe('per-encoding §4 ceiling', function () {
         let decoder
         beforeEach(() => {
@@ -608,9 +594,7 @@ describe('Taproot envelope recognition ( S2)', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
     // Carrier arbitration + replay across the flag boundary
-    // -----------------------------------------------------------------------
     describe('carrier arbitration (§3.8), height-gated', function () {
         let decoder, fundingTx, commitTx, rpc
 
@@ -740,9 +724,7 @@ describe('Taproot envelope recognition ( S2)', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
     // Constants conformance (decoder == encoder == documentation)
-    // -----------------------------------------------------------------------
     describe('constants conformance', function () {
         it('the decoder exports the vendored constants unchanged', function () {
             assert.strictEqual(XChainDecoder.ENVELOPE_MAX_PAYLOAD, CONSTANTS.ENVELOPE_MAX_PAYLOAD)
@@ -814,9 +796,7 @@ describe('Taproot envelope recognition ( S2)', function () {
         })
     })
 
-    // -----------------------------------------------------------------------
     // Wire fidelity: a REAL encoder-built, signed reveal through parseTransaction
-    // -----------------------------------------------------------------------
     describe('wire fidelity with the shipped encoder (sibling-gated)', function () {
         const ENCODER_DIR = process.env.XCHAIN_ENCODER_DIR ||
             path.join(__dirname, '..', '..', '..', 'xchain-encoder')

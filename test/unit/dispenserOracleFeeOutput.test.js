@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// PRICE v1 oracle-usage-fee output capture (, unblocking ).
+// PRICE v1 oracle-usage-fee output capture.
 //
 // A Mode B dispenser pays its oracle operator up front as a real native-coin output and
 // the indexer REJECTS the create/refill when it cannot see that output in
@@ -141,7 +141,7 @@ function buildDecoder(txSpecs, model, opts) {
     return decoder
 }
 
-describe('DISPENSER PRICE v1 oracle-fee output capture ', function () {
+describe('DISPENSER PRICE v1 oracle-fee output capture', function () {
     this.timeout(0)
 
     it('captures the oracle-fee output of a v0 Mode B create', async () => {

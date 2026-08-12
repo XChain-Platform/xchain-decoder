@@ -33,19 +33,16 @@ module.exports = {
 
         generator.reset()
 
-        // Generate calm period (1-2 xchn txs per block)
         const calm = generator.generateBlockChain(calmBlocks, {
             xchnTxsPerBlock: 2,
             plainTxsPerBlock: 3
         })
 
-        // Generate spike period (many xchn txs per block)
         const spike = generator.generateBlockChain(spikeBlocks, {
             xchnTxsPerBlock: spikeTxs,
             plainTxsPerBlock: 5
         })
 
-        // Load all funding txs
         const allBlocks = [...calm.blocks, ...spike.blocks]
         for (const block of allBlocks) {
             for (const [txid, hex] of block.fundingTxStore) {
@@ -57,7 +54,6 @@ module.exports = {
         metrics.start()
         metrics.takeSnapshot('before_calm')
 
-        // Process calm blocks
         const calmStart = process.hrtime.bigint()
         let calmTxs = 0
 
@@ -72,7 +68,6 @@ module.exports = {
         const calmElapsed = Number(process.hrtime.bigint() - calmStart) / 1e6
         metrics.takeSnapshot('after_calm')
 
-        // Process spike blocks
         const spikeStart = process.hrtime.bigint()
         let spikeTxsProcessed = 0
         let spikeXchn = 0

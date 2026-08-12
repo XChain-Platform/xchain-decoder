@@ -150,9 +150,9 @@ describe('migrate.js operator CLI @regression', function () {
     });
 
     it('lock-skip path: reports SKIPPED and exits 2 instead of a false done @regression', async function () {
-        // #3162 parity with the indexer: a contended run examines nothing, so
-        // reporting 'done. applied=[] still-pending=[]' with exit 0 tells the
-        // operator the schema is migrated when it may not be.
+        // A contended run examines nothing, so reporting 'done. applied=[]
+        // still-pending=[]' with exit 0 tells the operator the schema is
+        // migrated when it may not be. Matches the indexer CLI's behaviour.
         process.env.DECODER_DB_HOST = 'db.test';
         process.env.DECODER_DB_NAME = 'decoder_test';
         process.env.DECODER_DB_USER = 'tester';

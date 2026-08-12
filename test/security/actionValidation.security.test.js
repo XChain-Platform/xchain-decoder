@@ -108,14 +108,13 @@ describe('Security: ACTION Data Validation', () => {
 
     describe('Invalid ACTION names', () => {
         it('[REGRESSION P0] R-ACT-002: should still decode raw data even with unknown ACTION name', async () => {
-            // The decoder stores whatever passes the XCHN check at parse level,
-            // the ACTION name validation happens at the block-processing level.
-            // At parseTransaction level, data is returned regardless.
+            // ACTION name validation happens at the block-processing level, not here;
+            // parseTransaction returns whatever data passes the XCHN check regardless
+            // of whether the ACTION name is recognized.
             const tx = buildTxWithPayload('FAKECMD|0|payload')
             const result = await decoder.parseTransaction(tx)
 
             assert.ok(result)
-            // Data should be present in result (parseTransaction doesn't validate ACTION names)
             assert.ok(result.data.length > 0)
         })
     })
@@ -227,7 +226,7 @@ describe('Security: ACTION Data Validation', () => {
             const tx = new bitcoin.Transaction()
             tx.version = 2
             tx.addInput(PREV_HASH, 1)
-            tx.ins[0].script = Buffer.alloc(0) // empty scriptSig
+            tx.ins[0].script = Buffer.alloc(0)
 
             const p2shPlain = Buffer.from('XCHNp2sh')
             const p2shCipher = encryptBuf(p2shPlain)
@@ -244,7 +243,6 @@ describe('Security: ACTION Data Validation', () => {
             const tx = new bitcoin.Transaction()
             tx.version = 2
             tx.addInput(PREV_HASH, 1)
-            // scriptSig with only 1 push (not the 3 expected)
             tx.ins[0].script = bitcoin.script.compile([Buffer.alloc(33, 0x02)])
 
             const p2shPlain = Buffer.from('XCHNp2sh')
@@ -281,7 +279,7 @@ describe('Security: ACTION Data Validation', () => {
             tx.version = 2
             tx.addInput(PREV_HASH, 1)
             tx.ins[0].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
-            tx.ins[0].witness = [Buffer.alloc(10)] // only 1 element instead of 3
+            tx.ins[0].witness = [Buffer.alloc(10)]
 
             const p2wshPlain = Buffer.from('XCHNp2wsh')
             const p2wshCipher = encryptBuf(p2wshPlain)

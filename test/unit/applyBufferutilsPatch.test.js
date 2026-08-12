@@ -8,10 +8,10 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-//  regression: the BigInt-safe bufferutils patch must be active
-// in-process (not only via the Dockerfile COPY over node_modules), or a
-// Dogecoin output > 2^53-1 sat (~90.07M DOGE) throws during block decode and
-// wedges the decoder permanently on any non-Docker run.
+// Regression guard: the BigInt-safe bufferutils patch must be active in-process
+// (not only via the Dockerfile COPY over node_modules), or a Dogecoin output
+// > 2^53-1 sat (~90.07M DOGE) throws during block decode and wedges the decoder
+// permanently on any non-Docker run.
 
 const assert = require('assert')
 const bufferutils = require('../../src/applyBufferutilsPatch')
@@ -32,7 +32,7 @@ const LARGE_OUTPUT_TX_HEX =
     '00' +                                                                // scriptPubKey len
     '00000000'                                                            // locktime
 
-describe('applyBufferutilsPatch ', function () {
+describe('applyBufferutilsPatch', function () {
 
     it('patches the shared bitcoinjs-lib bufferutils module in place', function () {
         assert.strictEqual(bufferutils, require('bitcoinjs-lib/src/bufferutils'))

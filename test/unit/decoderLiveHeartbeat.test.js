@@ -14,13 +14,14 @@
 
 'use strict';
 
-// : /live answered 200 forever while the parse loop was dead.
+// /live used to answer 200 forever while the parse loop was dead.
 //
 // Health was decoderRunning && dbOk && !stalled, and every gate in isStalled() is a
 // statement about CHAIN PROGRESS: it returns false for a caught-up decoder and false
-// again on a stale tip (deliberately, ). So a loop that died while caught up
-// left running true, db true and stalled false, and the Docker HEALTHCHECK kept the
-// container alive while nothing parsed.
+// again on a stale tip (deliberately, because restarting the container cannot fix an
+// upstream node outage). So a loop that died while caught up left running true, db
+// true and stalled false, and the Docker HEALTHCHECK kept the container alive while
+// nothing parsed.
 //
 // These cases drive the REAL registrar out of src/api.js against a REAL XChainDecoder,
 // not a copy of the route rebuilt in the test. The copy is what makes this class of
@@ -76,7 +77,7 @@ function getLive(app) {
     });
 }
 
-describe('/live gates on the poll-loop heartbeat ()', function () {
+describe('/live gates on the poll-loop heartbeat', function () {
 
     it('answers 200 while the loop is iterating, caught up and quiet', async function () {
         const res = await getLive(liveApp(caughtUpDecoder()));
@@ -117,9 +118,10 @@ describe('/live gates on the poll-loop heartbeat ()', function () {
 
     // The outage retry path re-enters the loop top every ~3s (catch -> sleep(3000) ->
     // continue main_parsing), so the heartbeat keeps ticking through a node outage.
-    // Pinned because a heartbeat that went silent on an outage would re-open the
-    // restart flap  closed, which is the one thing this fix must not do.
-    it('stays 200 through a node-tip outage, so the #3729 restart flap stays closed', async function () {
+    // Pinned because a heartbeat that went silent on an outage would restart every
+    // container in the fleet during an upstream outage, which is the one thing this
+    // gate must never do.
+    it('stays 200 through a node-tip outage, so containers are not restarted', async function () {
         const decoder = caughtUpDecoder();
         decoder.blockchainInfoLastRefreshAt = Date.now() - (3 * 30000);
         decoder.lastPollAt = Date.now() - 3000;

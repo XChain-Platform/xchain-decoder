@@ -8,12 +8,12 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// : coin-node RPC failover. A dead RPC endpoint used to stall the
-// decoder forever because the block loop retries RPC failures indefinitely by
-// design. These tests pin the NODE_URL_FALLBACK rotation behavior in
-// BlockchainConnector: endpoint-list parsing, failover after
-// NODE_FAILOVER_THRESHOLD consecutive connection-level failures, counter
-// reset on success and on HTTP-level errors, and round-robin rotation.
+// Coin-node RPC failover. A dead RPC endpoint used to stall the decoder
+// forever, because the block loop retries RPC failures indefinitely by design.
+// These pin the NODE_URL_FALLBACK rotation behavior in BlockchainConnector:
+// endpoint-list parsing, failover after NODE_FAILOVER_THRESHOLD consecutive
+// connection-level failures, counter reset on success and on HTTP-level errors,
+// and round-robin rotation.
 
 const assert = require('assert')
 const sinon = require('sinon')
@@ -26,7 +26,7 @@ function connectionError(code) {
     return err
 }
 
-describe('BlockchainConnector NODE_URL_FALLBACK failover ', () => {
+describe('BlockchainConnector NODE_URL_FALLBACK failover', () => {
     let axiosStub
     let warnStub
 

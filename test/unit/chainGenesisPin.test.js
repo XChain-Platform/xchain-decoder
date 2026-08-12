@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Block-0 chain-identity pin ().
+ * Block-0 chain-identity pin.
  *
  * The chain-tier gate (chainIdentityGate.test.js) can prove an endpoint is on the
  * wrong TIER and nothing more: BTC-mainnet and DOGE-mainnet both report
@@ -21,8 +21,8 @@
  * local history. The block-0 hash is the only constant that separates them.
  *
  * These pin the mechanism: the registry field, the accessor, the boot assertion,
- * the throttled re-check, and - just as load-bearing - the three fail-OPEN cases
- * (unpinned, unreadable, agreeing), because a mechanism that halts a healthy
+ * the throttled re-check, and (just as load-bearing) the three fail-OPEN cases
+ * of unpinned, unreadable and agreeing, because a mechanism that halts a healthy
  * decoder is worse than the hole it closes.
  */
 

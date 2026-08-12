@@ -13,7 +13,6 @@
  **********************************************************************
  * Integration tests: Malformed and invalid data handling.
  *
- * Covers plan scenarios C1 (non-XCHN transactions) and C2 (corrupted XCHN data).
  * Verifies the decoder does not crash, does not insert bad rows, and does not
  * corrupt the database when presented with invalid input.
  */

@@ -8,23 +8,21 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// Decoder half of the shared encoder->decoder roundtrip conformance fixture
-// (). Feeds the encoder-built golden bytes through the REAL decoder
-// primitives -- XChainDecoder.prototype.removeObfuscation plus the same
-// bitcoin.script.decompile call and leading-Buffer arbiter gate the decode path
-// applies (XChainDecoder.js ~677-718) -- rather than a test-local deobfuscate
-// reimplementation. This closes the gap the previous suite had: encoder output
-// was only ever decoded by copied helpers, never the shipped decoder code.
+// Decoder half of the shared encoder->decoder roundtrip conformance fixture.
+// Feeds the encoder-built golden bytes through the REAL decoder primitives
+// (removeObfuscation plus the same bitcoin.script.decompile call and
+// leading-Buffer arbiter gate the decode path applies) rather than a test-local
+// deobfuscate reimplementation, so the cross-service seam is pinned against the
+// shipped code and not against copied helpers.
 //
 // The fixture is authored in the sibling xchain-encoder repo (single source of
-// truth) and VENDORED byte-identically into test/fixtures/ here, matching the
-// ActionManifestConformance convention: the vendored copy is loaded
-// unconditionally so these assertions always run in single-repo CI, and a
-// separate byte-identity guard (below) catches drift against the encoder
-// original when the sibling checkout is present (or hard-fails under
-// XCHAIN_REQUIRE_SIBLINGS=1). Previously this test resolved the fixture from the
-// sibling checkout and this.skip()'d when it was absent, so single-repo CI
-// reported green having executed zero assertions.
+// truth) and VENDORED byte-identically into test/fixtures/ here. The vendored
+// copy is loaded unconditionally so these assertions always run in single-repo
+// CI; a separate byte-identity guard (below) catches drift against the encoder
+// original when the sibling checkout is present, or hard-fails under
+// XCHAIN_REQUIRE_SIBLINGS=1. Resolving the fixture from the sibling and
+// skipping when it was absent once made single-repo CI report green having
+// executed zero assertions.
 
 'use strict'
 
@@ -55,7 +53,7 @@ function gateOutcome (compiled) {
   return { gate: 'accepted', data: decompiled[0], rawData }
 }
 
-describe('roundtrip conformance fixture: real-decoder decode ()', function () {
+describe('roundtrip conformance fixture: real-decoder decode', function () {
   let decoder
   let magicBuffer
 
@@ -107,13 +105,12 @@ describe('roundtrip conformance fixture: real-decoder decode ()', function () {
   })
 })
 
-// : multi-input/multi-output reassembly harness. The original suite only
-// exercised the single-push OP_RETURN path; these blocks feed the encoder-built
-// MULTISIGN slots and P2SH/P2WSH redeem-script chunks through the SAME
-// extraction shapes parseTransaction applies (XChainDecoder.js MULTISIGN branch
-// ~695-731, P2SH ~633-655, P2WSH ~661-682, final decompile gate ~748-795),
-// using the real decoder deobfuscation primitive throughout.
-describe('roundtrip conformance fixture: MULTISIGN reassembly ', function () {
+// Multi-input/multi-output reassembly harness. The original suite only exercised
+// the single-push OP_RETURN path; these blocks feed the encoder-built MULTISIGN
+// slots and P2SH/P2WSH redeem-script chunks through the same extraction shapes
+// parseTransaction applies (its MULTISIGN, P2SH and P2WSH branches and the final
+// decompile gate), using the real decoder deobfuscation primitive throughout.
+describe('roundtrip conformance fixture: MULTISIGN reassembly', function () {
   let decoder
   let magicBuffer
 
@@ -167,7 +164,7 @@ describe('roundtrip conformance fixture: MULTISIGN reassembly ', function () {
   })
 })
 
-describe('roundtrip conformance fixture: P2SH/P2WSH multi-input reassembly ', function () {
+describe('roundtrip conformance fixture: P2SH/P2WSH multi-input reassembly', function () {
   let decoder
   let magicBuffer
 
@@ -256,7 +253,7 @@ describe('roundtrip conformance fixture: P2SH/P2WSH multi-input reassembly ', fu
   })
 })
 
-describe('roundtrip conformance fixture: alias rewrite ', function () {
+describe('roundtrip conformance fixture: alias rewrite', function () {
   let decoder
   let magicBuffer
 
@@ -285,8 +282,8 @@ describe('roundtrip conformance fixture: alias rewrite ', function () {
       assert.strictEqual(outcome.gate, 'accepted', `${c.name}: alias case must pass the gate`)
       assert.strictEqual(outcome.data.toString('hex'), c.expected.dataHex, `${c.name}: on-wire data`)
 
-      // The shared canonicalization helper both decode paths apply ()
-      // must expand the alias and rewrite the stored payload.
+      // The shared canonicalization helper both decode paths apply must expand
+      // the alias and rewrite the stored payload.
       const canonical = canonicalizeActionPayload(outcome.data)
       assert.strictEqual(canonical.rawActionName, c.expected.rawActionName, `${c.name}: rawActionName`)
       assert.strictEqual(canonical.actionName, c.expected.actionName, `${c.name}: actionName`)

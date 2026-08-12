@@ -31,7 +31,6 @@ module.exports = {
         const results = {}
 
         for (const size of PAYLOAD_SIZES) {
-            // Pre-generate encrypted payloads
             const txid = crypto.randomBytes(32).toString('hex')
             const plaintext = crypto.randomBytes(size)
             const key = txid.substr(0, 16)
@@ -41,12 +40,10 @@ module.exports = {
 
             const label = `deobfuscate_${size}B`
 
-            // Warm up
             for (let i = 0; i < 100; i++) {
                 await decoder.removeObfuscation(encrypted, txid)
             }
 
-            // Timed run
             const startTime = process.hrtime.bigint()
 
             for (let i = 0; i < iterations; i++) {

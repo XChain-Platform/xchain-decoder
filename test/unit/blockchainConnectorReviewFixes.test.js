@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Regression coverage for review-board fixes in BlockchainConnector:
+ * Regression coverage for BlockchainConnector error accounting and reporting:
  *   - getRawTransaction must not inflate rpcErrors when the fetch succeeds
  *     (or resolves null) on the final attempt (the counter-vs-settled guard).
  *   - getRawTransaction must fail loud on deterministic non-timeout errors:
@@ -27,7 +27,7 @@ const sinon  = require('sinon')
 const axios  = require('axios')
 const BlockchainConnector = require('../../src/BlockchainConnector')
 
-describe('BlockchainConnector review-board fixes', () => {
+describe('BlockchainConnector RPC error accounting and reporting', () => {
     let connector
     let axiosStub
 
@@ -40,8 +40,6 @@ describe('BlockchainConnector review-board fixes', () => {
     afterEach(() => {
         sinon.restore()
     })
-
-    // ─── getRawTransaction: rpcErrors miscount on final-attempt success ──────
 
     describe('#getRawTransaction() final-attempt accounting', () => {
         it('does NOT increment rpcErrors when the fetch succeeds on the 10th attempt', async () => {
@@ -75,8 +73,6 @@ describe('BlockchainConnector review-board fixes', () => {
         }).timeout(5000)
     })
 
-    // ─── getRawTransaction: fail loud on deterministic errors ───────────────
-
     describe('#getRawTransaction() fail-loud on deterministic errors', () => {
         it('carries the node cause into the final rejection instead of a bare message', async () => {
             // Core delivers most RPC errors as HTTP 500 + JSON body. A code that is
@@ -102,8 +98,6 @@ describe('BlockchainConnector review-board fixes', () => {
             assert.strictEqual(connector.rpcErrors, 1)
         }).timeout(5000)
     })
-
-    // ─── sanitizeRpcError: HTTP-500 JSON-RPC error body is preserved ─────────
 
     describe('block-path methods surface the HTTP-500 JSON-RPC error code', () => {
         it('getBlockHash rethrows an error carrying the node rpcCode/rpcMessage', async () => {

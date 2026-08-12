@@ -12,22 +12,15 @@ const assert = require('assert')
 const XChainDecoder = require('../../src/XChainDecoder')
 const util = require('../../src/util')
 
-// Regression test for the byte order of blocks.previous_block_hash.
+// Regression guard for the byte order of blocks.previous_block_hash.
 //
-// Bug: Buffer.prototype.reverse() mutates the buffer in place and returns the
-// same buffer. The block loop computed the display-format (big-endian) previous
-// block hash once with `block.prevHash.reverse()`, then reversed the SAME buffer
-// a second time when building the insertBlock payload. The second reverse undid
-// the first, so every row was written with little-endian wire bytes instead of
-// the big-endian display hash. Reorg detection was unaffected (it used the
-// already-computed local variable), but the persisted value was wrong.
-//
-// Fix: reuse the already-computed `previousBlockHash` variable in the insertBlock
-// payload instead of reversing the buffer a second time.
-//
-// This test drives the real start() loop for a single block, stubbing only the
-// node connector, the database, and blockFromHex, and captures the value handed
-// to db.insertBlock.
+// Buffer.prototype.reverse() mutates in place and returns the same buffer. The
+// block loop computed the display-format (big-endian) previous block hash once,
+// then reversed the SAME buffer again when building the insertBlock payload; the
+// second reverse undid the first and every row was persisted with little-endian
+// wire bytes. Reorg detection was unaffected (it read the already-computed local),
+// so only the stored value was wrong, which is why this drives the real start()
+// loop and captures what reaches db.insertBlock rather than testing a helper.
 describe('XChainDecoder block previous_block_hash byte order', function () {
     this.timeout(0)
 

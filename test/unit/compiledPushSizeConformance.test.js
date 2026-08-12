@@ -98,11 +98,10 @@ describe('compiled-push-size arbiter conformance', function () {
         });
     });
 
-    // Item 2687: the OP_PUSHDATA2 overhead used to be a bare `+ 3` literal here, so a
-    // name-keyed cross-service drift check found the canonical symbol only in
-    // xchain-documentation. The decoder now binds the canonical name; these cases pin
-    // that the binding did not change the arithmetic (a named constant that shifts a
-    // value would be a consensus bug, not a cleanup).
+    // The OP_PUSHDATA2 overhead used to be a bare `+ 3` literal here, invisible to any
+    // name-keyed cross-service drift check. The decoder now binds the canonical named
+    // constant; these cases pin that the binding did not change the arithmetic (a named
+    // constant that shifts a value would be a consensus bug, not a cleanup).
     describe('OP_RETURN_PUSH_OVERHEAD is name-keyed and value-identical', function () {
 
         it('equals the vendored canonical protocol constant', function () {

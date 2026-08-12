@@ -21,9 +21,6 @@ function makeDb(name = 'test_db') {
     return new Database('127.0.0.1', 3306, name, 'user', 'pass')
 }
 
-// ============================================================================
-// Constructor validation
-// ============================================================================
 
 describe('Database constructor', () => {
     it('should construct successfully with a valid alphanumeric name', () => {
@@ -118,10 +115,6 @@ describe('Database constructor', () => {
     })
 })
 
-// ============================================================================
-// bigIntSatoshiToDecimalsString
-// ============================================================================
-
 describe('Database#bigIntSatoshiToDecimalsString()', () => {
     let db
 
@@ -180,10 +173,6 @@ describe('Database#bigIntSatoshiToDecimalsString()', () => {
         assert.strictEqual(db.bigIntSatoshiToDecimalsString(12345678), '0.12345678')
     })
 })
-
-// ============================================================================
-// stripSqlLineComments
-// ============================================================================
 
 describe('Database#stripSqlLineComments()', () => {
     let db
@@ -259,10 +248,6 @@ describe('Database#stripSqlLineComments()', () => {
         assert.ok(result.includes('SELECT 1'))
     })
 })
-
-// ============================================================================
-// parseExpectedColumns
-// ============================================================================
 
 describe('Database#parseExpectedColumns()', () => {
     let db
@@ -379,7 +364,7 @@ describe('Database#parseExpectedColumns()', () => {
         // A surrogate AUTO_INCREMENT column whose PK is a different column (e.g.
         // pubkeys.id, PK is address_id). AUTO_INCREMENT implies NOT NULL; if this
         // read as nullable, alterTableForDrift would emit a bare `MODIFY <type> NULL`
-        // that silently strips AUTO_INCREMENT (the 2026-06-10 mirror-cursor incident).
+        // that silently strips AUTO_INCREMENT from a live table.
         const sql = `
             CREATE TABLE t (
                 address_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
@@ -445,9 +430,7 @@ describe('Database#parseExpectedColumns()', () => {
     })
 })
 
-// ============================================================================
 // Transaction lock mechanics (_acquireTransactionLock / _releaseTransactionLock)
-// ============================================================================
 
 describe('Database transaction lock queue', () => {
     let db
@@ -496,10 +479,6 @@ describe('Database transaction lock queue', () => {
     })
 })
 
-// ============================================================================
-// parseExpectedIndexes
-// ============================================================================
-
 describe('Database#parseExpectedIndexes()', () => {
     let db
 
@@ -547,10 +526,6 @@ describe('Database#parseExpectedIndexes()', () => {
         assert.strictEqual(idxs[0].name, 'real_idx')
     })
 })
-
-// ============================================================================
-// reconcileTableIndexes
-// ============================================================================
 
 describe('Database#reconcileTableIndexes()', () => {
     const fs   = require('fs')

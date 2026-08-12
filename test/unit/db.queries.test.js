@@ -20,9 +20,6 @@ const assert   = require('assert');
 const sinon    = require('sinon');
 const Database = require('../../src/db.js');
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function makeDb(name = 'xchain_btc_mainnet') {
     return new Database('127.0.0.1', 3306, name, 'u', 'p');
@@ -45,10 +42,6 @@ function withConn(queryStub) {
 function injectPool(db, pool) {
     db.pool = pool;
 }
-
-// ---------------------------------------------------------------------------
-// getLastBlockIndex
-// ---------------------------------------------------------------------------
 
 describe('Database#getLastBlockIndex()', () => {
     afterEach(() => sinon.restore());
@@ -115,10 +108,6 @@ describe('Database#getLastBlockIndex()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// getLastTxIndex
-// ---------------------------------------------------------------------------
-
 describe('Database#getLastTxIndex()', () => {
     afterEach(() => sinon.restore());
 
@@ -168,10 +157,6 @@ describe('Database#getLastTxIndex()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// getBlockByIndex
-// ---------------------------------------------------------------------------
-
 describe('Database#getBlockByIndex()', () => {
     afterEach(() => sinon.restore());
 
@@ -194,8 +179,8 @@ describe('Database#getBlockByIndex()', () => {
     });
 
     it('[REGRESSION P0] throws (never returns the missing-row sentinel) after retries on persistent query error', async () => {
-        // Item 2459: returning null on a query error made a failed read
-        // indistinguishable from "no such row", and verifyReorg's backward walk reads
+        // Returning null on a query error made a failed read indistinguishable
+        // from "no such row", and verifyReorg's backward walk reads
         // a null row as "table exhausted". One transient DB error therefore ended the
         // rollback walk early and reported the reorg reconciled with orphan blocks
         // still stored. Same retry-then-throw contract as getLastBlockIndex.
@@ -230,10 +215,6 @@ describe('Database#getBlockByIndex()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// getTransaction
-// ---------------------------------------------------------------------------
-
 describe('Database#getTransaction()', () => {
     afterEach(() => sinon.restore());
 
@@ -263,10 +244,6 @@ describe('Database#getTransaction()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// getTransactionId
-// ---------------------------------------------------------------------------
-
 describe('Database#getTransactionId()', () => {
     afterEach(() => sinon.restore());
 
@@ -295,10 +272,6 @@ describe('Database#getTransactionId()', () => {
         assert.strictEqual(await db.getTransactionId('bad'), null);
     });
 });
-
-// ---------------------------------------------------------------------------
-// createTransaction
-// ---------------------------------------------------------------------------
 
 describe('Database#createTransaction()', () => {
     afterEach(() => sinon.restore());
@@ -347,10 +320,6 @@ describe('Database#createTransaction()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// getAddressId
-// ---------------------------------------------------------------------------
-
 describe('Database#getAddressId()', () => {
     afterEach(() => sinon.restore());
 
@@ -378,10 +347,6 @@ describe('Database#getAddressId()', () => {
         assert.strictEqual(await db.getAddressId('x'), null);
     });
 });
-
-// ---------------------------------------------------------------------------
-// createAddress
-// ---------------------------------------------------------------------------
 
 describe('Database#createAddress()', () => {
     afterEach(() => sinon.restore());
@@ -415,10 +380,6 @@ describe('Database#createAddress()', () => {
         assert.strictEqual(await db.createAddress('newaddr'), 8);
     });
 });
-
-// ---------------------------------------------------------------------------
-// hasPubkey
-// ---------------------------------------------------------------------------
 
 describe('Database#hasPubkey()', () => {
     afterEach(() => sinon.restore());
@@ -457,10 +418,6 @@ describe('Database#hasPubkey()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// insertPubkey
-// ---------------------------------------------------------------------------
-
 describe('Database#insertPubkey()', () => {
     afterEach(() => sinon.restore());
 
@@ -489,10 +446,6 @@ describe('Database#insertPubkey()', () => {
         assert.deepStrictEqual(conn.query.firstCall.args[1], [7, 'mypubkey']);
     });
 });
-
-// ---------------------------------------------------------------------------
-// insertEvent
-// ---------------------------------------------------------------------------
 
 describe('Database#insertEvent()', () => {
     afterEach(() => sinon.restore());
@@ -535,10 +488,6 @@ describe('Database#insertEvent()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// deleteBlockByIndex
-// ---------------------------------------------------------------------------
-
 describe('Database#deleteBlockByIndex()', () => {
     afterEach(() => sinon.restore());
 
@@ -568,9 +517,9 @@ describe('Database#deleteBlockByIndex()', () => {
         );
         const deletes = calls.filter(s => /DELETE/i.test(s));
         assert.strictEqual(deletes.length, 4, 'no additional undeclared DELETE targets');
-        // [REGRESSION P0] TP-17 F-7: a resurrect UPDATE (clear expiry marks left by
-        // this now-orphaned block) must run BEFORE the dispenser row-delete, so a
-        // dispenser expired by this block is restored on reorg.
+        // The resurrect UPDATE (clearing expiry marks left by this now-orphaned
+        // block) must run BEFORE the dispenser row-delete, so a dispenser expired
+        // by this block is restored on reorg.
         const resurrectIdx = calls.findIndex(s => /UPDATE\s+dispensers\s+SET\s+expired_block_index\s*=\s*NULL/i.test(s));
         const dispDeleteIdx = calls.findIndex(s => /DELETE\s+FROM\s+dispensers/i.test(s));
         assert.ok(resurrectIdx >= 0, 'must clear soft-expiry marks for the orphaned block');
@@ -598,8 +547,8 @@ describe('Database#deleteBlockByIndex()', () => {
         assert.ok(paramCalls.length >= 4);
     });
 
-    // [REGRESSION M-12] The decoder reorg signal must be crash-durable: the REORG audit
-    // marker for a rolled-back block has to commit ATOMICALLY with that block's deletion.
+    // The decoder reorg signal must be crash-durable: the REORG audit marker for a
+    // rolled-back block has to commit ATOMICALLY with that block's deletion.
     // A once-at-end event write left a crash window where blocks were gone but no marker
     // existed, so the indexer (which detects decoder reorgs only via these events rows)
     // never retracted the orphaned old-chain rows it had already indexed.
@@ -671,10 +620,6 @@ describe('Database#deleteBlockByIndex()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// insertBlock
-// ---------------------------------------------------------------------------
-
 describe('Database#insertBlock()', () => {
     afterEach(() => sinon.restore());
 
@@ -716,10 +661,6 @@ describe('Database#insertBlock()', () => {
         assert.ok(createTxStub.calledWith('h2'));
     });
 });
-
-// ---------------------------------------------------------------------------
-// insertTransaction
-// ---------------------------------------------------------------------------
 
 describe('Database#insertTransaction()', () => {
     afterEach(() => sinon.restore());
@@ -771,10 +712,6 @@ describe('Database#insertTransaction()', () => {
         assert.strictEqual(params[8], null); // raw_data
     });
 });
-
-// ---------------------------------------------------------------------------
-// insertMempoolTransaction
-// ---------------------------------------------------------------------------
 
 describe('Database#insertMempoolTransaction()', () => {
     afterEach(() => sinon.restore());
@@ -852,10 +789,6 @@ describe('Database#insertMempoolTransaction()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// insertDispenser
-// ---------------------------------------------------------------------------
-
 describe('Database#insertDispenser()', () => {
     afterEach(() => sinon.restore());
 
@@ -918,10 +851,6 @@ describe('Database#insertDispenser()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// insertTransactionOutput
-// ---------------------------------------------------------------------------
-
 describe('Database#insertTransactionOutput()', () => {
     afterEach(() => sinon.restore());
 
@@ -966,10 +895,6 @@ describe('Database#insertTransactionOutput()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// isThereADispenserForAddress
-// ---------------------------------------------------------------------------
-
 describe('Database#isThereADispenserForAddress()', () => {
     afterEach(() => sinon.restore());
 
@@ -1005,10 +930,6 @@ describe('Database#isThereADispenserForAddress()', () => {
         assert.strictEqual(await db.isThereADispenserForAddress('addr'), false);
     });
 });
-
-// ---------------------------------------------------------------------------
-// getAllOpenDispenserAddresses
-// ---------------------------------------------------------------------------
 
 describe('Database#getAllOpenDispenserAddresses()', () => {
     afterEach(() => sinon.restore());
@@ -1068,10 +989,6 @@ describe('Database#getAllOpenDispenserAddresses()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// deleteOpenDispensers
-// ---------------------------------------------------------------------------
-
 describe('Database#deleteOpenDispensers()', () => {
     afterEach(() => sinon.restore());
 
@@ -1100,8 +1017,8 @@ describe('Database#deleteOpenDispensers()', () => {
         assert.strictEqual(await db.deleteOpenDispensers(5, 1000), false);
     });
 
-    // [REGRESSION P0] TP-17 F-7: the expiry sweep must SOFT-expire (stamp the block
-    // height into expired_block_index) rather than hard-DELETE, so a reorg's
+    // The expiry sweep must SOFT-expire (stamp the block height into
+    // expired_block_index) rather than hard-DELETE, so a reorg's
     // deleteBlockByIndex can restore a dispenser an orphaned block's non-monotonic
     // timestamp expired. It must also be idempotent on replay (IS NULL guard).
     it('soft-expires (UPDATE ... SET expired_block_index, guarded IS NULL): not a DELETE', async () => {
@@ -1133,10 +1050,6 @@ describe('Database#deleteOpenDispensers()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// purgeExpiredDispensers
-// ---------------------------------------------------------------------------
-
 describe('Database#purgeExpiredDispensers()', () => {
     afterEach(() => sinon.restore());
 
@@ -1165,13 +1078,10 @@ describe('Database#purgeExpiredDispensers()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// deleteAndCompareTxsNotInList
-// ---------------------------------------------------------------------------
 
-//  / review P20: deleteAndCompareTxsNotInList now diffs the stored
-// mempool against the node's current mempool entirely in SQL via a session temp
-// table, instead of streaming every mempool_transactions row into Node. This
+// deleteAndCompareTxsNotInList diffs the stored mempool against the node's
+// current mempool entirely in SQL via a session temp table, instead of
+// streaming every mempool_transactions row into Node. This
 // fake connection models that flow: it holds a set of currently-stored tx
 // hashes and a temp-table snapshot seeded by the INSERTs, and answers the
 // anti-join DELETE and the intersection SELECT accordingly.
@@ -1280,10 +1190,6 @@ describe('Database#deleteAndCompareTxsNotInList()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// dropDatabase
-// ---------------------------------------------------------------------------
-
 describe('Database#dropDatabase()', () => {
     afterEach(() => sinon.restore());
 
@@ -1302,9 +1208,6 @@ describe('Database#dropDatabase()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// getConnection: success, retry, and give-up paths
-// ---------------------------------------------------------------------------
 
 describe('Database#getConnection()', () => {
     afterEach(() => sinon.restore());
@@ -1354,10 +1257,6 @@ describe('Database#getConnection()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// releaseConnection
-// ---------------------------------------------------------------------------
-
 describe('Database#releaseConnection()', () => {
     afterEach(() => sinon.restore());
 
@@ -1377,10 +1276,6 @@ describe('Database#releaseConnection()', () => {
         assert.strictEqual(db.transactionConnection, null);
     });
 });
-
-// ---------------------------------------------------------------------------
-// beginTransaction
-// ---------------------------------------------------------------------------
 
 describe('Database#beginTransaction()', () => {
     afterEach(() => sinon.restore());
@@ -1444,10 +1339,6 @@ describe('Database#beginTransaction()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// endTransaction
-// ---------------------------------------------------------------------------
-
 describe('Database#endTransaction()', () => {
     afterEach(() => sinon.restore());
 
@@ -1483,10 +1374,6 @@ describe('Database#endTransaction()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// commitTransaction
-// ---------------------------------------------------------------------------
-
 describe('Database#commitTransaction()', () => {
     afterEach(() => sinon.restore());
 
@@ -1521,10 +1408,6 @@ describe('Database#commitTransaction()', () => {
         assert.ok(rollbackStub.calledOnce);
     });
 });
-
-// ---------------------------------------------------------------------------
-// verifyDatabase
-// ---------------------------------------------------------------------------
 
 describe('Database#verifyDatabase()', () => {
     afterEach(() => sinon.restore());
@@ -1567,10 +1450,6 @@ describe('Database#verifyDatabase()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// createDatabase
-// ---------------------------------------------------------------------------
-
 describe('Database#createDatabase()', () => {
     afterEach(() => sinon.restore());
 
@@ -1601,15 +1480,12 @@ describe('Database#createDatabase()', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
 // Additional coverage: error paths when transactionConnection is active
 // These cover the `if (this.transactionConnection)` branches in error handlers
-// ---------------------------------------------------------------------------
 
 describe('Database error-path transactionConnection branches', () => {
     afterEach(() => sinon.restore());
 
-    // createAddress INSERT error path (line 973)
     it('createAddress: swallows INSERT error even with active transactionConnection', async () => {
         const db = makeDb();
         // Use a fake transactionConnection so getConnection returns it
@@ -1630,7 +1506,6 @@ describe('Database error-path transactionConnection branches', () => {
         assert.ok(id === 11 || id === null);
     });
 
-    // insertEvent: endTransaction called when transactionConnection set (line 1042-1046).
     // Regression: insertEvent previously called releaseConnection() here, which leaves
     // the transaction open on the pooled connection and never frees the transaction lock
     // (_releaseTransactionLock), deadlocking the next beginTransaction(). It must call
@@ -1670,7 +1545,6 @@ describe('Database error-path transactionConnection branches', () => {
         assert.strictEqual(db._transactionLock, false, 'transaction lock released');
     });
 
-    // insertDispenser: endTransaction called when transactionConnection set (line 1128-1129)
     it('insertDispenser: calls endTransaction when transactionConnection is active on generic error', async () => {
         const db = makeDb();
         sinon.stub(db, 'createAddress').resolves(3);
@@ -1688,7 +1562,6 @@ describe('Database error-path transactionConnection branches', () => {
         assert.ok(endTxStub.calledOnce);
     });
 
-    // insertTransactionOutput: endTransaction called when transactionConnection set (line 1171-1172)
     it('insertTransactionOutput: calls endTransaction when transactionConnection is active on generic error', async () => {
         const db = makeDb();
         sinon.stub(db, 'createAddress').resolves(4);
@@ -1706,7 +1579,6 @@ describe('Database error-path transactionConnection branches', () => {
         assert.ok(endTxStub.calledOnce);
     });
 
-    // deleteOpenDispensers: endTransaction called when transactionConnection set (line 1223-1224)
     it('deleteOpenDispensers: calls endTransaction when transactionConnection is active on generic error', async () => {
         const db = makeDb();
         const endTxStub = sinon.stub(db, 'endTransaction').resolves();
@@ -1723,7 +1595,6 @@ describe('Database error-path transactionConnection branches', () => {
         assert.ok(endTxStub.calledOnce);
     });
 
-    // insertBlock: endTransaction called when transactionConnection set (line 717-718)
     it('insertBlock: calls endTransaction when transactionConnection is active on generic error', async () => {
         const db = makeDb();
         sinon.stub(db, 'createTransaction').resolves(1);
@@ -1741,7 +1612,6 @@ describe('Database error-path transactionConnection branches', () => {
         assert.ok(endTxStub.calledOnce);
     });
 
-    // insertTransaction: endTransaction called when transactionConnection set (line 801-802)
     it('insertTransaction: calls endTransaction when transactionConnection is active on generic error', async () => {
         const db = makeDb();
         sinon.stub(db, 'createTransaction').resolves(1);
@@ -1760,7 +1630,6 @@ describe('Database error-path transactionConnection branches', () => {
         assert.ok(endTxStub.calledOnce);
     });
 
-    // insertMempoolTransaction: endTransaction called when transactionConnection set (line 847-848)
     it('insertMempoolTransaction: calls endTransaction when transactionConnection is active on generic error', async () => {
         const db = makeDb();
         sinon.stub(db, 'createTransaction').resolves(1);
@@ -1780,9 +1649,7 @@ describe('Database error-path transactionConnection branches', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
 // _ensureMigrationsLedger: covered cheaply via a fake connection
-// ---------------------------------------------------------------------------
 
 describe('Database#_ensureMigrationsLedger()', () => {
     afterEach(() => sinon.restore());

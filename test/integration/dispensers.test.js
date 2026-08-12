@@ -13,9 +13,6 @@
  **********************************************************************
  * Integration tests: DISPENSER multi-table writes and edge cases.
  *
- * Covers plan scenarios C3 (dispenser edge cases) and parts of B1
- * (transaction_outputs via indexer contract query).
- *
  * DISPENSER actions create rows in both `transactions` and `dispensers`
  * tables. When a subsequent transaction pays to a dispenser address,
  * a row is created in `transaction_outputs`.

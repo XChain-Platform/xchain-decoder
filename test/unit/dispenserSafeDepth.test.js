@@ -82,7 +82,7 @@ describe('DISPENSER_EXPIRE_SAFE_DEPTH', function () {
         // Pins the tracker's hand-mirrored ceiling to the decoder's constant in BOTH
         // directions. resolveUndoBlocks() only warns when the resolved window EXCEEDS
         // MAX_SAFE_UNDO_BLOCKS, so LOWERING DISPENSER_EXPIRE_SAFE_DEPTH alone is silent
-        // at runtime; this equality is the only thing that catches it (#3883).
+        // at runtime; this equality is the only thing that catches it.
         it('tracker MAX_SAFE_UNDO_BLOCKS equals the decoder SAFE_DEPTH', function () {
             const { MAX_SAFE_UNDO_BLOCKS } = require(UNDO);
             assert.strictEqual(

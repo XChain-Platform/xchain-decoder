@@ -8,8 +8,10 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Regression tests for the 2026-07-08 xchain-decoder stress-sweep fixes.
-// See claude/reports/2026-07-08_xchain-decoder-stress-sweep.md.
+// Regression guards for a batch of decoder stability fixes: the LTC MWEB prevout
+// wedge, zero-input transactions, the JSON-RPC batch-size cap, deterministic
+// INSERT quarantine, the DOGE large-output bufferutils self-check, and output
+// capture on a co-resident invalid ACTION.
 
 const assert = require('assert')
 const bitcoin = require('bitcoinjs-lib')
@@ -29,10 +31,10 @@ function newDecoder(network){
     return new XChainDecoder(network, 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null)
 }
 
-describe('xchain-decoder stress-sweep fixes @regression', function () {
+describe('decoder stability fixes @regression', function () {
     this.timeout(0)
 
-    describe('F1: prevout/funding parse routes through transactionFromHex (LTC MWEB wedge)', function () {
+    describe('prevout/funding parse routes through transactionFromHex (LTC MWEB wedge)', function () {
         it('the crafted MWEB-flagged hex is one that vanilla strict fromHex rejects', function () {
             // Guards the test itself: if this ever stops throwing, the fix below is moot.
             assert.throws(() => bitcoin.Transaction.fromHex(MWEB_FLAGGED_TX_HEX))
@@ -60,7 +62,7 @@ describe('xchain-decoder stress-sweep fixes @regression', function () {
         })
     })
 
-    describe('F6: zero-input tx is skipped cleanly instead of throwing', function () {
+    describe('zero-input tx is skipped cleanly instead of throwing', function () {
         it('parseTransaction returns null for a tx with no inputs', async function () {
             const decoder = newDecoder('litecoin-regtest')
             assert.strictEqual(await decoder.parseTransaction({ ins: [] }), null)
@@ -72,7 +74,7 @@ describe('xchain-decoder stress-sweep fixes @regression', function () {
         })
     })
 
-    describe('F4: JSON-RPC batch-size guard', function () {
+    describe('JSON-RPC batch-size guard', function () {
         function fakeRes(){
             return { _code: null, _json: null, status(c){ this._code = c; return this }, json(o){ this._json = o; return this } }
         }
@@ -102,7 +104,7 @@ describe('xchain-decoder stress-sweep fixes @regression', function () {
         })
     })
 
-    describe('F2: deterministic INSERT failure is quarantined, not retried forever', function () {
+    describe('deterministic INSERT failure is quarantined, not retried forever', function () {
         // Drives the real block loop with a mocked db/connector (one block, one XChain tx),
         // mirroring the rpcLookupFailure.test.js harness.
         function buildDecoder(insertTransaction){
@@ -164,7 +166,7 @@ describe('xchain-decoder stress-sweep fixes @regression', function () {
         })
     })
 
-    describe('F2: insertTransaction error classification', function () {
+    describe('insertTransaction error classification', function () {
         function dbWithQueryError(errno){
             const db = new Database('h', '0', 'db', 'u', 'p')
             db.transactionConnection = null
@@ -199,7 +201,7 @@ describe('xchain-decoder stress-sweep fixes @regression', function () {
         })
     })
 
-    describe('F3: DOGE large-output bufferutils-patch self-check', function () {
+    describe('DOGE large-output bufferutils-patch self-check', function () {
         const { bigIntBufferutilsActive } = require('../../src/XChainDecoder')
 
         it('reports inactive when the reader throws (stock bitcoinjs, wedge-prone)', function () {
@@ -217,7 +219,7 @@ describe('xchain-decoder stress-sweep fixes @regression', function () {
         })
     })
 
-    describe('F5: dispense/payment outputs survive a co-resident invalid/oversized ACTION', function () {
+    describe('dispense/payment outputs survive a co-resident invalid/oversized ACTION', function () {
         function buildDecoder(parseResult){
             const decoder = newDecoder('bitcoin-regtest')
             decoder.startBlockIndex = 0

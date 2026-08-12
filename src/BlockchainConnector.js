@@ -259,13 +259,14 @@ class BlockchainConnector {
         this.rpcUser = rpcUser
         this.rpcPassword = rpcPassword
         this.rpcErrors = 0
-        // RPC endpoint failover : a dead primary endpoint used to stall
-        // the decoder forever, because the block loop retries RPC failures
-        // indefinitely by design. The connector now keeps an ordered endpoint
-        // list (primary + comma-separated NODE_URL_FALLBACK entries) and
-        // rotates to the next endpoint after NODE_FAILOVER_THRESHOLD
-        // consecutive connection-level failures. Rotation is round-robin, so a
-        // recovered primary is retried again if the fallback also dies.
+        // RPC endpoint failover. A dead primary endpoint used to stall the
+        // decoder forever, because the block loop retries RPC failures
+        // indefinitely by design (skipping a block would corrupt the index).
+        // The ordered endpoint list (primary + comma-separated
+        // NODE_URL_FALLBACK entries) rotates to the next endpoint after
+        // NODE_FAILOVER_THRESHOLD consecutive connection-level failures.
+        // Rotation is round-robin, so a recovered primary is retried again if
+        // the fallback also dies.
         this.endpoints = [normalizeEndpoint(url, port)]
         const fallbacks = (process.env.NODE_URL_FALLBACK ?? '').split(',').map(s => s.trim()).filter(Boolean)
         for (const fallback of fallbacks) this.endpoints.push(normalizeEndpoint(fallback, port))
@@ -456,16 +457,15 @@ class BlockchainConnector {
         throw new Error("There were problems getting a block header. ")
     }
 
-    // Item 2731: the RPC fetches below are deliberately OUTSIDE the try. A transport
-    // fault (a Dogecoin 1.14 node dropping the TCP connection when its RPC queue fills,
-    // a node restart, a network blip) must propagate unwrapped, with error.code intact,
-    // so callers can tell it apart from a block whose AuxPoW section cannot be
-    // traversed. The old catch-all wrapped every throw in a bare Error, discarding
-    // error.code, and the decoder counted the result toward the malformed-AuxPoW
-    // escalation: ~15s of node unavailability flipped it into per-tx block reassembly
-    // aimed at the node that was already saturated. Only the header-strip/parse block
-    // is wrapped now, and its errors carry auxPowParseFailure = true, which is the
-    // signal that escalation actually wants.
+    // The RPC fetches below are deliberately OUTSIDE the try. A transport fault (a
+    // Dogecoin 1.14 node dropping the TCP connection when its RPC queue fills, a node
+    // restart, a network blip) must propagate unwrapped, with error.code intact, so
+    // callers can tell it apart from a block whose AuxPoW section cannot be traversed.
+    // A catch-all here once wrapped every throw in a bare Error, discarding error.code,
+    // and the decoder counted the result toward the malformed-AuxPoW escalation: ~15s
+    // of node unavailability flipped it into per-tx block reassembly aimed at the node
+    // that was already saturated. Only the header-strip/parse block is wrapped, and its
+    // errors carry auxPowParseFailure = true, the signal escalation actually wants.
     async getBlockWithoutAuxPow(blockhash) {
         let blockHeaderHex = await this.getBlockHeader(blockhash, true)
         let blockHex = await this.getBlock(blockhash, true)
@@ -473,8 +473,8 @@ class BlockchainConnector {
         try {
             // Strip logic lives in stripAuxPowFromBlockHex, which is byte-identical to
             // the xchain-utxo-tracker twin. Only the framing differs between the repos
-            // and that difference is deliberate : the decoder fetches the header
-            // and block OUTSIDE this try so an RPC fault is not mislabeled a content
+            // and that difference is deliberate: the decoder fetches the header and
+            // block OUTSIDE this try so an RPC fault is not mislabeled a content
             // fault, and tags a traversal failure with auxPowParseFailure so
             // fetchBlockHex can escalate to getBlockReassembled.
             blockHex = stripAuxPowFromBlockHex(blockHeaderHex, blockHex)
@@ -490,8 +490,8 @@ class BlockchainConnector {
         }
     }
 
-    // Recovery path for a block whose AuxPoW section skipAuxPow cannot traverse
-    // : rebuild the pure (AuxPoW-free) block from RPC parts instead of
+    // Recovery path for a block whose AuxPoW section skipAuxPow cannot traverse:
+    // rebuild the pure (AuxPoW-free) block from RPC parts instead of
     // stripping the raw block hex. getblockheader gives the 80-byte header,
     // verbose getblock gives the in-block txid order, and getrawtransaction
     // gives each tx's canonical serialization, so the result is byte-identical
@@ -508,9 +508,9 @@ class BlockchainConnector {
             if (!verboseBlock || !Array.isArray(verboseBlock.tx)) {
                 throw new Error('verbose getblock returned no tx array')
             }
-            // Fetch via the bounded-concurrency batch helper : serial
-            // per-tx fetches with per-tx retry backoff made a large DOGE block
-            // take minutes to reassemble, wedging the decoder at this height.
+            // Fetch via the bounded-concurrency batch helper: serial per-tx
+            // fetches with per-tx retry backoff made a large DOGE block take
+            // minutes to reassemble, wedging the decoder at this height.
             const txHexes = await this.getRawTransactions(verboseBlock.tx)
             for (let i = 0; i < txHexes.length; i++) {
                 // getRawTransaction resolves null for a missing tx (mempool-eviction
@@ -603,10 +603,9 @@ class BlockchainConnector {
                         id: 1
                     }
 
-                    // Make the request to the node
                     const response = await this.rpcPost(data)
 
-                    // Verify if there is a result and return it. Return (not break) so
+                    // Return (not break) so
                     // a success on the final attempt cannot fall through to the failure
                     // guard below and inflate rpcErrors on a recovered fetch.
                     if (response.data.result) {
@@ -692,8 +691,8 @@ class BlockchainConnector {
         return results
     }
     
-    // Startup probe for txindex availability . getBlockReassembled (the
-    //  malformed-AuxPoW recovery path) calls getrawtransaction WITHOUT a
+    // Startup probe for txindex availability. getBlockReassembled (the
+    // malformed-AuxPoW recovery path above) calls getrawtransaction WITHOUT a
     // blockhash param, which requires the node to run with txindex=1. On a node
     // without it, recovery fails deterministically forever, turning a one-block
     // recovery into a permanent quarantine loop with no hint why. Probe once at
@@ -748,8 +747,8 @@ class BlockchainConnector {
 }
 
 module.exports = BlockchainConnector
-// Exported for the  malformed-AuxPoW reassembly regression test.
+// Exported for the malformed-AuxPoW reassembly regression test.
 module.exports.encodeVarintHex = encodeVarintHex
-// Exported for the  cross-repo strip-parity test.
+// Exported for the cross-repo strip-parity test.
 module.exports.stripAuxPowFromBlockHex = stripAuxPowFromBlockHex
 module.exports.skipAuxPow = skipAuxPow

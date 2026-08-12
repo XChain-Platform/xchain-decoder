@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Decoder - node endpoint chain-tier identity ()
+ * XChain Decoder - node endpoint chain-tier identity
  *
  * The block loop's getblockchaininfo gate validated only that `blocks` and
  * `verificationprogress` were numbers, so an endpoint serving a DIFFERENT chain
@@ -36,7 +36,7 @@
  *    `testnet4` all map to `testnet` below, yet Bitcoin testnet3 and testnet4 are
  *    DIFFERENT chains with different genesis blocks and different history. A
  *    testnet4 node under a testnet3-configured decoder agrees with this gate and
- *    still walks the finding's whole failure path. The collapse is deliberate:
+ *    still walks the whole failure path described above. The collapse is deliberate:
  *    `chain` carries no evidence that separates them.
  *
  * 2. CHAIN (chainGenesisMismatch). The block-0 hash is the only constant that
@@ -58,8 +58,8 @@
  *
  * BOTH tip-refresh paths are gated, not just the loop's. getBlockchainInfo() is
  * called in two places: the block loop's throttled refresh, and verifyReorg's
- * best-effort re-read after a failed getBlockHash (XChainDecoder.js, the item-1301
- * recovery). The second one assigns `nodeTip`, which the above-tip branch deletes
+ * best-effort re-read after a failed getBlockHash (XChainDecoder.js). The second
+ * one assigns `nodeTip`, which the above-tip branch deletes
  * valid local blocks against, so leaving it ungated would have left the evidenced
  * data-loss path open behind a closed front door. Any THIRD caller of
  * getBlockchainInfo whose result reaches ingestion or a delete has to call

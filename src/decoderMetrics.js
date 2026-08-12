@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Decoder - feed-freshness metrics ()
+ * XChain Decoder - feed-freshness metrics
  *
  * Decoder-owned Prometheus gauges registered on the observability handle's
  * registry. The observability module itself is vendored byte-identically into

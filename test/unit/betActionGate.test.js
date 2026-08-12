@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// BET decode vectors ( P2).
+// BET decode vectors.
 //
 // The decoder is the arbiter of which leading ACTION token survives decode: a
 // name outside VALID_ACTION_NAMES is dropped with a console.error and no test
@@ -50,7 +50,7 @@ const VECTORS = {
     resolve: 'BET|3|1234|1|Final score 24-21'
 }
 
-describe('BET action-name gate ', function () {
+describe('BET action-name gate', function () {
 
     it('every BET format survives the ACTION-name gate', function () {
         for (const [name, payload] of Object.entries(VECTORS)) {

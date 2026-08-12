@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Endpoint chain-tier identity gate ().
+ * Endpoint chain-tier identity gate.
  *
  * The block loop's getblockchaininfo gate validated shape only, so a node on a
  * different chain was accepted: its blocks were decoded under the configured

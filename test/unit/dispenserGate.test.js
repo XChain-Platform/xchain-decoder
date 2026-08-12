@@ -25,7 +25,7 @@ function makeDecoder(network) {
     )
 }
 
-describe('dispenser-open gate — coin parity with the indexer', () => {
+describe('dispenser-open gate: coin parity with the indexer', () => {
     it('derives the local coin ticker from the network key', () => {
         assert.strictEqual(makeDecoder('bitcoin-regtest').coinTick, 'BTC')
         assert.strictEqual(makeDecoder('dogecoin-mainnet').coinTick, 'DOGE')

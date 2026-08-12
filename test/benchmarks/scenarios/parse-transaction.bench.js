@@ -30,20 +30,17 @@ module.exports = {
         const iterations = config.iterations || DEFAULT_ITERATIONS
         const results = {}
 
-        // --- OP_RETURN transactions ---
+        // OP_RETURN transactions
         {
-            // Pre-generate transaction data
             const txData = []
             for (let i = 0; i < iterations; i++) {
                 const entry = generator.generateXChainOpReturnTx({
                     action: 'SEND|0|XCHAIN|100|destaddr|memo'
                 })
                 txData.push(entry)
-                // Register funding tx in the mock connector
                 decoder.connector.transactions.set(entry.fundingTxId, entry.fundingTxHex)
             }
 
-            // Warm up
             for (let i = 0; i < 10; i++) {
                 const tx = bitcoin.Transaction.fromHex(txData[i].txHex)
                 await decoder.parseTransaction(tx)
@@ -70,7 +67,7 @@ module.exports = {
             }
         }
 
-        // --- Multisig transactions ---
+        // Multisig transactions
         {
             const txData = []
             for (let i = 0; i < iterations; i++) {
@@ -107,7 +104,7 @@ module.exports = {
             }
         }
 
-        // --- Plain (non-XChain) transactions (early-exit path) ---
+        // Plain (non-XChain) transactions: exercises the early-exit path
         {
             const txData = []
             for (let i = 0; i < iterations; i++) {

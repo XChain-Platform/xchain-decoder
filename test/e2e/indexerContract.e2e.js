@@ -31,9 +31,6 @@ const {
 describe('E2E: Indexer Contract', function () {
     this.timeout(0)
 
-    // ---------------------------------------------------------------
-    // E1: getDecoderBlockData() contract fields
-    // ---------------------------------------------------------------
     describe('getDecoderBlockData() field contract', () => {
 
         it('E1.1: should return all required fields with correct types for OP_RETURN tx', async () => {
@@ -166,19 +163,17 @@ describe('E2E: Indexer Contract', function () {
             await txBuilder.waitForDecoder(dispBlock)
             await txBuilder.waitForTransaction(dispHash)
 
-            // Verify dispenser exists
             const dispensers = await getDispensersForAddress(global.db, dispenserFunded.address)
             assert.ok(dispensers.length > 0, 'Dispenser should exist')
 
-            // Send a payment to the dispenser address (via wallet sendToAddress)
-            // This creates a non-XCHN tx that pays to the dispenser address
+            // A plain (non-XCHN) payment to the dispenser address alone is not
+            // enough: dispenser output tracking only fires for a tx that is itself
+            // XCHN-encoded and also pays to a dispenser address, so this plain send
+            // is not expected to produce a transaction_outputs row.
             const { txHash: payHash, blockIndex: payBlock } = await txBuilder.sendToAddress(dispenserFunded.address, 0.001)
             await txBuilder.waitForDecoder(payBlock)
 
-            // The payment tx may or may not appear in getDecoderBlockData
-            // depending on whether it had XCHN data. The dispenser output tracking
-            // requires the tx to be an XCHN tx that also pays to a dispenser address.
-            // Let's use an XCHN-encoded payment instead:
+            // Use an XCHN-encoded payment to actually exercise dispenser output tracking.
             const payer = await txBuilder.createFundedLegacyAddress()
             const payAction = 'SEND|0|CDISP_R|50|' + dispenserFunded.address + '|pay'
             const { txHash: xchnPayHash, blockIndex: xchnPayBlock } = await txBuilder.broadcastOpReturn(payer, payAction)
@@ -192,9 +187,6 @@ describe('E2E: Indexer Contract', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // E2: Block table contract
-    // ---------------------------------------------------------------
     describe('blocks table contract', () => {
 
         it('E2.1: should track the last block index accurately', async () => {
@@ -229,9 +221,6 @@ describe('E2E: Indexer Contract', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // E3: Normalization table integrity
-    // ---------------------------------------------------------------
     describe('normalization table integrity', () => {
 
         it('E3.1: all source_ids should resolve in index_addresses', async () => {
@@ -239,9 +228,9 @@ describe('E2E: Indexer Contract', function () {
         })
 
         it('E3.2: same address across multiple transactions should use same address_id', async () => {
-            // Create two transactions from different funded addresses but both
-            // referencing mainTestAddress in the ACTION string. The source will
-            // be different, but we can check the source_id is consistent.
+            // Two transactions from different funded (source) addresses, both
+            // referencing mainTestAddress in the ACTION string: the sources differ,
+            // but each one's source_id should still resolve consistently.
             const funded1 = await txBuilder.createFundedLegacyAddress()
             const funded2 = await txBuilder.createFundedLegacyAddress()
 
@@ -256,7 +245,6 @@ describe('E2E: Indexer Contract', function () {
             await txBuilder.waitForDecoder(bi2)
             await txBuilder.waitForTransaction(h2)
 
-            // Both transactions should exist with valid sources
             const tx1 = await global.db.getTransaction(h1)
             const tx2 = await global.db.getTransaction(h2)
             assert.ok(tx1.source.length > 0)
@@ -284,7 +272,6 @@ describe('E2E: Indexer Contract', function () {
         it('E3.4: tx_index should be unique and sequential', async () => {
             const connection = await global.db.pool.getConnection()
             try {
-                // Check for duplicate tx_index values
                 const dupes = await connection.query(`
                     SELECT tx_index, COUNT(*) as cnt
                     FROM transactions
@@ -293,8 +280,8 @@ describe('E2E: Indexer Contract', function () {
                 `)
                 assert.strictEqual(dupes.length, 0, 'No duplicate tx_index values')
 
-                // Check for gaps: the count of transactions should equal max - min + 1
-                // (only if there are transactions)
+                // No gaps means the row count equals max - min + 1 (only checked
+                // when there are transactions to check)
                 const stats = await connection.query(`
                     SELECT MIN(tx_index) as min_idx, MAX(tx_index) as max_idx, COUNT(*) as cnt
                     FROM transactions

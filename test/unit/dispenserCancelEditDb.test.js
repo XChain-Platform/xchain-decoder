@@ -8,14 +8,14 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// DB-layer unit tests for the DISPENSER open-view mirror (, revised by #3119).
-// These pin the real db.js UPDATE that re-dates an open dispenser row: the SQL shape,
-// the bound args order, and the same false/true rollback-signalling contract
-// insertDispenser uses. No real DB: a fake pool is injected, like db.queries.test.js.
+// DB-layer unit tests for the DISPENSER open-view mirror. These pin the real db.js
+// UPDATE that re-dates an open dispenser row: the SQL shape, the bound args order, and
+// the same false/true rollback-signalling contract insertDispenser uses. No real DB: a
+// fake pool is injected, like db.queries.test.js.
 //
-// #3119 turned the two closing mirrors into ONE extending one. The decoder's open-view is
-// advisory (the indexer targets a cancel/edit by DISPENSER_ACTION_INDEX, which the decoder
-// does not have), so what the SQL must NOT do is now as load-bearing as what it does:
+// The two closing mirrors were replaced by ONE extending mirror. The decoder's open-view
+// is advisory (the indexer targets a cancel/edit by DISPENSER_ACTION_INDEX, which the
+// decoder does not have), so what the SQL must NOT do is as load-bearing as what it does:
 // never move an expiration earlier, and never pick one row out of several. Both negatives
 // are asserted below, because both were present before and either one coming back
 // reintroduces the money-bearing failure (closing a row while the indexer still dispenses
@@ -44,19 +44,19 @@ function injectPool(db, pool) {
     db.pool = pool;
 }
 
-describe('the cancel mirror is retired (#3119)', () => {
+describe('the cancel mirror is retired', () => {
     it('db.js exposes no dispenser-closing method at all', () => {
         const db = makeDb();
         // A cancel could only ever be mirrored by moving an expiration EARLIER on a row
         // resolved by SOURCE, i.e. closing a guessed dispenser. The method is gone rather
-        // than fixed; re-adding one under any name reopens #3119.
+        // than fixed; re-adding one under any name reopens that defect.
         assert.strictEqual(typeof db.cancelOpenDispenserBySource, 'undefined');
         assert.strictEqual(typeof db.editOpenDispenserExpirationBySource, 'undefined',
             'the unconditional-set edit is gone too; only the extending form survives');
     });
 });
 
-describe('Database#extendOpenDispenserExpirationBySource() (#3119)', () => {
+describe('Database#extendOpenDispenserExpirationBySource()', () => {
     afterEach(() => sinon.restore());
 
     it('extends with GREATEST and never shortens', async () => {
@@ -77,19 +77,19 @@ describe('Database#extendOpenDispenserExpirationBySource() (#3119)', () => {
             'an unconditional SET would let a shortening edit close the row early');
         assert.match(sql, /expired_block_index\s+IS\s+NULL/i);
         // Args: the new expiration, this block's height (the soft-expiry stamp the CASE
-        // clears, ), the acting address once per key subquery, then the height
-        // again for the WHERE's this-block admission. The third bind of the pre-#3119
-        // query was the ranking term, which no longer exists.
+        // clears), the acting address once per key subquery, then the height again for
+        // the WHERE's this-block admission. The old query's third bind was the ranking
+        // term, which no longer exists.
         assert.deepStrictEqual(args, [1700050000, 900, 'bcrt1qsource', 'bcrt1qsource', 900]);
     });
 
-    // . deleteOpenDispensers stamps expired_block_index at block START, before
-    // the transaction loop that applies a format-2 edit, so an `IS NULL`-only filter could
+    // deleteOpenDispensers stamps expired_block_index at block START, before the
+    // transaction loop that applies a format-2 edit, so an `IS NULL`-only filter could
     // not reach the very row a same-block extend exists for: the extend no-oped, the
     // decoder row stayed closed forever, and it stopped capturing payments to a dispenser
     // the indexer applied the same edit to and kept open. The restore is scoped to THIS
     // block's stamp; an earlier block's close stays closed, since reopening one would be
-    // the guessed-target row surgery #3119 removed.
+    // the guessed-target row surgery this mirror was rewritten to remove.
     it('reopens a row soft-expired by THIS block, and only this block', async () => {
         const db = makeDb();
         const q  = sinon.stub().resolves([]);
@@ -128,8 +128,8 @@ describe('Database#extendOpenDispenserExpirationBySource() (#3119)', () => {
         // address) and a bare /LIMIT/ would match those and pass for the wrong reason.
         assert.doesNotMatch(sql, /expired_block_index\s+IS\s+NULL[\s\S]*\bLIMIT\b/i,
             'no single-row limit on the dispensers UPDATE');
-        //  reach is kept: the indexer authorises an edit from the dispenser SOURCE
-        // *or* its GET_ADDRESS, so both keys still match.
+        // The delegated reach is kept: the indexer authorises an edit from the dispenser
+        // SOURCE *or* its GET_ADDRESS, so both keys still match.
         assert.match(sql, /address_id\s*=\s*\(SELECT\s+id\s+FROM\s+index_addresses/i);
         assert.match(sql, /OR\s+source_address_id\s*=\s*\(SELECT\s+id\s+FROM\s+index_addresses/i);
     });
@@ -150,10 +150,10 @@ describe('Database#extendOpenDispenserExpirationBySource() (#3119)', () => {
     });
 });
 
-// : the create SOURCE is stored alongside the operating address so a
-// cancel/edit/refill from EITHER address resolves to the dispenser, matching the
-// indexer's ownership gate (SOURCE == dispenser SOURCE or GET_ADDRESS).
-describe('dispenser create-SOURCE keying ', () => {
+// The create SOURCE is stored alongside the operating address so a cancel/edit/refill
+// from EITHER address resolves to the dispenser, matching the indexer's ownership gate
+// (SOURCE == dispenser SOURCE or GET_ADDRESS).
+describe('dispenser create-SOURCE keying', () => {
     afterEach(() => sinon.restore());
 
     it('insertDispenser stores the create SOURCE when the dispenser is delegated', async () => {
@@ -187,8 +187,8 @@ describe('dispenser create-SOURCE keying ', () => {
         injectPool(db, pool);
 
         // GET_ADDRESS omitted, so the decoder passes SOURCE as both fields. Storing a
-        // duplicate id would buy nothing (address_id already matches), so the row is
-        // written exactly as it was before .
+        // duplicate id would buy nothing (address_id already matches), so the row keeps
+        // its original single-address shape.
         await db.insertDispenser({
             txIndex: 42,
             address: 'bcrt1qself',
@@ -203,8 +203,9 @@ describe('dispenser create-SOURCE keying ', () => {
 
     it('the oracle-address lookup resolves on the create SOURCE too', async () => {
         // A v2 refill of a DELEGATED Mode B dispenser is paid by its creator, whose
-        // SOURCE is not the operating address. Before  that lookup found nothing,
-        // no oracle-fee output was captured, and the indexer rejected the refill.
+        // SOURCE is not the operating address. Before the create SOURCE was stored, that
+        // lookup found nothing, no oracle-fee output was captured, and the indexer
+        // rejected the refill.
         const db = makeDb();
         const q = sinon.stub().resolves([{ oracle_address: 'bcrt1qoracle' }]);
         const { pool } = withConn(q);

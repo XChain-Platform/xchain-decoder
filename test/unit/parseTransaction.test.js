@@ -17,7 +17,6 @@ const XChainDecoder = require('../../src/XChainDecoder')
 
 bitcoin.initEccLib(ecc)
 
-// --- Synthetic test transaction builder ---
 // The decoder derives AES key/IV from the reversed hex of the first input's prevout hash.
 // All test txs use the same prevout hash for simplicity.
 const PREV_HASH = Buffer.from('aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011', 'hex')
@@ -94,8 +93,6 @@ describe('XChainDecoder#parseTransaction()', () => {
         sinon.restore()
     })
 
-    // --- Coinbase transaction rejection ---
-
     it('[REGRESSION P0] R-SCR-001: should return null for a coinbase transaction', async () => {
         const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
         tx.ins[0].hash = Buffer.alloc(32, 0)
@@ -111,8 +108,6 @@ describe('XChainDecoder#parseTransaction()', () => {
         const result = await decoder.parseTransaction(tx)
         assert.strictEqual(result, null)
     })
-
-    // --- OP_RETURN decoding ---
 
     it('[REGRESSION P0] R-SCR-001: should decode an OP_RETURN transaction with XCHN payload', async () => {
         const result = await decoder.parseRawTransaction(TX_HEX.opReturn)
@@ -148,8 +143,6 @@ describe('XChainDecoder#parseTransaction()', () => {
         assert.strictEqual(result.data.length, 0)
         assert.strictEqual(result.dispenseOutputs.length, 0)
     })
-
-    // --- Multisig decoding ---
 
     it('[REGRESSION P0] R-SCR-004: should decode a 1-of-3 multisig transaction', async () => {
         const result = await decoder.parseRawTransaction(TX_HEX.multisig)
@@ -225,8 +218,6 @@ describe('XChainDecoder#parseTransaction()', () => {
         assert.ok(result.data.equals(action), 'decoded data must match original payload byte-for-byte')
     })
 
-    // --- P2SH / P2WSH mid-input extraction failure (no silent truncation) ---
-
     // Regression: a per-input redeem-script decompile throw used to be caught,
     // logged, and `continue`d, dropping that input's chunk while concatenation
     // kept going, so a truncated ACTION payload could be committed with no
@@ -292,16 +283,14 @@ describe('XChainDecoder#parseTransaction()', () => {
         )
     })
 
-    // --- Funding-fee output vout remap (PK-collision guard) ---
-
     // Regression: a P2SH/P2WSH reveal attributes the native-coin fee output (which
     // physically lives on the funding/commit tx) to this action. That output carries
     // the FUNDING tx's vout, but is stored under the REVEAL's tx_index. transaction_outputs
     // is keyed by (tx_index, vout), so a funding fee output at the same vout number as one
     // of the reveal tx's OWN outputs (a dispense or COINPAY output) used to collide on the
-    // primary key and be silently dropped as a duplicate INSERT — after which the indexer's
-    // detectFeePaymentMode saw no fee output and wrongly rejected the action on LTC/DOGE (or
-    // fell back to XCHAIN deduction on BTC). The fee output is now stored at
+    // primary key and be silently dropped as a duplicate INSERT. The indexer's
+    // detectFeePaymentMode then saw no fee output and wrongly rejected the action on
+    // LTC/DOGE (or fell back to XCHAIN deduction on BTC). The fee output is now stored at
     // vout + FUNDING_VOUT_BASE, a domain disjoint from any real reveal-tx vout.
     it('[REGRESSION] P2SH reveal: funding fee output is remapped into the FUNDING_VOUT_BASE domain so it cannot collide with a reveal-tx output at the same vout', async () => {
         const FEE_ADDR = 'mzBc4XEFSdzCDcTxAgf6EZXgsZWpztRhef'
@@ -313,7 +302,7 @@ describe('XChainDecoder#parseTransaction()', () => {
             Buffer.concat([Buffer.from('XCHN'), Buffer.from('p2sh')])
         )
 
-        // The funding (commit) tx contributes ONE fee output at vout 0 — the same vout number
+        // The funding (commit) tx contributes ONE fee output at vout 0, the same vout number
         // as the reveal tx's own output below (the previously-colliding case).
         sinon.stub(decoder, 'findFundingFeeOutputs').resolves([
             { vout: 0, destinationAddress: FEE_ADDR, amount: 4321 }
@@ -353,8 +342,6 @@ describe('XChainDecoder#parseTransaction()', () => {
         assert.ok(!allVouts.some(v => v === 0 && allVouts.filter(x => x === 0).length > 1), 'no PK collision at vout 0')
     })
 
-    // --- Result structure ---
-
     it('[REGRESSION P0] R-SCR-001: should return an object with data, rawData, source, destination, and dispenseOutputs', async () => {
         const result = await decoder.parseRawTransaction(TX_HEX.opReturn)
 
@@ -375,8 +362,6 @@ describe('XChainDecoder#parseTransaction()', () => {
         assert.ok(Array.isArray(result.dispenseOutputs))
         assert.strictEqual(result.dispenseOutputs.length, 0)
     })
-
-    // --- Dispenser output detection ---
 
     // Helper: build the open-dispenser Set the block loop now passes into
     // parseTransaction, containing every payable output address of `tx`.
@@ -411,8 +396,6 @@ describe('XChainDecoder#parseTransaction()', () => {
         assert.strictEqual(typeof result.dispenseOutputs[0].vout, 'number')
     })
 
-    // --- N+1 dispenser-lookup regression (per-block set, not per-output query) ---
-
     it('[REGRESSION] should not issue any per-output DB dispenser lookup', async () => {
         // The decoder loads the open-dispenser set once per block and tests
         // membership in JS. parseTransaction must never call the per-output
@@ -441,8 +424,6 @@ describe('XChainDecoder#parseTransaction()', () => {
         assert.strictEqual(decoder.db.isThereADispenserForAddress.callCount, 0)
     })
 
-    // --- standard_input field handling ---
-
     it('should treat missing standard_input field as true (default)', async () => {
         const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
         delete tx.ins[0]['standard_input']
@@ -459,8 +440,6 @@ describe('XChainDecoder#parseTransaction()', () => {
         assert.ok(result !== null)
     })
 
-    // --- OP_RETURN without XCHN prefix ---
-
     it('should not include data from an OP_RETURN that decrypts without XCHN prefix', async () => {
         const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
         // Replace the OP_RETURN data with random bytes that won't decrypt to XCHN
@@ -473,15 +452,11 @@ describe('XChainDecoder#parseTransaction()', () => {
         assert.strictEqual(result.data.length, 0)
     })
 
-    // --- Edge cases for multisig ---
-
     it('should skip multisig outputs that do not have exactly 6 decompiled elements', async () => {
         const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
         const result = await decoder.parseTransaction(tx)
         assert.ok(result)
     })
-
-    // --- parseRawTransaction ---
 
     it('should throw on invalid hex input', async () => {
         await assert.rejects(async () => {
@@ -494,8 +469,6 @@ describe('XChainDecoder#parseTransaction()', () => {
             await decoder.parseRawTransaction('')
         })
     })
-
-    // --- Dynamic transaction building ---
 
     it('[REGRESSION P0] R-SCR-001: should decode a dynamically built OP_RETURN transaction', async () => {
         const tx = new bitcoin.Transaction()
@@ -603,7 +576,7 @@ describe('XChainDecoder#getSourceFromOutput()', () => {
         sinon.restore()
     })
 
-    it('should throw a tagged rpcLookupFailure when the connector throws (H-6: a failed lookup is not a null source)', async () => {
+    it('should throw a tagged rpcLookupFailure when the connector throws (a failed lookup is not a null source)', async () => {
         decoder.connector.getRawTransaction = sinon.stub().rejects(new Error('not found'))
 
         await assert.rejects(

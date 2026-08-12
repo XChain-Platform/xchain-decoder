@@ -12,11 +12,11 @@
  *
  **********************************************************************
  *
- * XChain Decoder - PRICE v1 oracle-usage-fee output recognition 
+ * XChain Decoder - PRICE v1 oracle-usage-fee output recognition
  *
  * A Mode B (ORACLE_ADDRESS) dispenser pays its oracle operator up front as a real
  * native-coin output, and the indexer REJECTS the create/refill when that output is
- * absent or short (xchain-indexer utility.validateOracleFee, ). The indexer
+ * absent or short (xchain-indexer utility.validateOracleFee). The indexer
  * only ever sees outputs the decoder persisted to `transaction_outputs`, and that
  * capture was previously limited to the protocol FEE_DESTINATION and COINPAY - so
  * an output paying an ORACLE_ADDRESS was dropped and every fee-bearing Mode B

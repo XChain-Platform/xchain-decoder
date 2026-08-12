@@ -30,8 +30,8 @@ const rateLimit = require('express-rate-limit');
 const XChainDecoder  = require('./XChainDecoder');
 const { resolveFeeDestination } = require('./feeDestination');
 const jsonRouter = require('express-json-rpc-router')
-const { installObservability } = require('./observability');   // : default-off /metrics + structured log shim
-const { registerDecoderMetrics } = require('./decoderMetrics'); // : decoder feed-freshness gauges
+const { installObservability } = require('./observability');   // default-off /metrics + structured log shim
+const { registerDecoderMetrics } = require('./decoderMetrics'); // decoder feed-freshness gauges
 
 
 const NETWORK = process.env.NETWORK
@@ -71,23 +71,19 @@ function makeRpcBatchGuard(maxBatch){
     }
 }
 
-// Registers GET /live, the LIVENESS probe and the route the Docker HEALTHCHECK runs
-// (see SERVICE_HEALTHCHECK[XCHAIN_DECODER] in xchain-node's ModuleService, which sets
-// path:'/live'). It is /status plus the one thing /status structurally cannot see:
-// the block loop retrying a block forever. decoderRunning only goes false when
-// start() REJECTS, and the loop is written never to reject on a fetch/parse fault
-// (skipping a block would corrupt the index), so a wedged decoder kept answering
-// /status with 200 while lag grew without bound and autoheal, whose only input is
-// docker inspect's Health.Status, never saw a thing.
+// GET /live, the LIVENESS probe the Docker HEALTHCHECK runs. It is /status plus the
+// one thing /status structurally cannot see: the block loop retrying a block forever.
+// decoderRunning only goes false when start() REJECTS, and the loop never rejects on a
+// fetch/parse fault (skipping a block would corrupt the index), so a wedged decoder
+// answered /status with 200 while lag grew without bound and autoheal, whose only input
+// is the container's health status, never saw it.
 //
-// Kept separate from /status rather than folded into it: /status is the
-// load-balancer / uptime signal and its running+db semantics are relied on
-// elsewhere. Same split, same reason, as sync's /health override.
+// Kept separate from /status rather than folded in: /status is the load-balancer /
+// uptime signal and its running+db semantics are relied on elsewhere.
 //
-// A module-scope registrar rather than an inline route so a test can mount and drive
-// THIS handler (test/unit/decoderLiveHeartbeat.test.js). The states it exists to
-// answer 503 in are exactly the ones a reimplementation of the route inside a test
-// would get wrong, so a copy proves nothing about the probe that ships.
+// A module-scope registrar rather than an inline route so a test can drive THIS
+// handler; a reimplementation inside a test would get exactly the 503 states this
+// exists for wrong, and so would prove nothing about the probe that ships.
 //
 // isDecoderRunning is a getter, not a boolean: the flag it reads flips from start()'s
 // settle and from shutdown(), long after this route is registered.
@@ -115,12 +111,13 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
             stalled,
             poll_silent: pollSilent,
             last_poll_at: decoder.lastPollAt || null,
-            // A frozen node tip, reported but deliberately NOT gating ().
-            // isStalled() returns false while the tip is stale on purpose: restarting
-            // the container cannot fix an upstream node outage, and gating on it
-            // re-opens the restart flap  closed. So the outage stays invisible
-            // to autoheal by design and visible HERE, as a stable boolean a dashboard
-            // or watchdog can read (getSyncStatus omits the key entirely when fresh).
+            // A frozen node tip, reported but deliberately NOT gating. isStalled()
+            // returns false while the tip is stale on purpose: restarting the container
+            // cannot fix an upstream node outage, and gating on it re-opens the
+            // restart flap where a healthy decoder was recycled repeatedly for an
+            // outage it could not affect. So the outage stays invisible to autoheal by
+            // design and visible HERE, as a stable boolean a dashboard or watchdog can
+            // read (getSyncStatus omits the key entirely when fresh).
             node_height_stale: syncStatus.node_height_stale === true,
             last_processed_block: syncStatus.last_processed_block,
             node_height: syncStatus.node_height,
@@ -192,10 +189,11 @@ async function startApi(){
     }));
 
     app.use(bodyParser.json({ limit: '100kb' }));
-    // Allow CORS for development
+    // Open CORS: every method this API exposes is a read-only status probe, so
+    // there is nothing a cross-origin caller can reach that a direct one cannot.
     app.use(cors());
 
-    // : Prometheus /metrics plus a structured log shim, both DEFAULT OFF.
+    // Prometheus /metrics plus a structured log shim, both DEFAULT OFF.
     // Nothing is registered and no timer starts unless METRICS_ENABLED (and, for
     // log shipping, LOG_SHIP_ENABLED + LOG_SHIP_URL) are set. The coin/network
     // labels let one Prometheus scrape distinguish the per-chain decoders.
@@ -216,7 +214,7 @@ async function startApi(){
     // warn works in every deployment; only its DESTINATION depends on the env.
     decoder.setObservabilityLogger(observability.logger)
 
-    // Decoder feed-freshness gauges (). registry is null unless
+    // Decoder feed-freshness gauges. registry is null unless
     // METRICS_ENABLED, and registerDecoderMetrics is then a no-op: nothing is
     // registered and no collector runs, matching the module's default-off contract.
     registerDecoderMetrics(observability.registry, decoder)
@@ -252,7 +250,7 @@ async function startApi(){
                 }
             }
 
-            // Latent REORG_HALT marker . TTL-cached inside checkReorgHalt, so a
+            // Latent REORG_HALT marker. TTL-cached inside checkReorgHalt, so a
             // monitoring burst costs at most one DB query per minute. Deliberately does
             // NOT flip `status` to unhealthy: the decoder healthcheck carries autoheal,
             // and a halted decoder still parses forward, so reporting unhealthy would
@@ -314,7 +312,7 @@ async function startApi(){
             // db.ping() uses its own pooled connection; see the health method note.
             try { dbOk = await decoder.db.ping() } catch (_) {}
         }
-        // Latent halt marker , reported here too so an operator can see it on
+        // Latent halt marker, reported here too so an operator can see it on
         // the cheap probe. The HTTP code stays keyed on running+db for the reason given
         // in health() above: a dormant halt must not make an advancing decoder look dead.
         let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }

@@ -28,7 +28,6 @@ module.exports = {
     async run(decoder, generator, metrics, config = {}) {
         const blockCount = config.blockCount || DEFAULT_BLOCK_COUNT
 
-        // Generate a realistic mixed chain
         generator.reset()
         const { blocks } = generator.generateBlockChain(blockCount, {
             xchnTxsPerBlock: (i) => {
@@ -39,7 +38,6 @@ module.exports = {
             plainTxsPerBlock: (i) => Math.floor(Math.random() * 8) + 2  // 2-9 plain txs
         })
 
-        // Load all funding transactions
         for (const block of blocks) {
             for (const [txid, hex] of block.fundingTxStore) {
                 decoder.connector.transactions.set(txid, hex)
@@ -70,7 +68,6 @@ module.exports = {
 
             windowBlocks++
 
-            // Record throughput window
             if (windowBlocks >= SNAPSHOT_INTERVAL || i === blocks.length - 1) {
                 const windowElapsed = Number(process.hrtime.bigint() - windowStart) / 1e6
                 throughputWindows.push({

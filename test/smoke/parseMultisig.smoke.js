@@ -12,17 +12,16 @@ const assert = require('assert')
 const sinon = require('sinon')
 const XChainDecoder = require('../../src/XChainDecoder')
 
-// THE FIXTURE THIS FILE USED COULD NEVER HAVE DECODED. The tail of its
-// first data-carrying pubkey and the whole of its second were zero-filled
-// where the ciphertext belongs (only the third, an all-0x03 filler key,
-// matched the real one), so deobfuscation returned bytes that do not start
-// with XCHN and the two tests below asserted 'Multisig data' against an
-// empty buffer. That is a placeholder, not a redaction: no decoder change
-// could have satisfied it.
+// This fixture used to be undecodable: the tail of its first data-carrying
+// pubkey and the whole of its second were zero-filled where the ciphertext
+// belongs (only the third, an all-0x03 filler key, matched the real one), so
+// deobfuscation never produced the XCHN prefix and the tests asserted
+// 'Multisig data' against an empty buffer, a placeholder rather than a
+// working fixture.
 //
-// This is now the same hex the unit suite's [REGRESSION P0] R-SCR-004 case
-// decodes, documented there as a genuine AES-128-CTR encryption of
-// 'XCHN' + compile(['Multisig data']) padded to a full 64-byte chunk.
+// It is now the same hex the unit suite's [REGRESSION P0] R-SCR-004 case
+// decodes: a genuine AES-128-CTR encryption of 'XCHN' + compile(['Multisig
+// data']) padded to a full 64-byte chunk.
 const MULTISIG_TX_HEX = '0200000001aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011010000006b4830303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303021020202020202020202020202020202020202020202020202020202020202020202ffffffff02e803000000000000695121025ed141846dc8d3e27dce7b3c6cab14fb07115cbb7a04d9341aadaaa5268635642102e71ca15723d902414e2d1eabfe0fbd6380eb928110bbec51127fce0de72f14652103030303030303030303030303030303030303030303030303030303030303030353ae00e1f505000000001976a914aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88ac00000000'
 
 // The prevout the fixture spends (input index 1), output 1 a standard P2PKH.

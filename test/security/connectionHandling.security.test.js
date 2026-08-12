@@ -81,7 +81,6 @@ describe('Security: Connection Handling', () => {
             await db._acquireTransactionLock()
             assert.strictEqual(db._transactionLock, true)
 
-            // Clean up
             db._releaseTransactionLock()
         })
 
@@ -91,23 +90,19 @@ describe('Security: Connection Handling', () => {
             await db._acquireTransactionLock()
             assert.strictEqual(db._transactionLock, true)
 
-            // Second call should queue
             let secondAcquired = false
             const secondPromise = db._acquireTransactionLock().then(() => {
                 secondAcquired = true
             })
 
-            // Second hasn't resolved yet
             await new Promise(resolve => setTimeout(resolve, 10))
             assert.strictEqual(secondAcquired, false)
             assert.strictEqual(db._transactionLockQueue.length, 1)
 
-            // Release first; second should resolve
             db._releaseTransactionLock()
             await secondPromise
             assert.strictEqual(secondAcquired, true)
 
-            // Clean up
             db._releaseTransactionLock()
         })
 
@@ -131,7 +126,7 @@ describe('Security: Connection Handling', () => {
             const p2 = db._acquireTransactionLock().then(() => order.push(2))
             const p3 = db._acquireTransactionLock().then(() => order.push(3))
 
-            // Poll for the three waiters to enqueue rather than sleeping a fixed 10ms ():
+            // Poll for the three waiters to enqueue rather than sleeping a fixed 10ms:
             // the wait is on an observable condition, so a loaded machine cannot under-sleep it.
             const deadline = Date.now() + 2000
             while (db._transactionLockQueue.length < 3 && Date.now() < deadline) {

@@ -13,7 +13,7 @@
 --********************************************************************
 
 -- xchain:migration mode=manual
--- (manual: a one-time column TYPE change with a value conversion — run with the
+-- (manual: a one-time column TYPE change with a value conversion. Run with the
 --  decoder stopped, take a backup first; see HOW TO RUN below.)
 -- Migration: dispensers.expiration  DATETIME  ->  BIGINT UNSIGNED (raw unix seconds).
 --
@@ -21,9 +21,9 @@
 -- was a DATETIME populated via FROM_UNIXTIME(). Fresh installs already get
 -- BIGINT UNSIGNED from src/sql/dispensers.sql and never need this migration.
 --
--- Do NOT read mode=manual as a safety property (). It withholds this
--- file from the unattended startup run only; the blanket `npm run migrate` this
--- header used to advertise applies every PENDING manual file, and on a column
+-- Do NOT read mode=manual as a safety property. It withholds this file from the
+-- unattended startup run only; the blanket `npm run migrate` this header used to
+-- advertise applies every PENDING manual file, and on a column
 -- that is already BIGINT the UPDATE below reads raw epoch seconds as a date-form
 -- number, yields NULL for ordinary 10-digit values, and the drop plus rename then
 -- replace the good column with those NULLs. What actually makes the file safe on
@@ -40,7 +40,7 @@
 -- FROM_UNIXTIME() caps at 2147483647 (Y2038) and returns NULL above it, so any
 -- expiration in 2038–2106 was silently stored as NULL. A NULL expiration is
 -- never `< block_time`, so such dispensers were NEVER expired by the decoder's
--- per-block sweep — diverging from xchain-indexer, which stores the same field
+-- per-block sweep, diverging from xchain-indexer, which stores the same field
 -- as a raw BIGINT UNSIGNED and expires it correctly. Storing/comparing the raw
 -- unix integer removes the Y2038 cap and aligns the two schemas.
 --
@@ -49,7 +49,7 @@
 --   1. Add a BIGINT UNSIGNED holding column (expiration_unix).
 --   2. Convert existing DATETIME values with UNIX_TIMESTAMP(). Rows whose
 --      expiration is already NULL (the corrupted >2038 rows; the original
---      unix value is unrecoverable) stay NULL — those dispensers were never
+--      unix value is unrecoverable) stay NULL. Those dispensers were never
 --      going to be expired by the old code either, and the table only holds
 --      still-open dispensers, so on a live node this set is typically empty.
 --   3. Drop the old DATETIME column.

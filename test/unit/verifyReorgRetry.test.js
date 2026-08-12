@@ -40,10 +40,11 @@ describe('XChainDecoder.verifyReorg retry budget', function () {
     const nodeHash = { 102: 'node102', 101: 'node101', 100: 'node100', 99: 'match99' }
     const failsLeft = { 102: failuresPerBlock, 101: failuresPerBlock, 100: failuresPerBlock }
     const deleted = []
-    // Records the (block_index, block_hash) each deleteBlockByIndex call received. Since M-12 the
-    // REORG marker is written atomically inside deleteBlockByIndex (per block), so verifyReorg no
-    // longer calls insertEvent once at the end. Capturing the hash argument here proves verifyReorg
-    // hands the durable-marker path the right block hash per deleted block.
+    // Records the (block_index, block_hash) each deleteBlockByIndex call received. The REORG
+    // marker is now written atomically inside deleteBlockByIndex, per block, so verifyReorg no
+    // longer calls insertEvent once at the end (a crash mid-reorg used to lose the audit trail
+    // entirely). Capturing the hash argument proves verifyReorg hands the durable-marker path
+    // the right block hash for each deleted block.
     const deleteArgs = []
 
     decoder.connector = {
@@ -76,7 +77,7 @@ describe('XChainDecoder.verifyReorg retry budget', function () {
 
     assert.strictEqual(result, true)
     assert.deepStrictEqual(deleted, [102, 101, 100], 'all three orphan blocks should be deleted')
-    // M-12: each deleted block is handed its own block hash so deleteBlockByIndex can write the
+    // Each deleted block is handed its own block hash so deleteBlockByIndex can write the
     // REORG marker atomically with the delete (one durable marker per rolled-back block).
     assert.deepStrictEqual(getDeleteArgs(), [
       { block_index: 102, block_hash: 'db102' },
@@ -162,11 +163,11 @@ describe('XChainDecoder.verifyReorg depth guard', function () {
   })
 })
 
-// Item 1300: the safe-depth ceiling is a per-invocation counter, so before the
-// durable-halt fix a process restart re-entered verifyReorg with a zeroed counter
-// and silently completed an over-deep rollback past the dispenser purge window.
-// A durable REORG_HALT marker (isReorgHalted/markReorgHalted) must survive the
-// restart and make the second invocation refuse to delete anything further.
+// The safe-depth ceiling is a per-invocation counter, so before the durable-halt
+// fix a process restart re-entered verifyReorg with a zeroed counter and silently
+// completed an over-deep rollback past the dispenser purge window. A durable
+// REORG_HALT marker (isReorgHalted/markReorgHalted) must survive the restart and
+// make the second invocation refuse to delete anything further.
 describe('XChainDecoder.verifyReorg durable halt (restart-mid-reorg)', function () {
   this.timeout(0)
 
@@ -240,7 +241,7 @@ describe('XChainDecoder.verifyReorg durable halt (restart-mid-reorg)', function 
   })
 })
 
-// Item 1301: verifyReorg froze the node tip at call time, so a mid-walk tip
+// verifyReorg froze the node tip at call time, so a mid-walk tip
 // regression (node restart onto a shorter chain / second reorg) made the stuck
 // height fall through to getBlockHash, which throws "Block height out of range",
 // and the transient catch retried the same height forever. The catch now best-
@@ -321,7 +322,7 @@ describe('XChainDecoder.verifyReorg mid-walk tip regression', function () {
   })
 })
 
-// Item 2459: getBlockByIndex used to return null both for "no such row" and for a
+// getBlockByIndex used to return null both for "no such row" and for a
 // caught query error, and the walk guard reads a null row as "table exhausted".
 // One failed read therefore ended the rollback and returned true ("reorg
 // reconciled") with orphan blocks still stored above the fork point. The helper now

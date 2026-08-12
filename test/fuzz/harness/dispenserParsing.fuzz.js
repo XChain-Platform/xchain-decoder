@@ -61,7 +61,7 @@ function parseDispenserData(decodedData) {
             ? DEFAULT_EXPIRATION
             : Number(expirationToken)
 
-        // Mirrors the create guard, which requires an INTEGER (): the column is
+        // Mirrors the create guard, which requires an INTEGER: the column is
         // BIGINT UNSIGNED and the indexer rejects a fractional EXPIRATION outright.
         // Number.isInteger subsumes the isNaN test it replaces.
         if (!Number.isInteger(expiration) || expiration < 0 || expiration > 4294967295) {

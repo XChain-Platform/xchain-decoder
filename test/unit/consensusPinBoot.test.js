@@ -11,11 +11,11 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Boot-time consensus-pin verification (mirror of XChainIndexer.js:218).
+ * Boot-time consensus-pin verification, mirroring the indexer's own boot check.
  * start() must call coins.verifyConsensusPin(<net>) fail-closed BEFORE any
- * DB work, so a partial/stale deploy with drifted coin files halts instead
- * of parsing on-chain bytes with divergent network params once a pin is
- * armed (Phase 6). Mainnet pin is null today, so the live check is a no-op.
+ * DB work, so a partial/stale deploy with drifted coin files halts instead of
+ * parsing on-chain bytes with divergent network params once a pin is armed.
+ * The mainnet pin is null today, so the live check is a no-op.
  */
 
 'use strict';

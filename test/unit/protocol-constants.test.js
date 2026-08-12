@@ -1,7 +1,6 @@
-//  doctrine test-coverage program: unit coverage for src/protocol/constants.js.
 // The decoder's copy of the protocol size/gas/XCALL limits is a consensus
-// surface (it bounds what the decoder will accept before the indexer sees it);
-// this pins the exported constants to sane, finite, positive integers and the
+// surface: it bounds what the decoder will accept before the indexer sees it.
+// These pin the exported constants to finite, positive integers and to the
 // handful of ordering invariants the wire format depends on.
 
 const assert = require('assert');

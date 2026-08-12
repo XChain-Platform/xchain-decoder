@@ -30,16 +30,13 @@ describeOrSkip('Smoke: Database Initialization', () => {
     before(async function () {
         this.timeout(10000)
 
-        // Load real mariadb (not the mock)
-        // The unit setup.js redirects 'mariadb' requires to the mock.
-        // For this test, we load the real module by its resolved path.
+        // Load the real mariadb driver by resolved path and clear it from the
+        // require cache first: the unit test setup redirects 'mariadb' requires
+        // to a mock, and this suite needs the real connection.
         const realMariadbPath = require.resolve('mariadb')
         delete require.cache[realMariadbPath]
         mariadb = require(realMariadbPath)
 
-        // We need to load Database fresh so it picks up real mariadb
-        // But since unit/setup.js may have intercepted the require,
-        // we construct the DB object manually with real mariadb
         Database = require('../../src/db')
         db = new Database(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS)
 
