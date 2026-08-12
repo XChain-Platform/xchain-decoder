@@ -31,6 +31,7 @@ const { BIP32Factory } = require('bip32')
 const bip39 = require('bip39')
 const { ECPairFactory } = require('ecpair')
 const nodeHelper = require('../../nodeHelper')
+const { waitUntil } = require('../../helpers/waitUntil')
 const bufferutils = require('bitcoinjs-lib/src/bufferutils')
 
 bitcoin.initEccLib(ecc)
@@ -473,47 +474,54 @@ async function getBlockHash(height) {
  * Wait for the decoder to process up to a given block index.
  */
 async function waitForDecoder(targetBlockIndex, maxWaitMs) {
-    const deadline = Date.now() + (maxWaitMs || 30000)
-    while (Date.now() < deadline) {
-        const lastBlock = await global.db.getLastBlockIndex()
-        if (lastBlock >= targetBlockIndex) return true
-        await new Promise(r => setTimeout(r, 500))
-    }
-    throw new Error(`Decoder did not reach block ${targetBlockIndex} within timeout`)
+    await waitUntil(
+        async () => (await global.db.getLastBlockIndex()) >= targetBlockIndex,
+        {
+            timeout: maxWaitMs || 30000,
+            interval: 500,
+            message: `Decoder did not reach block ${targetBlockIndex} within timeout`
+        }
+    )
+    return true
 }
 
 /**
  * Wait for a specific transaction to appear in the decoder DB.
  */
 async function waitForTransaction(txHash, maxWaitMs) {
-    const deadline = Date.now() + (maxWaitMs || 30000)
-    while (Date.now() < deadline) {
-        const tx = await global.db.getTransaction(txHash)
-        if (tx) return tx
-        await new Promise(r => setTimeout(r, 500))
-    }
-    throw new Error(`Transaction ${txHash} not found in decoder DB within timeout`)
+    return waitUntil(
+        () => global.db.getTransaction(txHash),
+        {
+            timeout: maxWaitMs || 30000,
+            interval: 500,
+            message: `Transaction ${txHash} not found in decoder DB within timeout`
+        }
+    )
 }
 
 /**
  * Wait for a specific transaction to appear in the mempool_transactions table.
  */
 async function waitForMempoolTransaction(txHash, maxWaitMs) {
-    const deadline = Date.now() + (maxWaitMs || 90000) // mempool polls every 60s
-    while (Date.now() < deadline) {
-        const connection = await global.db.pool.getConnection()
-        try {
-            const rows = await connection.query(
-                `SELECT * FROM mempool_transactions WHERE tx_hash = ?`,
-                [txHash]
-            )
-            if (rows.length > 0) return rows[0]
-        } finally {
-            await connection.release()
+    return waitUntil(
+        async () => {
+            const connection = await global.db.pool.getConnection()
+            try {
+                const rows = await connection.query(
+                    `SELECT * FROM mempool_transactions WHERE tx_hash = ?`,
+                    [txHash]
+                )
+                return rows.length > 0 ? rows[0] : null
+            } finally {
+                await connection.release()
+            }
+        },
+        {
+            timeout: maxWaitMs || 90000, // mempool polls every 60s
+            interval: 2000,
+            message: `Mempool transaction ${txHash} not found within timeout`
         }
-        await new Promise(r => setTimeout(r, 2000))
-    }
-    throw new Error(`Mempool transaction ${txHash} not found within timeout`)
+    )
 }
 
 /**

@@ -27,6 +27,7 @@ const { BIP32Factory } = require('bip32')
 const bip39 = require('bip39')
 const { ECPairFactory } = require('ecpair')
 const nodeHelper = require('../../nodeHelper')
+const { waitUntil } = require('../../helpers/waitUntil')
 const bufferutils = require('bitcoinjs-lib/src/bufferutils')
 
 bitcoin.initEccLib(ecc)
@@ -364,26 +365,29 @@ async function broadcastNonXchnOpReturn(funded, rawBytes) {
  * Polls db.getLastBlockIndex() with retries.
  */
 async function waitForDecoder(targetBlockIndex, maxWaitMs) {
-    const deadline = Date.now() + (maxWaitMs || 30000)
-    while (Date.now() < deadline) {
-        const lastBlock = await global.db.getLastBlockIndex()
-        if (lastBlock >= targetBlockIndex) return true
-        await new Promise(r => setTimeout(r, 500))
-    }
-    throw new Error(`Decoder did not reach block ${targetBlockIndex} within timeout`)
+    await waitUntil(
+        async () => (await global.db.getLastBlockIndex()) >= targetBlockIndex,
+        {
+            timeout: maxWaitMs || 30000,
+            interval: 500,
+            message: `Decoder did not reach block ${targetBlockIndex} within timeout`
+        }
+    )
+    return true
 }
 
 /**
  * Wait for a specific transaction to appear in the decoder DB.
  */
 async function waitForTransaction(txHash, maxWaitMs) {
-    const deadline = Date.now() + (maxWaitMs || 30000)
-    while (Date.now() < deadline) {
-        const tx = await global.db.getTransaction(txHash)
-        if (tx) return tx
-        await new Promise(r => setTimeout(r, 500))
-    }
-    throw new Error(`Transaction ${txHash} not found in decoder DB within timeout`)
+    return waitUntil(
+        () => global.db.getTransaction(txHash),
+        {
+            timeout: maxWaitMs || 30000,
+            interval: 500,
+            message: `Transaction ${txHash} not found in decoder DB within timeout`
+        }
+    )
 }
 
 module.exports = {

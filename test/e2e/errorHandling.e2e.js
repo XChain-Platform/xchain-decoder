@@ -38,10 +38,9 @@ describe('E2E: Error Handling', function () {
         it('D1.1:should not store a plain BTC transfer (no OP_RETURN)', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             const { txHash, blockIndex } = await txBuilder.broadcastPlainTransaction(funded)
+            // waitForDecoder blocks until this block (and any transactions in it) are
+            // committed, so a would-be row is already present when it returns.
             await txBuilder.waitForDecoder(blockIndex)
-
-            // Give decoder extra time to process
-            await new Promise(r => setTimeout(r, 2000))
 
             const tx = await global.db.getTransaction(txHash)
             assert.strictEqual(tx, null, 'Plain BTC transfer should not be in decoder DB')
@@ -51,7 +50,6 @@ describe('E2E: Error Handling', function () {
             const funded = await txBuilder.createFundedLegacyAddress()
             const { txHash, blockIndex } = await txBuilder.broadcastNonXchnOpReturn(funded)
             await txBuilder.waitForDecoder(blockIndex)
-            await new Promise(r => setTimeout(r, 2000))
 
             await assertNoTransaction(global.db, txHash)
         })
@@ -61,7 +59,6 @@ describe('E2E: Error Handling', function () {
             const textData = Buffer.from('HELLO WORLD THIS IS NOT XCHN DATA', 'utf-8')
             const { txHash, blockIndex } = await txBuilder.broadcastNonXchnOpReturn(funded, textData)
             await txBuilder.waitForDecoder(blockIndex)
-            await new Promise(r => setTimeout(r, 2000))
 
             await assertNoTransaction(global.db, txHash)
         })
@@ -72,7 +69,6 @@ describe('E2E: Error Handling', function () {
             const fakeXchn = Buffer.from('XCHNthis_is_fake_data_not_encrypted')
             const { txHash, blockIndex } = await txBuilder.broadcastNonXchnOpReturn(funded, fakeXchn)
             await txBuilder.waitForDecoder(blockIndex)
-            await new Promise(r => setTimeout(r, 2000))
 
             // After deobfuscation, this won't have the XCHN magic word, so it should be rejected
             const tx = await global.db.getTransaction(txHash)
@@ -106,7 +102,6 @@ describe('E2E: Error Handling', function () {
 
             const { txHash, blockIndex } = await txBuilder.broadcastNonXchnOpReturn(funded, truncated)
             await txBuilder.waitForDecoder(blockIndex)
-            await new Promise(r => setTimeout(r, 2000))
 
             // Decoder should not crash:verify by processing the next transaction
             const funded2 = await txBuilder.createFundedLegacyAddress()
@@ -130,7 +125,6 @@ describe('E2E: Error Handling', function () {
 
             const { txHash, blockIndex } = await txBuilder.broadcastNonXchnOpReturn(funded, obfuscated)
             await txBuilder.waitForDecoder(blockIndex)
-            await new Promise(r => setTimeout(r, 2000))
 
             // Decoder should continue:verify with next valid tx
             const funded2 = await txBuilder.createFundedLegacyAddress()
