@@ -27,15 +27,13 @@
  *   it('[REGRESSION P1] R-BUG-001: DISPENSER with 12 fields no longer crashes (fix #42)', ...)
  */
 
-const assert = require('assert')
-
 describe('Bug-Fix Regressions', () => {
     // Add regression tests here as bugs are fixed.
     // Each test must fail without the fix and pass with it.
-
-    // Placeholder deliberately carries no [REGRESSION P1] tag so grep-based tier
-    // selection does not count it as a real regression guard.
-    it('R-BUG-000: placeholder (untagged): regression suite is loadable', () => {
-        assert.ok(true)
-    })
+    //
+    // This suite is intentionally empty until the first tracked bug lands here:
+    // a constant-truth placeholder (`assert.ok(true)`) only ever reported a
+    // false green, so it was removed rather than left to defend nothing. Each
+    // case added here reproduces its incident and asserts the fixed behavior,
+    // tagged `[REGRESSION P1]` per the header convention above.
 })
