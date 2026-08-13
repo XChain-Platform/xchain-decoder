@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A conformance test pins the ACTION-name aliases declared in the manifest.
 
 ### Changed
+- The block and mempool loops share one storage gate, so the record a confirmed row holds and the one a pending row holds cannot drift apart.
+- The roundtrip conformance suite drives encoder-built bytes through the real parse and storage gate to the stored record, instead of through a test-local copy of the decode arbiter.
 - Test suites poll the decoder's own progress signal through a shared `waitUntil(predicate, timeout)` helper instead of fixed sleeps, removing a class of timing flakes.
 - The CI gate declares `xchain-encoder` in `.ci-siblings` so cross-repo conformance tests run against a freshly cloned canonical encoder instead of a stale leftover checkout.
 - All migrations live under `src/sql/migrations/`, the only directory the runner reads, and the stale root duplicates are gone.

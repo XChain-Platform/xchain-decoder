@@ -1145,6 +1145,87 @@ class XChainDecoder {
         return []
     }
 
+    // Whether a parse result is worth a transactions row at all: it must carry an
+    // attributable ACTION (data plus a resolved source) or at least one possible
+    // dispense. A tx failing this never reaches the storage gate and never consumes
+    // a tx_index. Kept beside buildStoredActionRecord so the two halves of "what
+    // gets stored" are one readable pair rather than a loop condition nothing
+    // outside the running block loop can call.
+    hasStorableContent(parseResult){
+        if (parseResult == null) return false
+        const hasAction = (parseResult["data"] != null)
+            && (parseResult["data"].length > 0)
+            && (parseResult["source"] != null)
+        return hasAction || (parseResult["dispenseOutputs"]?.length > 0)
+    }
+
+    // The storage gate: turns a parseTransaction result into the exact ACTION
+    // record a row INSERT stores. This is the second half of the decode contract
+    // and the one that decides what history actually holds, so it lives here as a
+    // callable entry point rather than inline in the two parse loops. It used to
+    // exist only as two hand-kept copies (confirmed-block and mempool), which meant
+    // nothing outside a running loop could exercise it and a conformance test could
+    // only re-implement it.
+    //
+    // Applies, in order: the per-encoding compiled-size ceiling (envelope spec §4),
+    // alias canonicalization, the UTF-8 decode (strict, lenient fallback) and the
+    // VALID_ACTION_NAMES gate. A rejected ACTION is NOT a rejected transaction: when
+    // the tx also carries money-bearing dispense/payment outputs the action is
+    // blanked ('' plus a null raw_data, never SQL NULL, so a pending row and its
+    // confirmed twin still correlate) and the caller stores the outputs. Only a tx
+    // with nothing else to record is skipped.
+    //
+    // mempool selects the log wording of the two paths; the acceptance rules are
+    // identical by construction, which is the point of the shared helper.
+    // Returns { skip, data, rawData }.
+    buildStoredActionRecord(parseResult, txHash, mempool){
+        const rejectPrefix = (mempool ? 'Mempool: tx ' : 'Skipping ACTION for tx ') + txHash + ': '
+        const utf8Prefix = (mempool ? 'Mempool: tx ' : 'Tx ') + txHash + ': '
+
+        let payload = parseResult["data"]
+        // No action payload at all: the tx is stored for its outputs alone. null
+        // (only reachable from a stub result) stays null so the mempool row keeps
+        // the shape it had before this helper existed.
+        if (payload == null) return { skip: false, data: null, rawData: parseResult["rawData"] || null }
+        if (payload.length === 0) return { skip: false, data: "", rawData: parseResult["rawData"] || null }
+
+        let hasOutputs = ((parseResult["dispenseOutputs"]?.length > 0) || (parseResult["paymentOutputs"]?.length > 0))
+        // The || covers results from stubs/older shapes without the field.
+        let payloadCeiling = parseResult["payloadCeiling"] || MAX_ACTION_DATA_LENGTH
+
+        if (parseResult["compiledDataLength"] > payloadCeiling){
+            this.parseErrors++
+            console.error(rejectPrefix + `ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${payloadCeiling})`)
+            return { skip: !hasOutputs, data: "", rawData: null }
+        }
+
+        // Canonicalize (tokenize + alias-expand) at the BYTE level before string
+        // decoding, so the canonical name (always plain ASCII) rides through the same
+        // strict/lenient decode as everything else and the DB ends up alias-free
+        // regardless of which spelling was used on-chain. canonical.buffer equals the
+        // parsed payload unchanged whenever no rewrite is needed (including the
+        // unknown-name case), so this decode is byte-for-byte identical to decoding
+        // the raw data. The ceiling above deliberately bounds the WIRE form only: an
+        // alias expansion runs after it and may push the stored record past the cap.
+        const canonical = canonicalizeActionPayload(payload)
+        let decodedData
+        try {
+            decodedData = strictTextDecoder.decode(canonical.buffer)
+        } catch (e) {
+            this.parseErrors++
+            decodedData = lenientTextDecoder.decode(canonical.buffer)
+            console.error(utf8Prefix + 'ACTION data contains invalid UTF-8, decoded with replacement characters', e)
+        }
+
+        if (!canonical.isKnown){
+            this.parseErrors++
+            console.error(rejectPrefix + `unknown ACTION name '${canonical.rawActionName.substring(0, 32)}'`)
+            return { skip: !hasOutputs, data: "", rawData: null }
+        }
+
+        return { skip: false, data: decodedData, rawData: parseResult["rawData"] || null }
+    }
+
     // blockHeight gates Taproot-envelope recognition (envelope spec §7): the
     // confirmed-block path passes the block being parsed, the mempool path
     // passes its next-block estimate. Omitted/undefined resolves to INACTIVE
@@ -2494,69 +2575,24 @@ class XChainDecoder {
                     
                     if (parseResult != null){
                         let dispenseOutputs = parseResult['dispenseOutputs']
-                        
-                        if (//the transaction must have a data and a source or at least some possible dispenses
-                            (
-                                (parseResult["data"].length > 0) 
-                                && 
-                                (parseResult["source"] != null)
-                            )
-                            || dispenseOutputs.length > 0
-                        ){
+
+                        if (this.hasStorableContent(parseResult)){
                             lastProcessedTxIndex = lastProcessedTxIndex + 1
                             validTransactionsCount = validTransactionsCount + 1
 
-                            let decodedData = ""
-                            if (parseResult["data"].length > 0) {
-                                // A tx can carry BOTH an XChain OP_RETURN and money-bearing
-                                // dispense/payment outputs. When the ACTION is oversized or names
-                                // an unknown action, do NOT drop those outputs: treat the bad
-                                // action as no-action (empty data, null raw_data) and fall through
-                                // so the dispense/payment outputs are still recorded. Only skip the
-                                // whole tx when there is nothing else to record. The no-output skip
-                                // path still consumes a tx_index and continues: changing tx_index
-                                // assignment for invalid-action txs would diverge from
-                                // already-decoded history.
-                                let hasOutputs = (dispenseOutputs.length > 0 || parseResult["paymentOutputs"].length > 0)
-                                // Per-encoding ceiling (envelope spec §4): the envelope's
-                                // payloadCeiling is ENVELOPE_MAX_PAYLOAD, legacy lanes
-                                // report MAX_ACTION_DATA_LENGTH (the || covers results
-                                // from stubs/older shapes without the field).
-                                let payloadCeiling = parseResult["payloadCeiling"] || MAX_ACTION_DATA_LENGTH
-                                if (parseResult["compiledDataLength"] > payloadCeiling) {
-                                    this.parseErrors++
-                                    console.error(`Skipping ACTION for tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${payloadCeiling})`)
-                                    if (!hasOutputs) continue
-                                    decodedData = ""
-                                    parseResult["rawData"] = null
-                                } else {
-                                    // Canonicalize (tokenize + alias-expand) at the byte
-                                    // level via the shared helper BEFORE string-decoding, so the
-                                    // canonical name (always plain ASCII) rides through the same
-                                    // strict/lenient decode as everything else and the DB ends up
-                                    // alias-free regardless of which spelling was used on-chain.
-                                    // canonical.buffer equals parseResult["data"] unchanged whenever
-                                    // no rewrite is needed (including the unknown-name case), so this
-                                    // decode is byte-for-byte identical to decoding the raw data.
-                                    const canonical = canonicalizeActionPayload(parseResult["data"])
-                                    try {
-                                        decodedData = strictTextDecoder.decode(canonical.buffer)
-                                    } catch (e) {
-                                        this.parseErrors++
-                                        decodedData = lenientTextDecoder.decode(canonical.buffer)
-                                        console.error(`Tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`, e)
-                                    }
+                            // Storage gate (buildStoredActionRecord): a tx can carry BOTH an
+                            // XChain ACTION and money-bearing dispense/payment outputs. When the
+                            // ACTION is oversized or names an unknown action, those outputs are
+                            // NOT dropped: the bad action is blanked and the row is still
+                            // written. Only a tx with nothing else to record is skipped, and
+                            // that skip still consumes a tx_index (changing tx_index assignment
+                            // for invalid-action txs would diverge from already-decoded history).
+                            let stored = this.buildStoredActionRecord(parseResult, nextTransactionHash, false)
+                            if (stored.skip) continue
+                            // The canonical ACTION string as stored; the dispenser and
+                            // COINPAY handling below reads the same value the row holds.
+                            let decodedData = stored.data
 
-                                    if (!canonical.isKnown) {
-                                        this.parseErrors++
-                                        console.error(`Skipping ACTION for tx ${nextTransactionHash}: unknown ACTION name '${canonical.rawActionName.substring(0, 32)}'`)
-                                        if (!hasOutputs) continue
-                                        decodedData = ""
-                                        parseResult["rawData"] = null
-                                    }
-                                }
-                            }
-                            
                             let insertResult = await this.db.insertTransaction({
                                 index: lastProcessedTxIndex,
                                 hash: nextTransactionHash,
@@ -2565,8 +2601,8 @@ class XChainDecoder {
                                 destination: parseResult["destination"],
                                 amount: parseResult["amount"],
                                 fee: 0,
-                                data: decodedData,
-                                raw_data: parseResult["rawData"] || null
+                                data: stored.data,
+                                raw_data: stored.rawData
 
                             })
                             if (insertResult === this.db.POISON_ROW){
@@ -3085,74 +3121,18 @@ class XChainDecoder {
                         continue
                     }
 
-                    let mempoolData = parseResult["data"]
-                    if (mempoolData != null && mempoolData.length > 0) {
-                        // Mirror the confirmed-block path: apply the same two guards so a
-                        // pending tx never shows one thing and then silently vanishes on confirm.
-                        // A tx can carry BOTH an invalid/oversized ACTION and money-bearing
-                        // dispense/payment outputs; when it does, do NOT drop the whole tx.
-                        // Treat the bad action as no-action (null data) and still record the
-                        // pending tx, exactly as the block path does at confirmation. Only skip
-                        // the whole tx when there is nothing else to record.
-                        let hasOutputs = ((parseResult["dispenseOutputs"]?.length > 0) || (parseResult["paymentOutputs"]?.length > 0))
-
-                        // Guard 1: oversized payloads, against the per-encoding
-                        // ceiling the parse reported (envelope spec §4: enforced
-                        // identically in the block and mempool paths).
-                        let mempoolPayloadCeiling = parseResult["payloadCeiling"] || MAX_ACTION_DATA_LENGTH
-                        if (parseResult["compiledDataLength"] > mempoolPayloadCeiling) {
-                            this.parseErrors++
-                            console.error(`Mempool: tx ${nextTransactionHash}: ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${mempoolPayloadCeiling})`)
-                            if (!hasOutputs) continue
-                            // Empty buffer (not null) so this decodes to the SAME ''
-                            // sentinel the confirmed-block path stores for a rejected
-                            // ACTION on a money-bearing tx; a null would persist as SQL
-                            // NULL and break pending/confirmed content-correlation.
-                            mempoolData = new Uint8Array(0)
-                            // Drop the raw payload with the action it belonged to, exactly as
-                            // the confirmed-block path does; a rejected ACTION must not leave
-                            // a stale raw_data on the pending row.
-                            parseResult["rawData"] = null
-                        } else {
-                            // Guard 2: unknown ACTION names (expand aliases first so an
-                            // alias-named tx doesn't show as pending and then silently vanish).
-                            // Shared with the confirmed-block path via
-                            // canonicalizeActionPayload so the two gates cannot drift again.
-                            const canonical = canonicalizeActionPayload(mempoolData)
-                            if (!canonical.isKnown) {
-                                this.parseErrors++
-                                console.error(`Mempool: tx ${nextTransactionHash}: unknown ACTION name '${canonical.rawActionName.substring(0, 32)}'`)
-                                if (!hasOutputs) continue
-                                // Empty buffer (not null): decodes to '' matching the
-                                // confirmed-block path, not SQL NULL. See guard 1 above.
-                                mempoolData = new Uint8Array(0)
-                                // Same parity as guard 1: no action stored means no raw payload.
-                                parseResult["rawData"] = null
-                            } else {
-                                mempoolData = canonical.buffer
-                            }
-                        }
-                    }
-
-                    // Store the canonical payload as the SAME UTF-8 string the
-                    // confirmed-block path writes (strictTextDecoder over
-                    // canonical.buffer, lenient fallback on invalid UTF-8), not
-                    // hex. Otherwise mempool_transactions.data ("434f..." hex)
-                    // and transactions.data ("COINPAY|..." text) hold the same
-                    // on-wire ACTION in two encodings, so any content-correlation
-                    // between a pending row and its confirmed twin silently
-                    // mismatches (uuid:26220713). mempoolData here is
-                    // canonical.buffer (a Uint8Array) for a known ACTION.
-                    let mempoolDataString = null
-                    if (mempoolData != null) {
-                        try {
-                            mempoolDataString = strictTextDecoder.decode(mempoolData)
-                        } catch (e) {
-                            this.parseErrors++
-                            mempoolDataString = lenientTextDecoder.decode(mempoolData)
-                            console.error(`Mempool: tx ${nextTransactionHash}: ACTION data contains invalid UTF-8, decoded with replacement characters`, e)
-                        }
-                    }
+                    // Same storage gate as the confirmed-block path, by construction:
+                    // buildStoredActionRecord owns the ceiling, the alias expansion, the
+                    // UTF-8 decode and the VALID_ACTION_NAMES check, so a pending tx can
+                    // never show one thing and then silently vanish on confirm. It stores
+                    // the canonical payload as the SAME UTF-8 string the block path writes,
+                    // not hex: otherwise mempool_transactions.data ("434f..." hex) and
+                    // transactions.data ("COINPAY|..." text) hold the same on-wire ACTION in
+                    // two encodings and content-correlation between a pending row and its
+                    // confirmed twin silently mismatches (uuid:26220713). A rejected ACTION
+                    // on a money-bearing tx blanks to '' (never SQL NULL) for the same reason.
+                    let stored = this.buildStoredActionRecord(parseResult, nextTransactionHash, true)
+                    if (stored.skip) continue
 
                     if (!(await this.mempoolDb.insertMempoolTransaction({
                         hash: nextTransactionHash,
@@ -3160,8 +3140,8 @@ class XChainDecoder {
                         destination: parseResult["destination"],
                         amount: parseResult["amount"],
                         fee: 0,
-                        data: mempoolDataString,
-                        raw_data: parseResult["rawData"] || null
+                        data: stored.data,
+                        raw_data: stored.rawData
 
                     }))) {
                         await this.sleep(3000)
