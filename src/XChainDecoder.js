@@ -30,6 +30,7 @@ const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
 const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress } = require('./oracleFeeOutput')
 const { isDispenserExpiryRealignActive } = require('./dispenserExpiryRealign')
+const { captureCommands } = require('./batchSubCommandCapture')
 const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./chainIdentity')
 const strictTextDecoder = new TextDecoder('utf-8', { fatal: true })
 const lenientTextDecoder = new TextDecoder('utf-8')
@@ -1143,6 +1144,40 @@ class XChainDecoder {
         }
 
         return []
+    }
+
+    // The UNION of the oracle-fee addresses named by every command in `commands`, or false
+    // when a deterministic DB fault stopped a resolution (propagated so the caller retries
+    // the block rather than persisting a smaller output set than a healthy node would).
+    //
+    // For a non-BATCH transaction `commands` is [decodedData] and this is exactly
+    // resolveOracleFeeAddresses. For a BATCH at/above
+    // BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION it is the sub-command list, and one batch
+    // may name several oracles: each DISPENSER sub-command is dispatched independently by
+    // the indexer and pays its own oracle, so the whole union has to be capturable.
+    //
+    // The cache bounds the DB work a 250-command batch can force inside the block loop. A
+    // v0 create resolves purely by parsing its own fields (no query at all), while every
+    // v2 refill resolves from SOURCE alone - the payload names its target by
+    // DISPENSER_ACTION_INDEX, an id in the indexer's space the decoder does not maintain -
+    // so all v2 sub-commands of one transaction resolve identically and share a cache key.
+    async resolveOracleFeeAddressesForCommands(commands, source, blockTime, transactionHash){
+        let addresses = []
+        let resolved = new Set()
+        for (let nextCommand of commands){
+            if (typeof nextCommand !== 'string' || !nextCommand.startsWith("DISPENSER|"))
+                continue
+            let cacheKey = nextCommand.startsWith("DISPENSER|2|") ? "DISPENSER|2|" : nextCommand
+            if (resolved.has(cacheKey))
+                continue
+            resolved.add(cacheKey)
+            let commandAddresses = await this.resolveOracleFeeAddresses(nextCommand, source, blockTime, transactionHash)
+            if (commandAddresses === false)
+                return false
+            for (let nextAddress of commandAddresses)
+                addresses.push(nextAddress)
+        }
+        return addresses
     }
 
     // Whether a parse result is worth a transactions row at all: it must carry an
@@ -2667,8 +2702,18 @@ class XChainDecoder {
                                 //    address or to the source's whole open set depending on
                                 //    ORACLE_FEE_SET_CAPTURE_ACTIVATION; see
                                 //    resolveOracleFeeAddresses.
-                                let isCoinpay = decodedData.startsWith("COINPAY|")
-                                let oracleFeeAddresses = await this.resolveOracleFeeAddresses(decodedData, parseResult["source"], block.timestamp, nextTransactionHash)
+                                // The action strings the capture decision is taken over. Both tests
+                                // below used to read the TOP-LEVEL action name only, so a BATCH
+                                // carrying either action persisted nothing and its settlement
+                                // never reached the indexer. For a non-BATCH transaction, and for
+                                // every block below BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
+                                // this list is exactly [decodedData] and both tests reduce to the
+                                // startsWith they replace; at/above the gate a BATCH yields its
+                                // SUB-COMMANDS instead, split to agree with
+                                // xchain-indexer/src/actions/batch.js (see batchSubCommandCapture).
+                                let commands = captureCommands(decodedData, this.consensusNetwork, block.timestamp)
+                                let isCoinpay = commands.some(nextCommand => nextCommand.startsWith("COINPAY|"))
+                                let oracleFeeAddresses = await this.resolveOracleFeeAddressesForCommands(commands, parseResult["source"], block.timestamp, nextTransactionHash)
                                 if (oracleFeeAddresses === false){
                                     // Deterministic DB fault while resolving a refill's oracle
                                     // address. Capturing nothing here would drop an output a

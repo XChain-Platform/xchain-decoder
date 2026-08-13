@@ -419,6 +419,59 @@ const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
     regtest: 0,
 };
 
+// BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION (payment-output capture through a BATCH): the
+// flag-day at/above which the DECODER decides which native-coin outputs to persist by looking
+// at a BATCH's SUB-COMMANDS instead of only at the top-level ACTION name. Keyed on BLOCK TIME
+// with the same >= semantics as ORACLE_FEE_OUTPUT_ACTIVATION, because the affected settlement
+// flows run on BTC, LTC and DOGE, whose heights diverge by millions of blocks.
+//
+// WHY IT EXISTS: capture reads the top-level action string. `decodedData.startsWith("COINPAY|")`
+// is FALSE for `BATCH|0|COINPAY|0|x;COINPAY|0|y`, and resolveOracleFeeAddresses' matching
+// `startsWith("DISPENSER|")` is false for a batched DISPENSER, so a BATCH carrying either action
+// persists NO settlement output and NO oracle-fee output. The indexer only ever sees outputs the
+// decoder persisted, so a batched COINPAY reaches it with an EMPTY COIN_DESTINATION and settles
+// nothing ("COINPAY (skip): destination mismatch tx= payee=<seller>", witnessed on regtest), and
+// a batched Mode B DISPENSER is rejected for a missing oracle fee whether or not the payer paid.
+// Both are money-bearing: the payer's coin is spent and nothing settles. At/above the gate the
+// capture decision runs over the batch's sub-command list, split exactly as
+// xchain-indexer/src/actions/batch.js splits it, so a batched COINPAY captures the same outputs a
+// top-level COINPAY does.
+//
+// CONSENSUS-AFFECTING: it changes the set of rows written to transaction_outputs, which changes
+// indexer verdicts, which changes the ledger. An ungated flip makes a from-genesis re-decode
+// capture outputs the live fleet never captured, so the legacy top-level-only view stays live
+// BELOW the gate and pre-flag-day history re-decodes byte-identically.
+//
+// NEVER ARM IT BELOW two sibling instants, both asserted in
+// test/unit/batchSubCommandOutputCaptureActivation.test.js:
+//   * the indexer's FIX_OUTPUT_FANOUT. A BATCH is a data-bearing, non-COINPAY row, so the extra
+//     captured outputs fan it out to several rows, and BELOW that flag-day
+//     output_fanout.collapseOutputFanout treats that as a consensus-critical fault and HALTS the
+//     block. Arming this gate earlier does not merely change a verdict, it stops the chain.
+//   * the indexer's BATCH_ISSUANCE_LIMITS, which carries the batch-cumulative settlement ledger.
+//     Capture without that ledger lets N COINPAY sub-commands settle N obligations from ONE
+//     payment, which is the defect this spec's R5 closes; arming capture first would open it.
+//
+// null means DISARMED (never active), the fail-closed default: mainnet keeps the legacy
+// top-level-only view until the operator ratifies an instant, chosen with the fleet's upgrade
+// state in hand, because arming it too early forks the chain and arming it in the past rewrites
+// agreed history. testnet and regtest are genesis-on, matching BOTH sibling gates there
+// (FIX_OUTPUT_FANOUT and BATCH_ISSUANCE_LIMITS are all-zeros off mainnet), so the venues exercise
+// the sub-command path from block 0.
+//
+// DEPLOY DEADLINE, once an instant is armed: EVERY decoder on that network MUST be running the
+// armed value before the instant, or the fleet splits on the first BATCH carrying a COINPAY or a
+// Mode B DISPENSER.
+//
+// Vendored into xchain-decoder/src/protocol/constants.js AHEAD of the canonical copy in
+// xchain-documentation/protocol/constants.js; the conformance suite requires that mirror to exist
+// before mainnet may be armed.
+const BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION = {
+    mainnet: null,        // DISARMED: awaiting the operator's ratified instant
+    testnet: 0,
+    regtest: 0,
+};
+
 // Taproot envelope.
 
 // ENVELOPE_MAX_PAYLOAD: the Taproot-envelope payload ceiling, PER-ENCODING by
@@ -536,6 +589,7 @@ module.exports = {
     ORACLE_FEE_OUTPUT_ACTIVATION,
     ORACLE_FEE_SET_CAPTURE_ACTIVATION,
     DISPENSER_EXPIRY_REALIGN_ACTIVATION,
+    BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
     ENVELOPE_MAX_PAYLOAD,
     ENVELOPE_RECOGNITION_ACTIVATION,
     VALID_FIAT_CODES,
