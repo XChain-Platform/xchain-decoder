@@ -1,7 +1,28 @@
-# Siblings the CI gate checks out (at origin/master) next to this repo so the
-# decoder's cross-repo conformance tests resolve ../xchain-encoder deterministically.
-# Without this, the byte-identity drift-guard (roundtripConformance) reads whatever
-# stale checkout happens to sit at the venue's work/xchain-encoder and can fail on a
-# non-canonical leftover; shipping the canonical origin/master copy makes the guard
-# run against the single source of truth (and self-heals any leftover via rm -rf).
+# Repos the decoder suite needs checked out BESIDE it on the CI venue.
+#
+# Declaring a sibling here is what makes its cross-repo guards actually run. An
+# UNdeclared sibling is not a neutral omission: every guard written against it
+# resolves with existsSync, calls this.skip(), and the gate still prints PASS,
+# so the run reports green having exercised none of them. Measured 2026-08-12,
+# that gap was 19 guards (a venue carrying only xchain-encoder ran 1063 passing
+# / 30 pending where a full local checkout runs 1082 / 11). See
+# test/unit/sibling-coverage.test.js, which reports the surface this file leaves
+# uncovered; the same gap applies to a sibling that is declared but missing.
+#
+# ci-dispatch.sh ships each of these at its origin/master (falling back to local
+# HEAD) and REFUSES the push if one is not a checkout beside this repo, so a
+# declared sibling can never be silently absent. It also removes any leftover at
+# the venue, so a guard can never compare against whatever revision another
+# repo's run left behind.
+
+# Roundtrip and compiled-push-size conformance, plus taproot-envelope validator parity.
 xchain-encoder
+# Action-manifest conformance, the canonical ORACLE_FEE_OUTPUT_ACTIVATION map,
+# and the taproot golden vectors.
+xchain-documentation
+# Vendored coins-registry byte-identity: BTC/LTC/DOGE/index/consensus_pin.
+xchain-hub
+# The FIX_OUTPUT_FANOUT registration in the indexer protocol-change table.
+xchain-indexer
+# AuxPoW strip parity and the dispenser safe-depth twin.
+xchain-utxo-tracker
