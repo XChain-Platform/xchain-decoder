@@ -41,6 +41,7 @@
 
 const assert = require('assert')
 const XChainDecoder = require('../../src/XChainDecoder')
+const { DISPENSER_EXPIRY_REALIGN_ACTIVATION } = require('../../src/dispenserExpiryRealign')
 
 const PREV_WIRE = Buffer.from(
     '00112233445566778899aabbccddeeff0123456789abcdeffedcba9876543210',
@@ -60,6 +61,7 @@ class DispenserModel {
     constructor() {
         this.rows  = []
         this.calls = { insert: [], extend: [] }
+        this.stampsCleared = 0
     }
     async insertDispenser({ txIndex, address, sourceAddress, expiration, oracleAddress }) {
         this.calls.insert.push({ txIndex, address, sourceAddress, expiration: Number(expiration) })
@@ -97,16 +99,27 @@ class DispenserModel {
         const open = this._openFor(sourceAddress)
         return (open.length && open[0].oracleAddress) ? open[0].oracleAddress : null
     }
+    // Mirrors getOpenDispenserOracleAddressesBySource: the same target resolution with the
+    // ranking dropped, de-duplicated, as the set the block loop tests membership against
+    // at/above ORACLE_FEE_SET_CAPTURE_ACTIVATION.
+    async getOpenDispenserOracleAddressesBySource(sourceAddress) {
+        return [...new Set(this._openFor(sourceAddress)
+            .map(r => r.oracleAddress)
+            .filter(a => !!a))]
+    }
     // Mirrors extendOpenDispenserExpirationBySource:
     //   UPDATE ... SET expiration = GREATEST(expiration, ?) ... (no ORDER BY, no LIMIT)
     // over EVERY open row the acting address may act on. Never shortens, never picks.
     // The candidate set also admits a row THIS block soft-expired, and clears that
-    // stamp, because deleteOpenDispensers ran before the transaction loop.
+    // stamp, because below DISPENSER_EXPIRY_REALIGN_ACTIVATION deleteOpenDispensers ran
+    // before the transaction loop. `stampsCleared` counts the rows that clear actually
+    // rescued, so a test asserting the rescue cannot pass vacuously in an era where the
+    // block-start soft-expire never stamped anything to begin with.
     async extendOpenDispenserExpirationBySource(sourceAddress, newExpiration, blockIndex) {
         this.calls.extend.push({ sourceAddress, newExpiration: Number(newExpiration), blockIndex })
         for (const r of this._openFor(sourceAddress, blockIndex)) {
             r.expiration = Math.max(Number(r.expiration), Number(newExpiration))
-            if (r.expiredBlockIndex === blockIndex) r.expiredBlockIndex = null
+            if (r.expiredBlockIndex === blockIndex) { r.expiredBlockIndex = null; this.stampsCleared++ }
         }
         return true
     }
@@ -187,6 +200,7 @@ function buildDecoder(txSpecs, model) {
         purgeExpiredDispensers:              (h) => model.purgeExpiredDispensers(h),
         getAllOpenDispenserAddresses:        () => model.getAllOpenDispenserAddresses(),
         getOpenDispenserOracleAddressBySource: (s) => model.getOpenDispenserOracleAddressBySource(s),
+        getOpenDispenserOracleAddressesBySource: (s) => model.getOpenDispenserOracleAddressesBySource(s),
     }
 
     decoder.xchainBlockDecoder = {
@@ -265,7 +279,8 @@ describe('DISPENSER lifecycle mirror: advisory open-view', function () {
 
     // The ORDERING case the mirror was missing.
     //
-    // The decoder soft-expires at block START (deleteOpenDispensers, before the tx loop);
+    // BELOW DISPENSER_EXPIRY_REALIGN_ACTIVATION the decoder soft-expires at block
+    // START (deleteOpenDispensers, before the tx loop);
     // the indexer expires at block END (processExpirations, after it). So on the first
     // block whose header time passes an expiration, the indexer applies a same-block
     // format-2 extension BEFORE its expiry pass and keeps the dispenser open, while the
@@ -274,6 +289,12 @@ describe('DISPENSER lifecycle mirror: advisory open-view', function () {
     // and payments to a dispenser the indexer still honours stopped being captured. That is
     // the money-bearing direction, and it is the exact failure this mirror exists to
     // prevent, so a stamp from THIS block is cleared.
+    //
+    // Pinned to the LEGACY era on purpose. The harness builds a regtest decoder, and regtest
+    // is genesis-on for the realign gate, so left alone this case would never produce a
+    // same-block stamp at all and would pass vacuously. The clear it asserts still governs
+    // every network below the gate (and any re-processed block above it), so the era is
+    // disarmed here to keep the assertion pointed at the mechanism it was written for.
     it('a same-block extend REOPENS a row this block soft-expired', async () => {
         const model = new DispenserModel()
         // Pre-existing row, already past its expiry at this block's header time, so the
@@ -285,9 +306,15 @@ describe('DISPENSER lifecycle mirror: advisory open-view', function () {
             { id: 'edit01', action: `DISPENSER|2|7||${extended}||`, source: ADDR },
         ], model)
 
-        await decoder.start()
+        const savedGate = DISPENSER_EXPIRY_REALIGN_ACTIVATION.regtest
+        DISPENSER_EXPIRY_REALIGN_ACTIVATION.regtest = null
+        try { await decoder.start() }
+        finally { DISPENSER_EXPIRY_REALIGN_ACTIVATION.regtest = savedGate }
 
         assert.strictEqual(model.calls.extend.length, 1, 'the edit must reach the mirror')
+        assert.strictEqual(model.stampsCleared, 1,
+            'the legacy block-start soft-expire must actually have stamped the row, and the ' +
+            'extend must actually have cleared that stamp; 0 here means the case went vacuous');
         assert.strictEqual(model.rows[0].expiredBlockIndex, null,
             'the soft-expiry stamp from THIS block must be cleared, not left to close the row forever');
         assert.strictEqual(model.rows[0].expiration, extended, 'and the expiry moved out')

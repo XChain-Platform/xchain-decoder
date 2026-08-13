@@ -98,7 +98,7 @@ describe('E2E: DISPENSER Lifecycle', function () {
 
     describe('dispenser expiration', () => {
 
-        it('B2.1: should soft-expire a dispenser past its expiration on the next block', async () => {
+        it('B2.1: should soft-expire a dispenser past its expiration in its own block', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
             // Set expiration to a timestamp in the past relative to the next block.
             // Block timestamps on regtest are based on system time, so use a past time.
@@ -108,12 +108,14 @@ describe('E2E: DISPENSER Lifecycle', function () {
             await txBuilder.waitForDecoder(blockIndex)
             await txBuilder.waitForTransaction(txHash)
 
-            // The sweep runs BEFORE a block's own transactions are parsed, so a
-            // create can never be expired by the block that carries it: the next
-            // block is what expires it.
-            const newHeight = await txBuilder.mineBlocks(1)
-            await txBuilder.waitForDecoder(newHeight)
-
+            // WHERE the sweep runs is flag-day gated (DISPENSER_EXPIRY_REALIGN_ACTIVATION),
+            // and regtest is genesis-on, so this venue exercises the REALIGNED path: the
+            // sweep runs AFTER the block's own transactions, exactly where the indexer's
+            // processExpirations sits. An already-past expiration is therefore stamped by
+            // the block that CARRIES the create, not the one after it. (Below the gate the
+            // sweep ran first and a create could never be expired by its own block, which
+            // is the legacy behavior mainnet/testnet keep until an instant is ratified.)
+            //
             // Expiry is a SOFT expire, not a delete: db.deleteOpenDispensers stamps
             // the expiring block height into expired_block_index so a reorg can
             // resurrect a dispenser that an orphaned block's non-monotonic timestamp
@@ -125,9 +127,9 @@ describe('E2E: DISPENSER Lifecycle', function () {
                 dispensers[0].expired_block_index !== null,
                 'Expired dispenser should carry the expiring block height'
             )
-            assert.ok(
-                Number(dispensers[0].expired_block_index) > blockIndex,
-                'Expiry should be stamped by a block after the create'
+            assert.strictEqual(
+                Number(dispensers[0].expired_block_index), Number(blockIndex),
+                'Expiry should be stamped by the create block itself under the realigned sweep'
             )
         })
 

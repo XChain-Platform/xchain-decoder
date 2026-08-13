@@ -28,7 +28,8 @@ const ecc = require('tiny-secp256k1')
 const BlockchainConnector = require('./BlockchainConnector')
 const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
-const { isOracleFeeCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress } = require('./oracleFeeOutput')
+const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress } = require('./oracleFeeOutput')
+const { isDispenserExpiryRealignActive } = require('./dispenserExpiryRealign')
 const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./chainIdentity')
 const strictTextDecoder = new TextDecoder('utf-8', { fatal: true })
 const lenientTextDecoder = new TextDecoder('utf-8')
@@ -1055,8 +1056,8 @@ class XChainDecoder {
         return Array.isArray(decodedDataSplit) && decodedDataSplit.length >= 10
     }
 
-    // The ORACLE_ADDRESS whose native-coin output this transaction's payment-output
-    // capture must persist, or null when there is none.
+    // The ORACLE_ADDRESSes whose native-coin outputs this transaction's payment-output
+    // capture must persist, as an array (empty when there are none).
     //
     // A Mode B dispenser pays its PRICE v1 oracle operator up front as a real on-chain
     // output, and the indexer rejects the create/refill when it cannot SEE that output
@@ -1065,23 +1066,34 @@ class XChainDecoder {
     // this transaction is associated with and leaves every amount/eligibility question to
     // the indexer, exactly as it does for the protocol FEE_DESTINATION.
     //
-    //   v0 (create): the address is in the payload itself (field 13).
+    //   v0 (create): the address is in the payload itself (field 13), so this is always a
+    //       one-element answer.
     //   v2 (edit/refill): the payload carries no address. It names the target by
     //       DISPENSER_ACTION_INDEX, an id in the INDEXER's action space the decoder does
-    //       not maintain, so the oracle address is read back from the open dispenser row
+    //       not maintain, so the oracle address is read back from the open dispenser rows
     //       this decoder registered, resolved by SOURCE address. That match covers the
     //       create SOURCE as well as the operating address, so a delegated (GET_ADDRESS)
-    //       dispenser refilled by its original creator resolves too. This read keeps its
-    //       single-row ranking even though the open-view mirror no longer ranks: the
-    //       reasoning differs, and db.js states it at the site. An unmatched SOURCE
+    //       dispenser refilled by its original creator resolves too. An unmatched SOURCE
     //       captures nothing and the indexer rejects that refill, which is fail-closed.
+    //
+    //       Which rows a v2 resolves to is itself gated, on
+    //       ORACLE_FEE_SET_CAPTURE_ACTIVATION:
+    //         at/above it - EVERY open Mode B dispenser of that source, and the caller
+    //             tests membership. No ORDER BY can identify the DISPENSER_ACTION_INDEX
+    //             target, so the set is the only answer that captures the right output for
+    //             a source holding more than one open dispenser.
+    //         below it - the legacy single top-ranked pick, preserved byte-for-byte
+    //             because widening the persisted output set is consensus-affecting and a
+    //             re-decode of pre-flag-day history must reproduce what the fleet wrote.
+    //             Its known defect (a refill of any non-top-ranked row captures nothing)
+    //             is stated at getOpenDispenserOracleAddressBySource in db.js.
     //
     // Returns false on a DB fault so the caller can roll the block back: silently
     // capturing nothing would make this node disagree with a healthy one about what the
     // transaction paid, which is a ledger fork rather than a missed row.
-    async resolveOracleFeeAddress(decodedData, source, blockTime, transactionHash){
+    async resolveOracleFeeAddresses(decodedData, source, blockTime, transactionHash){
         if (typeof decodedData !== 'string' || !decodedData.startsWith("DISPENSER|"))
-            return null
+            return []
         // Consensus gate. Below it the decoder captures nothing, so a fee-bearing Mode B
         // create is rejected whether or not it paid - the fail-closed direction, and the
         // one that keeps a from-genesis re-decode byte-identical to what live nodes wrote.
@@ -1089,7 +1101,7 @@ class XChainDecoder {
         // SECOND output on a data-bearing transaction fans it out to two rows, which below
         // that flag-day is a consensus-critical fault that halts the block.
         if (!isOracleFeeCaptureActive(this.consensusNetwork, blockTime))
-            return null
+            return []
 
         let fields = decodedData.split("|")
         let format = parseInt(fields[1], 10)
@@ -1103,19 +1115,34 @@ class XChainDecoder {
                 // a historical replay.
                 this.parseErrors++
                 console.error(`Oracle-fee output NOT captured for tx ${transactionHash}: compacted ORACLE_ADDRESS reference '${fields[13]}' cannot be resolved by the decoder, so the indexer will reject this dispenser create`)
-                return null
+                return []
             }
-            return oracleAddressFromCreate(fields)
+            let createOracleAddress = oracleAddressFromCreate(fields)
+            return createOracleAddress ? [createOracleAddress] : []
         }
 
         if (format === 2){
-            if (!source || source.length === 0) return null
+            if (!source || source.length === 0) return []
+            if (isOracleFeeSetCaptureActive(this.consensusNetwork, blockTime)){
+                let oracleAddresses = await this.db.getOpenDispenserOracleAddressesBySource(source)
+                if (oracleAddresses === false) return false
+                // db.js returns an array; any iterable of addresses (a Set, say) is accepted
+                // so an alternate accessor shape degrades to a correct capture rather than
+                // to a silently empty one. A bare string is NOT one: spreading it would
+                // make every character a set member.
+                if (!oracleAddresses || typeof oracleAddresses === 'string' ||
+                    typeof oracleAddresses[Symbol.iterator] !== 'function') return []
+                // Drop null/empty entries defensively: an unresolvable address must never
+                // become a set member, or an output whose own address failed to resolve
+                // (also null) would match it and be captured by accident.
+                return [...oracleAddresses].filter(nextAddress => typeof nextAddress === 'string' && nextAddress.length > 0)
+            }
             let oracleAddress = await this.db.getOpenDispenserOracleAddressBySource(source)
             if (oracleAddress === false) return false
-            return oracleAddress || null
+            return oracleAddress ? [oracleAddress] : []
         }
 
-        return null
+        return []
     }
 
     // blockHeight gates Taproot-envelope recognition (envelope spec §7): the
@@ -2330,20 +2357,42 @@ class XChainDecoder {
                     continue main_parsing
                 }
 
+                // WHERE the dispenser soft-expire runs is a consensus decision, so it rides a
+                // flag-day (DISPENSER_EXPIRY_REALIGN_ACTIVATION, keyed on block TIME).
+                //
+                // LEGACY (below the gate): here, at block START, before the transaction loop.
+                // The open-dispenser address set loaded just below therefore excludes anything
+                // this block's header time expired, so payments to it are not captured. The
+                // INDEXER expires at block END (utility.processExpirations), so for every tx in
+                // this same block it still treats that dispenser as open, and since it only sees
+                // outputs the decoder persisted, the boundary block pays coin with no DISPENSE.
+                // That defect is preserved verbatim below the gate: a from-genesis re-decode has
+                // to reproduce what the fleet actually wrote, byte for byte.
+                //
+                // REALIGNED (at/above the gate): skipped here and run after the transaction loop
+                // instead (same block transaction), which puts both services' measurement points
+                // in the same place so a boundary block yields the same DISPENSE set on both.
+                const expireDispensersAtBlockEnd =
+                    isDispenserExpiryRealignActive(this.consensusNetwork, block.timestamp)
+
                 //Soft-expire open dispensers past their expiration (marks them with
                 //this block height instead of deleting, so a reorg can restore them).
                 //false means the UPDATE failed and the block transaction was already
                 //rolled back; continuing would land every subsequent write on fresh
                 //autocommit connections OUTSIDE any transaction (durable rows the
                 //rollback was meant to discard), so retry the block instead.
-                if ((await this.db.deleteOpenDispensers(nextBlockHeight, block.timestamp)) !== true){
+                if (!expireDispensersAtBlockEnd &&
+                    (await this.db.deleteOpenDispensers(nextBlockHeight, block.timestamp)) !== true){
                     console.error(`deleteOpenDispensers failed at block ${nextBlockHeight}; block rolled back, retrying`)
                     await resetAfterRollback()
                     continue main_parsing
                 }
 
-                // Load the set of open-dispenser addresses once for this block (after
-                // expiring stale ones above) so parseTransaction can test each output
+                // Load the set of open-dispenser addresses once for this block (below the
+                // realign gate, after expiring stale ones above; at/above it, before any
+                // expiry runs, which is the whole point: a dispenser this block's header
+                // time passes is still open for every tx in the block, as the indexer has
+                // it) so parseTransaction can test each output
                 // against it in JS instead of issuing one DB query per output; the
                 // per-output lookup was thousands of serialized round-trips per mainnet
                 // block. Kept current within the block by .add()ing any dispenser opened
@@ -2578,25 +2627,37 @@ class XChainDecoder {
                                 //  • DISPENSER v0/v2: the PRICE v1 oracle-usage-fee output paying
                                 //    the dispenser's ORACLE_ADDRESS, so the indexer can validate it
                                 //    (utility.validateOracleFee). Gated on
-                                //    ORACLE_FEE_OUTPUT_ACTIVATION; see resolveOracleFeeAddress.
+                                //    ORACLE_FEE_OUTPUT_ACTIVATION, and a v2 refill resolves to one
+                                //    address or to the source's whole open set depending on
+                                //    ORACLE_FEE_SET_CAPTURE_ACTIVATION; see
+                                //    resolveOracleFeeAddresses.
                                 let isCoinpay = decodedData.startsWith("COINPAY|")
-                                let oracleFeeAddress = await this.resolveOracleFeeAddress(decodedData, parseResult["source"], block.timestamp, nextTransactionHash)
-                                if (oracleFeeAddress === false){
+                                let oracleFeeAddresses = await this.resolveOracleFeeAddresses(decodedData, parseResult["source"], block.timestamp, nextTransactionHash)
+                                if (oracleFeeAddresses === false){
                                     // Deterministic DB fault while resolving a refill's oracle
                                     // address. Capturing nothing here would drop an output a
                                     // healthy node captures, so retry the block instead.
-                                    console.error(`resolveOracleFeeAddress failed at block ${nextBlockHeight}; block rolled back, retrying`)
+                                    console.error(`resolveOracleFeeAddresses failed at block ${nextBlockHeight}; block rolled back, retrying`)
                                     await resetAfterRollback()
                                     continue main_parsing
                                 }
-                                if (isCoinpay || this.feeDestination || oracleFeeAddress){
+                                // Membership set, empty when this transaction is associated with no
+                                // oracle at all. Below ORACLE_FEE_SET_CAPTURE_ACTIVATION it holds at
+                                // most the one legacy pick, so the capture decision is identical to
+                                // the equality test it replaced.
+                                let oracleFeeAddressSet = new Set(oracleFeeAddresses)
+                                if (isCoinpay || this.feeDestination || oracleFeeAddressSet.size > 0){
                                     for (let nextOutput of parseResult["paymentOutputs"]){
                                         // Both address tests are truthiness-guarded: an unset
-                                        // feeDestination/oracleFeeAddress is null, and an output
-                                        // whose address could not be resolved is null too, so a
-                                        // bare !== comparison would capture it by accident.
+                                        // feeDestination is null, and an output whose address could
+                                        // not be resolved is null too, so a bare !== comparison
+                                        // would capture it by accident. The oracle test is set
+                                        // membership rather than equality (a v2 refill can resolve
+                                        // to several open dispensers' oracles above the flag-day),
+                                        // and the set never holds a null member, so an unresolved
+                                        // output address cannot match it either.
                                         let isFeeOutput    = this.feeDestination && nextOutput.destinationAddress === this.feeDestination
-                                        let isOracleOutput = oracleFeeAddress    && nextOutput.destinationAddress === oracleFeeAddress
+                                        let isOracleOutput = nextOutput.destinationAddress && oracleFeeAddressSet.has(nextOutput.destinationAddress)
                                         if (!isCoinpay && !isFeeOutput && !isOracleOutput)
                                             continue
                                         nextOutput.txIndex = lastProcessedTxIndex
@@ -2803,7 +2864,13 @@ class XChainDecoder {
                                                 // with the legacy set preserved below it so a from-genesis
                                                 // re-decode stays byte-identical. Outputs BEFORE the edit
                                                 // tx in this block are unreachable by any re-seed and need
-                                                // the end-of-block expiry realignment instead.
+                                                // the end-of-block expiry realignment instead, which is
+                                                // now what DISPENSER_EXPIRY_REALIGN_ACTIVATION arms: at/above
+                                                // that gate nothing is stamped before the loop, so there is
+                                                // no same-block stamp to clear and no mid-block gap at all.
+                                                // The clear below stays for the legacy era it was written
+                                                // for, where it is still the only thing ending the
+                                                // PERSISTENT divergence.
                                                 if ((await this.db.extendOpenDispenserExpirationBySource(editSource, newExpiration, nextBlockHeight)) === false){
                                                     // extendOpenDispenserExpirationBySource's error path already rolled the block back.
                                                     await resetAfterRollback()
@@ -2825,7 +2892,25 @@ class XChainDecoder {
                 }
                 
                 transactionsCount = transactionsCount + transactions.length
-                
+
+                // REALIGNED soft-expire (at/above DISPENSER_EXPIRY_REALIGN_ACTIVATION): the
+                // block's transactions have all been seen, so expire now, exactly where the
+                // indexer's utility.processExpirations sits. Every tx in this block therefore
+                // saw the dispenser open on BOTH sides, and a boundary block yields the same
+                // DISPENSE set. Runs INSIDE the block transaction (the commit below is what
+                // makes it durable), so a reorg still restores the row through
+                // deleteBlockByIndex, and the same-block extend above can still clear a stamp
+                // this height wrote on a re-processed block. Same rollback contract as the
+                // legacy call site: false means the UPDATE failed and the block transaction is
+                // already rolled back, so retry the block rather than writing on past it.
+                // Below the gate this is a no-op; the block-start call already ran.
+                if (expireDispensersAtBlockEnd &&
+                    (await this.db.deleteOpenDispensers(nextBlockHeight, block.timestamp)) !== true){
+                    console.error(`deleteOpenDispensers failed at end of block ${nextBlockHeight}; block rolled back, retrying`)
+                    await resetAfterRollback()
+                    continue main_parsing
+                }
+
                 // Commit once the batch is full, or immediately on the block that reaches
                 // the node tip so a caught-up decoder never holds a block uncommitted.
                 if ((blocksQuantity == DB_TRANSACTION_BLOCKS_QUANTITY-1) || (nextBlockHeight == this.blockchainInfoLastBlock)){
