@@ -645,6 +645,200 @@ describe('BATCH dispenser registration', function () {
             assert.deepStrictEqual(await probe(ARMED), { registered: 0, captured: 0 })
         })
     })
+
+    // ---------------------------------------------------------------------------
+    // The DISPENSER prefix carries its delimiter (row 34).
+    //
+    // The registry selected on `startsWith("DISPENSER")`, a bare ACTION NAME with no '|'.
+    // The wire delimits names with '|', so that also matched every longer string sharing the
+    // head: `DISPENSERX|0|...`, which the indexer dispatches nowhere, and the real but
+    // indexer-SYNTHESIZED DISPENSER_CLOSE / DISPENSER_EXPIRE, whose wire-spelled form resolves
+    // no dispenser there either. The decoder registered a dispenser for all of them and then
+    // classified payments to that address as DISPENSE outputs the indexer never settles.
+    //
+    // WHERE IT BITES, established by these tests rather than assumed: at the TOP LEVEL it does
+    // not, because buildStoredActionRecord's VALID_ACTION_NAMES gate blanks an unknown name to
+    // '' before the walk sees it. Row 26's sub-command walk is what made it reachable, since a
+    // BATCH's pieces pass NO name gate - only the outer 'BATCH' was ever checked. That makes
+    // this an inherited defect with a live above-gate consequence and, today, no reachable
+    // below-gate consequence at all. Both halves are pinned below, including the invariant the
+    // second half rests on.
+    describe('the DISPENSER prefix carries its delimiter above the gate', function () {
+
+        // Same field layout as `create`/`refill`, so the only thing that varies is the NAME.
+        const renamed = (name, command) => name + command.slice(command.indexOf('|'))
+
+        // Strings sharing the DISPENSER head that are not the DISPENSER action. DISPENSERX and
+        // DISPENSERS match no dispatch branch at all; DISPENSER_CLOSE and DISPENSER_EXPIRE are
+        // real names, but ones the INDEXER mints for itself (both sit in its FEE_QUOTE_EXEMPT
+        // set beside DISPENSE and ORDER_MATCH), so a wire transaction spelling one carries no
+        // resolvable DISPENSER_ACTION_INDEX and its handler returns without touching state.
+        const NEAR_MISS_NAMES = ['DISPENSERX', 'DISPENSERS', 'DISPENSER_CLOSE', 'DISPENSER_EXPIRE']
+
+        describe('inside a BATCH, where the defect is reachable', function () {
+
+            it('registers NOTHING for a near-miss sub-command above the gate', async () => {
+                for (const name of NEAR_MISS_NAMES) {
+                    const decoder = await runOne(
+                        'BATCH|0|' + renamed(name, create({ oracle: ORACLE_A })), ABOVE_GATE)
+                    assert.deepStrictEqual(decoder.model.rows, [],
+                        `${name} is not the DISPENSER action; the indexer runs nothing for it`)
+                    assert.strictEqual(decoder.model.insertCalls, 0)
+                }
+            })
+
+            it('still registers a GENUINE sub-command above the gate (row 26 intact)', async () => {
+                const decoder = await runOne('BATCH|0|' + create({ oracle: ORACLE_A }), ABOVE_GATE)
+                assert.deepStrictEqual(decoder.model.rows, [{
+                    txIndex: 1, address: SOURCE, expiration: EXP_LATE,
+                    oracleAddress: ORACLE_A, sourceAddress: null, expiredBlockIndex: null }])
+            })
+
+            it('drops only the near-miss when a batch carries one of each', async () => {
+                const decoder = await runOne('BATCH|0|' + [
+                    renamed('DISPENSERX', create({ getAddress: DELEGATE_B, oracle: ORACLE_B })),
+                    create({ getAddress: DELEGATE_A, oracle: ORACLE_A }),
+                ].join(';'), ABOVE_GATE)
+                assert.deepStrictEqual(addressesOf(decoder.model.rows), [DELEGATE_A],
+                    'a near-miss sibling must not take the whole batch down with it')
+                assert.strictEqual(rowFor(decoder.model, DELEGATE_A).oracleAddress, ORACLE_A)
+            })
+
+            it('registers nothing below the gate, for genuine OR near-miss', async () => {
+                // Below the gate a BATCH's sub-commands are invisible to the registry at all,
+                // so this is the same empty answer the fleet wrote pre-flag-day either way.
+                for (const name of ['DISPENSER', 'DISPENSERX']) {
+                    const decoder = await runOne(
+                        'BATCH|0|' + renamed(name, create({})), BELOW_GATE)
+                    assert.deepStrictEqual(decoder.model.rows, [])
+                }
+            })
+
+            it('a near-miss v2 sub-command extends NOTHING above the gate', async () => {
+                // Pass 2 (the lifecycle mirrors) reads the same gated prefix as pass 1, so a
+                // near-miss stops extending open rows at the same instant it stops registering.
+                for (const name of NEAR_MISS_NAMES) {
+                    const decoder = await runAll([
+                        { id: 'create01', action: create({ expiration: EXP_EARLY }), source: SOURCE, outputs: [] },
+                        { id: 'batch01',  action: 'BATCH|0|' + renamed(name, refill(EXP_LATE)),
+                          source: SOURCE, outputs: [] },
+                    ], ABOVE_GATE)
+                    assert.deepStrictEqual(decoder.model.extendCalls, [],
+                        `${name} must not reach the extend mirror`)
+                    assert.strictEqual(decoder.model.rows[0].expiration, EXP_EARLY)
+                }
+            })
+
+            it('a GENUINE v2 sub-command still extends above the gate', async () => {
+                const decoder = await runAll([
+                    { id: 'create01', action: create({ expiration: EXP_EARLY }), source: SOURCE, outputs: [] },
+                    { id: 'batch01',  action: 'BATCH|0|' + refill(EXP_LATE),     source: SOURCE, outputs: [] },
+                ], ABOVE_GATE)
+                assert.strictEqual(decoder.model.extendCalls.length, 1)
+                assert.strictEqual(decoder.model.rows[0].expiration, EXP_LATE)
+            })
+
+            // The money-bearing end: the registry is the set that decides which outputs become
+            // DISPENSE outputs, so a near-miss registration turns real payments into dispenses
+            // against a dispenser that does not exist anywhere but here.
+            it('stops classifying payments to a near-miss address as dispenses', async () => {
+                const decoder = await runAll([
+                    { id: 'batch01',
+                      action: 'BATCH|0|' + renamed('DISPENSERX', create({ getAddress: DELEGATE_A })),
+                      source: SOURCE, outputs: [] },
+                    { id: 'pay01', action: 'SEND|0|BTC|TICK|1|' + SELLER, source: BUYER,
+                      outputs: [{ destinationAddress: DELEGATE_A, vout: 0, amount: 50000 }] },
+                ], ABOVE_GATE, { feeDestination: FEE_DEST })
+                assert.deepStrictEqual(await decoder.model.getAllOpenDispenserAddresses(), new Set(),
+                    'no address is held open, so the payment stays an ordinary output')
+            })
+        })
+
+        describe('at the TOP LEVEL, where VALID_ACTION_NAMES already closed it', function () {
+
+            it('registers nothing for a near-miss name on EITHER side of the gate', async () => {
+                // Unchanged by this row: the storage gate blanks the action to '' first, so the
+                // loose prefix never saw these strings. Pinned so the claim is checked, not
+                // asserted, and so a future widening of VALID_ACTION_NAMES fails loudly here.
+                for (const name of NEAR_MISS_NAMES) {
+                    for (const venue of [ABOVE_GATE, BELOW_GATE]) {
+                        const decoder = await runOne(renamed(name, create({ oracle: ORACLE_A })), venue)
+                        assert.deepStrictEqual(decoder.model.rows, [],
+                            `${name} is blanked by the VALID_ACTION_NAMES gate`)
+                    }
+                }
+            })
+
+            it('registers a genuine top-level DISPENSER on both sides', async () => {
+                for (const venue of [ABOVE_GATE, BELOW_GATE]) {
+                    const decoder = await runOne(create({ oracle: ORACLE_A }), venue)
+                    assert.deepStrictEqual(decoder.model.rows, [{
+                        txIndex: 1, address: SOURCE, expiration: EXP_LATE,
+                        oracleAddress: ORACLE_A, sourceAddress: null, expiredBlockIndex: null }])
+                }
+            })
+
+            it('registers nothing for the bare token DISPENSER, on both sides', async () => {
+                // The ONE top-level string that clears VALID_ACTION_NAMES and still misses
+                // `DISPENSER|`: no pipe at all, so field [1] is undefined and the FORMAT parses
+                // NaN. It matched the loose prefix and matches the tight one nowhere, and the
+                // outcome is identical either way - which is exactly why the below-gate branch
+                // of this tightening has no reachable consequence today.
+                for (const venue of [ABOVE_GATE, BELOW_GATE]) {
+                    const decoder = await runOne('DISPENSER', venue)
+                    assert.deepStrictEqual(decoder.model.rows, [])
+                    assert.deepStrictEqual(decoder.model.extendCalls, [])
+                }
+            })
+
+            it('leaves DISPENSE alone (a SHORTER name, matched by neither prefix)', async () => {
+                for (const venue of [ABOVE_GATE, BELOW_GATE]) {
+                    const decoder = await runOne(renamed('DISPENSE', create({})), venue)
+                    assert.deepStrictEqual(decoder.model.rows, [])
+                }
+            })
+        })
+
+        // The invariant the whole below-gate byte-identity argument rests on. The gate is
+        // still applied to the predicate because THIS set can change: the day someone adds a
+        // DISPENSER-prefixed name to it, pre-flag-day history must still re-decode to the
+        // over-captured rows the fleet wrote, and only the gate promises that. This test is
+        // what turns that from a comment into a tripwire.
+        it('VALID_ACTION_NAMES holds no other name beginning DISPENSER', function () {
+            const { VALID_ACTION_NAMES } = require('../../src/XChainDecoder')
+            const shareTheHead = [...VALID_ACTION_NAMES].filter(n => n.startsWith('DISPENSER'))
+            assert.deepStrictEqual(shareTheHead, ['DISPENSER'],
+                'a second DISPENSER-prefixed action name makes the loose top-level prefix ' +
+                'reachable again; the flag-day gate on the predicate is what covers that')
+        })
+
+        // ONE constant, not two. Driven against the real gate by arming mainnet in place, so
+        // this fails the moment someone gives the tightening its own activation.
+        it('arms at the same instant as the sub-command walk', async () => {
+            const ARMED = 1789430400
+            const saved = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet
+            const probe = async (blockTime) => {
+                const decoder = await runOne('BATCH|0|' + [
+                    renamed('DISPENSERX', create({ getAddress: DELEGATE_B })),
+                    create({ getAddress: DELEGATE_A }),
+                ].join(';'), { network: 'bitcoin-mainnet', blockTime })
+                return addressesOf(decoder.model.rows)
+            }
+            BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = ARMED
+            try {
+                assert.deepStrictEqual(await probe(ARMED - 1), [],
+                    'one second below the instant the walk is off entirely')
+                assert.deepStrictEqual(await probe(ARMED), [DELEGATE_A],
+                    'at the instant the walk is on AND the prefix is tight')
+            } finally {
+                BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = saved
+            }
+            assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, null,
+                'the map must be back to DISARMED after the probe')
+            assert.deepStrictEqual(await probe(ARMED), [],
+                'DISARMED on mainnet leaves both halves off there')
+        })
+    })
 })
 
 // The collapse itself, driven directly. Its inputs are already-validated creates, so these

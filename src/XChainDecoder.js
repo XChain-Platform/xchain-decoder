@@ -30,7 +30,7 @@ const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
 const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress } = require('./oracleFeeOutput')
 const { isDispenserExpiryRealignActive } = require('./dispenserExpiryRealign')
-const { captureCommands, collapseDispenserRegistrations } = require('./batchSubCommandCapture')
+const { captureCommands, collapseDispenserRegistrations, isBatchSubCommandCaptureActive } = require('./batchSubCommandCapture')
 const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./chainIdentity')
 const strictTextDecoder = new TextDecoder('utf-8', { fatal: true })
 const lenientTextDecoder = new TextDecoder('utf-8')
@@ -2812,9 +2812,60 @@ class XChainDecoder {
                                 // top-level dispensers either. These rows are keyed on
                                 // (tx_index, operating address) and nothing here is keyed on an
                                 // action index, so nothing is approximated by not having one.
+                                //
+                                // THE PREFIX CARRIES ITS DELIMITER at/above the same gate, and only
+                                // there. `startsWith("DISPENSER")` selects on a bare action NAME, but
+                                // the wire delimits the name with '|', so it also matches every
+                                // longer string sharing that head: `DISPENSERX|0|...`, which
+                                // xchain-indexer/src/actions.js dispatches nowhere, and the real but
+                                // indexer-SYNTHESIZED DISPENSER_CLOSE / DISPENSER_EXPIRE (both sit in
+                                // FEE_QUOTE_EXEMPT beside DISPENSE and ORDER_MATCH), whose
+                                // wire-spelled form carries no resolvable DISPENSER_ACTION_INDEX and
+                                // so resolves no dispenser there either. The indexer runs NOTHING for
+                                // any of them while the bare prefix has the decoder splitting on '|',
+                                // reading field [1] as a DISPENSER FORMAT, and registering a create
+                                // (or extending an open row on a format-2 read). The registry IS the
+                                // set that decides which outputs become DISPENSE outputs, so the
+                                // decoder then captures dispenses no indexer will ever settle. The
+                                // direction is over-capture, which is why it was survivable and why
+                                // it closes on a flag-day rather than as a hotfix.
+                                //
+                                // WHERE IT IS ACTUALLY REACHABLE, which is not where it looks. NOT at
+                                // the top level: buildStoredActionRecord runs the VALID_ACTION_NAMES
+                                // gate first, and that set holds 'DISPENSER' and no other name
+                                // beginning DISPENSER, so `DISPENSERX|...` is blanked to '' before
+                                // this walk ever sees it. The one top-level string that survives that
+                                // gate and still misses `DISPENSER|` is the bare token 'DISPENSER'
+                                // with no pipe at all, whose field [1] is undefined and whose FORMAT
+                                // therefore parses NaN, matching no branch below either way.
+                                // Sub-commands get NO such gate: the name checked was BATCH, and
+                                // nothing re-checks the pieces. Row 26's walk is what made this
+                                // reachable, and `BATCH|0|DISPENSERX|0|...` really does register.
+                                //
+                                // WHY IT IS GATED ANYWAY, given that the below-gate branch is a
+                                // provable no-op today. That proof rests entirely on the membership
+                                // of VALID_ACTION_NAMES, a set that can gain a DISPENSER-prefixed
+                                // name later; the day it does, a from-genesis re-decode of history
+                                // BELOW the flag-day must still reproduce the over-captured rows the
+                                // fleet wrote, and only a gate can promise that in advance. It rides
+                                // BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION rather than a constant
+                                // of its own because that gate is BUILT AND STILL UNARMED on mainnet:
+                                // the tightening costs no flag-day, and the inheritance it closes
+                                // arms in the same instant that introduced it. A second constant
+                                // would arm one half of one decision separately.
+                                //
+                                // `DISPENSER|` is the whole tightening: DISPENSER has no legacy
+                                // VERSION-less wire form to spare (actions.js injects VERSION 0 for
+                                // ISSUE/MINT/SEND only), and no alias resolves to it (ACTION_ALIASES
+                                // is TRANSFER/ADDR/DROP/CAST/MSG), so every form the indexer
+                                // dispatches to actionDispenser literally begins 'DISPENSER|'.
+                                const dispenserCommandPrefix =
+                                    isBatchSubCommandCaptureActive(this.consensusNetwork, block.timestamp)
+                                        ? "DISPENSER|"
+                                        : "DISPENSER"
                                 let dispenserCreateCandidates = []
                                 for (let dispenserCommand of commands){
-                                    if (typeof dispenserCommand !== 'string' || !dispenserCommand.startsWith("DISPENSER"))
+                                    if (typeof dispenserCommand !== 'string' || !dispenserCommand.startsWith(dispenserCommandPrefix))
                                         continue
                                     let decodedDataSplit = dispenserCommand.split("|")
                                     // Field [1] is the DISPENSER FORMAT (create=0, cancel=1,
@@ -2952,8 +3003,11 @@ class XChainDecoder {
 
                                 // Pass 2: the format-1/2 lifecycle mirrors, after every create of
                                 // this transaction is registered (see the ordering note above).
+                                // Same gated prefix as pass 1: the two passes must agree about what
+                                // a DISPENSER command IS, or a string one pass registers is a string
+                                // the other declines to mirror.
                                 for (let dispenserCommand of commands){
-                                    if (typeof dispenserCommand !== 'string' || !dispenserCommand.startsWith("DISPENSER"))
+                                    if (typeof dispenserCommand !== 'string' || !dispenserCommand.startsWith(dispenserCommandPrefix))
                                         continue
                                     let decodedDataSplit = dispenserCommand.split("|")
                                     let dispenserFormat = parseInt(decodedDataSplit[1], 10)
