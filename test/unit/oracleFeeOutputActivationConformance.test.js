@@ -32,7 +32,8 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const { ORACLE_FEE_OUTPUT_ACTIVATION } = require('../../src/protocol/constants.js');
+const { ORACLE_FEE_OUTPUT_ACTIVATION, ORACLE_FEE_SET_CAPTURE_ACTIVATION } =
+    require('../../src/protocol/constants.js');
 
 // 2026-08-07 00:00:00 UTC, the contract-era flag-day the fan-out collapse rides.
 const PINNED_MAINNET_ACTIVATION = 1786060800;
@@ -86,5 +87,55 @@ describe('ORACLE_FEE_OUTPUT_ACTIVATION conformance', function () {
             'oracle-fee capture (' + ORACLE_FEE_OUTPUT_ACTIVATION.mainnet + ') must not begin before ' +
             'FIX_OUTPUT_FANOUT (' + fanoutMainnetTime + '): a second stored output below that ' +
             'flag-day is a consensus-critical fan-out fault that halts the block');
+    });
+});
+
+// ORACLE_FEE_SET_CAPTURE_ACTIVATION drift guard.
+//
+// The second gate widens a v2 refill's oracle-fee capture from ONE resolved address to
+// membership over every open Mode B dispenser of the paying source. That changes the set of
+// outputs persisted to transaction_outputs, so it is consensus-affecting in both directions:
+// arming it early on a fleet that has not deployed forks the chain, and arming it in the past
+// rewrites agreed history on a re-decode. null means DISARMED, which is the fail-closed
+// default a network sits at until its maintainers ratify an instant.
+describe('ORACLE_FEE_SET_CAPTURE_ACTIVATION conformance', function () {
+
+    it('carries a block time or null (DISARMED) per network, regtest genesis-on', function () {
+        const networks = Object.keys(ORACLE_FEE_SET_CAPTURE_ACTIVATION);
+        assert.deepStrictEqual(networks.sort(), ['mainnet', 'regtest', 'testnet'],
+            'the map must cover exactly the networks the base gate covers');
+        for (const network of networks) {
+            const value = ORACLE_FEE_SET_CAPTURE_ACTIVATION[network];
+            assert.ok(value === null || (Number.isSafeInteger(value) && value >= 0),
+                network + ' must be a non-negative block time or null (DISARMED)');
+        }
+        assert.strictEqual(ORACLE_FEE_SET_CAPTURE_ACTIVATION.regtest, 0,
+            'regtest holds no agreed history and stays genesis-on so the venues exercise the set path');
+    });
+
+    it('never precedes the base oracle-fee capture gate on any network', function () {
+        // Set capture only widens a capture the base gate already switched on. A value
+        // below it would arm a widening of something that captures nothing, and on mainnet
+        // it would also drag capture below the indexer's FIX_OUTPUT_FANOUT flag-day, which
+        // halts blocks.
+        for (const network of Object.keys(ORACLE_FEE_SET_CAPTURE_ACTIVATION)) {
+            const setGate = ORACLE_FEE_SET_CAPTURE_ACTIVATION[network];
+            if (setGate === null) continue;
+            assert.ok(setGate >= ORACLE_FEE_OUTPUT_ACTIVATION[network],
+                network + ' set capture (' + setGate + ') must not precede oracle-fee capture (' +
+                ORACLE_FEE_OUTPUT_ACTIVATION[network] + ')');
+        }
+    });
+
+    it('is value-identical to the canonical map in xchain-documentation', function () {
+        if (!siblingOrSkip(this, DOCS_CONSTANTS)) return;
+        const canon = require(DOCS_CONSTANTS).ORACLE_FEE_SET_CAPTURE_ACTIVATION;
+        assert.ok(canon && typeof canon === 'object',
+            'xchain-documentation/protocol/constants.js must export ORACLE_FEE_SET_CAPTURE_ACTIVATION');
+        assert.deepStrictEqual(
+            { mainnet: ORACLE_FEE_SET_CAPTURE_ACTIVATION.mainnet,
+              testnet: ORACLE_FEE_SET_CAPTURE_ACTIVATION.testnet,
+              regtest: ORACLE_FEE_SET_CAPTURE_ACTIVATION.regtest },
+            { mainnet: canon.mainnet, testnet: canon.testnet, regtest: canon.regtest });
     });
 });

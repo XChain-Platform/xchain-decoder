@@ -28,9 +28,10 @@
 
 const assert = require('assert')
 const XChainDecoder = require('../../src/XChainDecoder')
-const { isOracleFeeCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress } =
-    require('../../src/oracleFeeOutput')
-const { ORACLE_FEE_OUTPUT_ACTIVATION } = require('../../src/protocol/constants.js')
+const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate,
+        isCompactedOracleAddress } = require('../../src/oracleFeeOutput')
+const { ORACLE_FEE_OUTPUT_ACTIVATION, ORACLE_FEE_SET_CAPTURE_ACTIVATION } =
+    require('../../src/protocol/constants.js')
 
 const PREV_WIRE = Buffer.from(
     '00112233445566778899aabbccddeeff0123456789abcdeffedcba9876543210',
@@ -40,6 +41,10 @@ const PREV_WIRE = Buffer.from(
 const T0        = 1700000000
 const SOURCE    = 'bcrt1qdispenseroperator'
 const ORACLE    = 'bcrt1qoracleoperator'
+// A second and third oracle operator, for the multi-dispenser cases: one SOURCE holding
+// several open Mode B dispensers whose oracles differ.
+const ORACLE_A  = 'bcrt1qoracleoperatoraaa'
+const ORACLE_B  = 'bcrt1qoracleoperatorbbb'
 const FEE_DEST  = 'bcrt1qprotocolfeedest'
 const OTHER     = 'bcrt1qsomeoneelse'
 
@@ -63,11 +68,17 @@ class DispenserModel {
     async getAllOpenDispenserAddresses() {
         return new Set(this.rows.filter(r => r.expiredBlockIndex === null).map(r => r.address))
     }
+    _openFor(sourceAddress) {
+        return this.rows.filter(r => r.address === sourceAddress && r.expiredBlockIndex === null)
+    }
+    // Legacy single-pick (below ORACLE_FEE_SET_CAPTURE_ACTIVATION): most recent open row.
     async getOpenDispenserOracleAddressBySource(sourceAddress) {
-        const open = this.rows
-            .filter(r => r.address === sourceAddress && r.expiredBlockIndex === null)
-            .sort((a, b) => b.txIndex - a.txIndex)
+        const open = this._openFor(sourceAddress).sort((a, b) => b.txIndex - a.txIndex)
         return (open.length && open[0].oracleAddress) ? open[0].oracleAddress : null
+    }
+    // Set membership (at/above the gate): every open row's oracle, de-duplicated, unranked.
+    async getOpenDispenserOracleAddressesBySource(sourceAddress) {
+        return [...new Set(this._openFor(sourceAddress).map(r => r.oracleAddress).filter(a => !!a))]
     }
 }
 
@@ -130,7 +141,10 @@ function buildDecoder(txSpecs, model, opts) {
         deleteOpenDispensers:                (b, m) => model.deleteOpenDispensers(b, m),
         purgeExpiredDispensers:              (h) => model.purgeExpiredDispensers(h),
         getAllOpenDispenserAddresses:        () => model.getAllOpenDispenserAddresses(),
+        // opts.oracleLookup stands in for whichever accessor the flag-day routes to, so a
+        // fault-injection case does not have to know which side of the gate it is on.
         getOpenDispenserOracleAddressBySource: (s) => (opts.oracleLookup || ((x) => model.getOpenDispenserOracleAddressBySource(x)))(s),
+        getOpenDispenserOracleAddressesBySource: (s) => (opts.oracleLookup || ((x) => model.getOpenDispenserOracleAddressesBySource(x)))(s),
     }
 
     decoder.xchainBlockDecoder = {
@@ -201,6 +215,90 @@ describe('DISPENSER PRICE v1 oracle-fee output capture', function () {
         assert.strictEqual(decoder.captured.length, 1)
         assert.strictEqual(decoder.captured[0].destinationAddress, ORACLE)
         assert.strictEqual(decoder.captured[0].amount, '0.00000600')
+    })
+
+    // One SOURCE, several open Mode B dispensers, different oracles. The v2 payload names
+    // its target by DISPENSER_ACTION_INDEX (an indexer id the decoder does not maintain),
+    // so the legacy lookup RANKED the source's open rows and took one. A refill of any
+    // other row then resolved the wrong oracle, and because capture is an address equality
+    // test it captured NOTHING - the indexer, which resolves the exact target, rejected a
+    // valid refill for a missing oracle fee after the payer's coin was already spent.
+    // Above ORACLE_FEE_SET_CAPTURE_ACTIVATION capture tests membership over the whole set,
+    // so every row's refill captures; below it the legacy pick stands, byte-for-byte.
+    describe('set-membership capture over a source\'s open Mode B dispensers', function () {
+
+        // create01 (ORACLE_A) then create02 (ORACLE_B), both from SOURCE, then a refill
+        // paying `payTo`. create02 outranks create01 (higher tx_index), so a refill of
+        // create01 is exactly the case the single-pick gets wrong.
+        const twoOpenThenRefill = (payTo) => ([
+            { id: 'create01', action: createWith(ORACLE_A), source: SOURCE, outputs: [] },
+            { id: 'create02', action: createWith(ORACLE_B), source: SOURCE, outputs: [] },
+            { id: 'refill01', action: REFILL, source: SOURCE,
+              outputs: [{ destinationAddress: payTo, vout: 0, amount: '0.00000600' }] },
+        ])
+
+        // regtest is genesis-on for both gates; mainnet at the base flag-day has capture on
+        // and set capture still DISARMED, which is the pre-fix behavior to preserve.
+        const ABOVE = { network: 'bitcoin-regtest', blockTime: T0 }
+        const BELOW = { network: 'bitcoin-mainnet', blockTime: ORACLE_FEE_OUTPUT_ACTIVATION.mainnet,
+                        feeDestination: null }
+
+        it('captures the oracle of a NON-top-ranked open dispenser above the gate', async () => {
+            const model = new DispenserModel()
+            const decoder = buildDecoder(twoOpenThenRefill(ORACLE_A), model, ABOVE)
+
+            await decoder.start()
+
+            assert.strictEqual(model.rows.length, 2, 'both creates registered open dispensers')
+            assert.strictEqual(decoder.captured.length, 1,
+                'the refill of the older dispenser captured its oracle-fee output')
+            assert.strictEqual(decoder.captured[0].destinationAddress, ORACLE_A)
+            assert.strictEqual(decoder.captured[0].amount, '0.00000600')
+        })
+
+        it('captures the top-ranked dispenser oracle above the gate too', async () => {
+            const model = new DispenserModel()
+            const decoder = buildDecoder(twoOpenThenRefill(ORACLE_B), model, ABOVE)
+
+            await decoder.start()
+
+            assert.strictEqual(decoder.captured.length, 1)
+            assert.strictEqual(decoder.captured[0].destinationAddress, ORACLE_B)
+        })
+
+        it('captures nothing for an address outside the set, above the gate', async () => {
+            // The widening is bounded by the source's own open dispensers: an unrelated
+            // payee (change, a counterparty) is still not a transaction_output.
+            const model = new DispenserModel()
+            const decoder = buildDecoder(twoOpenThenRefill(OTHER), model, ABOVE)
+
+            await decoder.start()
+
+            assert.strictEqual(decoder.captured.length, 0)
+        })
+
+        it('keeps the legacy single-pick below the gate: the older row captures nothing', async () => {
+            // The defect itself, pinned. Changing this is a consensus change: a re-decode
+            // of pre-flag-day history must reproduce the output set the fleet wrote live.
+            const model = new DispenserModel()
+            const decoder = buildDecoder(twoOpenThenRefill(ORACLE_A), model, BELOW)
+
+            await decoder.start()
+
+            assert.strictEqual(model.rows.length, 2, 'both creates registered open dispensers')
+            assert.strictEqual(decoder.captured.length, 0,
+                'below the gate the wrong oracle is resolved and no output is persisted')
+        })
+
+        it('keeps the legacy single-pick below the gate: the top-ranked row still captures', async () => {
+            const model = new DispenserModel()
+            const decoder = buildDecoder(twoOpenThenRefill(ORACLE_B), model, BELOW)
+
+            await decoder.start()
+
+            assert.strictEqual(decoder.captured.length, 1)
+            assert.strictEqual(decoder.captured[0].destinationAddress, ORACLE_B)
+        })
     })
 
     it('captures nothing extra on a non-Mode-B (FIAT_AMOUNT-only) create', async () => {
@@ -299,6 +397,44 @@ describe('DISPENSER PRICE v1 oracle-fee output capture', function () {
 
             assert.strictEqual(decoder.captured.length, 1)
             assert.strictEqual(decoder.captured[0].destinationAddress, ORACLE)
+        })
+
+        it('never arms set capture before the base capture gate on any network', function () {
+            // Set capture only WIDENS a capture the base gate switched on, so a value below
+            // it would be meaningless, and one above it must still be a real instant. null
+            // means DISARMED: that network keeps the legacy single-pick until its
+            // maintainers ratify an instant.
+            for (const network of Object.keys(ORACLE_FEE_SET_CAPTURE_ACTIVATION)) {
+                const setGate  = ORACLE_FEE_SET_CAPTURE_ACTIVATION[network]
+                const baseGate = ORACLE_FEE_OUTPUT_ACTIVATION[network]
+                assert.ok(setGate === null || typeof setGate === 'number',
+                    network + ' must be a block time or null (DISARMED)')
+                if (typeof setGate === 'number')
+                    assert.ok(setGate >= baseGate,
+                        network + ' set capture (' + setGate + ') must not precede oracle-fee ' +
+                        'capture (' + baseGate + ')')
+            }
+            assert.strictEqual(ORACLE_FEE_SET_CAPTURE_ACTIVATION.regtest, 0,
+                'regtest holds no agreed history, so it stays genesis-on and exercises the set path')
+        })
+
+        it('reads a DISARMED (null) network entry as never active, at any block time', function () {
+            for (const network of Object.keys(ORACLE_FEE_SET_CAPTURE_ACTIVATION)) {
+                const setGate = ORACLE_FEE_SET_CAPTURE_ACTIVATION[network]
+                if (setGate === null) {
+                    assert.strictEqual(isOracleFeeSetCaptureActive(network, 4000000000), false,
+                        network + ' is disarmed, so no block time may switch set capture on')
+                    continue
+                }
+                assert.strictEqual(isOracleFeeSetCaptureActive(network, setGate), true)
+                assert.strictEqual(isOracleFeeSetCaptureActive(network, setGate - 1), false)
+            }
+        })
+
+        it('fails set capture closed on an unrecognized network or an unusable block time', function () {
+            assert.strictEqual(isOracleFeeSetCaptureActive('signet', 4000000000), false)
+            assert.strictEqual(isOracleFeeSetCaptureActive(undefined, 4000000000), false)
+            assert.strictEqual(isOracleFeeSetCaptureActive('regtest', NaN), false)
         })
 
         it('fails closed on an unrecognized network rather than capturing from genesis', function () {

@@ -2030,11 +2030,13 @@ class Database {
     // Do NOT re-add a closing mirror here, in either form, and do not reintroduce
     // ORDER BY ... LIMIT 1 targeting: both are the defect, not the fix.
     //
-    // The advisory contract stops at the open-view. Output CAPTURE resolution
-    // (getOpenDispenserOracleAddressBySource) still resolves by SOURCE and still picks ONE
-    // row with ORDER BY ... LIMIT 1. That ranking carries the same defect and is NOT
-    // benign: capture is an equality test, so a wrong pick captures nothing at all. See
-    // that function's own header for the failure and the activation gate its fix needs.
+    // The advisory contract stops at the open-view. Output CAPTURE resolution has TWO
+    // implementations, picked by the ORACLE_FEE_SET_CAPTURE_ACTIVATION flag-day:
+    // getOpenDispenserOracleAddressesBySource returns the WHOLE set of a source's open
+    // oracle addresses (no ranking, tested by membership) and is what runs above the gate;
+    // getOpenDispenserOracleAddressBySource keeps the legacy ORDER BY ... LIMIT 1 pick and
+    // runs only below it, where changing the captured output set would break from-genesis
+    // byte-identity. Both headers state their own contract.
 
     // Mirror a DISPENSER format-2 edit that re-dates EXPIRATION, so the block-time
     // soft-expire (deleteOpenDispensers) does not close a decoder row while the indexer
@@ -2055,7 +2057,8 @@ class Database {
     // the create SOURCE, stored only when the two differ, so an edit issued by the
     // creator of a delegated dispenser still reaches its row.
     //
-    // THIS-BLOCK RESTORE. deleteOpenDispensers runs at block START, before the
+    // THIS-BLOCK RESTORE. BELOW DISPENSER_EXPIRY_REALIGN_ACTIVATION deleteOpenDispensers
+    // runs at block START, before the
     // transaction loop, while the indexer expires at block END, after it. So on the block
     // whose header time first passes an expiration, this mirror is handed a row that the
     // block-start soft-expire has ALREADY stamped, and an `expired_block_index IS NULL`
@@ -2071,6 +2074,12 @@ class Database {
     // lifecycle.
     // Same shape as deleteBlockByIndex's reorg clear, which also keys the reset on the
     // stamping height, so a re-processed block remains idempotent.
+    //
+    // AT/ABOVE that gate the soft-expire moves to the end of the block loop, so no row
+    // carries a stamp from THIS block while the loop is running and the widened filter is
+    // simply never exercised on a fresh pass. It still matters on a RE-PROCESSED block
+    // (the stamp from the earlier pass survives), and it is what keeps the two eras' write
+    // behavior identical on every input the legacy era could produce, so this clause stays.
     //
     // The caller has already validated newExpiration is present, in range and future.
     // A stale/unknown SOURCE matches zero rows and is a no-op. Same false/true contract
@@ -2112,26 +2121,25 @@ class Database {
     // dispenser (paid by its original creator, whose SOURCE is not the operating address)
     // still find its dispenser and capture the oracle-fee output the indexer will look for.
     //
-    // KNOWN DEFECT: the ORDER BY ... LIMIT 1 ranking removed from the extend path survives
-    // here, and it is retained rather than endorsed. Capture is a single-address EQUALITY
-    // test (the block loop's payment-output scan,
-    // `nextOutput.destinationAddress === oracleFeeAddress`), so a wrong pick captures
-    // NOTHING: this lands in the under-capture direction the advisory note above calls
-    // money-bearing, not the over-capture direction it calls safe. When one source holds
-    // several open Mode B dispensers with DIFFERENT oracle addresses, a refill of any row
-    // but the top-ranked one resolves the wrong oracle, no output is captured, and the
+    // LEGACY PATH, BELOW THE FLAG-DAY ONLY. The ORDER BY ... LIMIT 1 ranking removed from
+    // the extend path survives here, and it is preserved rather than endorsed: it is the
+    // exact behavior the fleet ran before ORACLE_FEE_SET_CAPTURE_ACTIVATION, so a re-decode
+    // of pre-flag-day history must keep reproducing it byte-for-byte. Its defect is real.
+    // Capture is a single-address EQUALITY test (the block loop's payment-output scan), so
+    // a wrong pick captures NOTHING: the under-capture direction the advisory note above
+    // calls money-bearing, not the over-capture direction it calls safe. When one source
+    // holds several open Mode B dispensers with DIFFERENT oracle addresses, a refill of any
+    // row but the top-ranked one resolves the wrong oracle, no output is captured, and the
     // indexer (which resolves the exact DISPENSER_ACTION_INDEX target) rejects a valid
     // refill for a missing oracle fee after the native payment is already spent.
     //
     // Do not restore the claim that a wrong pick is harmless because it captures an extra
     // output the indexer ignores: a single-equality filter cannot over-capture.
     //
-    // The fix is set-membership capture over ALL of the source's open-dispenser oracle
-    // addresses, which changes the persisted output set and is therefore consensus-affecting:
-    // it needs its own future activation flag-day beside isOracleFeeCaptureActive, with the
-    // legacy single-pick preserved below the gate so a from-genesis re-decode stays
-    // byte-identical. Widening this query without that gate breaks from-genesis
-    // byte-identity, which is why the ranking stands until the flag-day exists.
+    // ABOVE the flag-day that defect is gone: the block loop calls
+    // getOpenDispenserOracleAddressesBySource below and tests membership over the whole set.
+    // Do not "fix" the ranking here, and do not widen this query: it exists to reproduce the
+    // pre-flag-day output set, and widening it breaks from-genesis byte-identity.
     //
     // Returns the address string, null when there is no match or the dispenser named no
     // oracle, and false on a query fault (the caller retries the block rather than
@@ -2156,6 +2164,65 @@ class Database {
             return null
         } catch (err) {
             console.error('Error reading dispenser oracle address:', err);
+            if (this.transactionConnection){
+                await this.endTransaction()
+            }
+            return false;
+        } finally {
+            if (ownLease){
+                await connection.release()
+            }
+        }
+    }
+
+    // EVERY ORACLE_ADDRESS named by an open dispenser of this SOURCE, as a set the block
+    // loop tests output addresses against. Live at/above ORACLE_FEE_SET_CAPTURE_ACTIVATION;
+    // below it the single-pick above stands, unchanged.
+    //
+    // Same two-key match as the single-pick and as extendOpenDispenserExpirationBySource
+    // (operating address OR stored create SOURCE), so a refill of a DELEGATED dispenser
+    // paid by its original creator still resolves. What changes is that the ranking is
+    // GONE: a v2 payload names its target by DISPENSER_ACTION_INDEX, an id in the INDEXER's
+    // action space the decoder does not maintain, so no ORDER BY can identify the targeted
+    // row, and picking one made a refill of any other open row capture nothing at all.
+    // Returning the whole set makes capture right for every row of the source. When the
+    // source holds several oracles the refill may also capture an output paying an oracle
+    // it did not target; that is the over-capture direction the decoder's advisory contract
+    // calls safe, because the indexer validates the fee against the target it resolved and
+    // ignores the rest.
+    //
+    // DISTINCT because the set is membership-tested: two open dispensers naming the same
+    // oracle must not make the same address appear twice, and ORDER BY keeps the set
+    // deterministic for logs (the persisted rows keep the block's own vout order either
+    // way, since the caller walks the transaction's outputs, not this list).
+    //
+    // Rows whose dispenser named no oracle are dropped by the INNER JOIN, so a source with
+    // only Mode A dispensers yields []. Returns an array (possibly empty), or false on a
+    // query fault, matching the single-pick's contract: the caller retries the block rather
+    // than committing a different output set than a healthy node.
+    async getOpenDispenserOracleAddressesBySource(sourceAddress) {
+        const query = `
+            SELECT DISTINCT a2.address AS oracle_address
+            FROM dispensers d
+            INNER JOIN index_addresses a2 ON (a2.id = d.oracle_address_id)
+            WHERE (d.address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
+                OR d.source_address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1))
+              AND d.expired_block_index IS NULL
+            ORDER BY a2.address ASC;
+        `;
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            let rows = await connection.query(query, [sourceAddress, sourceAddress])
+            if (!rows || rows.length === 0) return []
+            let addresses = []
+            for (let nextRow of rows){
+                if (nextRow && nextRow.oracle_address)
+                    addresses.push(nextRow.oracle_address)
+            }
+            return addresses
+        } catch (err) {
+            console.error('Error reading dispenser oracle addresses:', err);
             if (this.transactionConnection){
                 await this.endTransaction()
             }

@@ -333,6 +333,92 @@ const ORACLE_FEE_OUTPUT_ACTIVATION = {
     regtest: 0,
 };
 
+// ORACLE_FEE_SET_CAPTURE_ACTIVATION (PRICE v1 oracle usage fee, set-membership capture): the
+// flag-day at/above which the DECODER captures a DISPENSER v2 (edit/refill) oracle-fee output
+// by SET MEMBERSHIP over EVERY open Mode B dispenser of the paying SOURCE, instead of the one
+// top-ranked row the legacy lookup picks. Keyed on BLOCK TIME with the same >= semantics as
+// ORACLE_FEE_OUTPUT_ACTIVATION, which it never precedes: set capture only widens a capture
+// that gate has already switched on.
+//
+// WHY IT EXISTS: a v2 payload names its target by DISPENSER_ACTION_INDEX, an id in the
+// INDEXER's action space the decoder does not maintain, so the decoder resolves the oracle by
+// SOURCE address. Capture is an address EQUALITY test, so when one source holds several open
+// Mode B dispensers with DIFFERENT oracle addresses, a refill of any row but the top-ranked
+// one resolves the wrong oracle, NOTHING is captured, and the indexer (which resolves the
+// exact DISPENSER_ACTION_INDEX target) rejects a valid refill after the payer's native payment
+// is already spent. Testing membership over the whole set captures the right output for every
+// row; the extra outputs a multi-oracle source's refill may also capture are ones the indexer
+// ignores, which is the over-capture direction the decoder's advisory open-view calls safe.
+//
+// CONSENSUS-AFFECTING: it changes the set of outputs persisted to transaction_outputs, so an
+// ungated widening breaks from-genesis byte-identity and forks validators. The legacy
+// single-pick therefore stays live BELOW the gate, and a re-decode of pre-flag-day history
+// reproduces exactly what the fleet wrote live.
+//
+// null means DISARMED (never active), the fail-closed default: mainnet and testnet keep the
+// legacy single-pick until that network's maintainers ratify an instant, chosen with the
+// fleet's upgrade state in hand, because arming it too early forks the chain and arming it in
+// the past rewrites agreed history. regtest holds no agreed history (its chains are recreated
+// per run), so it is genesis-on and exercises the set path in the regtest venues.
+//
+// DEPLOY DEADLINE, once an instant is armed: EVERY decoder on that network MUST be running the
+// armed value before the instant, or the fleet splits on the first refill of a source holding
+// more than one open Mode B dispenser.
+//
+// Vendored byte-equal into xchain-decoder/src/protocol/constants.js; the conformance suite
+// keeps the two copies in lockstep and refuses a value that precedes
+// ORACLE_FEE_OUTPUT_ACTIVATION.
+const ORACLE_FEE_SET_CAPTURE_ACTIVATION = {
+    mainnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
+    testnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
+    regtest: 0,
+};
+
+// DISPENSER_EXPIRY_REALIGN_ACTIVATION (dispenser soft-expire measurement point): the flag-day
+// at/above which the DECODER soft-expires open dispensers AFTER the block's transaction loop
+// instead of before it, putting its measurement point where the INDEXER's already is. Keyed on
+// BLOCK TIME with the same >= semantics as ORACLE_FEE_OUTPUT_ACTIVATION, because dispensers
+// settle on BTC, LTC and DOGE, whose heights diverge.
+//
+// WHY IT EXISTS: the two services expire the same dispenser at opposite ends of the same block.
+// The decoder runs db.deleteOpenDispensers BEFORE its transaction loop and then loads the
+// open-dispenser address set the loop tests every output against, so on the FIRST block whose
+// header time passes an expiration the dispenser is already out of that set. The indexer runs
+// utility.processExpirations AFTER its transaction loop (XChainIndexer.js, next to
+// processBetPasses), so for every transaction in that same block it still treats the dispenser
+// as open. The indexer only ever sees outputs the decoder persisted, so a native payment to
+// that dispenser on the boundary block is dropped by the decoder and no DISPENSE ever reaches
+// the indexer: the payer's coin is spent and nothing is dispensed for it. That is money-bearing
+// and unreachable by any in-memory re-seed, because transactions preceding an edit in the block
+// are already past.
+//
+// At/above the gate the soft-expire moves to the end of the block loop, inside the same block
+// transaction, so both services measure expiry at the identical point and a boundary block
+// yields the same DISPENSE set on both sides.
+//
+// CONSENSUS-AFFECTING: it changes the set of outputs persisted to transaction_outputs on
+// boundary blocks, so an ungated move breaks from-genesis byte-identity and forks validators.
+// The legacy block-start soft-expire therefore stays live BELOW the gate, and a re-decode of
+// pre-flag-day history reproduces exactly what the fleet wrote live.
+//
+// null means DISARMED (never active), the fail-closed default: mainnet and testnet keep the
+// legacy block-start expiry until that network's maintainers ratify an instant, chosen with the
+// fleet's upgrade state in hand, because arming it too early forks the chain and arming it in
+// the past rewrites agreed history. regtest holds no agreed history (its chains are recreated
+// per run), so it is genesis-on and exercises the realigned path in the regtest venues.
+//
+// DEPLOY DEADLINE, once an instant is armed: EVERY decoder on that network MUST be running the
+// armed value before the instant, or the fleet splits on the first block whose header time
+// passes an open dispenser's expiration.
+//
+// Vendored byte-equal into xchain-decoder/src/protocol/constants.js; the conformance suite
+// keeps the two copies in lockstep.
+const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
+    mainnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
+    testnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
+    regtest: 0,
+};
+
 // Taproot envelope.
 
 // ENVELOPE_MAX_PAYLOAD: the Taproot-envelope payload ceiling, PER-ENCODING by
@@ -448,6 +534,8 @@ module.exports = {
     ARCHIVE_REWARD_AMOUNT,
     CROSS_CHAIN_ROYALTY_ACTIVATION,
     ORACLE_FEE_OUTPUT_ACTIVATION,
+    ORACLE_FEE_SET_CAPTURE_ACTIVATION,
+    DISPENSER_EXPIRY_REALIGN_ACTIVATION,
     ENVELOPE_MAX_PAYLOAD,
     ENVELOPE_RECOGNITION_ACTIVATION,
     VALID_FIAT_CODES,

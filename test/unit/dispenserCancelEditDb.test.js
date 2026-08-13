@@ -219,3 +219,56 @@ describe('dispenser create-SOURCE keying', () => {
         assert.deepStrictEqual(args, ['bcrt1qcreator', 'bcrt1qcreator', 'bcrt1qcreator']);
     });
 });
+
+// At/above ORACLE_FEE_SET_CAPTURE_ACTIVATION the block loop stops resolving ONE oracle for a
+// v2 refill and tests output addresses against the whole set of the source's open oracles.
+// The single-pick could only be right for the top-ranked row, and because capture is an
+// address equality test a refill of any other open dispenser captured nothing at all.
+describe('Database#getOpenDispenserOracleAddressesBySource()', () => {
+    afterEach(() => sinon.restore());
+
+    it('returns every open oracle of the source, with no ranking and no LIMIT', async () => {
+        const db = makeDb();
+        const q = sinon.stub().resolves([
+            { oracle_address: 'bcrt1qoracleaaa' },
+            { oracle_address: 'bcrt1qoraclebbb' },
+        ]);
+        const { pool } = withConn(q);
+        injectPool(db, pool);
+
+        const oracles = await db.getOpenDispenserOracleAddressesBySource('bcrt1qcreator');
+
+        assert.deepStrictEqual(oracles, ['bcrt1qoracleaaa', 'bcrt1qoraclebbb']);
+        const [sql, args] = q.firstCall.args;
+        // The ranking is the defect: no ORDER BY over the ROWS and no LIMIT may come back,
+        // or the query silently narrows to one dispenser again. (The ORDER BY on the
+        // address column only makes the returned set deterministic.)
+        assert.doesNotMatch(sql, /LIMIT\s+1\s*;/i, 'the set must not be truncated to one row');
+        assert.doesNotMatch(sql, /ORDER\s+BY\s*\(/i, 'no row ranking may return');
+        assert.match(sql, /SELECT\s+DISTINCT/i, 'membership set, so duplicate oracles collapse');
+        // Same two-key match as the single-pick, so a delegated dispenser refilled by its
+        // creator resolves: operating address OR stored create SOURCE, one arg each.
+        assert.match(sql, /OR\s+d\.source_address_id\s*=\s*\(SELECT\s+id\s+FROM\s+index_addresses/i);
+        assert.match(sql, /d\.expired_block_index\s+IS\s+NULL/i, 'only OPEN dispensers');
+        assert.deepStrictEqual(args, ['bcrt1qcreator', 'bcrt1qcreator']);
+    });
+
+    it('returns an empty set when the source has no open Mode B dispenser', async () => {
+        const db = makeDb();
+        const { pool } = withConn(sinon.stub().resolves([]));
+        injectPool(db, pool);
+
+        assert.deepStrictEqual(await db.getOpenDispenserOracleAddressesBySource('bcrt1qnobody'), []);
+    });
+
+    it('returns false on a query fault so the caller retries the block', async () => {
+        // Capturing a smaller output set than a healthy node is a ledger fork, not a
+        // missed row, so the fault must reach the block loop rather than read as "none".
+        const db = makeDb();
+        const { pool } = withConn(sinon.stub().rejects(new Error('connection lost')));
+        injectPool(db, pool);
+        sinon.stub(console, 'error');
+
+        assert.strictEqual(await db.getOpenDispenserOracleAddressesBySource('bcrt1qcreator'), false);
+    });
+});

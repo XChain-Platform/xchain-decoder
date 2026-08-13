@@ -30,7 +30,7 @@
 
 'use strict';
 
-const { ORACLE_FEE_OUTPUT_ACTIVATION } = require('./protocol/constants.js')
+const { ORACLE_FEE_OUTPUT_ACTIVATION, ORACLE_FEE_SET_CAPTURE_ACTIVATION } = require('./protocol/constants.js')
 
 // Field positions in the DISPENSER v0 wire format (must stay in sync with the
 // indexer, xchain-indexer/src/actions/dispenser.js this.formats[0]):
@@ -52,6 +52,27 @@ const ORACLE_ADDRESS_INDEX = 13
 // uses (it disables while `change.mainnet_time > current.block_time`).
 function isOracleFeeCaptureActive(consensusNetwork, blockTime){
     const activation = ORACLE_FEE_OUTPUT_ACTIVATION[consensusNetwork]
+    if (typeof activation !== 'number') return false
+    const t = Number(blockTime)
+    if (!Number.isFinite(t)) return false
+    return t >= activation
+}
+
+// Is SET-MEMBERSHIP oracle-fee capture in force for a block at `blockTime` on this network?
+//
+// Above this second gate a DISPENSER v2 refill captures an output paying ANY open Mode B
+// dispenser of the paying SOURCE; below it the legacy single top-ranked pick stands, so a
+// re-decode of pre-flag-day history reproduces the output set the fleet wrote live.
+//
+// Fails CLOSED twice over, since both failure modes widen the persisted output set on a
+// chain whose fleet has not armed the change (a fork):
+//   * an unrecognized network name reads as "no capture widening", not "no gate";
+//   * a null (DISARMED) entry means the network's maintainers have not ratified an instant
+//     yet, and stays inactive at every block time rather than defaulting to genesis-on.
+// Callers must test isOracleFeeCaptureActive first: this gate only widens a capture the
+// base gate has already switched on, and the constant is pinned never to precede it.
+function isOracleFeeSetCaptureActive(consensusNetwork, blockTime){
+    const activation = ORACLE_FEE_SET_CAPTURE_ACTIVATION[consensusNetwork]
     if (typeof activation !== 'number') return false
     const t = Number(blockTime)
     if (!Number.isFinite(t)) return false
@@ -88,6 +109,7 @@ function isCompactedOracleAddress(fields){
 module.exports = {
     ORACLE_ADDRESS_INDEX,
     isOracleFeeCaptureActive,
+    isOracleFeeSetCaptureActive,
     oracleAddressFromCreate,
     isCompactedOracleAddress,
 }
