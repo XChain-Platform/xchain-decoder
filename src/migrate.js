@@ -99,7 +99,13 @@ async function main(){
             console.error('migrate: SKIPPED - another process holds the migration lock (xchain_migrate_' + name + '). Nothing was applied and the schema may still be un-migrated. Re-run once the other migrator finishes.');
             process.exitCode = 2;
         } else {
-            console.log('migrate: done. applied=' + JSON.stringify(res.applied) + ' still-pending=' + JSON.stringify(res.pending));
+            // `baselined` is reported apart from `applied`: those files ran NO statement,
+            // they were recorded as applied because their precondition says this database
+            // is already in the state they exist to produce.
+            const baselined = (res.baselined && res.baselined.length)
+                ? ' baselined-not-run=' + JSON.stringify(res.baselined) : '';
+            console.log('migrate: done. applied=' + JSON.stringify(res.applied) + baselined +
+                ' still-pending=' + JSON.stringify(res.pending));
         }
     } catch(err){
         console.error('migrate: FAILED: ' + ((err && err.stack) || err));
