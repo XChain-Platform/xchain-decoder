@@ -419,11 +419,12 @@ const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
     regtest: 0,
 };
 
-// BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION (payment-output capture through a BATCH): the
-// flag-day at/above which the DECODER decides which native-coin outputs to persist by looking
-// at a BATCH's SUB-COMMANDS instead of only at the top-level ACTION name. Keyed on BLOCK TIME
-// with the same >= semantics as ORACLE_FEE_OUTPUT_ACTIVATION, because the affected settlement
-// flows run on BTC, LTC and DOGE, whose heights diverge by millions of blocks.
+// BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION (output capture AND open-dispenser registration
+// through a BATCH): the flag-day at/above which the DECODER reads a BATCH's SUB-COMMANDS
+// instead of only its top-level ACTION name, both when deciding which native-coin outputs to
+// persist and when deciding which dispensers to register. Keyed on BLOCK TIME with the same >=
+// semantics as ORACLE_FEE_OUTPUT_ACTIVATION, because the affected settlement flows run on BTC,
+// LTC and DOGE, whose heights diverge by millions of blocks.
 //
 // WHY IT EXISTS: capture reads the top-level action string. `decodedData.startsWith("COINPAY|")`
 // is FALSE for `BATCH|0|COINPAY|0|x;COINPAY|0|y`, and resolveOracleFeeAddresses' matching
@@ -436,6 +437,17 @@ const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
 // capture decision runs over the batch's sub-command list, split exactly as
 // xchain-indexer/src/actions/batch.js splits it, so a batched COINPAY captures the same outputs a
 // top-level COINPAY does.
+//
+// THE OPEN-DISPENSER REGISTRY RIDES THE SAME INSTANT, deliberately, because it is the same
+// blindness and the same decision. `decodedData.startsWith("DISPENSER")` is false for
+// `BATCH|0|DISPENSER|0|...`, so a dispenser CREATED inside a batch never entered
+// getAllOpenDispenserAddresses: payments to it were never classified as dispense outputs and no
+// DISPENSE ever fired, while the INDEXER, which dispatches the sub-command, registered it. A
+// user could open a dispenser in a batch, fund it, and it would never dispense. That registry IS
+// the address set the dispense half of output capture tests against, so splitting the two across
+// two flag-days would leave the decoder half-batch-aware for a stretch of chain with nothing
+// gained. One instant arms both; xchain-decoder/test/unit/batchDispenserRegistration.test.js
+// drives the coupling rather than asserting it in prose.
 //
 // CONSENSUS-AFFECTING: it changes the set of rows written to transaction_outputs, which changes
 // indexer verdicts, which changes the ledger. An ungated flip makes a from-genesis re-decode

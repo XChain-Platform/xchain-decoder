@@ -30,7 +30,7 @@ const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
 const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress } = require('./oracleFeeOutput')
 const { isDispenserExpiryRealignActive } = require('./dispenserExpiryRealign')
-const { captureCommands } = require('./batchSubCommandCapture')
+const { captureCommands, collapseDispenserRegistrations } = require('./batchSubCommandCapture')
 const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./chainIdentity')
 const strictTextDecoder = new TextDecoder('utf-8', { fatal: true })
 const lenientTextDecoder = new TextDecoder('utf-8')
@@ -2766,8 +2766,57 @@ class XChainDecoder {
                                 //    |GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS
                                 //    |FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS
                                 //    |EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO
-                                if (decodedData.startsWith("DISPENSER")){
-                                    let decodedDataSplit = decodedData.split("|")
+                                //
+                                // THE COMMAND VIEW IS `commands` ABOVE, deliberately the same
+                                // variable and therefore the same flag-day as payment-output
+                                // capture: [decodedData] for every non-BATCH transaction and for
+                                // every block below BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION, the
+                                // BATCH's sub-commands at/above it. Registration and capture are two
+                                // halves of ONE decision (this registry IS the address set that
+                                // decides which outputs are captured as dispenses), so arming them at
+                                // different instants would leave the decoder half-batch-aware for no
+                                // gain. Below the gate a BATCH's sub-commands stay invisible here
+                                // exactly as they were, and the walk reduces to the single
+                                // `decodedData.startsWith("DISPENSER")` test it replaces, so a
+                                // from-genesis re-decode is byte-identical.
+                                //
+                                // What was broken: that top-level test is false for
+                                // `BATCH|0|DISPENSER|0|...`, so a dispenser created inside a batch
+                                // never entered the open set, its buyer's payments were never
+                                // captured, and no DISPENSE ever fired - while the INDEXER, which
+                                // dispatches the sub-command, registered it. Money-bearing, and a
+                                // live decoder/indexer divergence.
+                                //
+                                // TWO PASSES, both in sub-command position order:
+                                //   1. every v0 create is validated, the set is collapsed to one
+                                //      registration per OPERATING ADDRESS (see
+                                //      collapseDispenserRegistrations: the dispensers PRIMARY KEY is
+                                //      (tx_index, address_id), which a batch can collide with), and
+                                //      the survivors are inserted;
+                                //   2. the format-1/2 lifecycle mirrors run AFTERWARDS, so an edit
+                                //      anywhere in the batch reaches a dispenser created anywhere in
+                                //      the same batch. The indexer dispatches in strict position
+                                //      order, so an edit placed BEFORE its create fails there while
+                                //      the decoder extends a row: that is the hold-open-longer
+                                //      direction its advisory contract permits. The reverse ordering
+                                //      would let an edit AFTER its create miss the row, which closes
+                                //      early - the money-bearing direction.
+                                //
+                                // Per sub-command, not per transaction: EXPIRATION is read from THIS
+                                // command's field [14] (defaulting from the shared block time, as the
+                                // indexer's own default does), and the operating address from THIS
+                                // command's GET_ADDRESS. There is no per-sub-command DISPENSER_ACTION_INDEX
+                                // to reproduce: the indexer mints one per sub-command from its own
+                                // action_index sequence (actions/batch.js -> db.createActionIndex ->
+                                // getNextActionIndex), an id space the decoder has never held for
+                                // top-level dispensers either. These rows are keyed on
+                                // (tx_index, operating address) and nothing here is keyed on an
+                                // action index, so nothing is approximated by not having one.
+                                let dispenserCreateCandidates = []
+                                for (let dispenserCommand of commands){
+                                    if (typeof dispenserCommand !== 'string' || !dispenserCommand.startsWith("DISPENSER"))
+                                        continue
+                                    let decodedDataSplit = dispenserCommand.split("|")
                                     // Field [1] is the DISPENSER FORMAT (create=0, cancel=1,
                                     // edit=2; xchain-indexer/src/actions/dispenser.js this.formats).
                                     // The decoder mirrors all three so its open-dispenser view (the
@@ -2859,8 +2908,7 @@ class XChainDecoder {
                                                 // still have its oracle-fee output captured.
                                                 // Compacted `^<id>` tokens resolve to null, same reason as
                                                 // GET_ADDRESS above.
-                                                if (!(await this.db.insertDispenser({
-                                                    txIndex: lastProcessedTxIndex,
+                                                dispenserCreateCandidates.push({
                                                     address: operatingAddress,
                                                     // The create SOURCE, kept alongside the operating
                                                     // address so a later cancel/edit/refill issued by the
@@ -2872,20 +2920,44 @@ class XChainDecoder {
                                                     sourceAddress: parseResult["source"],
                                                     oracleAddress: oracleAddressFromCreate(decodedDataSplit),
                                                     expiration: expiration
-                                                }))){
-                                                    // insertDispenser's error path already rolled the block back.
-                                                    await resetAfterRollback()
-                                                    continue main_parsing
-                                                }
-                                                // Keep the in-memory open-dispenser set current so a
-                                                // later transaction in this same block that pays this
-                                                // freshly-opened dispenser is still recognized as a
-                                                // dispense (mirrors the old per-output DB lookup).
-                                                if (operatingAddress)
-                                                    openDispenserAddresses.add(operatingAddress)
+                                                })
                                             }
                                         }
-                                    } else if (dispenserFormat === 1){
+                                    }
+                                }
+
+                                // Pass 1b: one row per OPERATING ADDRESS, in first-appearance order.
+                                // A transaction carrying a single create (every non-BATCH transaction,
+                                // and every transaction below the gate) collapses to that create
+                                // unchanged, so this insert is byte-identical to the one it replaces.
+                                for (let nextRegistration of collapseDispenserRegistrations(dispenserCreateCandidates)){
+                                    if (!(await this.db.insertDispenser({
+                                        txIndex: lastProcessedTxIndex,
+                                        address: nextRegistration.address,
+                                        sourceAddress: nextRegistration.sourceAddress,
+                                        oracleAddress: nextRegistration.oracleAddress,
+                                        expiration: nextRegistration.expiration
+                                    }))){
+                                        // insertDispenser's error path already rolled the block back.
+                                        await resetAfterRollback()
+                                        continue main_parsing
+                                    }
+                                    // Keep the in-memory open-dispenser set current so a
+                                    // later transaction in this same block that pays this
+                                    // freshly-opened dispenser is still recognized as a
+                                    // dispense (mirrors the old per-output DB lookup).
+                                    if (nextRegistration.address)
+                                        openDispenserAddresses.add(nextRegistration.address)
+                                }
+
+                                // Pass 2: the format-1/2 lifecycle mirrors, after every create of
+                                // this transaction is registered (see the ordering note above).
+                                for (let dispenserCommand of commands){
+                                    if (typeof dispenserCommand !== 'string' || !dispenserCommand.startsWith("DISPENSER"))
+                                        continue
+                                    let decodedDataSplit = dispenserCommand.split("|")
+                                    let dispenserFormat = parseInt(decodedDataSplit[1], 10)
+                                    if (dispenserFormat === 1){
                                         // Format 1 = cancel. Wire: VERSION|DISPENSER_ACTION_INDEX|MEMO.
                                         // NOT MIRRORED. The decoder's open-dispenser view is advisory
                                         // and must never close a row on a guessed target: it has

@@ -26,6 +26,13 @@
  * for a missing oracle fee whether or not the payer paid. Both are money-bearing: the
  * coin is spent on chain and no obligation clears.
  *
+ * The SAME blindness reaches the open-dispenser REGISTRY: `decodedData.startsWith("DISPENSER")`
+ * is false for `BATCH|0|DISPENSER|0|...`, so a dispenser created inside a batch never entered
+ * getAllOpenDispenserAddresses, payments to it were never captured as dispense outputs, and no
+ * DISPENSE ever fired - while the INDEXER registered it. Same gate, same command view; see
+ * collapseDispenserRegistrations below for the one thing registration needs that capture does
+ * not (the dispensers PRIMARY KEY is per-transaction, and a batch breaks that assumption).
+ *
  * This module holds the pure decisions capture needs to see through a BATCH: the gate,
  * and the sub-command split. The split MUST agree with the indexer's, because a decoder
  * that disagrees about what the sub-commands ARE captures for actions the indexer never
@@ -126,10 +133,66 @@ function captureCommands(decodedData, consensusNetwork, blockTime){
     return (subCommands === null) ? [decodedData] : subCommands
 }
 
+// Collapse the v0 DISPENSER creates of ONE transaction to at most one registration per
+// OPERATING ADDRESS, keeping the LATEST expiration and the first oracle address named.
+// Input order is sub-command position order; output order is first-appearance order.
+//
+// WHY IT EXISTS. The decoder's registry is keyed PRIMARY KEY(tx_index, address_id) (see
+// src/sql/dispensers.sql). A transaction could only ever carry ONE create before this
+// change, so that key was unique by construction. A BATCH can carry several, and every
+// create that omits GET_ADDRESS operates on the transaction SOURCE, so
+// `DISPENSER|0|...;DISPENSER|0|...` is two rows with one key. The second INSERT raises
+// errno 1062, insertDispenser reports DUPLICATED_TRANSACTION, and the block loop reads
+// that as "already stored" - leaving the row holding the FIRST create's expiration. When
+// that is the EARLIER of the two, the decoder soft-expires the address while the indexer
+// still holds the second dispenser open, stops capturing payments to it, and real
+// dispenses are lost. That is the under-capture direction db.js (above
+// extendOpenDispenserExpirationBySource) calls money-bearing.
+//
+// So the collapse is deliberate, not incidental: taking the MAX expiration keeps the
+// address open until the last of the batch's dispensers closes, which is the
+// hold-open-LONGER direction the advisory contract permits. The first NON-EMPTY oracle
+// wins for the same reason: an address recorded is an oracle-fee output capturable.
+//
+// A transaction with one create (every non-BATCH transaction, and every transaction below
+// the gate) returns that create unchanged, so this is a no-op on the legacy path.
+//
+// RESIDUAL, stated rather than hidden: dispensers.oracle_address_id is ONE column, so a
+// batch opening two Mode B dispensers on the SAME operating address naming DIFFERENT
+// oracles records only the first, and a later v2 refill of the second (which resolves its
+// oracle from these rows, by SOURCE) captures no oracle-fee output. Recording both needs a
+// per-sub-command discriminator in the dispensers PRIMARY KEY - a schema migration on
+// every decoder in the fleet, mainnet included, where this gate is DISARMED - which is a
+// wider blast radius than the hole it would close. Registering ONE of the two is strictly
+// better than today, where a batch registers NEITHER.
+function collapseDispenserRegistrations(candidates){
+    const collapsed = new Map()
+    if (!Array.isArray(candidates)) return []
+    for (const candidate of candidates){
+        if (!candidate || !candidate.address) continue
+        const existing = collapsed.get(candidate.address)
+        if (existing === undefined){
+            collapsed.set(candidate.address, {
+                address:       candidate.address,
+                sourceAddress: candidate.sourceAddress,
+                oracleAddress: candidate.oracleAddress || null,
+                expiration:    candidate.expiration,
+            })
+            continue
+        }
+        if (candidate.expiration > existing.expiration)
+            existing.expiration = candidate.expiration
+        if (!existing.oracleAddress && candidate.oracleAddress)
+            existing.oracleAddress = candidate.oracleAddress
+    }
+    return [...collapsed.values()]
+}
+
 module.exports = {
     BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
     BATCH_SUB_COMMAND_FORMATS,
     isBatchSubCommandCaptureActive,
     batchSubCommands,
     captureCommands,
+    collapseDispenserRegistrations,
 }
