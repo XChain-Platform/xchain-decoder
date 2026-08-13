@@ -17,7 +17,7 @@
  * Decoder-owned Prometheus gauges registered on the observability handle's
  * registry. The observability module itself is vendored byte-identically into
  * every xchain-* service and carries no domain metrics by design, so this lives
- * OUTSIDE src/observability/ where bin/check-observability-parity.js cannot see
+ * OUTSIDE src/observability/ where the vendored-copy parity check cannot see
  * it and a shared-module resync cannot delete it.
  *
  * Everything here reads decoder state at scrape time through one collector; no
