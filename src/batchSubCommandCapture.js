@@ -33,8 +33,10 @@
  * collapseDispenserRegistrations below for the one thing registration needs that capture does
  * not (the dispensers PRIMARY KEY is per-transaction, and a batch breaks that assumption).
  *
- * This module holds the pure decisions capture needs to see through a BATCH: the gate,
- * and the sub-command split. The split MUST agree with the indexer's, because a decoder
+ * This module holds the pure decisions capture needs to see through a BATCH: the gate, the
+ * sub-command split, and the WHOLE-BATCH REJECTION mirror (hasProvablyRejectedBatch) that
+ * stops capture reading a batch's siblings when the indexer throws the whole record out. The
+ * split MUST agree with the indexer's, because a decoder
  * that disagrees about what the sub-commands ARE captures for actions the indexer never
  * runs (or misses ones it does) - a worse fault than the one being fixed. See
  * batchSubCommands below for the equivalence argument against
@@ -46,6 +48,10 @@
 
 const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION } = require('./protocol/constants.js')
 const ACTION_ALIASES = require('./actionAliases.js')
+const { COMMAND_LIMIT,
+        ACTION_LIMITS,
+        GATED_ACTION_LIMITS,
+        CHILD_ISSUE_KEY } = require('./protocol/indexerBatchLimits.js')
 
 // The BATCH FORMAT versions the indexer registers (xchain-indexer/src/actions/batch.js
 // `this.formats`, which today holds only 0 = 'VERSION|COMMAND'). A BATCH whose FORMAT is
@@ -165,10 +171,13 @@ function subCommandActionName(command){
 // on the decoder's own known-name set would suppress capture for batches the indexer
 // dispatches normally. The EMPTY name is different in kind rather than in degree: '' is
 // not an ACTION and not a feature-gate flag, no addChange can name it, and it is the one
-// verdict this file can reach on its own evidence. Everything else in the class (an
-// unknown name, a nested BATCH, a per-ACTION limit, the 250-command cap) needs the
-// indexer's registry and flag instants vendored here first; that is a bigger cross-repo
-// artifact than this gate, and it is stated rather than half-built.
+// verdict this file can reach on its own evidence.
+//
+// The rest of the class is now closed as far as it is provable, in hasProvablyRejectedBatch
+// below: the nested BATCH, the per-ACTION caps and the 250-command cap, against the indexer's
+// cap tables vendored canonically in src/protocol/indexerBatchLimits.js. The UNKNOWN NAME is
+// still the one cause left open, and deliberately, for the reason this paragraph gives: a
+// vendored name LIST is not closed under registry growth, so a stale one under-captures.
 //
 // A '' name is reachable two ways and both are covered, because both are what
 // `split('|')[0]` yields: an EMPTY element (a trailing ';', a ';;', or the whole command
@@ -203,10 +212,222 @@ function hasProvablyRejectedSubCommand(subCommands){
 function expandSubCommandAlias(command, aliases){
     const actionName = subCommandActionName(command)
     if (actionName === null || actionName === '') return command
-    if (!Object.prototype.hasOwnProperty.call(aliases, actionName)) return command
-    const canonical = aliases[actionName]
-    if (typeof canonical !== 'string' || canonical.length === 0) return command
+    const canonical = expandAliasName(actionName, aliases)
+    if (canonical === actionName) return command
     return canonical + command.slice(actionName.length)
+}
+
+// The alias rewrite on the NAME alone, split out of expandSubCommandAlias because the
+// whole-batch rejection scan below needs the canonical name without rebuilding the command
+// string. Returns `actionName` unchanged when the table holds no usable entry; both guards
+// are the ones documented on expandSubCommandAlias and are the reason this is one function
+// rather than two copies of the lookup.
+function expandAliasName(actionName, aliases){
+    if (typeof actionName !== 'string' || actionName === '') return actionName
+    if (!Object.prototype.hasOwnProperty.call(aliases, actionName)) return actionName
+    const canonical = aliases[actionName]
+    if (typeof canonical !== 'string' || canonical.length === 0) return actionName
+    return canonical
+}
+
+// ---------------------------------------------------------------------------------------
+// THE REST OF THE WHOLE-BATCH REJECTION CLASS.
+//
+// hasProvablyRejectedSubCommand above closes ONE cause (the empty ACTION name). The indexer
+// rejects a BATCH as a single record - so that NOT ONE sub-command runs - for several more,
+// and capture that keeps reading the siblings persists outputs for actions nothing executes:
+// a dispenser registers here and nowhere else, and payments to it are then classified
+// against a dispenser that never settles.
+//
+// WHAT IS MIRRORED, and it is deliberately a SUBSET (see hasProvablyRejectedBatch):
+//   * the global 250-command cap                      -> 'invalid: COMMAND (limit)'
+//   * a nested BATCH sub-command (actionLimits.BATCH=0)-> 'invalid: BATCH (limit)'
+//   * more than one TOP-LEVEL (undotted) ISSUE         -> 'invalid: ISSUE (limit)'
+//   * more than one DEPLOY                             -> 'invalid: DEPLOY (limit)'
+//   * two MINTs naming the SAME literal TICK           -> 'invalid: MINT (limit)'
+//
+// WHICH FLAG STATE THESE ARE READ IN, and it is the whole difficulty. The indexer applies
+// the 250 cap, the dotted-TICK ISSUE exemption and the DEPLOY cap only at/after
+// BATCH_ISSUANCE_LIMITS. This module applies the POST-flag rule set UNCONDITIONALLY, and
+// that is sound rather than convenient, for two separate reasons:
+//
+//   1. Nothing here can run below BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION, and that gate
+//      is REQUIRED to sit at or after the indexer's BATCH_ISSUANCE_LIMITS instant on every
+//      armed network - the LEDGER tier of batchSubCommandOutputCaptureActivation.test.js,
+//      which predates this change and exists for the settlement ledger. So at every block
+//      time these rules are evaluated, that flag is already on. batchLimitsVendoring.test.js
+//      completes the argument by pinning the other two halves of the indexer's own gate
+//      (its block-index thresholds are 0, and its registered semver is at or below the
+//      indexer's compiled CONSENSUS_VERSION), so "the time has passed" really does mean
+//      "the flag is active" and not merely "one of its three conditions is met".
+//   2. Even if that ordering were somehow violated, the two UNGATED mirrors stay correct and
+//      the two rules the SUB-SET direction protects still cannot suppress a dispatched
+//      batch: below the flag the indexer's ISSUE cap is STRICTER (every dotted child counts
+//      top-level) and its MINT cap is STRICTER (raw occurrences, not distinct ticks), so a
+//      mirror written to the post-flag rule refuses a SUBSET of what it rejects. Only the
+//      250-command cap and the DEPLOY cap genuinely need reason 1, and they are named here
+//      rather than buried so the day the ordering changes, this comment is the thing to
+//      re-read.
+//
+// THE TRAP THIS ROW EXISTS FOR: after BATCH_ISSUANCE_LIMITS arms, a batch of ONE parent plus
+// MANY dotted children is VALID. A decoder that naively mirrored the pre-flag `ISSUE: 1` cap
+// would suppress capture for exactly those batches - UNDER-capture, on the very feature the
+// flag ships. Measured against the live BTC regtest corpus at the time of writing, 21 of 67
+// real on-chain batches carry two or more ISSUE sub-commands that the exemption makes valid,
+// so the naive mirror is not a theoretical regression, it is the common case.
+//
+// WHAT IS NOT MIRRORED, and why, is in hasProvablyRejectedBatch.
+// ---------------------------------------------------------------------------------------
+
+// The indexer's `util.isNumeric`, mirrored verbatim, because isLegacyActionFormat below
+// branches on it and a divergence here moves a TICK by one position.
+function isNumeric(value){
+    return typeof value === 'bigint' || (!isNaN(parseFloat(value)) && isFinite(value))
+}
+
+// The indexer's `util.isLegacyActionFormat`, mirrored verbatim. It decides whether
+// normalizeSubAction splices an implied VERSION 0 onto an ISSUE/MINT/SEND's params, which is
+// what puts TICK at params[1] for BTNS-style legacy commands. Getting this wrong reads the
+// wrong field as the TICK, which for ISSUE means calling a child top-level (suppression that
+// the indexer would not do: the money-bearing direction), so it is pinned against the real
+// sibling helper over a vector table in batchLimitsVendoring.test.js.
+function isLegacyActionFormat(params){
+    const version = params[0]
+    if (String(version).length > 2) return true
+    if (typeof version === 'string' && !isNumeric(version)) return true
+    return false
+}
+
+// The TICK a sub-command's handler will parse: params[1] in all seven ISSUE formats and in
+// MINT's single format, read AFTER the implied legacy VERSION 0 is injected. Mirrors the
+// indexer's `Batch.subCommandTick` (and the extraction inside `Batch.classifyLimitAction`,
+// which keeps its own copy there for the same landed-consensus reason).
+//
+// `normalize` is not a parameter: every block time this module runs at is at/after
+// BATCH_SUBACTION_NORMALIZATION, asserted by the NORMALIZATION tier of
+// batchSubCommandOutputCaptureActivation.test.js, so the indexer's `normalize` is true.
+// Returns '' when there is no TICK at all - never a token named the empty string.
+// Never throws: a classifier crash here would take down block decoding.
+function subCommandTick(action, command){
+    try {
+        const params = String(command).split('|').slice(1)
+        if (['ISSUE','MINT','SEND'].includes(action) && isLegacyActionFormat(params))
+            params.splice(0, 0, 0)
+        const tick = params[1]
+        if (tick === undefined || tick === null) return ''
+        return String(tick).trim()
+    } catch (e) {
+        return ''
+    }
+}
+
+// The key a sub-command is COUNTED under by the indexer's per-ACTION limit scan
+// (`Batch.classifyLimitAction`). Only ISSUE is reclassified: a dotted TICK is a CHILD
+// issuance and lands in the non-ACTION bucket CHILD_ISSUE_KEY, exempt from the cap of 1.
+//
+// A caret TICK (^<id>) is NEVER exempt - its dot is a decimal in an id reference, not a
+// namespace separator - and an ISSUE with no readable TICK counts TOP-LEVEL, because
+// exemption is granted on positive evidence only. Both of those are the indexer's rules, not
+// choices made here; note that both push a command INTO the capped bucket, i.e. toward
+// suppression, which is why the whole classifier is driven against the real sibling rather
+// than argued.
+function subCommandLimitKey(command, aliases){
+    const rawName = subCommandActionName(command)
+    if (rawName === null) return null
+    const action = expandAliasName(rawName, aliases)
+    if (action !== 'ISSUE') return action
+    try {
+        const params = String(command).split('|').slice(1)
+        if (isLegacyActionFormat(params)) params.splice(0, 0, 0)
+        let tick = params[1]
+        if (tick === undefined || tick === null) return action
+        tick = String(tick)
+        if (tick.charAt(0) === '^') return action
+        if (tick.includes('.')) return CHILD_ISSUE_KEY
+        return action
+    } catch (e) {
+        return action
+    }
+}
+
+// The largest number of MINT sub-commands in this batch naming the SAME LITERAL TICK.
+//
+// This is a strict LOWER BOUND on the indexer's `maxMintsPerDistinctTick`, which buckets by
+// RESOLVED ticker id and needs a database the decoder does not have. The bound is sound in
+// the only direction that matters: `getTickerId` is a function of the tick string, so two
+// IDENTICAL strings always land in the same bucket there (and two empty strings share the
+// unresolved bucket), hence maxIdentical <= maxDistinct and `maxIdentical > cap` implies
+// `maxDistinct > cap`. The converse does not hold - `JDOG` and `^614` can be one token - so
+// this mirror stays silent on exactly the cases it cannot prove, which is the safe direction.
+// A Map, not an object literal: these are untrusted wire strings and `__proto__` or
+// `constructor` would read as an already-present entry on an object.
+function maxIdenticalMintTicks(ticks){
+    const counts = new Map()
+    let max = 0
+    for (const tick of ticks){
+        const count = (counts.get(tick) || 0) + 1
+        counts.set(tick, count)
+        if (count > max) max = count
+    }
+    return max
+}
+
+// Does the indexer PROVABLY reject this whole BATCH, so that none of its sub-commands runs?
+//
+// Returns true only on evidence this module can establish from the command list ALONE. It is
+// deliberately incomplete, and the three causes left out are left out for stated reasons
+// rather than for want of effort:
+//
+//   * AN UNREGISTERED ACTION NAME (beyond the empty one). The indexer's activation scan
+//     rejects any name absent from its protocol-change registry OR not yet active at this
+//     block. Mirroring it needs that registry AND its per-name instants AND the indexer's
+//     compiled consensus version vendored here. REFUSED, because a vendored NAME LIST is not
+//     closed under registry growth: the registry only ever gains names, so a decoder whose
+//     copy is one release stale reads a newly-registered ACTION as unknown and suppresses
+//     capture for batches the indexer dispatches - under-capture, the money-bearing
+//     direction, on exactly the networks (testnet/regtest, where new changes are
+//     genesis-active) where this gate is live today. 53 names are enabled in the sibling and
+//     absent from this decoder's VALID_ACTION_NAMES, so the gap is large and it moves.
+//     Note also that the registry is a plain object, so `constructor`, `toString` and
+//     `__proto__` read as REGISTERED AND ENABLED there; a name gate written from a list
+//     would have to reproduce that too. Left open; the over-capture it costs is the safe
+//     direction.
+//   * A SLEEPING SOURCE. `indexerDb.isActionAllowed` reads the indexer's own address-sleep
+//     state (db.isAddressSleeping) as of the block. That table does not exist in the decoder
+//     and is not derivable from the transaction, so there is nothing here to mirror. Stated
+//     plainly rather than approximated.
+//   * THE AGGREGATE GAS PRE-CHECK ('invalid: GAS (insufficient)'). Same reason: it reads the
+//     SOURCE's balances and the token set from the indexer database.
+//
+// Order of the checks is irrelevant to the verdict (any one of them means "rejected"), so
+// this does NOT reproduce the indexer's error precedence, which decides only WHICH string a
+// rejected batch reports.
+function hasProvablyRejectedBatch(subCommands, aliases){
+    if (!Array.isArray(subCommands)) return false
+    // The global command cap, counted over the raw ';'-split list with empty elements
+    // included - the same list, and the same counting rule, the indexer caps.
+    if (subCommands.length > COMMAND_LIMIT) return true
+    if (hasProvablyRejectedSubCommand(subCommands)) return true
+
+    const tally     = new Map()
+    const mintTicks = []
+    for (const command of subCommands){
+        const key = subCommandLimitKey(command, aliases)
+        if (key === null) continue
+        if (key === 'MINT') mintTicks.push(subCommandTick('MINT', command))
+        tally.set(key, (tally.get(key) || 0) + 1)
+    }
+
+    // The post-flag table: the ungated caps with the gated ones merged over them, exactly as
+    // the indexer builds it when BATCH_ISSUANCE_LIMITS is active. Built per call from the
+    // vendored constants so neither vendored table is ever mutated.
+    const caps = Object.assign({}, ACTION_LIMITS, GATED_ACTION_LIMITS)
+    for (const action of Object.keys(caps)){
+        const count = (action === 'MINT') ? maxIdenticalMintTicks(mintTicks)
+                                          : (tally.get(action) || 0)
+        if (count > caps[action]) return true
+    }
+    return false
 }
 
 // The list of action strings the output-capture decision should be taken over.
@@ -221,8 +442,9 @@ function expandSubCommandAlias(command, aliases){
 // Two things happen to that sub-command list, and NEITHER can run below the gate, which is
 // what makes this whole file inert for pre-flag-day history:
 //
-//   1. A batch carrying a provably-rejected sub-command yields the EMPTY list, because the
-//      indexer runs none of its commands (see hasProvablyRejectedSubCommand).
+//   1. A batch the indexer PROVABLY rejects as a whole yields the EMPTY list, because it
+//      runs none of its commands (see hasProvablyRejectedBatch, which covers the empty
+//      ACTION name, the 250-command cap and the per-ACTION caps).
 //   2. Sub-command ACTION names are alias-expanded, because that is the name the indexer
 //      DISPATCHES on. Un-expanded, a batched alias reaches capture in its wire spelling
 //      while the indexer runs its canonical one, and the day an alias resolves to COINPAY
@@ -243,7 +465,7 @@ function captureCommands(decodedData, consensusNetwork, blockTime){
         return [decodedData]
     const subCommands = batchSubCommands(decodedData)
     if (subCommands === null) return [decodedData]
-    if (hasProvablyRejectedSubCommand(subCommands)) return []
+    if (hasProvablyRejectedBatch(subCommands, ACTION_ALIASES)) return []
     return subCommands.map(command => expandSubCommandAlias(command, ACTION_ALIASES))
 }
 
@@ -309,7 +531,18 @@ module.exports = {
     batchSubCommands,
     subCommandActionName,
     hasProvablyRejectedSubCommand,
+    hasProvablyRejectedBatch,
     expandSubCommandAlias,
+    expandAliasName,
+    isNumeric,
+    isLegacyActionFormat,
+    subCommandTick,
+    subCommandLimitKey,
+    maxIdenticalMintTicks,
     captureCommands,
     collapseDispenserRegistrations,
+    COMMAND_LIMIT,
+    ACTION_LIMITS,
+    GATED_ACTION_LIMITS,
+    CHILD_ISSUE_KEY,
 }
