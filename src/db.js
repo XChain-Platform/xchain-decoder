@@ -2488,7 +2488,10 @@ class Database {
 // DBs recorded whichever revision they applied first). Executable SQL is
 // byte-identical across every pinned revision (verified: strip `--` comment
 // lines and blank lines; the residue hashes identically from first commit to
-// HEAD). Applied fleet-wide through code deploy: both the startup auto-run and
+// HEAD) for every entry EXCEPT the byte-order one at the bottom, which is
+// justified by a measured data equivalence instead and carries that argument in
+// full at its own entry rather than relying on this blanket sentence.
+// Applied fleet-wide through code deploy: both the startup auto-run and
 // `node src/migrate.js` pass through this heal before the mismatch guard, so no
 // direct schema_migrations SQL is ever needed. Mirrors xchain-indexer/src/db.js.
 Database.MIGRATION_CHECKSUM_REBASELINES = {
@@ -2538,6 +2541,36 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
             '82865499dd2ccc48c0a0a016535409a9201b415395f49c70b41c73a3aeda8847',  // ec36bd4 (license header)
         ],
         to:   'b03b41b6fcabef9c959851ede9b75cc9089cef7c015bdd69cfcea74ad5acea7a',  // comment tidy (HEAD)
+    },
+    // Comment-only edit: the fleet recorded 50a5e83, which is the revision that ADDED the
+    // `@mempool_has_ids` guard, so the guarded UPDATEs are what actually ran. 7817e6c then
+    // added the license header. Stripped residue verified IDENTICAL between 50a5e83 and
+    // HEAD, so this entry meets the ordinary contract above.
+    '2026-05-28-unique-index-tables.sql': {
+        from: '8845b9addc0990b0433f8862969b57cb472535474b4b4d5576c408db777b57ce',  // 50a5e83..7817e6c^
+        to:   '4f7f53ea5423d5ad50e0a2136243dab9e215033e6a110c7b47e66ba5361d44c2',  // 7817e6c (HEAD)
+    },
+    // THE ONE ENTRY THAT DOES NOT MEET THE BYTE-IDENTICAL-SQL CONTRACT ABOVE, said plainly
+    // rather than filed quietly alongside the comment-only ones. The fleet recorded 0a6afe3,
+    // which PREDATES c808bd1, so the SQL that ran there really was the earlier form:
+    //
+    //     recorded (0a6afe3):  JOIN blocks prev ON prev.block_index = b.block_index - 1
+    //     HEAD     (c808bd1):  JOIN blocks prev ON prev.block_index + 1 = b.block_index
+    //
+    // The two are algebraically identical for every block_index >= 1 and differ ONLY at
+    // block_index 0, where `b.block_index - 1` underflows BIGINT UNSIGNED - which is the
+    // defect c808bd1 fixed. So this is justified by a DATA equivalence rather than by a text
+    // equivalence, and the data was measured on 2026-08-14 rather than assumed: the lowest
+    // block any decoder holds is its XChain genesis pin, BTC 950000, LTC 3120000, DOGE
+    // 6240000. No decoder database contains block_index 0, or anything near it, so the
+    // divergent branch was UNREACHABLE on every database this heals and both forms produced
+    // identical rows.
+    //
+    // The check to re-run before extending this entry to a new database: if it can ever hold
+    // block_index 0, this reasoning does NOT carry and the schema must be reconciled instead.
+    '2026-06-02-fix-previous-block-hash-byte-order.sql': {
+        from: '263aba4e1f16aca19342cb1d58eb072735e822ddffc3823e8850cf52404c37dd',  // 0a6afe3..c808bd1^
+        to:   'db1e2cac25b7ed132dddaf33a483f35151208901c40a5b4c637d5b5f23492663',  // 7817e6c (HEAD)
     },
 };
 
