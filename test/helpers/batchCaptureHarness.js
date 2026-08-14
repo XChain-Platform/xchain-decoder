@@ -35,8 +35,8 @@ const SELLER = 'bcrt1qselleraddress';
 const CHANGE = 'bcrt1qchangeaddress';
 const ORACLE = 'bcrt1qoracleoperatoraaa';
 
-// Mainnet at a block time below the DISARMED sub-command gate: the legacy top-level-only
-// view a re-decode of pre-flag-day history must reproduce.
+// Mainnet at a block time below its sub-command gate instant: the legacy top-level-only view
+// a re-decode of pre-flag-day history must reproduce.
 const BELOW_GATE = { network: 'bitcoin-mainnet', blockTime: T0 };
 // regtest is genesis-on for the gate.
 const ABOVE_GATE = { network: 'bitcoin-regtest', blockTime: T0 };

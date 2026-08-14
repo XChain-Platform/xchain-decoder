@@ -479,7 +479,15 @@ const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
 // xchain-documentation/protocol/constants.js; the conformance suite requires that mirror to exist
 // before mainnet may be armed.
 const BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION = {
-    mainnet: null,        // DISARMED: awaiting the operator's ratified instant
+    mainnet: 1786838400,  // ARMED 2026-08-14 (operator, pre-launch): 2026-08-16T00:00:00Z, the
+                          // SAME instant as BATCH_ISSUANCE_LIMITS carries in the indexer. One
+                          // decision, one boundary: arming the issuance rework WITHOUT this one
+                          // ships a mainnet where a batched COINPAY spends the coin and settles
+                          // nothing, and a batched DISPENSER create never dispenses, because
+                          // capture would still read only the top-level ACTION name. DEPLOY
+                          // DEADLINE: every decoder on mainnet must run this value BEFORE the
+                          // instant, or the fleet splits on the first BATCH carrying a COINPAY
+                          // or a Mode B DISPENSER.
     testnet: 0,
     regtest: 0,
 };

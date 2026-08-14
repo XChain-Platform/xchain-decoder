@@ -80,8 +80,8 @@ const CANCEL = 'DISPENSER|1|7|'
 // DISPENSER|2|DISPENSER_ACTION_INDEX|GIVE_ESCROW|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO
 const refill = (expiration) => `DISPENSER|2|7|100|${expiration}|||`
 
-// Mainnet at a block time below the (DISARMED) sub-command gate: the legacy top-level-only
-// view a re-decode of pre-flag-day history must reproduce.
+// Mainnet at a block time below its sub-command gate instant: the legacy top-level-only view
+// a re-decode of pre-flag-day history must reproduce.
 const BELOW_GATE = { network: 'bitcoin-mainnet', blockTime: T0 }
 // regtest is genesis-on for the gate.
 const ABOVE_GATE = { network: 'bitcoin-regtest', blockTime: T0 }
@@ -640,9 +640,17 @@ describe('BATCH dispenser registration', function () {
             } finally {
                 BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = saved
             }
-            assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, null,
-                'the map must be back to DISARMED after the probe')
-            assert.deepStrictEqual(await probe(ARMED), { registered: 0, captured: 0 })
+            // Restore to the PRE-PROBE value, never to a baseline written in here: this test
+            // borrows the map, so it owes back exactly what it took. A hardcoded baseline made
+            // an operator arming mainnet fail in a test that is not about the instant at all.
+            assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, saved,
+                'the map must be back to its pre-probe value')
+            // Behavioural half of the same check, one second below whatever mainnet now
+            // carries; a DISARMED map is inactive at every block time, so the probe instant
+            // serves there.
+            const belowRestored = typeof saved === 'number' ? saved - 1 : ARMED
+            assert.deepStrictEqual(await probe(belowRestored), { registered: 0, captured: 0 },
+                'the decoder follows the restored map, not the probe value')
         })
     })
 
@@ -833,10 +841,13 @@ describe('BATCH dispenser registration', function () {
             } finally {
                 BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = saved
             }
-            assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, null,
-                'the map must be back to DISARMED after the probe')
-            assert.deepStrictEqual(await probe(ARMED), [],
-                'DISARMED on mainnet leaves both halves off there')
+            // Give the map back exactly what was borrowed; the value itself is pinned in
+            // test/unit/batchSubCommandOutputCaptureActivation.test.js, not re-litigated here.
+            assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, saved,
+                'the map must be back to its pre-probe value')
+            const belowRestored = typeof saved === 'number' ? saved - 1 : ARMED
+            assert.deepStrictEqual(await probe(belowRestored), [],
+                'below the restored mainnet instant both halves are off there')
         })
     })
 })

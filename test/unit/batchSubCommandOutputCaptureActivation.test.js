@@ -20,7 +20,8 @@
 // makes a from-genesis re-decode capture outputs the live fleet never captured.
 //
 // Four tiers, so a one-sided edit fails somewhere no matter which checkout is present:
-//   1. PIN     - the vendored map has the disarmed/genesis-on shape, in this repo alone.
+//   1. PIN     - the vendored map carries the ratified mainnet instant and the genesis-on
+//                testnet/regtest shape, in this repo alone.
 //   2. FANOUT  - on every ARMED network it is >= the indexer's FIX_OUTPUT_FANOUT instant. A
 //                BATCH is a data-bearing, non-COINPAY row, so the extra captured outputs fan
 //                it out to several rows, and below that flag-day
@@ -56,6 +57,24 @@ const INDEXER_BATCH = process.env.XCHAIN_INDEXER_DIR
     : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'actions', 'batch.js');
 const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
+// 2026-08-16 00:00:00 UTC, armed on mainnet by the operator on 2026-08-14 (pre-launch) at
+// the SAME instant the indexer carries for BATCH_ISSUANCE_LIMITS. Moving this number is a
+// consensus act and not a tidy-up: below it a from-genesis re-decode must reproduce the
+// top-level-only output set the live fleet wrote, and above it every decoder on mainnet must
+// already be running the armed value or the fleet splits on the first BATCH carrying a
+// COINPAY or a Mode B DISPENSER. A change here should be a deliberate edit, never a
+// side-effect of making a red test green.
+const PINNED_MAINNET_ACTIVATION = 1786838400;
+
+// A block time strictly below whatever mainnet carries, for the cases that pin pre-flag-day
+// inertness. Derived from the map rather than hardcoded, so this stays BELOW the gate if the
+// instant ever moves; a DISARMED mainnet is inactive at every block time, so an absurd one
+// serves there.
+const BELOW_MAINNET_GATE =
+    typeof BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet === 'number'
+        ? BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet - 1
+        : 4000000000;
+
 function siblingOrSkip(ctx, file){
     if (fs.existsSync(file)) return true;
     if (REQUIRE_SIBLINGS)
@@ -88,12 +107,32 @@ function indexerChangeTimes(name){
 
 describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
 
-    it('keeps mainnet DISARMED and testnet/regtest genesis-on', function () {
-        // Teeth for the ratification requirement: a number on mainnet means someone armed a
-        // consensus boundary without the operator's ratified instant.
-        assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, null);
+    it('pins the ratified mainnet flag-day and keeps testnet/regtest genesis-on', function () {
+        // Teeth for the ratified instant: any OTHER value on mainnet, null included, means
+        // someone moved a consensus boundary the operator armed. Moving it forward strands
+        // every decoder already running the armed value; moving it back rewrites agreed
+        // history on a re-decode.
+        assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet,
+            PINNED_MAINNET_ACTIVATION);
         assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.testnet, 0);
         assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.regtest, 0);
+    });
+
+    it('is off below the ratified mainnet instant and on from it, through the real helper', function () {
+        // The number above only matters through the predicate the decoder actually calls, so
+        // the boundary is driven rather than asserted: mainnet history below the instant must
+        // re-decode with the legacy top-level-only view, and the block AT the instant is the
+        // first one that sees sub-commands (>=, as every protocol_changes gate reads).
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 0), false);
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 1786060800), false,
+            'the ORACLE_FEE_OUTPUT_ACTIVATION flag-day is below this one and must stay off here');
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', PINNED_MAINNET_ACTIVATION - 1),
+            false, 'the block one second below the instant keeps top-level-only capture');
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', PINNED_MAINNET_ACTIVATION),
+            true, 'the block AT the instant sees sub-commands');
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', PINNED_MAINNET_ACTIVATION + 1),
+            true);
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 4000000000), true);
     });
 
     it('covers exactly the networks the sibling capture gates cover', function () {
@@ -184,9 +223,22 @@ describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
     });
 
     it('a DISARMED network is inactive at every block time, including absurd ones', function () {
-        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 0), false);
-        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 1786060800), false);
-        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 4000000000), false);
+        // Every network in this map is armed today, so the null branch needs a fixture: disarm
+        // mainnet in place for the length of the test and drive the REAL helper (it reads the
+        // map per call, so the mutation is visible). The branch has to stay covered because it
+        // is the fail-closed default protecting every gate no operator has ratified yet - a
+        // null that read as "no gate" would widen the persisted output set on an unarmed chain.
+        const saved = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet;
+        BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = null;
+        try {
+            assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 0), false);
+            assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 1786060800), false);
+            assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 4000000000), false);
+        } finally {
+            BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = saved;
+        }
+        assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, saved,
+            'the probe must put back whatever the map held before it');
     });
 
     it('testnet and regtest are active from genesis so the venues exercise the sub-command path', function () {
@@ -210,10 +262,11 @@ describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
     });
 
     it('flips exactly at the armed instant once a network IS armed (>= semantics)', function () {
-        // mainnet is disarmed today, so arm it in place for the length of this test and drive
-        // the REAL helper (the module reads the map per call, so the mutation is visible).
-        // This pins the boundary the operator will ratify onto: >=, so the block AT the
-        // instant already captures, matching every protocol_changes gate.
+        // The >= boundary itself, driven at an instant NOBODY has ratified, so it stays a
+        // statement about the comparison rather than about today's mainnet value: arm mainnet
+        // onto a synthetic instant for the length of this test and drive the REAL helper (the
+        // module reads the map per call, so the mutation is visible). The block AT the instant
+        // already captures, matching every protocol_changes gate.
         const ARMED = 1789430400;
         const saved = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet;
         BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = ARMED;
@@ -227,8 +280,18 @@ describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
         } finally {
             BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = saved;
         }
-        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', ARMED), false,
-            'the map must be back to DISARMED after the probe');
+        // Restore to whatever was there BEFORE the probe, never to a baseline written into
+        // this test: hardcoding one made an operator arming mainnet fail here, which is the
+        // one place the arming must not be re-litigated.
+        assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, saved,
+            'the map must be back to its pre-probe value');
+        // Behavioural half: the helper answers under the RESTORED map again. A leaked
+        // mutation (the synthetic instant is LATER than the real one) reads as inactive at
+        // the real instant, so it cannot pass here.
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', BELOW_MAINNET_GATE), false);
+        if (typeof saved === 'number')
+            assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', saved), true,
+                'the restored map governs again, not the probe value');
     });
 });
 
@@ -299,9 +362,12 @@ describe('BATCH sub-command split', function () {
 describe('capture command view', function () {
 
     it('is the action string itself below the gate, for a BATCH and for anything else', function () {
-        assert.deepStrictEqual(captureCommands('BATCH|0|COINPAY|0|1|abc', 'mainnet', 4000000000),
+        // Pre-flag-day mainnet history: the view is the top-level string, so a from-genesis
+        // re-decode reproduces the output set the fleet wrote live, byte for byte.
+        assert.deepStrictEqual(
+            captureCommands('BATCH|0|COINPAY|0|1|abc', 'mainnet', BELOW_MAINNET_GATE),
             ['BATCH|0|COINPAY|0|1|abc']);
-        assert.deepStrictEqual(captureCommands('COINPAY|0|1|abc', 'mainnet', 4000000000),
+        assert.deepStrictEqual(captureCommands('COINPAY|0|1|abc', 'mainnet', BELOW_MAINNET_GATE),
             ['COINPAY|0|1|abc']);
     });
 
@@ -314,6 +380,20 @@ describe('capture command view', function () {
 
     it('is the sub-command list above the gate for a BATCH', function () {
         assert.deepStrictEqual(captureCommands('BATCH|0|COINPAY|0|1|abc;SEND|0|BTC', 'regtest', 0),
+            ['COINPAY|0|1|abc', 'SEND|0|BTC']);
+    });
+
+    it('flips to the sub-command list on mainnet at its ratified instant', function () {
+        // The armed half of the same boundary, on the network the arming is about: one second
+        // below the instant a batched COINPAY is still invisible to capture, and at it the
+        // settlement sub-command is what capture sees.
+        assert.deepStrictEqual(
+            captureCommands('BATCH|0|COINPAY|0|1|abc;SEND|0|BTC', 'mainnet',
+                PINNED_MAINNET_ACTIVATION - 1),
+            ['BATCH|0|COINPAY|0|1|abc;SEND|0|BTC']);
+        assert.deepStrictEqual(
+            captureCommands('BATCH|0|COINPAY|0|1|abc;SEND|0|BTC', 'mainnet',
+                PINNED_MAINNET_ACTIVATION),
             ['COINPAY|0|1|abc', 'SEND|0|BTC']);
     });
 });

@@ -35,7 +35,8 @@
 const assert = require('assert');
 const path   = require('path');
 
-const { captureCommands,
+const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
+        captureCommands,
         hasProvablyRejectedBatch,
         subCommandLimitKey,
         subCommandTick,
@@ -50,6 +51,17 @@ const { SOURCE, SELLER, CHANGE, ORACLE, T0,
 const CORPUS = require('../fixtures/regtestBatchCorpus.json');
 
 const reject = (subCommands) => hasProvablyRejectedBatch(subCommands, ACTION_ALIASES);
+
+// A mainnet block time strictly below the sub-command gate instant, which is where the
+// byte-identity argument lives: pre-flag-day history must re-decode to the top-level-only
+// view the live fleet wrote. Derived from the map so it stays below the gate wherever the
+// operator ratified it; a DISARMED mainnet is inactive at every block time, so an absurd one
+// serves there. The instant itself is pinned in
+// test/unit/batchSubCommandOutputCaptureActivation.test.js.
+const BELOW_MAINNET_GATE =
+    typeof BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet === 'number'
+        ? BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet - 1
+        : 4000000000;
 
 // COINPAY|VERSION|ORDER_ACTION_INDEX - the sub-command whose presence makes capture happen at
 // all, so it is the sibling every "does this batch capture?" case is built around.
@@ -309,9 +321,9 @@ describe('BATCH whole-batch rejection: the rest of the class', function () {
 
         it('leaves the command view as the legacy top-level string', function () {
             const over = batchOf([COINPAY].concat(filler(COMMAND_LIMIT)));
-            assert.deepStrictEqual(captureCommands(over, 'mainnet', 4000000000), [over]);
+            assert.deepStrictEqual(captureCommands(over, 'mainnet', BELOW_MAINNET_GATE), [over]);
             const nested = batchOf([COINPAY, 'BATCH|0|SEND|0|a']);
-            assert.deepStrictEqual(captureCommands(nested, 'mainnet', 4000000000), [nested]);
+            assert.deepStrictEqual(captureCommands(nested, 'mainnet', BELOW_MAINNET_GATE), [nested]);
         });
 
         it('captures nothing for any of these batches, exactly as the live fleet wrote it', async () => {
@@ -395,7 +407,8 @@ describe('BATCH whole-batch rejection: the rest of the class', function () {
 
         it('is byte-identical below the gate, every payload', function () {
             for (const payload of CORPUS)
-                assert.deepStrictEqual(captureCommands(payload, 'mainnet', 4000000000), [payload]);
+                assert.deepStrictEqual(captureCommands(payload, 'mainnet', BELOW_MAINNET_GATE),
+                    [payload]);
         });
     });
 });
