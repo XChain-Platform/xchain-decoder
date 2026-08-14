@@ -45,6 +45,7 @@
 'use strict';
 
 const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION } = require('./protocol/constants.js')
+const ACTION_ALIASES = require('./actionAliases.js')
 
 // The BATCH FORMAT versions the indexer registers (xchain-indexer/src/actions/batch.js
 // `this.formats`, which today holds only 0 = 'VERSION|COMMAND'). A BATCH whose FORMAT is
@@ -103,10 +104,14 @@ function isBatchSubCommandCaptureActive(consensusNetwork, blockTime){
 // registered F, and then the command list is the remainder split on ';'. The prefix holds
 // no ';', so slicing before the split gives the identical array the indexer builds.
 //
-// Empty elements are KEPT, matching the indexer's raw ';'-split list (a trailing ';'
-// yields a trailing empty command there, which its activation scan whole-batch rejects).
-// They carry no action prefix, so they select no capture; keeping them costs nothing and
-// keeps the two lists index-for-index comparable.
+// Empty elements are KEPT, matching the indexer's raw ';'-split list, and keeping them is
+// LOAD-BEARING rather than merely tidy. A trailing ';' yields a trailing empty command
+// there, whose action name is '' and which its activation scan whole-batch rejects, so no
+// sub-command in that batch runs at all. An earlier note here read "they carry no action
+// prefix, so they select no capture; keeping them costs nothing" - true of the empty
+// element itself and false of the batch containing it, which is the whole point of
+// hasProvablyRejectedSubCommand below. Keeping them also keeps the two lists
+// index-for-index comparable.
 function batchSubCommands(decodedData){
     if (typeof decodedData !== 'string' || !decodedData.startsWith('BATCH|'))
         return null
@@ -118,6 +123,92 @@ function batchSubCommands(decodedData){
     return []
 }
 
+// The ACTION NAME of a sub-command: every character before the first '|', or the whole
+// string when it carries none. Byte-for-byte the indexer's own
+// `String(command).split('|')[0]`, which is the token BOTH of its per-command scans key on
+// (the activation scan and the per-ACTION limit tally). Kept as one function so the two
+// readers below cannot drift into two ideas of where a name ends.
+function subCommandActionName(command){
+    if (typeof command !== 'string') return null
+    const pipeIndex = command.indexOf('|')
+    return (pipeIndex === -1) ? command : command.slice(0, pipeIndex)
+}
+
+// Does this BATCH carry a sub-command whose ACTION NAME the indexer's activation scan
+// PROVABLY rejects, taking the whole batch down with it?
+//
+// WHY CAPTURE HAS TO CARE. batch.js runs, before any dispatch:
+//
+//     for(let command of commands){
+//         let action = String(command).split('|')[0];
+//         if(normalize) action = this.normalizeSubAction(action);
+//         if(!error && await this.protocolChanges.isEnabled(action, ...) == false)
+//             error = 'invalid: ACTION (unknown)';
+//     }
+//
+// and `isEnabled` returns FALSE for any name absent from its registry. One rejected name
+// invalidates the WHOLE batch as a single record, so NO sub-command runs - not even the
+// well-formed ones beside it. Capture that keeps reading those siblings persists outputs
+// for actions the indexer never executes: the same over-capture the DISPENSER prefix
+// tightening closes, reached through a sibling command instead of through the DISPENSER
+// command's own name. `BATCH|0|DISPENSER|0|...;` (one trailing semicolon) registers a
+// dispenser here and none there, and payments to that address are then read as dispenses
+// no indexer will ever settle.
+//
+// WHY ONLY THE EMPTY NAME, when the scan rejects far more than that. Suppression is the
+// UNDER-capture direction, the money-bearing one: refuse capture for a batch the indexer
+// actually runs and a real settlement output is never persisted. So this may only fire on
+// names it can PROVE are unregistered, and the decoder holds no copy of that registry.
+// Measured against the sibling indexer at this commit, 53 names are enabled there and
+// absent from VALID_ACTION_NAMES here (DISPENSE, XCALL, ORDER_MATCH and every non-action
+// feature-gate flag: UNIFIED_FEES, ISSUANCE_FEE, FIX_OUTPUT_FANOUT, ...), so a gate keyed
+// on the decoder's own known-name set would suppress capture for batches the indexer
+// dispatches normally. The EMPTY name is different in kind rather than in degree: '' is
+// not an ACTION and not a feature-gate flag, no addChange can name it, and it is the one
+// verdict this file can reach on its own evidence. Everything else in the class (an
+// unknown name, a nested BATCH, a per-ACTION limit, the 250-command cap) needs the
+// indexer's registry and flag instants vendored here first; that is a bigger cross-repo
+// artifact than this gate, and it is stated rather than half-built.
+//
+// A '' name is reachable two ways and both are covered, because both are what
+// `split('|')[0]` yields: an EMPTY element (a trailing ';', a ';;', or the whole command
+// list being empty) and an element that leads with the delimiter (`|0|x`).
+function hasProvablyRejectedSubCommand(subCommands){
+    return subCommands.some(command => subCommandActionName(command) === '')
+}
+
+// Expand a short-form ACTION alias on a sub-command, mirroring the alias half of the
+// indexer's `batch.js normalizeSubAction`. Only the NAME is rewritten; every character
+// from the first '|' onward is returned verbatim.
+//
+// The VERSION-0 injection normalizeSubAction also performs is deliberately NOT mirrored:
+// it applies to ISSUE/MINT/SEND only, it edits PARAMS rather than the name, and no capture
+// decision in this decoder reads either - so mirroring it would move nothing and would
+// couple this file to a second cross-repo rule for no gain.
+//
+// `aliases` is passed in rather than closed over so a test can drive a synthetic table:
+// with the real one this expansion is a no-op for capture, because no alias resolves to
+// COINPAY or DISPENSER, and a check nothing can exercise is not a check.
+//
+// TWO guards, each load-bearing on a case the other does not reach, which is why both
+// stay: hasOwnProperty because these names are untrusted wire bytes and a sub-command
+// spelled `constructor|0|x` would otherwise read a member off the table's PROTOTYPE, and
+// the string check because a table entry of any other type would splice a number, an
+// object or nothing onto the head of a command the capture sites then prefix-match.
+// Against the REAL table both are unreachable (it is an object literal of five string
+// values, pinned to the canonical manifest), and the indexer's `for...in` walk is
+// equivalent on it for the same reason - an object literal's inherited members are not
+// enumerable. They are stated rather than assumed because this function also takes tables
+// its caller does not own.
+function expandSubCommandAlias(command, aliases){
+    const actionName = subCommandActionName(command)
+    if (actionName === null || actionName === '') return command
+    if (!Object.prototype.hasOwnProperty.call(aliases, actionName)) return command
+    const canonical = aliases[actionName]
+    if (typeof canonical !== 'string' || canonical.length === 0) return command
+    return canonical + command.slice(actionName.length)
+}
+
 // The list of action strings the output-capture decision should be taken over.
 //
 // Below the gate, and for every transaction that is not a BATCH, this is exactly
@@ -126,11 +217,34 @@ function batchSubCommands(decodedData){
 // the legacy behaviour. Above the gate a BATCH yields its sub-commands INSTEAD of itself:
 // the BATCH string can never carry a capture-selecting prefix of its own, so dropping it
 // changes nothing and keeps the list to things that are actually dispatched.
+//
+// Two things happen to that sub-command list, and NEITHER can run below the gate, which is
+// what makes this whole file inert for pre-flag-day history:
+//
+//   1. A batch carrying a provably-rejected sub-command yields the EMPTY list, because the
+//      indexer runs none of its commands (see hasProvablyRejectedSubCommand).
+//   2. Sub-command ACTION names are alias-expanded, because that is the name the indexer
+//      DISPATCHES on. Un-expanded, a batched alias reaches capture in its wire spelling
+//      while the indexer runs its canonical one, and the day an alias resolves to COINPAY
+//      or DISPENSER that gap becomes a missed settlement output - the money-bearing
+//      direction. Nothing moves today (no alias resolves to either), which is precisely
+//      when a consensus-affecting rule is cheap to state.
+//
+// Step 2 assumes the indexer has ALREADY normalized sub-actions wherever this gate is
+// live, i.e. that on every armed network BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION is at
+// or after BATCH_SUBACTION_NORMALIZATION. Below THAT flag an aliased sub-command is an
+// unregistered name and whole-batch-rejects instead of dispatching, so expanding it there
+// would over-capture. The ordering holds today (testnet/regtest genesis-on for both,
+// mainnet normalization active since 2026-08-07 with this gate still disarmed) and
+// batchSubCommandOutputCaptureActivation.test.js drives it against the sibling indexer
+// rather than leaving it as a comment.
 function captureCommands(decodedData, consensusNetwork, blockTime){
     if (!isBatchSubCommandCaptureActive(consensusNetwork, blockTime))
         return [decodedData]
     const subCommands = batchSubCommands(decodedData)
-    return (subCommands === null) ? [decodedData] : subCommands
+    if (subCommands === null) return [decodedData]
+    if (hasProvablyRejectedSubCommand(subCommands)) return []
+    return subCommands.map(command => expandSubCommandAlias(command, ACTION_ALIASES))
 }
 
 // Collapse the v0 DISPENSER creates of ONE transaction to at most one registration per
@@ -193,6 +307,9 @@ module.exports = {
     BATCH_SUB_COMMAND_FORMATS,
     isBatchSubCommandCaptureActive,
     batchSubCommands,
+    subCommandActionName,
+    hasProvablyRejectedSubCommand,
+    expandSubCommandAlias,
     captureCommands,
     collapseDispenserRegistrations,
 }

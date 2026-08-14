@@ -129,6 +129,26 @@ describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
         }
     });
 
+    it('never precedes the indexer BATCH_SUBACTION_NORMALIZATION flag-day (sub-command aliases)', function () {
+        if (!siblingOrSkip(this, INDEXER_CHANGES)) return;
+        // captureCommands alias-expands a BATCH's SUB-COMMAND names, because that is the
+        // name the indexer DISPATCHES on at/after this flag-day. BELOW it an aliased
+        // sub-command is an unregistered name, so the indexer's activation scan
+        // whole-batch-rejects and runs nothing: expanding there would capture for a batch
+        // that never executed. The ordering is what makes the expansion faithful rather
+        // than merely convenient, and nothing in code enforces it.
+        const normalization = indexerChangeTimes('BATCH_SUBACTION_NORMALIZATION');
+        for (const network of Object.keys(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION)) {
+            const gate = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION[network];
+            if (gate === null) continue;
+            assert.ok(gate >= normalization[network],
+                network + ' sub-command capture (' + gate + ') must not begin before ' +
+                'BATCH_SUBACTION_NORMALIZATION (' + normalization[network] + '): below that ' +
+                'flag-day a batched alias is an unknown ACTION that invalidates the whole ' +
+                'batch, so the sub-command view must not resolve it to its canonical name');
+        }
+    });
+
     it('mirrors the BATCH FORMAT versions the indexer registers', function () {
         if (!siblingOrSkip(this, INDEXER_BATCH)) return;
         // Capture must see sub-commands in exactly the FORMATs the indexer dispatches. A

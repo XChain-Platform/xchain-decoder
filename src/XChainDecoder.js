@@ -186,19 +186,12 @@ const VALID_ACTION_NAMES = new Set([
     'SWEEP', 'UNSTAKE', 'VOTE', 'WITHDRAW'
 ])
 
-// Short-form ACTION-name aliases. A spec-following client may encode any of
-// these leading tokens (e.g. the BRC20/SRC20-compatible TRANSFER, or MSG for a
-// shorter MESSAGE) and produce a valid on-chain payload. We expand the alias to
-// its canonical name BEFORE the VALID_ACTION_NAMES gate and rewrite the stored
-// payload to the canonical form, so the decoder DB never holds aliased names and
-// every downstream consumer sees one spelling per action.
-const ACTION_ALIASES = {
-    'TRANSFER': 'SEND',
-    'ADDR': 'ADDRESS',
-    'DROP': 'AIRDROP',
-    'CAST': 'BROADCAST',
-    'MSG': 'MESSAGE'
-}
+// Short-form ACTION-name aliases; see ./actionAliases.js for the table and why it
+// sits in its own module (batchSubCommandCapture.js expands the same aliases on a
+// BATCH's SUB-COMMAND names and is required BY this file, so a shared literal here
+// would be a require cycle). Re-exported below under this name, which is how the
+// ActionManifestConformance guard binds it to the canonical manifest.
+const ACTION_ALIASES = require('./actionAliases.js')
 
 // Canonicalize the ACTION name in a raw payload buffer, expanding a short-form
 // alias to its canonical form. Single source for the tokenize+lookup logic
