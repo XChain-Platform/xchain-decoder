@@ -184,6 +184,11 @@ class Database {
             try { await db.release(); } catch(_){}
             return false;
         }
+        // One summary line instead of a per-table pair; error paths below still
+        // name the table, so a failure stays attributable.
+        console.log('Verifying database and tables...');
+        let checked = 0;
+        let created = 0;
         try {
             for (file of files){
                 // indexOf returns -1 when '.sql' is absent (e.g. the migrations/ subdirectory).
@@ -192,7 +197,7 @@ class Database {
                 var isSql = file.indexOf('.sql');
                 if(isSql !== -1){
                     let table   = file.substring(0, file.indexOf('.sql'));
-                    console.log('Verifying ' + table + ' table exists...');
+                    checked++;
                     try {
                         if(existing.has(table)){
                             // Existing table: reconcile column drift against the SQL
@@ -209,6 +214,7 @@ class Database {
                         } else {
                             await this.createTable(file, db);
                             existing.add(table);
+                            created++;
                         }
                     } catch(e){
                         console.log('Error verifying table ' + table + ': ' + e.code);
@@ -224,6 +230,7 @@ class Database {
             // one connection per created table plus this one and exhausts the pool.
             try { await db.release(); } catch(_){}
         }
+        console.log('Database and tables verified (' + checked + ' tables, ' + created + ' created).');
         return true;
     }
 
@@ -1089,7 +1096,6 @@ class Database {
         // latent fresh-install-only bug.
         let queries = this.splitSqlStatements(data);
         let query   = null;
-        console.log('Creating ' + table + ' table and indexes...');
         try {
             for(query of queries){
                 query = query.trim();
