@@ -95,7 +95,13 @@ describe('Security: Connection Handling', () => {
                 secondAcquired = true
             })
 
-            await new Promise(resolve => setTimeout(resolve, 10))
+            // Poll for the waiter to enqueue rather than sleeping a fixed 10ms: the wait
+            // is on an observable condition, so a loaded machine cannot under-sleep it.
+            // Same shape as the FIFO test below.
+            const deadline = Date.now() + 2000
+            while (db._transactionLockQueue.length < 1 && Date.now() < deadline) {
+                await new Promise(resolve => setImmediate(resolve))
+            }
             assert.strictEqual(secondAcquired, false)
             assert.strictEqual(db._transactionLockQueue.length, 1)
 

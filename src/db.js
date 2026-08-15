@@ -474,7 +474,7 @@ class Database {
     }
 
     // Assert that dispensers.expiration is exactly BIGINT UNSIGNED. The DISPENSER parser
-    // accepts a raw unix expiration up to 4294967295 (year 2106) and xchain-indexer holds
+    // accepts a raw unix expiration up to Number.MAX_SAFE_INTEGER and xchain-indexer holds
     // the same field as BIGINT UNSIGNED, so anything narrower or signed is fleet drift the
     // guard exists to catch: a signed BIGINT loses nothing today but rejects nothing either,
     // while INT / INT UNSIGNED either fail the write under a strict sql_mode or truncate
@@ -1953,7 +1953,7 @@ class Database {
         // expiration is a raw unix timestamp (seconds) stored as-is into a BIGINT UNSIGNED
         // column. It is deliberately NOT wrapped in FROM_UNIXTIME(): FROM_UNIXTIME() caps at
         // 2147483647 (Y2038) and returns NULL above it, which would silently drop every
-        // expiration in 2038–2106 even though the decoder accepts values up to 4294967295
+        // expiration past 2038 even though the decoder accepts any safe-integer value
         // (XChainDecoder.js DISPENSER parse). Matches xchain-indexer dispensers.expiration.
         
         let connection = await this.getConnection()

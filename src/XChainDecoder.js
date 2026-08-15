@@ -2913,10 +2913,24 @@ class XChainDecoder {
                                         // block loop, which then retries the same deterministic tx
                                         // forever - or truncates under a lax one, leaving the decoder
                                         // holding a dispenser the indexer never registered.
-                                        // Number.isInteger already excludes NaN and Infinity, so it
+                                        // Number.isSafeInteger already excludes NaN and Infinity, so it
                                         // subsumes the isNaN test it replaces; the default expiration is
                                         // integral by construction (block timestamp + whole days).
-                                        if (!Number.isInteger(expiration) || expiration < 0 || expiration > 4294967295) {
+                                        //
+                                        // SAFE integer, not merely integer, and no u32 ceiling. The old
+                                        // `expiration > 4294967295` reject was recognition drift: the
+                                        // indexer escrows any non-negative integer EXPIRATION into its own
+                                        // BIGINT UNSIGNED column, so a dispenser opened past year 2106 (or
+                                        // spelled 9999999999 for "never") stayed open and escrowed there
+                                        // while the decoder skipped registration, and a later coin payment
+                                        // to it was never flagged as a dispense. Number.isSafeInteger is
+                                        // the bound that actually holds: at or below it Number() round-trips
+                                        // the payload token exactly, so the decoder stores the same value
+                                        // the indexer does, and it stays far inside BIGINT UNSIGNED.
+                                        // Dropping the ceiling outright would NOT be safe - Number.isInteger
+                                        // is true for 1e300, which overflows the column and wedges the block
+                                        // loop on the same deterministic tx forever.
+                                        if (!Number.isSafeInteger(expiration) || expiration < 0) {
                                             this.parseErrors++
                                             console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[14]}'`)
                                         } else if (this.dispenserOpensForThisChain(giveCoin, getCoin)){
@@ -3040,9 +3054,13 @@ class XChainDecoder {
                                             // path writes through extendOpenDispenserExpirationBySource
                                             // into the same BIGINT UNSIGNED column, and the indexer
                                             // rejects a fractional edit EXPIRATION with the identical
-                                            // isInteger test.
-                                            if (Number.isInteger(newExpiration) && newExpiration >= 0 &&
-                                                newExpiration <= 4294967295 && newExpiration > block.timestamp){
+                                            // isInteger test, and the same SAFE-integer ceiling rather than
+                                            // a u32 one (see the create guard: a u32 reject here would
+                                            // silently decline to mirror an extend the indexer accepted,
+                                            // closing the decoder's row early on a dispenser that is still
+                                            // open and escrowed).
+                                            if (Number.isSafeInteger(newExpiration) && newExpiration >= 0 &&
+                                                newExpiration > block.timestamp){
                                                 // nextBlockHeight lets the mirror also clear a soft-expiry
                                                 // THIS block stamped: deleteOpenDispensers ran before this
                                                 // loop, so without it the `IS NULL` filter silently skipped

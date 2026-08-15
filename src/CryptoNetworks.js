@@ -68,7 +68,12 @@ class CryptoNetworks {
         return coins.getCoinConfig(p.tick, p.net).chainGenesisHash || null;
     }
 
-    // Indexing start height (not part of any consensus hash). Unknown/regtest -> 0.
+    // Indexing start height, and a CONSENSUS input: coins/index.js folds firstBlock into
+    // consensusSubset() (REGENERATED 2026-08-06, see coins/consensus_pin.js), because the
+    // decoder reads it as the chain's start height, so it decides which block the action
+    // history begins at. A node bundling a higher value skips the actions below it and
+    // replays a different history while its pin verifies clean, so this is never a
+    // locally-tunable operational value. Unknown/regtest -> 0.
     static getFirstBlock(networkName){
         const p = parseNetworkName(networkName);
         return p ? coins.getCoinConfig(p.tick, p.net).firstBlock : 0;

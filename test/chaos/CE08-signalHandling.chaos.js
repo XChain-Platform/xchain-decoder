@@ -117,10 +117,17 @@ describe('CE-08: Signal Handling and Graceful Shutdown', function () {
 
         assert.strictEqual(decoder.lastPollAt, 0, 'heartbeat starts unset before the loop runs')
 
-        setTimeout(() => decoder.stop(), 200)
+        // Stop on the signal the assertions are about (the heartbeat has been stamped)
+        // rather than after a fixed 200ms: a loaded machine could spend that window
+        // before the first iteration and stop a loop that never ran. Stopping on the
+        // timeout branch too keeps a stuck loop a failed assertion, not a hung suite.
+        const stopWhenAlive = waitUntil(() => decoder.lastPollAt > 0, { interval: 5, timeout: 5000 })
+            .then(() => decoder.stop(), () => decoder.stop())
+
         await captureConsole(async () => {
             await decoder.start()
         })
+        await stopWhenAlive
 
         assert.ok(decoder.lastPollAt > 0, 'the loop must stamp lastPollAt')
         assert.strictEqual(decoder.isPollSilent(), false, 'a loop that just ran is not silent')
