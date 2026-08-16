@@ -34,7 +34,10 @@ describe('CE-08: Signal Handling and Graceful Shutdown', function () {
         mockConnector = createMockConnector()
         decoder.db = mockDb
         decoder.connector = mockConnector
-        decoder.sleep = (ms) => new Promise(r => setTimeout(r, Math.min(ms, 50)))
+        // Drop the retry backoff without naming a duration. setImmediate still
+        // yields the macrotask the poll loops need, so nothing in this suite is
+        // timed against a fixed sleep a loaded CI machine can overrun.
+        decoder.sleep = () => new Promise(r => setImmediate(r))
     })
 
     afterEach(function () {

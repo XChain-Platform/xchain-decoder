@@ -32,8 +32,10 @@ describe('CE-01: Node Unavailability and Recovery', function () {
         mockConnector = createMockConnector()
         decoder.db = mockDb
         decoder.connector = mockConnector
-        // Override sleep to be fast in tests
-        decoder.sleep = (ms) => new Promise(r => setTimeout(r, Math.min(ms, 50)))
+        // Drop the retry backoff without naming a duration. setImmediate still
+        // yields the macrotask the poll loops need, so nothing in this suite is
+        // timed against a fixed sleep a loaded CI machine can overrun.
+        decoder.sleep = () => new Promise(r => setImmediate(r))
     })
 
     afterEach(function () {
