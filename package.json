@@ -74,7 +74,8 @@
     "test:regression:critical": "mocha --timeout 5000 --require ./test/unit/setup.js --grep '\\[REGRESSION P0\\]' 'test/unit/**/*.test.js' 'test/security/**/*.security.test.js'",
     "test:regression:full": "mocha --timeout 10000 --require ./test/unit/setup.js --grep '\\[REGRESSION P[0123]\\]' 'test/unit/**/*.test.js' 'test/security/**/*.security.test.js' 'test/regression/**/*.test.js'",
     "test:mutation": "stryker run test/mutation/stryker.config.mjs",
-    "test:mutation:phase2": "stryker run test/mutation/stryker.phase2.config.mjs"
+    "test:mutation:phase2": "stryker run test/mutation/stryker.phase2.config.mjs",
+    "ci:full": "bash bin/ci-full.sh"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^9.6.1",
