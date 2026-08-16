@@ -1811,7 +1811,19 @@ class XChainDecoder {
                     if (reorgChainMismatch){
                         this.logError('reorg: ignoring a tip refresh from a foreign endpoint: ' + reorgChainMismatch)
                     } else if (info && typeof info.blocks === 'number') {
-                        nodeTip = info.blocks
+                        // Tier agreement is not chain identity: a same-tier foreign node (BTC-mainnet
+                        // and DOGE-mainnet both report chain="main") passes the tier gate above, so
+                        // re-prove the chain with the genesis pin too, exactly as the block loop does
+                        // before it trusts a refreshed tip. verifyChainGenesis() never throws and returns
+                        // null when unpinned/unreadable/agreeing, so on anything but a PROVEN mismatch the
+                        // tip advances as before; a proven mismatch keeps the call-time tip and falls
+                        // through to sleep-and-retry (the recoverable direction).
+                        const reorgGenesisMismatch = await this.verifyChainGenesis()
+                        if (reorgGenesisMismatch){
+                            this.logError('reorg: ignoring a tip refresh from a foreign endpoint: ' + reorgGenesisMismatch)
+                        } else {
+                            nodeTip = info.blocks
+                        }
                     }
                 } catch (refreshErr) { /* node unreachable; retry with the existing tip */ }
                 await this.sleep(3000)
