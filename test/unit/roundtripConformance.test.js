@@ -29,14 +29,9 @@
 // the canonical rewrite instead, which is the one place the stored record is
 // deliberately NOT the input.
 //
-// PLACEMENT (XC-1359). This lane sits in the fast gated unit tier and needs no
-// database: the storage gate is a pure function of a parse result, so nothing
-// here is green-by-mock from test/unit/setup.js's mariadb redirect (no src/db.js
-// is constructed; the parse's pubkey-capture writes go to an explicit stub whose
-// calls are asserted). Only the node RPC is faked, at the connector seam, which
-// is the same seam the integration tier replaces with a real regtest node. The
-// other half of the invariant, the row actually landing in MariaDB, belongs to
-// the docker-gated integration tier (test/integration/opReturn.test.js).
+// PLACEMENT: needs no database, since the storage gate is a pure function
+// of a parse result; only the node RPC is faked, at the connector seam.
+// The docker-gated integration tier covers the row landing in MariaDB.
 //
 // The fixture is authored in the sibling xchain-encoder repo (single source of
 // truth) and VENDORED byte-identically into test/fixtures/ here. The vendored
