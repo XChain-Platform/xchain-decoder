@@ -420,6 +420,31 @@ class Database {
                         continue;
                     }
 
+                    // Backdating guard: the dated-prefix check above freezes the NAMING
+                    // convention, but nothing stopped a new file from being dated before a
+                    // migration the fleet already applied. Lexical apply order then puts it
+                    // in its date slot on a fresh DB and after the frontier on an aged one,
+                    // diverging the two schemas. `frontier` is the ledger state at run start
+                    // (appliedByName is not written during the loop, and the precondition
+                    // baseline above deliberately does not advance it), so files applied or
+                    // baselined by THIS run never move it and a resumed partial run is fine.
+                    // Auto files only - see Database.backdatedFrontierViolation for why a
+                    // deferred mode=manual file cannot be told apart from a backdated one.
+                    // Mirrors xchain-indexer/src/db.js.
+                    if(mode === 'auto'){
+                        const frontier = Database.backdatedFrontierViolation(file, appliedByName.keys());
+                        if(frontier){
+                            const msg = 'runMigrations: ' + file + ' is dated BEFORE already-applied migration ' + frontier +
+                                ', so it would run in a different position here than on a fresh database and diverge the schema. ' +
+                                'Rename it with a date after ' + frontier + '.';
+                            // Same dual-mode contract as the checksum guard above: the operator
+                            // path and opt-in strict mode fail closed, passive startup logs and
+                            // proceeds so a backdated commit cannot black-start the fleet.
+                            if(includeManual || process.env.MIGRATION_STRICT_CHECKSUM === '1') throw new Error(msg);
+                            console.error(msg + ' Applying it anyway at this position - review manually.');
+                        }
+                    }
+
                     const statements = this.splitSqlStatements(raw);
                     // Destructive-DDL guard: the mode tag is a human declaration; this scan is
                     // the machine check behind it. A file tagged `auto` that contains DDL able
@@ -474,7 +499,7 @@ class Database {
     }
 
     // Assert that dispensers.expiration is exactly BIGINT UNSIGNED. The DISPENSER parser
-    // accepts a raw unix expiration up to 4294967295 (year 2106) and xchain-indexer holds
+    // accepts a raw unix expiration up to Number.MAX_SAFE_INTEGER and xchain-indexer holds
     // the same field as BIGINT UNSIGNED, so anything narrower or signed is fleet drift the
     // guard exists to catch: a signed BIGINT loses nothing today but rejects nothing either,
     // while INT / INT UNSIGNED either fail the write under a strict sql_mode or truncate
@@ -1953,7 +1978,7 @@ class Database {
         // expiration is a raw unix timestamp (seconds) stored as-is into a BIGINT UNSIGNED
         // column. It is deliberately NOT wrapped in FROM_UNIXTIME(): FROM_UNIXTIME() caps at
         // 2147483647 (Y2038) and returns NULL above it, which would silently drop every
-        // expiration in 2038–2106 even though the decoder accepts values up to 4294967295
+        // expiration past 2038 even though the decoder accepts any safe-integer value
         // (XChainDecoder.js DISPENSER parse). Matches xchain-indexer dispensers.expiration.
         
         let connection = await this.getConnection()
@@ -2618,6 +2643,39 @@ Database.MIGRATION_PRECONDITIONS = {
                    ', so there is no DATETIME to convert and UNIX_TIMESTAMP() would NULL every row.';
         }
     },
+};
+
+// Backdating guard for the auto-apply path, mirroring xchain-indexer/src/db.js. Apply
+// order is lexical, so a migration added with a date EARLIER than one already applied
+// runs in a different position on a fresh database (in its date slot) than on an aged
+// one (after the frontier), and the two schemas diverge across the fleet. Given a
+// pending filename and the names already in the ledger, return the offending applied
+// name when the pending file sorts before the lexical maximum of them, else null. An
+// empty ledger (fresh install) never trips. Pure string logic, no DB, unit-tested
+// directly.
+//
+// Callers must pass this ONLY auto-mode files, and that restriction is the whole
+// correctness argument rather than an optimization. A mode=manual file legitimately
+// sits unapplied behind the frontier for as long as the operator defers it (seven of
+// the nine files here are manual), so it is indistinguishable at runtime from a
+// backdated one and guarding it would hard-fail `node src/migrate.js` on every aged
+// fleet DB. An auto file has no such state: it applies unattended at the first startup
+// that sees it, so an unapplied auto file behind the frontier is always newly backdated.
+//
+// Only DATED ledger names are eligible to be the frontier. No undated decoder migration
+// ever shipped, so unlike the indexer this filter heals no known row; it is kept because
+// an undated name sorts ABOVE every 2026-* name in ASCII ('a' 0x61 > '2' 0x32), so one
+// stray row would make the frontier a garbage maximum that every ordinary new migration
+// sorts below, hard-failing migrate on exactly the aged DBs this guard must not break.
+Database.backdatedFrontierViolation = function(pendingName, appliedNames){
+    let frontier = null;
+    for(const name of (appliedNames || [])){
+        const n = String(name);
+        if(!/^\d{4}-\d{2}-\d{2}-/.test(n)) continue;
+        if(frontier === null || n > frontier) frontier = n;
+    }
+    if(frontier === null) return null;
+    return (String(pendingName) < frontier) ? frontier : null;
 };
 
 module.exports = Database

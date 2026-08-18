@@ -122,10 +122,20 @@ describe('endpoint chain-tier identity gate @regression', function () {
         it("verifyReorg's tip re-read refuses a foreign endpoint instead of moving nodeTip", function () {
             const idx = SRC.indexOf('chainTierMismatch(this.consensusNetwork, info["chain"])');
             assert.ok(idx > 0, "verifyReorg's getBlockchainInfo re-read must check the reported chain");
-            const window = SRC.slice(idx, idx + 400);
-            assert.ok(/nodeTip = info\.blocks/.test(window), 'the guarded assignment is the one under test');
-            assert.ok(/\}\s*else if/.test(window),
-                'the tip assignment must be the ELSE of the mismatch branch, so a foreign tip is never taken');
+            const window = SRC.slice(idx, idx + 1400);
+            // The tier gate cannot separate a same-tier foreign chain (BTC-mainnet and
+            // DOGE-mainnet both report chain="main"), so the re-read re-proves chain
+            // identity with the block-0 pin too before it trusts the refreshed tip,
+            // exactly as the block loop does. Both gates must precede the assignment.
+            const genesisIdx = window.indexOf('await this.verifyChainGenesis()');
+            const tipIdx = window.indexOf('nodeTip = info.blocks');
+            assert.ok(genesisIdx > 0,
+                'the tip re-read must also re-prove chain identity via verifyChainGenesis()');
+            assert.ok(tipIdx > 0, 'the guarded assignment is the one under test');
+            assert.ok(genesisIdx < tipIdx,
+                'verifyChainGenesis() must gate the tip assignment: a foreign block-0 keeps the call-time tip');
+            assert.ok(/\}\s*else\s*\{\s*nodeTip = info\.blocks/.test(window),
+                'the tip assignment must be the ELSE of the genesis-mismatch branch, so a foreign tip is never taken');
         });
     });
 

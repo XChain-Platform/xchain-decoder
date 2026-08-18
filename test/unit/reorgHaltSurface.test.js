@@ -123,18 +123,26 @@ describe('XChainDecoder latent REORG_HALT reporting', function () {
     it('concurrent probes collapse onto one in-flight query', async function () {
         const decoder = makeDecoder()
         let queries = 0
+        // Hold the first query open on a gate this test releases, rather than on a
+        // fixed sleep. The window the assertion needs is "query one is still in
+        // flight when probes two and three arrive", and a released gate states that
+        // window exactly instead of betting it fits inside 10ms of wall clock.
+        let releaseQuery
+        const queryGate = new Promise(resolve => { releaseQuery = resolve })
         decoder.db = {
             getReorgHaltMarker: async () => {
                 queries++
-                await new Promise(r => setTimeout(r, 10))
+                await queryGate
                 return { halted: false, at: null, reason: null }
             }
         }
-        await Promise.all([
+        const probes = [
             decoder.checkReorgHalt({ force: true }),
             decoder.checkReorgHalt({ force: true }),
             decoder.checkReorgHalt({ force: true })
-        ])
+        ]
+        releaseQuery()
+        await Promise.all(probes)
         assert.strictEqual(queries, 1)
     })
 

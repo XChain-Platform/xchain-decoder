@@ -204,6 +204,88 @@ describe('Database._destructiveAutoStatement() @regression', function () {
     });
 });
 
+describe('Database.backdatedFrontierViolation() @regression', function () {
+
+    it('reports the frontier when a pending file is dated before an applied one', function () {
+        assert.strictEqual(
+            Database.backdatedFrontierViolation('2026-07-01-late-add.sql',
+                ['2026-06-10-a.sql', '2026-08-10-b.sql']),
+            '2026-08-10-b.sql');
+    });
+
+    it('stays silent for a pending file dated after everything applied', function () {
+        assert.strictEqual(
+            Database.backdatedFrontierViolation('2026-08-11-new.sql',
+                ['2026-06-10-a.sql', '2026-08-10-b.sql']),
+            null);
+    });
+
+    it('never trips on a fresh install (empty ledger)', function () {
+        assert.strictEqual(Database.backdatedFrontierViolation('2026-01-01-first.sql', []), null);
+        assert.strictEqual(Database.backdatedFrontierViolation('2026-01-01-first.sql', null), null);
+    });
+
+    it('accepts a Map keys() iterator, which is what the apply loop passes', function () {
+        const applied = new Map([['2026-06-10-a.sql', 'h1'], ['2026-08-10-b.sql', 'h2']]);
+        assert.strictEqual(
+            Database.backdatedFrontierViolation('2026-07-01-late-add.sql', applied.keys()),
+            '2026-08-10-b.sql');
+    });
+
+    it('compares against the MAXIMUM applied name, not the last one seen', function () {
+        // Ledger rows arrive in whatever order the SELECT returns them.
+        assert.strictEqual(
+            Database.backdatedFrontierViolation('2026-07-01-late-add.sql',
+                ['2026-08-10-b.sql', '2026-06-10-a.sql']),
+            '2026-08-10-b.sql');
+    });
+
+    it('treats an equal name as applied, not backdated', function () {
+        assert.strictEqual(
+            Database.backdatedFrontierViolation('2026-08-10-b.sql', ['2026-08-10-b.sql']),
+            null);
+    });
+
+    // An undated ledger name sorts ABOVE every 2026-* name in ASCII ('a' 0x61 > '2'
+    // 0x32), so an unfiltered maximum makes the frontier a garbage value that every
+    // ordinary new migration sorts below. No undated decoder migration ever shipped,
+    // so this pins the filter rather than healing a known row.
+    it('ignores an undated legacy ledger row when computing the frontier', function () {
+        assert.strictEqual(
+            Database.backdatedFrontierViolation('2026-08-11-new.sql', [
+                '2026-06-15-events-data-mediumtext.sql',
+                'add_legacy_columns.sql',
+                '2026-08-10-action-data-utf8mb4.sql',
+            ]),
+            null,
+            'an undated legacy row must never become the frontier');
+    });
+
+    it('still reports a real violation when an undated legacy row is present', function () {
+        assert.strictEqual(
+            Database.backdatedFrontierViolation('2026-07-01-late-add.sql', [
+                'add_legacy_columns.sql',
+                '2026-08-10-action-data-utf8mb4.sql',
+            ]),
+            '2026-08-10-action-data-utf8mb4.sql',
+            'the filter must narrow the frontier, not disable the guard');
+    });
+
+    // The two shipped auto files are the live callers of this guard; a resumed partial
+    // run must not trip on them, because the ledger prefix a crash leaves behind always
+    // sorts below whatever is still pending.
+    it('does not trip a resumed partial run over the shipped auto files', function () {
+        assert.strictEqual(
+            Database.backdatedFrontierViolation('2026-06-15-events-data-mediumtext.sql',
+                ['2026-05-28-unique-index-tables.sql', '2026-06-13-dispensers-expiration-bigint.sql']),
+            null);
+        assert.strictEqual(
+            Database.backdatedFrontierViolation('2026-06-17-pubkeys-add-monotonic-id.sql',
+                ['2026-06-15-events-data-mediumtext.sql']),
+            null);
+    });
+});
+
 describe('committed migrations declare intent @regression', function () {
     const MIG_DIR = path.join(__dirname, '..', '..', 'src', 'sql', 'migrations');
     let files = [];
