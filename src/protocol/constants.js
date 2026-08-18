@@ -370,7 +370,11 @@ const ORACLE_FEE_OUTPUT_ACTIVATION = {
 // ORACLE_FEE_OUTPUT_ACTIVATION.
 const ORACLE_FEE_SET_CAPTURE_ACTIVATION = {
     mainnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
-    testnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
+    // ARMED AT GENESIS (instant 0 = always in force), operator-ratified 2026-08-18 under the
+    // pre-launch ruling that every feature must be ACTIVE on testnet. This gate fixes a defect
+    // that spends a payer native coin and gives nothing back, so a public testnet WILL hit it.
+    // Safe at 0 because testnet decoder/indexer state is REBUILT from the chain before launch.
+    testnet: 0,
     regtest: 0,
 };
 
@@ -415,7 +419,11 @@ const ORACLE_FEE_SET_CAPTURE_ACTIVATION = {
 // keeps the two copies in lockstep.
 const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
     mainnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
-    testnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
+    // ARMED AT GENESIS (instant 0 = always in force), operator-ratified 2026-08-18 under the
+    // pre-launch ruling that every feature must be ACTIVE on testnet. This gate fixes a defect
+    // that spends a payer native coin and gives nothing back, so a public testnet WILL hit it.
+    // Safe at 0 because testnet decoder/indexer state is REBUILT from the chain before launch.
+    testnet: 0,
     regtest: 0,
 };
 
