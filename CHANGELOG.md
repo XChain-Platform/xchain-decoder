@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.10.0] - 2026-08-18
 
+Consensus-affecting changes in this release ship behind per-chain activation
+points; behavior below each activation height is unchanged.
+
 ### Fixed
+- Two dispenser defects that spend a payer's own coin and give nothing back are corrected behind activation gates, armed on testnet from genesis and disarmed on mainnet.
 - Chain identity is re-proven on the reorg tip re-read, so a wrong-chain answer cannot slip in during a reorganization.
 - Code-review round fixes across the decode path (two rounds, 14 files).
 
