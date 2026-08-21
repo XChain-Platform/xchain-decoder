@@ -28,7 +28,7 @@ const ecc = require('tiny-secp256k1')
 const BlockchainConnector = require('./BlockchainConnector')
 const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
-const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress } = require('./oracleFeeOutput')
+const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('./oracleFeeOutput')
 const { isDispenserExpiryRealignActive } = require('./dispenserExpiryRealign')
 const { captureCommands, collapseDispenserRegistrations, isBatchSubCommandCaptureActive } = require('./batchSubCommandCapture')
 const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./chainIdentity')
@@ -284,6 +284,10 @@ class XChainDecoder {
         // Coin/network-prefixed loggers so cadence/reorg/stall lines are self-describing
         // even when a log pipeline strips container labels. Reads the fields at call time.
         this.log = (...args) => console.log('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args)
+        // Warn exists so a notable-but-not-failed event (a reorg starting) can reach a
+        // warn-and-above alerting rule without being dressed up as an error. console.log
+        // writes to stdout, which those rules do not read.
+        this.logWarn = (...args) => console.warn('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args)
         this.logError = (...args) => console.error('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args)
 
         // Native-coin protocol fee destination address for this coin+network. When set (not the
@@ -1804,7 +1808,7 @@ class XChainDecoder {
             try {
                 blockHashFromNode = await this.connector.getBlockHash(lastBlockIndex)
             } catch (err){
-                console.log("There was a problem trying to get a block hash from the node. Trying again...", err)
+                console.error("There was a problem trying to get a block hash from the node. Trying again...", err)
                 // The node's tip may have regressed below lastBlockIndex mid-walk (node
                 // restart onto a shorter chain, or a second reorg). Against the frozen
                 // call-time nodeTip that makes getBlockHash(lastBlockIndex) throw "Block
@@ -2458,7 +2462,7 @@ class XChainDecoder {
                     //previousBlockHash is not the same, it must be a reorg
                     if (previousBlockHash != previousBlock.block_hash){
                         await this.db.endTransaction()
-                        console.log("A reorg has been detected at block " + nextBlockHeight + ". Cleaning blocks...")
+                        this.logWarn("A reorg has been detected at block " + nextBlockHeight + ". Cleaning blocks...")
                         const preReorgBlock = lastProcessedBlockIndex
                         await this.verifyReorg(this.blockchainInfoLastBlock)
                         // Re-clamp: same as the pre-loop guard and the node-tip regression path.
@@ -2928,7 +2932,7 @@ class XChainDecoder {
                                         // Treat a missing token OR an empty-string token as an
                                         // omitted EXPIRATION and substitute the same default the
                                         // indexer uses; only a present, non-empty value is validated.
-                                        let expirationToken = decodedDataSplit[14]
+                                        let expirationToken = decodedDataSplit[V0_EXPIRATION_INDEX]
                                         let expiration
                                         if (expirationToken === undefined || expirationToken === "") {
                                             expiration = this.getDefaultExpiration(block.timestamp)
@@ -2963,7 +2967,7 @@ class XChainDecoder {
                                         // loop on the same deterministic tx forever.
                                         if (!Number.isSafeInteger(expiration) || expiration < 0) {
                                             this.parseErrors++
-                                            console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[14]}'`)
+                                            console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[V0_EXPIRATION_INDEX]}'`)
                                         } else if (this.dispenserOpensForThisChain(giveCoin, getCoin)){
                                             if (getAddress && getAddress.length > 0 && getAddress.charAt(0) === "^"){
                                                 // Fail loud on a compacted `^<id>` GET_ADDRESS. This is a
@@ -3077,7 +3081,7 @@ class XChainDecoder {
                                         // failing to mirror WOULD close early. An edit that shortens one
                                         // is deliberately not mirrored.
                                         const editSource = parseResult["source"]
-                                        const editExpirationToken = decodedDataSplit[4]
+                                        const editExpirationToken = decodedDataSplit[V2_EXPIRATION_INDEX]
                                         if (editSource && editSource.length > 0 &&
                                             editExpirationToken !== undefined && editExpirationToken !== ""){
                                             const newExpiration = Number(editExpirationToken)

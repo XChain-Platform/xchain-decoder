@@ -91,13 +91,15 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
             return 'old'
         })
 
-        const { logs } = await captureConsole(async () => {
+        const { errors } = await captureConsole(async () => {
             await decoder.verifyReorg()
         })
 
         assert.ok(hashCallCount >= 2, 'Should have retried getBlockHash')
-        const retryLogs = logs.filter(l => l.includes('problem trying to get a block hash'))
-        assert.ok(retryLogs.length >= 1, 'Should log retry message')
+        // Error, not info: this handler can spin for a whole node outage in the middle of
+        // a reorg walk, and it is the only trace that walk leaves while it is stalled.
+        const retryLogs = errors.filter(l => l.includes('problem trying to get a block hash'))
+        assert.ok(retryLogs.length >= 1, 'Should log retry message at error level')
     })
 
     it('verifyReorg should stop cleanly when every processed block is invalidated', async function () {
@@ -180,12 +182,13 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         // Stub verifyReorg to just reset state
         sinon.stub(decoder, 'verifyReorg').resolves(true)
 
-        const { logs } = await captureConsole(async () => {
+        const { warnings } = await captureConsole(async () => {
             await decoder.start()
         })
 
-        const reorgLogs = logs.filter(l => l.includes('reorg has been detected'))
-        assert.ok(reorgLogs.length >= 1, 'Should detect reorg in main loop')
+        // Warn, not info: see the level rationale on the same assertion in CE-04.
+        const reorgLogs = warnings.filter(l => l.includes('reorg has been detected'))
+        assert.ok(reorgLogs.length >= 1, 'Should detect reorg in main loop and announce it at warn level')
         assert.ok(decoder.verifyReorg.called, 'Should call verifyReorg')
         assert.ok(mockDb.endTransaction.called, 'Should end transaction before reorg processing')
     })

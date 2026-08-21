@@ -27,9 +27,13 @@
 //                it out to several rows, and below that flag-day
 //                output_fanout.collapseOutputFanout treats that as a consensus-critical
 //                fault and HALTS the block.
-//   3. LEDGER  - on every ARMED network it is >= the indexer's BATCH_ISSUANCE_LIMITS instant,
-//                which carries the batch-cumulative settlement ledger. Capture without that
-//                ledger lets N COINPAY sub-commands settle N obligations from ONE payment.
+//   3. LEDGER  - on every network it is EQUAL to the indexer's BATCH_ISSUANCE_LIMITS instant,
+//                which carries the batch-cumulative settlement ledger: one decision, one
+//                boundary (xchain-documentation/protocol/constants.js). Capture without the
+//                ledger lets N COINPAY sub-commands settle N obligations from ONE payment;
+//                the ledger without capture makes a batched COINPAY spend the coin and
+//                settle nothing. Ordering alone (>=) would let a re-arm open that second
+//                window with every pin still green, so this tier is equality, not a floor.
 //   4. DOCS    - it is value-identical to the canonical map in
 //                xchain-documentation/protocol/constants.js, which must exist before mainnet
 //                may be armed.
@@ -74,6 +78,10 @@ const BELOW_MAINNET_GATE =
     typeof BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet === 'number'
         ? BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet - 1
         : 4000000000;
+
+// 2100-01-01, the boundary the indexer's unarmed-gate suites use to tell a scheduled date
+// from the house UNARMED sentinel (9999999999): a ledger instant at or past it is unarmed.
+const YEAR_2100 = 4102444800;
 
 function siblingOrSkip(ctx, file){
     if (fs.existsSync(file)) return true;
@@ -154,17 +162,33 @@ describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
         }
     });
 
-    it('never precedes the indexer BATCH_ISSUANCE_LIMITS flag-day (the settlement ledger)', function () {
+    it('arms at exactly the indexer BATCH_ISSUANCE_LIMITS instant on every network (one boundary)', function () {
         if (!siblingOrSkip(this, INDEXER_CHANGES)) return;
+        // Equality, not ordering. The canonical map states this as ONE decision: capture and
+        // the settlement ledger flip together. A gap in either direction is a consensus
+        // window: capture before the ledger lets N COINPAY sub-commands settle N obligations
+        // from one payment; the ledger before capture makes a batched COINPAY spend the coin
+        // and settle nothing. A >= leg plus two independent literal pins stayed green while
+        // a re-arm moved either side, which is exactly the edit this must refuse.
         const limits = indexerChangeTimes('BATCH_ISSUANCE_LIMITS');
         for (const network of Object.keys(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION)) {
             const gate = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION[network];
-            if (gate === null) continue;
-            assert.ok(gate >= limits[network],
-                network + ' sub-command capture (' + gate + ') must not begin before ' +
-                'BATCH_ISSUANCE_LIMITS (' + limits[network] + '): that gate carries the ' +
-                'batch-cumulative settlement ledger, without which N COINPAY sub-commands ' +
-                'settle N obligations from one payment');
+            if (gate === null) {
+                // A DISARMED capture gate may only sit under a DISARMED ledger: the indexer
+                // parks an unarmed mainnet on a far-future sentinel, never a real date.
+                assert.ok(limits[network] >= YEAR_2100,
+                    network + ' sub-command capture is disarmed (null) while the indexer ' +
+                    'arms BATCH_ISSUANCE_LIMITS at ' + limits[network] + ': the settlement ' +
+                    'ledger would run with capture reading only the top-level ACTION name, so ' +
+                    'a batched COINPAY spends the coin and settles nothing');
+                continue;
+            }
+            assert.strictEqual(gate, limits[network],
+                network + ' sub-command capture (' + gate + ') must equal the indexer ' +
+                'BATCH_ISSUANCE_LIMITS instant (' + limits[network] + '): the canonical map ' +
+                'states them as one boundary, and the window [' +
+                Math.min(gate, limits[network]) + ', ' + Math.max(gate, limits[network]) +
+                ') either double-settles one payment or settles nothing from it');
         }
     });
 
