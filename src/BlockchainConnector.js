@@ -73,6 +73,14 @@ function sanitizeRpcError(error){
 // with HTTP 200 and result: null, in which case the real cause (Block height
 // out of range, Loading block index..., auth/queue errors) must not be masked
 // by a hand-written placeholder. `label` is the existing per-method message.
+//
+// "Missing" is PRESENCE, not truthiness: a JSON-RPC success carries a `result`
+// member that may legitimately be 0, false or "", and only undefined/null mean
+// the node sent no result. Every method funnelled through here today answers
+// with an object, an array or a non-empty hex string, so this changes nothing
+// for them; it is the guard the first falsy-answering method (a count at
+// genesis, a boolean) would otherwise be misread by and burned through the
+// caller's retry loop as a hard RPC failure.
 function rpcResult(response, label) {
     const rpcError = response && response.data && response.data.error
     if (rpcError) {
@@ -80,8 +88,10 @@ function rpcResult(response, label) {
         const message = (typeof rpcError.message === 'string') ? rpcError.message : JSON.stringify(rpcError)
         throw new Error(`${label}: RPC error ${code}: ${message}`)
     }
-    if (!response || !response.data || !response.data.result) throw new Error(label)
-    return response.data.result
+    if (!response || !response.data) throw new Error(label)
+    const result = response.data.result
+    if (result === undefined || result === null) throw new Error(label)
+    return result
 }
 
 // Decode a Bitcoin-style varint from `buf` at `offset`.

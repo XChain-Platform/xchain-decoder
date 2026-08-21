@@ -70,12 +70,13 @@ describe('updateMempool DB isolation', function () {
     assert.strictEqual(getParseTxDbArg(), decoder.mempoolDb, 'mempool parse must use mempoolDb for pubkey capture')
   })
 
-  it('hands deleteAndCompareTxsNotInList a deduped, DESCENDING-sorted txid list', async () => {
-    // db.js deleteAndCompareTxsNotInList binary-searches this array with the
-    // inverted comparator `needle.localeCompare(element)`, which requires
-    // descending lexicographic order. The old O(n^2) bs+splice build produced
-    // exactly that order (with duplicates skipped); the O(n log n) sort
-    // replacement must keep the same contract or the delete-diff silently breaks.
+  it('hands deleteAndCompareTxsNotInList a DEDUPED txid list', async () => {
+    // Dedup is the real contract at this seam: db.js deleteAndCompareTxsNotInList
+    // seeds the array into a temp table and filters it through a Set, so a repeated
+    // txid would be fetched and inserted twice. ORDER is deliberately NOT asserted
+    // here: the DB layer runs no binary search over this array (it did once, which
+    // is why an older version of this test pinned descending order), so the poll's
+    // sort is deterministic output rather than a requirement the consumer imposes.
     const { decoder } = buildDecoder(true)
     let received
     decoder.mempoolDb.deleteAndCompareTxsNotInList = async (list) => {
@@ -84,8 +85,9 @@ describe('updateMempool DB isolation', function () {
     decoder.connector.getRawMempool = async () => ['bbb', 'aaa', 'ccc', 'aaa', 'bbb']
     decoder.connector.getRawTransactions = async () => []
     await decoder.updateMempool()
-    assert.deepStrictEqual(received, ['ccc', 'bbb', 'aaa'],
-      'rawMempool must be deduped and sorted descending (the bs-comparator order)')
+    assert.strictEqual(received.length, 3, 'rawMempool must carry each txid once')
+    assert.deepStrictEqual(received.slice().sort(), ['aaa', 'bbb', 'ccc'],
+      'rawMempool must be the deduped txid set the node reported')
   })
 
   it('a mempool insert failure never rolls back or ends the block transaction', async () => {

@@ -37,12 +37,14 @@ const DECODER_GAUGES = [
     ['last_block_advance_timestamp_seconds',  'Unix time of the last forward block advance'],
     ['node_height_stale',                     '1 when the cached node tip is frozen (two or more consecutive tip polls failed)'],
     ['synced',                                '1 when the decoder is caught up to a fresh node tip'],
-    ['stalled',                               '1 when the block loop is wedged (the /live liveness signal)']
+    ['stalled',                               '1 when the block loop is wedged (the /live liveness signal)'],
+    ['last_reorg_depth',                      'Blocks rolled back by the most recent reorg']
 ];
 
 const DECODER_COUNTERS = [
     ['parse_errors_total', 'Transactions the decoder failed to parse since process start'],
-    ['rpc_errors_total',   'Node RPC errors seen since process start']
+    ['rpc_errors_total',   'Node RPC errors seen since process start'],
+    ['reorgs_total',       'Reorgs this decoder has rolled back since process start']
 ];
 
 /**
@@ -95,6 +97,12 @@ function registerDecoderMetrics(registry, decoder) {
         const rpcErrors = (decoder.rpcErrors || 0) + ((decoder.connector && decoder.connector.rpcErrors) || 0);
         counters.rpc_errors_total.setMonotonic({}, rpcErrors);
         counters.parse_errors_total.setMonotonic({}, decoder.parseErrors || 0);
+
+        // Reorg churn. The durable REORG rows and the indexer's reorgsProcessed cover
+        // the completed handshake, but neither is scrapeable when only Prometheus is
+        // deployed; these read the decoder's own lifetime counters at scrape time.
+        setIf(gauges.last_reorg_depth, decoder.lastReorgDepth);
+        counters.reorgs_total.setMonotonic({}, decoder.reorgCount || 0);
     });
 
     return { gauges, counters, collector };

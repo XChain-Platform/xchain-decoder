@@ -202,6 +202,47 @@ describe('Database._destructiveAutoStatement() @regression', function () {
         assert.strictEqual(scanSql('SET sql_mode = "STRICT_ALL_TABLES";'), null);
         assert.strictEqual(scanSql('SET @@session.foreign_key_checks = 0;'), null);
     });
+
+    // The indexer twin carries the same cases; keep the two suites in step.
+
+    it('flags a DROP hidden behind a `#` line comment (the server honours `#`)', function () {
+        // Before the strip knew `#`, this reached the classifier as one chunk starting
+        // with `#`, matched no ^-anchored check, and auto-ran the DROP at startup.
+        const offender = scanSql('# cleanup\nDROP TABLE transactions;');
+        assert.ok(offender && /DROP TABLE transactions/i.test(offender));
+    });
+
+    it('flags a statement still carrying a `#` line comment (strip-regression guard)', function () {
+        assert.ok(scanOf(['# cleanup\nDROP TABLE transactions']));
+    });
+
+    it('does not flag a `#` inside a quoted literal or a block comment', function () {
+        assert.strictEqual(scanSql("INSERT INTO notes (body) VALUES ('#tag');"), null);
+        assert.strictEqual(scanSql('/* see issue #4413 */ ALTER TABLE t ADD COLUMN y INT;'), null);
+    });
+
+    it('flags INSERT ... ON DUPLICATE KEY UPDATE but not a plain INSERT', function () {
+        assert.ok(scanSql("INSERT INTO dispensers (id, source) VALUES (1,'x') ON DUPLICATE KEY UPDATE source='y';"));
+        assert.strictEqual(scanSql("INSERT INTO dispensers (id, source) VALUES (1,'x');"), null);
+    });
+
+    it('flags LOAD DATA (rows come from a file the classifier cannot read)', function () {
+        assert.ok(scanSql("LOAD DATA INFILE '/tmp/x.csv' REPLACE INTO TABLE transactions;"));
+        assert.ok(scanSql("LOAD DATA LOCAL INFILE '/tmp/x.csv' INTO TABLE transactions;"));
+    });
+
+    it('flags ALTER TABLE partition and tablespace clauses', function () {
+        assert.ok(scanSql('ALTER TABLE events DROP PARTITION p2025;'));
+        assert.ok(scanSql('ALTER TABLE events TRUNCATE PARTITION p0;'));
+        assert.ok(scanSql('ALTER TABLE events EXCHANGE PARTITION p0 WITH TABLE events_old;'));
+        assert.ok(scanSql('ALTER TABLE events DISCARD TABLESPACE;'));
+        // Additive partition DDL is not separable by prefix, so it is non-auto too.
+        assert.ok(scanSql('ALTER TABLE events ADD PARTITION (PARTITION p2 VALUES LESS THAN (200));'));
+    });
+
+    it('does not flag an ordinary column whose name merely contains "partition"', function () {
+        assert.strictEqual(scanSql('ALTER TABLE t ADD COLUMN partition_id INT NULL;'), null);
+    });
 });
 
 describe('Database.backdatedFrontierViolation() @regression', function () {
@@ -757,6 +798,21 @@ describe('Database.splitSqlStatements() @regression', function () {
     it('does not split on a ; inside a -- line comment', function () {
         assert.deepStrictEqual(splitOf('SELECT 1; -- trailing; note\nSELECT 2;'),
             ['SELECT 1', 'SELECT 2']);
+    });
+
+    it('does not split on a ; inside a # line comment, and drops the comment', function () {
+        assert.deepStrictEqual(splitOf('SELECT 1; # see foo; bar\nSELECT 2;'),
+            ['SELECT 1', 'SELECT 2']);
+        assert.deepStrictEqual(splitOf('# cleanup\nDROP TABLE transactions;'),
+            ['DROP TABLE transactions']);
+    });
+
+    it('leaves a # or an apostrophe inside a block comment alone', function () {
+        // A naive #-to-end-of-line strip would eat the closing */ and the rest of the line.
+        assert.deepStrictEqual(splitOf('/* see issue #4413 */ SELECT 1;'),
+            ['/* see issue #4413 */ SELECT 1']);
+        assert.deepStrictEqual(splitOf("/* don't do this */ SELECT 1; SELECT 2;"),
+            ["/* don't do this */ SELECT 1", 'SELECT 2']);
     });
 
     it('splits ordinary multi-statement SQL into the same statements as before', function () {

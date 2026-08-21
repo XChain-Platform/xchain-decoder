@@ -369,6 +369,15 @@ class XChainDecoder {
         this.rpcErrors = 0
         this.parseErrors = 0
 
+        // Lifetime reorg counters, mirroring xchain-utxo-tracker. Each rolled-back block
+        // already writes a durable REORG row, but that trace is DB-only: without these a
+        // metrics-only deployment (no monitor plugin, indexer possibly down) has no
+        // scrapeable signal for a decoder thrashing through repeated shallow reorgs.
+        // Counted once per completed verifyReorg run, so count is reorg EVENTS and depth
+        // is the blocks rolled back by the most recent one.
+        this.reorgCount = 0
+        this.lastReorgDepth = 0
+
         // Consecutive block-fetch failures at _fetchErrorHeight. _fetchErrorCount counts
         // every failure (operator visibility); _auxPowParseErrorCount counts only the
         // AuxPoW-header-strip content faults that may escalate to per-tx block
@@ -558,7 +567,13 @@ class XChainDecoder {
         const status = {
             last_processed_block: this.lastProcessedBlockIndex,
             node_height: this.blockchainInfoLastBlock,
-            lag: this.blockchainInfoLastBlock - this.lastProcessedBlockIndex
+            lag: this.blockchainInfoLastBlock - this.lastProcessedBlockIndex,
+            // Reorg churn, additive: an operator polling /status sees how often this
+            // decoder has rolled back and how deep the last one went, without joining
+            // against the indexer. Absent from the nothing-processed-yet shape above,
+            // which deliberately reports unknowns rather than zeros.
+            reorg_count: this.reorgCount,
+            last_reorg_depth: this.lastReorgDepth
         }
         if (nodeHeightStale) status.node_height_stale = true
         return status
@@ -1858,6 +1873,10 @@ class XChainDecoder {
             // delete (deleteBlockByIndex), so there is no separate end-of-run event to write.
             // This is only an ops summary of the completed reorg.
             this.log(`reorg: rolled back ${blocksDeleted.length} block(s): ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
+            // Once per RUN, never per deleted block: a per-block increment would report a
+            // single depth-5 reorg as five reorgs and destroy the frequency signal.
+            this.reorgCount++
+            this.lastReorgDepth = blocksDeleted.length
         }
 
         return true
@@ -3226,11 +3245,13 @@ class XChainDecoder {
 
                 // Dedup + single O(n log n) sort. The old per-txid binary-insert
                 // (bs + splice) was O(n^2) in mempool size every poll cycle, a CPU
-                // hazard under a mempool flood. ORDER CONTRACT: descending
-                // lexicographic, i.e. exactly what the inverted bs comparator
-                // `needle.localeCompare(element)` produced; db.js
-                // deleteAndCompareTxsNotInList binary-searches this array with
-                // that same comparator and silently breaks on any other order.
+                // hazard under a mempool flood. What the consumer needs is the DEDUP:
+                // db.js deleteAndCompareTxsNotInList seeds this array into a temp
+                // table and filters it through a Set, so a repeated txid would be
+                // fetched and inserted twice. The descending sort is deterministic
+                // poll-order only (it preserves the order the old bs comparator
+                // produced, which keeps logs and fixtures comparable); nothing in the
+                // DB layer searches this array, so no ordering is load-bearing.
                 rawMempool = Array.from(new Set(rawMempoolUnordered))
                     .sort((a, b) => b.localeCompare(a))
 
