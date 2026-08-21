@@ -13,6 +13,10 @@ points; behavior below each activation height is unchanged.
 ### Fixed
 - Two dispenser defects that spend a payer's own coin and give nothing back are corrected behind activation gates, armed on testnet from genesis and disarmed on mainnet.
 - Chain identity is re-proven on the reorg tip re-read, so a wrong-chain answer cannot slip in during a reorganization.
+- A detected reorg is announced on stderr at warn and the block-hash retry loop at error, so alerting rules that only read warn-and-above can see them; reorgs are also counted.
+- The dispenser expiration wire offsets are named constants derived from the indexer's live formats, instead of bare literals with a comment as their only contract.
+- Sub-command capture arms on exactly the same boundary as the batch settlement ledger on every network, closing the consensus window an ordering-only check allowed.
+- The container no longer runs npm as its first process.
 - Code-review round fixes across the decode path (two rounds, 14 files).
 
 ### Security
