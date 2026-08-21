@@ -21,7 +21,6 @@
 const mariadb = require('mariadb');
 const fs      = require('fs');
 const util    = require('./util')
-const bs = require("binary-search")
 
 const SATOSHIS_DECIMALS = 8
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/
@@ -675,20 +674,23 @@ class Database {
     }
 
     // Destructive-DDL scan for the auto-apply path. Given a migration file's
-    // statement list (already `--`-comment-stripped and ';'-split), returns the
+    // statement list (already line-comment-stripped and ';'-split), returns the
     // first statement that can lose, truncate, or rename data - or null when the
     // file is safe to auto-run. Pure string logic (no DB), unit-tested directly.
     // Byte-for-byte the same classifier as xchain-indexer/src/db.js so the two
     // migration runners stay legible as a pair.
     //
     // Flagged as destructive: DROP TABLE/DATABASE/SCHEMA, TRUNCATE, RENAME TABLE,
-    // DELETE (any form), REPLACE INTO (atomic DELETE+INSERT), UPDATE (except the
+    // DELETE (any form), REPLACE INTO (atomic DELETE+INSERT), INSERT ... ON DUPLICATE
+    // KEY UPDATE (rewrites every colliding row), LOAD DATA (rows from a file the
+    // scanner cannot read), UPDATE (except the
     // committed AUTO_INCREMENT id=0 repair),
     // ALTER TABLE ... DROP <column|partition|bare identifier>,
     // ALTER TABLE ... RENAME (except RENAME INDEX/KEY), ALTER TABLE ... CHANGE
-    // (rename+retype), and MODIFY ... NOT NULL (the statically detectable
+    // (rename+retype), MODIFY ... NOT NULL (the statically detectable
     // narrowing; a width reduction cannot be seen without the live schema and
-    // stays covered by the manual-tag convention).
+    // stays covered by the manual-tag convention), and any ALTER TABLE PARTITION or
+    // TABLESPACE clause.
     //
     // Deliberately NOT flagged (legitimate existing auto patterns): DROP INDEX/KEY,
     // DROP FOREIGN KEY/CONSTRAINT/CHECK/DEFAULT/PRIMARY KEY (structural, no row
@@ -699,6 +701,27 @@ class Database {
         // Drops that remove metadata only; anything else after DROP inside an
         // ALTER (COLUMN, PARTITION, or a bare column identifier) loses data.
         const SAFE_ALTER_DROP = new Set(['INDEX', 'KEY', 'FOREIGN', 'CONSTRAINT', 'CHECK', 'DEFAULT', 'PRIMARY']);
+        // True when a `#` sits outside every quoted span - a line comment
+        // stripSqlLineComments should already have removed. Quote-aware so a `#`
+        // inside a string literal or a backtick identifier is not mistaken for one.
+        // Local rather than a method: runMigrations' callers build partial `this`
+        // objects, and a second prototype hop would break the guard on those.
+        const hasUnquotedHash = (s) => {
+            let q = null;
+            for(let i = 0; i < s.length; i++){
+                const c = s[i];
+                if(q){
+                    if(c === q){
+                        if(s[i + 1] === q){ i++; }
+                        else { q = null; }
+                    }
+                    continue;
+                }
+                if(c === "'" || c === '"' || c === '`'){ q = c; continue; }
+                if(c === '#') return true;
+            }
+            return false;
+        };
         for(const raw of (statements || [])){
             // Executable (versioned) comments are the one /* */ form the server RUNS:
             // MariaDB/MySQL execute `/*!50000 DROP TABLE balances */` and `/*M! ... */`
@@ -713,6 +736,12 @@ class Database {
             // gone) so a keyword inside comment prose never triggers or hides a hit.
             const stmt = String(raw).replace(/\/\*[\s\S]*?\*\//g, ' ').trim();
             if(!stmt) continue;
+            // Second layer behind stripSqlLineComments: MariaDB/MySQL honour `#` to
+            // end-of-line as a comment, so `# note\nDROP TABLE balances` is a DROP every
+            // ^-anchored check below is blind to. The strip removes it upstream; if one
+            // ever reaches here the strip has regressed, and the only safe reading of a
+            // comment introducer the classifier can still see is non-auto-eligible.
+            if(hasUnquotedHash(stmt))                            return raw;
             // Server-side indirection escapes a statement-prefix classifier: a mode=auto
             // file can smuggle destructive SQL past every keyword check below via dynamic
             // SQL (`SET @s = 'DROP TABLE balances'; PREPARE stmt FROM @s; EXECUTE stmt;`)
@@ -744,6 +773,16 @@ class Database {
             // touches - the same data-loss profile as DELETE, with no non-destructive
             // form - so match the bare keyword like DELETE above.
             if(/^REPLACE\b/i.test(stmt))                         return raw;
+            // INSERT ... ON DUPLICATE KEY UPDATE overwrites columns of every existing
+            // duplicate-key row it touches - the same data-rewrite profile the UPDATE arm
+            // below hard-blocks, reached from a keyword that arm never sees. Plain INSERT
+            // stays auto-eligible: with no ON DUPLICATE clause it only adds rows.
+            if(/^INSERT\b[\s\S]*\bON\s+DUPLICATE\s+KEY\s+UPDATE\b/i.test(stmt)) return raw;
+            // LOAD DATA ... REPLACE INTO TABLE is a DELETE+INSERT on every key collision,
+            // and the rows come from a file the classifier cannot read, so no form of it
+            // can be judged safe from the statement text. No committed auto migration
+            // loads a file; treat the whole form as non-auto-eligible.
+            if(/^LOAD\s+DATA\b/i.test(stmt))                     return raw;
             // A bare UPDATE can rewrite arbitrary row data. The one committed auto
             // pattern is the AUTO_INCREMENT id repair (`UPDATE <table> SET id = (...)
             // WHERE id = 0;` in 2026-06-10-mirror-id-autoincrement-repair.sql), which
@@ -751,6 +790,15 @@ class Database {
             // flag every other UPDATE.
             if(/^UPDATE\b/i.test(stmt) && !this._isIdRepairUpdate(stmt)) return raw;
             if(/^ALTER\s+TABLE\b/i.test(stmt)){
+                // Partition and tablespace clauses move or discard row data while carrying
+                // none of the keywords the checks below look for: TRUNCATE PARTITION empties
+                // a partition, EXCHANGE PARTITION swaps its rows out to another table,
+                // DISCARD TABLESPACE deletes the table's data file. The additive members of
+                // the class (ADD PARTITION, IMPORT TABLESPACE) are not separable from the
+                // destructive ones by prefix, and no committed migration partitions anything,
+                // so the whole class is non-auto-eligible - re-tag mode=manual to run one.
+                if(/\bPARTITION(?:ING)?\b/i.test(stmt))          return raw;
+                if(/\bTABLESPACE\b/i.test(stmt))                 return raw;
                 // Every DROP inside the ALTER must target a safe (metadata-only) object.
                 let m;
                 const dropRe = /\bDROP\s+([A-Za-z_]+|`[^`]+`)/gi;
@@ -836,11 +884,27 @@ class Database {
         );
     }
 
-    // Remove SQL `--` line comments while respecting quoted strings, so a ';'
+    // Remove SQL line comments while respecting quoted strings, so a ';'
     // or ',' appearing inside comment prose is never mistaken for SQL structure.
     // Single/double-quote and backtick spans are preserved verbatim (doubled
-    // quotes treated as escapes); a `--` outside any quote skips to the end of
-    // its line. Newlines are kept so the column-split below stays well-formed.
+    // quotes treated as escapes); a `--` or `#` outside any quote or block comment
+    // skips to the end of its line. Newlines are kept so the column-split below
+    // stays well-formed.
+    //
+    // `#` counts because MariaDB/MySQL honour it to end-of-line exactly like
+    // `--`. Missing it made a `# note` line ahead of a destructive statement
+    // invisible to the ^-anchored checks in _destructiveAutoStatement: the
+    // chunk began with `#`, matched no keyword, scored the file auto-eligible,
+    // and the server ran the DROP unattended at startup. A `;` inside a `#`
+    // comment also tore the statement in two for both the classifier and the
+    // apply loop.
+    //
+    // `/* ... */` spans are copied through verbatim rather than scanned: a `--`
+    // or `#` inside one would otherwise swallow the closing `*/` and the rest of
+    // that line (the server does not treat either as a comment start there), and
+    // an apostrophe in block-comment prose would open a bogus quote span. The
+    // verbatim copy also keeps `/*!...*/` executable-comment payloads intact for
+    // _destructiveAutoStatement to flag.
     stripSqlLineComments(sql){
         let out = '';
         let quote = null;
@@ -855,7 +919,14 @@ class Database {
                 continue;
             }
             if(ch === "'" || ch === '"' || ch === '`'){ quote = ch; out += ch; continue; }
-            if(ch === '-' && sql[i + 1] === '-'){
+            if(ch === '/' && sql[i + 1] === '*'){
+                const end = sql.indexOf('*/', i + 2);
+                if(end === -1){ out += sql.slice(i); break; }   // unterminated: copy the rest as-is
+                out += sql.slice(i, end + 2);
+                i = end + 1;
+                continue;
+            }
+            if((ch === '-' && sql[i + 1] === '-') || ch === '#'){
                 while(i < sql.length && sql[i] !== '\n'){ i++; }
                 if(i < sql.length){ out += '\n'; }
                 continue;
@@ -870,8 +941,8 @@ class Database {
     // string literal contains a semicolon (e.g. `SET data = 'a;b'`) into invalid
     // fragments, so no migration or seed carrying a semicolon in quoted data can
     // ship, and _destructiveAutoStatement ends up classifying fragments rather than
-    // real statements. `--` line comments are stripped first (same rule as the
-    // callers used); the quote model matches stripSqlLineComments exactly
+    // real statements. `--` and `#` line comments are stripped first (same rule as
+    // the callers used); the quote model matches stripSqlLineComments exactly
     // (single/double-quote and backtick spans, doubled quotes treated as escapes).
     // Returns trimmed, non-empty statements. Mirrors xchain-indexer/src/db.js.
     splitSqlStatements(sql){
@@ -890,6 +961,16 @@ class Database {
                 continue;
             }
             if(ch === "'" || ch === '"' || ch === '`'){ quote = ch; current += ch; continue; }
+            // Block comments survive the strip (the classifier needs `/*!...*/` payloads
+            // intact), so carry them across whole: an apostrophe in comment prose must not
+            // open a quote span, and a ';' inside one must not terminate the statement.
+            if(ch === '/' && stripped[i + 1] === '*'){
+                const end = stripped.indexOf('*/', i + 2);
+                if(end === -1){ current += stripped.slice(i); break; }
+                current += stripped.slice(i, end + 2);
+                i = end + 1;
+                continue;
+            }
             if(ch === ';'){ statements.push(current); current = ''; continue; }
             current += ch;
         }

@@ -24,6 +24,20 @@ describe('protocol/constants', function () {
         });
     }
 
+    // Value pins for the four constants the cross-repo xcall gate freezes.
+    // That gate (xchain-indexer/test/unit/xcall-constants-cross-repo.test.js)
+    // rosters only xchain-vm / -indexer / -sdk plus the xchain-documentation
+    // canonical, so this repo's mirror is tied to those values by nothing else:
+    // shape assertions alone let a one-sided edit here pass every suite in the
+    // platform. Same GOLDEN literals, same idiom as the sibling mirror suite in
+    // xchain-explorer. A real protocol bump edits every copy, this one included.
+    it('pins the gated cross-repo VM/XCALL limits to their GOLDEN values', function () {
+        assert.strictEqual(C.MAX_CODE_SIZE, 65536);
+        assert.strictEqual(C.XCALL_MAX_GAS, 200000);
+        assert.strictEqual(C.XCALL_MAX_HOPS, 2);
+        assert.strictEqual(C.XCALL_MIN_DEADLINE_BLOCKS, 10);
+    });
+
     it('XCALL gas floor does not exceed its ceiling', function () {
         assert.ok(C.XCALL_MIN_GAS <= C.XCALL_MAX_GAS);
     });

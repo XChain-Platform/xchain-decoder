@@ -38,7 +38,18 @@ const { ORACLE_FEE_OUTPUT_ACTIVATION, ORACLE_FEE_SET_CAPTURE_ACTIVATION } = requ
 //   5 GIVE_OWNERSHIP | 6 GIVE_ESCROW | 7 GET_COIN | 8 GET_TICK | 9 GET_AMOUNT
 //   10 GET_ADDRESS | 11 FIAT_CODE | 12 FIAT_AMOUNT | 13 ORACLE_ADDRESS
 //   14 EXPIRATION | 15 ALLOW_LIST | 16 BLOCK_LIST | 17 MEMO
+// Decoder offset = indexer format position + 1, because the decoder splits with the
+// ACTION token ('DISPENSER') at 0 while the indexer's format string starts at VERSION.
+// The comment is no longer the only contract: test/unit/dispenserFieldOffsets.test.js
+// derives all three offsets from the live sibling Dispenser's this.formats.
 const ORACLE_ADDRESS_INDEX = 13
+const V0_EXPIRATION_INDEX = 14
+
+// Field positions in the DISPENSER v2 (edit) wire format, same +1 convention
+// (indexer this.formats[2]):
+//   0 DISPENSER | 1 VERSION | 2 DISPENSER_ACTION_INDEX | 3 GIVE_ESCROW
+//   4 EXPIRATION | 5 ALLOW_LIST | 6 BLOCK_LIST | 7 MEMO
+const V2_EXPIRATION_INDEX = 4
 
 // Is oracle-fee output capture in force for a block at `blockTime` on this network?
 //
@@ -108,6 +119,8 @@ function isCompactedOracleAddress(fields){
 
 module.exports = {
     ORACLE_ADDRESS_INDEX,
+    V0_EXPIRATION_INDEX,
+    V2_EXPIRATION_INDEX,
     isOracleFeeCaptureActive,
     isOracleFeeSetCaptureActive,
     oracleAddressFromCreate,

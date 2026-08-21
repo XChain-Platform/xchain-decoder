@@ -51,11 +51,13 @@ function siblingOrSkip(ctx, file){
 
 describe('DISPENSER_EXPIRY_REALIGN_ACTIVATION conformance', function () {
 
-    it('keeps mainnet and testnet DISARMED and regtest genesis-on', function () {
-        // Teeth for the ratification requirement: a number on mainnet/testnet means someone
-        // armed a consensus boundary without the operator's ratified instant.
+    it('keeps mainnet DISARMED, with testnet and regtest genesis-on', function () {
+        // Teeth for the ratification requirement: a number on MAINNET means someone armed a
+        // consensus boundary without the operator's ratified instant. Testnet was ratified at
+        // instant 0 on 2026-08-18 (pre-launch, every feature active on testnet), which is safe
+        // only because testnet decoder/indexer state is rebuilt from the chain before launch.
         assert.strictEqual(DISPENSER_EXPIRY_REALIGN_ACTIVATION.mainnet, null);
-        assert.strictEqual(DISPENSER_EXPIRY_REALIGN_ACTIVATION.testnet, null);
+        assert.strictEqual(DISPENSER_EXPIRY_REALIGN_ACTIVATION.testnet, 0);
         assert.strictEqual(DISPENSER_EXPIRY_REALIGN_ACTIVATION.regtest, 0);
     });
 
@@ -74,10 +76,16 @@ describe('DISPENSER_EXPIRY_REALIGN_ACTIVATION conformance', function () {
     });
 
     it('a DISARMED network is inactive at every block time, including absurd ones', function () {
+        // Mainnet is the network still carrying the null sentinel. A `time >= null` coercion
+        // would read 0 and arm it from genesis, which is the failure this pins.
         assert.strictEqual(isDispenserExpiryRealignActive('mainnet', 0), false);
         assert.strictEqual(isDispenserExpiryRealignActive('mainnet', 1786060800), false);
         assert.strictEqual(isDispenserExpiryRealignActive('mainnet', 4000000000), false);
-        assert.strictEqual(isDispenserExpiryRealignActive('testnet', 4000000000), false);
+    });
+
+    it('testnet is active from genesis, so the launch runs the realigned path', function () {
+        assert.strictEqual(isDispenserExpiryRealignActive('testnet', 0), true);
+        assert.strictEqual(isDispenserExpiryRealignActive('testnet', 4000000000), true);
     });
 
     it('regtest is active from genesis so the venues exercise the realigned path', function () {

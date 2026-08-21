@@ -16,4 +16,10 @@ COPY ./src /XChainDecoder/src
 COPY ./src/bufferutils.js /XChainDecoder/node_modules/bitcoinjs-lib/src/bufferutils.js
 COPY ./.en[v] /XChainDecoder/.env
 
-CMD ["npm", "run", "api"]
+# Exec-form node, not `npm run api` (which is this exact command). npm builds an
+# npm -> sh -c -> node tree and no wrapper forwards signals, so `docker stop`
+# kills npm while node is never told anything (measured on the regtest encoder,
+# xchain-encoder/Dockerfile). This image registers real drain work on SIGTERM
+# (src/api.js: flip decoderRunning, then decoder.stop()), which only runs when
+# node is PID 1 and receives the signal itself.
+CMD ["node", "./src/api.js"]

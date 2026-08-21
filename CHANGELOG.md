@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-18
+
+Consensus-affecting changes in this release ship behind per-chain activation
+points; behavior below each activation height is unchanged.
+
+### Fixed
+- Two dispenser defects that spend a payer's own coin and give nothing back are corrected behind activation gates, armed on testnet from genesis and disarmed on mainnet.
+- Chain identity is re-proven on the reorg tip re-read, so a wrong-chain answer cannot slip in during a reorganization.
+- A detected reorg is announced on stderr at warn and the block-hash retry loop at error, so alerting rules that only read warn-and-above can see them; reorgs are also counted.
+- The dispenser expiration wire offsets are named constants derived from the indexer's live formats, instead of bare literals with a comment as their only contract.
+- Sub-command capture arms on exactly the same boundary as the batch settlement ledger on every network, closing the consensus window an ordering-only check allowed.
+- The container no longer runs npm as its first process.
+- Code-review round fixes across the decode path (two rounds, 14 files).
+
+### Security
+- Raised the brace-expansion and js-yaml dependency floors and the advisory guards that pin them.
+
 ## [0.9.0] - 2026-08-14
 
 First release of the XChain Platform release train. Every component in the train

@@ -68,7 +68,8 @@ const SIBLINGS = [
       guards: 'vendored coins-registry byte-identity (BTC/LTC/DOGE/index/consensus_pin)' },
     { repo: 'xchain-indexer', envs: ['XCHAIN_INDEXER_DIR'],
       marker: path.join('src', 'protocol_changes.js'),
-      guards: 'the FIX_OUTPUT_FANOUT registration in the indexer protocol-change table' },
+      guards: 'the FIX_OUTPUT_FANOUT registration in the indexer protocol-change table, and the '
+            + 'DISPENSER v0/v2 wire field offsets derived from the indexer Dispenser formats' },
     { repo: 'xchain-utxo-tracker', envs: ['XCHAIN_UTXO_TRACKER_DIR'],
       marker: path.join('src', 'BlockchainConnector.js'),
       guards: 'AuxPoW strip parity and the dispenser safe-depth twin' },

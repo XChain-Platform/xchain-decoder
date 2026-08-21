@@ -117,4 +117,36 @@ describe('BlockchainConnector RPC error accounting and reporting', () => {
             )
         }).timeout(5000)
     })
+
+    describe('the shared result extractor reads PRESENCE, not truthiness', () => {
+        // JSON-RPC 2.0: a success carries a `result` member, which may legitimately
+        // be 0, false or "". Only undefined/null mean the node sent no result. No
+        // method routed through the extractor today can answer falsy, so these pin
+        // the contract for the next one rather than a behaviour change.
+        it('returns a falsy-but-present result instead of throwing', async () => {
+            axiosStub.resolves({ data: { result: '' } })
+            assert.strictEqual(await connector.getBlockHash(0), '')
+
+            axiosStub.resolves({ data: { result: 0 } })
+            assert.strictEqual(await connector.getBlockHash(0), 0)
+
+            axiosStub.resolves({ data: { result: false } })
+            assert.strictEqual(await connector.getBlockHash(0), false)
+
+            assert.strictEqual(connector.rpcErrors, 0, 'a valid falsy result is not an RPC failure')
+        }).timeout(5000)
+
+        it('still throws the per-method label when the result is absent', async () => {
+            axiosStub.resolves({ data: { result: null } })
+            await assert.rejects(() => connector.getBlockHash(0), /Error getting block hash/)
+
+            axiosStub.resolves({ data: {} })
+            await assert.rejects(() => connector.getBlockHash(0), /Error getting block hash/)
+        }).timeout(5000)
+
+        it('still prefers the node error object over the result member', async () => {
+            axiosStub.resolves({ data: { result: 0, error: { code: -8, message: 'Block height out of range' } } })
+            await assert.rejects(() => connector.getBlockHash(0), /RPC error -8: Block height out of range/)
+        }).timeout(5000)
+    })
 })

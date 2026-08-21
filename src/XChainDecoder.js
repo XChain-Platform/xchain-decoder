@@ -28,7 +28,7 @@ const ecc = require('tiny-secp256k1')
 const BlockchainConnector = require('./BlockchainConnector')
 const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
-const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress } = require('./oracleFeeOutput')
+const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('./oracleFeeOutput')
 const { isDispenserExpiryRealignActive } = require('./dispenserExpiryRealign')
 const { captureCommands, collapseDispenserRegistrations, isBatchSubCommandCaptureActive } = require('./batchSubCommandCapture')
 const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./chainIdentity')
@@ -284,6 +284,10 @@ class XChainDecoder {
         // Coin/network-prefixed loggers so cadence/reorg/stall lines are self-describing
         // even when a log pipeline strips container labels. Reads the fields at call time.
         this.log = (...args) => console.log('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args)
+        // Warn exists so a notable-but-not-failed event (a reorg starting) can reach a
+        // warn-and-above alerting rule without being dressed up as an error. console.log
+        // writes to stdout, which those rules do not read.
+        this.logWarn = (...args) => console.warn('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args)
         this.logError = (...args) => console.error('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args)
 
         // Native-coin protocol fee destination address for this coin+network. When set (not the
@@ -368,6 +372,15 @@ class XChainDecoder {
 
         this.rpcErrors = 0
         this.parseErrors = 0
+
+        // Lifetime reorg counters, mirroring xchain-utxo-tracker. Each rolled-back block
+        // already writes a durable REORG row, but that trace is DB-only: without these a
+        // metrics-only deployment (no monitor plugin, indexer possibly down) has no
+        // scrapeable signal for a decoder thrashing through repeated shallow reorgs.
+        // Counted once per completed verifyReorg run, so count is reorg EVENTS and depth
+        // is the blocks rolled back by the most recent one.
+        this.reorgCount = 0
+        this.lastReorgDepth = 0
 
         // Consecutive block-fetch failures at _fetchErrorHeight. _fetchErrorCount counts
         // every failure (operator visibility); _auxPowParseErrorCount counts only the
@@ -558,7 +571,13 @@ class XChainDecoder {
         const status = {
             last_processed_block: this.lastProcessedBlockIndex,
             node_height: this.blockchainInfoLastBlock,
-            lag: this.blockchainInfoLastBlock - this.lastProcessedBlockIndex
+            lag: this.blockchainInfoLastBlock - this.lastProcessedBlockIndex,
+            // Reorg churn, additive: an operator polling /status sees how often this
+            // decoder has rolled back and how deep the last one went, without joining
+            // against the indexer. Absent from the nothing-processed-yet shape above,
+            // which deliberately reports unknowns rather than zeros.
+            reorg_count: this.reorgCount,
+            last_reorg_depth: this.lastReorgDepth
         }
         if (nodeHeightStale) status.node_height_stale = true
         return status
@@ -1789,7 +1808,7 @@ class XChainDecoder {
             try {
                 blockHashFromNode = await this.connector.getBlockHash(lastBlockIndex)
             } catch (err){
-                console.log("There was a problem trying to get a block hash from the node. Trying again...", err)
+                console.error("There was a problem trying to get a block hash from the node. Trying again...", err)
                 // The node's tip may have regressed below lastBlockIndex mid-walk (node
                 // restart onto a shorter chain, or a second reorg). Against the frozen
                 // call-time nodeTip that makes getBlockHash(lastBlockIndex) throw "Block
@@ -1858,6 +1877,10 @@ class XChainDecoder {
             // delete (deleteBlockByIndex), so there is no separate end-of-run event to write.
             // This is only an ops summary of the completed reorg.
             this.log(`reorg: rolled back ${blocksDeleted.length} block(s): ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
+            // Once per RUN, never per deleted block: a per-block increment would report a
+            // single depth-5 reorg as five reorgs and destroy the frequency signal.
+            this.reorgCount++
+            this.lastReorgDepth = blocksDeleted.length
         }
 
         return true
@@ -2439,7 +2462,7 @@ class XChainDecoder {
                     //previousBlockHash is not the same, it must be a reorg
                     if (previousBlockHash != previousBlock.block_hash){
                         await this.db.endTransaction()
-                        console.log("A reorg has been detected at block " + nextBlockHeight + ". Cleaning blocks...")
+                        this.logWarn("A reorg has been detected at block " + nextBlockHeight + ". Cleaning blocks...")
                         const preReorgBlock = lastProcessedBlockIndex
                         await this.verifyReorg(this.blockchainInfoLastBlock)
                         // Re-clamp: same as the pre-loop guard and the node-tip regression path.
@@ -2909,7 +2932,7 @@ class XChainDecoder {
                                         // Treat a missing token OR an empty-string token as an
                                         // omitted EXPIRATION and substitute the same default the
                                         // indexer uses; only a present, non-empty value is validated.
-                                        let expirationToken = decodedDataSplit[14]
+                                        let expirationToken = decodedDataSplit[V0_EXPIRATION_INDEX]
                                         let expiration
                                         if (expirationToken === undefined || expirationToken === "") {
                                             expiration = this.getDefaultExpiration(block.timestamp)
@@ -2944,7 +2967,7 @@ class XChainDecoder {
                                         // loop on the same deterministic tx forever.
                                         if (!Number.isSafeInteger(expiration) || expiration < 0) {
                                             this.parseErrors++
-                                            console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[14]}'`)
+                                            console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[V0_EXPIRATION_INDEX]}'`)
                                         } else if (this.dispenserOpensForThisChain(giveCoin, getCoin)){
                                             if (getAddress && getAddress.length > 0 && getAddress.charAt(0) === "^"){
                                                 // Fail loud on a compacted `^<id>` GET_ADDRESS. This is a
@@ -3058,7 +3081,7 @@ class XChainDecoder {
                                         // failing to mirror WOULD close early. An edit that shortens one
                                         // is deliberately not mirrored.
                                         const editSource = parseResult["source"]
-                                        const editExpirationToken = decodedDataSplit[4]
+                                        const editExpirationToken = decodedDataSplit[V2_EXPIRATION_INDEX]
                                         if (editSource && editSource.length > 0 &&
                                             editExpirationToken !== undefined && editExpirationToken !== ""){
                                             const newExpiration = Number(editExpirationToken)
@@ -3226,11 +3249,13 @@ class XChainDecoder {
 
                 // Dedup + single O(n log n) sort. The old per-txid binary-insert
                 // (bs + splice) was O(n^2) in mempool size every poll cycle, a CPU
-                // hazard under a mempool flood. ORDER CONTRACT: descending
-                // lexicographic, i.e. exactly what the inverted bs comparator
-                // `needle.localeCompare(element)` produced; db.js
-                // deleteAndCompareTxsNotInList binary-searches this array with
-                // that same comparator and silently breaks on any other order.
+                // hazard under a mempool flood. What the consumer needs is the DEDUP:
+                // db.js deleteAndCompareTxsNotInList seeds this array into a temp
+                // table and filters it through a Set, so a repeated txid would be
+                // fetched and inserted twice. The descending sort is deterministic
+                // poll-order only (it preserves the order the old bs comparator
+                // produced, which keeps logs and fixtures comparable); nothing in the
+                // DB layer searches this array, so no ordering is load-bearing.
                 rawMempool = Array.from(new Set(rawMempoolUnordered))
                     .sort((a, b) => b.localeCompare(a))
 

@@ -146,12 +146,14 @@ describe('CE-04: Mid-Transaction Database Failure', function () {
 
         sinon.stub(decoder, 'verifyReorg').resolves(true)
 
-        const { logs } = await captureConsole(async () => {
+        const { warnings } = await captureConsole(async () => {
             await decoder.start()
         })
 
-        const reorgLogs = logs.filter(l => l.includes('reorg has been detected'))
-        assert.ok(reorgLogs.length >= 1, 'Should detect reorg in main loop')
+        // Warn, not info: a reorg is the trigger for the decoder-to-indexer rollback
+        // handshake, and a warn-and-above alerting rule must see it start.
+        const reorgLogs = warnings.filter(l => l.includes('reorg has been detected'))
+        assert.ok(reorgLogs.length >= 1, 'Should detect reorg in main loop and announce it at warn level')
         assert.ok(decoder.verifyReorg.called, 'Should call verifyReorg')
         assert.ok(mockDb.endTransaction.called, 'Should end transaction before reorg processing')
     })

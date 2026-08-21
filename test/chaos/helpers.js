@@ -142,21 +142,30 @@ function wait(ms) {
 
 /**
  * Captures console output during a function execution.
+ *
+ * All three streams are captured separately, because the LEVEL a line is emitted at is
+ * part of what these suites assert: an alerting rule that reads warn-and-above sees
+ * `warnings` and `errors` and never sees `logs`, so a test that accepts any stream would
+ * pass while the operator-visible signal was gone.
  */
 async function captureConsole(fn) {
     const logs = []
+    const warnings = []
     const errors = []
     const origLog = console.log
+    const origWarn = console.warn
     const origError = console.error
     console.log = (...args) => logs.push(args.join(' '))
+    console.warn = (...args) => warnings.push(args.join(' '))
     console.error = (...args) => errors.push(args.join(' '))
     try {
         await fn()
     } finally {
         console.log = origLog
+        console.warn = origWarn
         console.error = origError
     }
-    return { logs, errors }
+    return { logs, warnings, errors }
 }
 
 /**

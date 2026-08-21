@@ -218,6 +218,57 @@ describe('registerDecoderMetrics() feed-freshness gauges', function () {
         assert.match(body, /^xchain_decoder_node_height_stale 0$/m);
     });
 
+    // Reorg churn had no decoder-side signal at all: the durable REORG rows are
+    // DB-only and the indexer's reorgsProcessed needs the indexer to be up, so a
+    // metrics-only deployment could watch a decoder thrash through shallow reorgs
+    // and see nothing move.
+
+    it('exports reorg count and depth so a metrics-only deployment sees churn', function () {
+        const registry = new Registry();
+        const decoder = makeRunningDecoder();
+        decoder.reorgCount = 3;
+        decoder.lastReorgDepth = 5;
+        registerDecoderMetrics(registry, decoder);
+
+        const body = registry.render();
+        assert.match(body, /^xchain_decoder_reorgs_total 3$/m);
+        assert.match(body, /^xchain_decoder_last_reorg_depth 5$/m);
+    });
+
+    it('reports zero reorgs on a fresh decoder rather than no series at all', function () {
+        // Unlike the height gauges, absent here is NOT safe: a missing counter and a
+        // decoder that has never reorged look identical to a rate() query.
+        const registry = new Registry();
+        registerDecoderMetrics(registry, makeDecoder());
+        assert.match(registry.render(), /^xchain_decoder_reorgs_total 0$/m);
+    });
+
+    it('counts reorg EVENTS, incrementing once per verifyReorg run', function () {
+        // A per-block increment inside either delete branch would report one depth-5
+        // reorg as five reorgs and destroy the frequency signal the counter exists for.
+        // The branches need a live node to reach, so this is a source-level guard.
+        const source = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8');
+        const increments = source.match(/this\.reorgCount\+\+/g) || [];
+        assert.strictEqual(increments.length, 1, 'exactly one reorgCount increment site');
+        assert.ok(
+            /if \(blocksDeleted\.length > 0\)\{[\s\S]{0,800}?this\.reorgCount\+\+/.test(source),
+            'the increment must sit in verifyReorg\'s end-of-run summary block, not in a per-block delete branch'
+        );
+        assert.ok(
+            /this\.lastReorgDepth = blocksDeleted\.length/.test(source),
+            'depth must be the blocks rolled back by the run that just completed'
+        );
+    });
+
+    it('surfaces the same counters on getSyncStatus, which /status spreads', function () {
+        const decoder = makeRunningDecoder();
+        decoder.reorgCount = 2;
+        decoder.lastReorgDepth = 1;
+        const status = decoder.getSyncStatus();
+        assert.strictEqual(status.reorg_count, 2);
+        assert.strictEqual(status.last_reorg_depth, 1);
+    });
+
     it('registers on the handle api.js captures, not a discarded return value', function () {
         const source = fs.readFileSync(require.resolve('../../src/api.js'), 'utf-8');
         assert.ok(

@@ -370,7 +370,11 @@ const ORACLE_FEE_OUTPUT_ACTIVATION = {
 // ORACLE_FEE_OUTPUT_ACTIVATION.
 const ORACLE_FEE_SET_CAPTURE_ACTIVATION = {
     mainnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
-    testnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
+    // ARMED AT GENESIS (instant 0 = always in force), operator-ratified 2026-08-18 under the
+    // pre-launch ruling that every feature must be ACTIVE on testnet. This gate fixes a defect
+    // that spends a payer native coin and gives nothing back, so a public testnet WILL hit it.
+    // Safe at 0 because testnet decoder/indexer state is REBUILT from the chain before launch.
+    testnet: 0,
     regtest: 0,
 };
 
@@ -415,7 +419,11 @@ const ORACLE_FEE_SET_CAPTURE_ACTIVATION = {
 // keeps the two copies in lockstep.
 const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
     mainnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
-    testnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
+    // ARMED AT GENESIS (instant 0 = always in force), operator-ratified 2026-08-18 under the
+    // pre-launch ruling that every feature must be ACTIVE on testnet. This gate fixes a defect
+    // that spends a payer native coin and gives nothing back, so a public testnet WILL hit it.
+    // Safe at 0 because testnet decoder/indexer state is REBUILT from the chain before launch.
+    testnet: 0,
     regtest: 0,
 };
 
@@ -560,11 +568,13 @@ const VALID_FIAT_CODES = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF'
 const GAS_TICK = 'XCHAIN';
 
 // Oracle federation (xchain-hub).
-// Canonical source: xchain-hub/src/constants.js. Mirrored here by hand and gated by
-// NOTHING: this repo is in neither the xcall constants guard nor the hub-side oracle
-// mirror list (xchain-hub/test/unit/constants-conformance.test.js), so a hub-side edit
-// drifts this copy silently. Treat any change as a manual all-copies edit. Nothing
-// here reads either one; they are re-exports for consumers.
+// Canonical source: xchain-hub/src/constants.js, mirrored here by hand. These two are
+// NOT in the GOLDEN set of the xcall constants gate, and this repo carries no copy of
+// that gate at all; the guard that diffs this copy against the canonical lives in
+// xchain-hub/test/unit/constants-conformance.test.js (#3886), whose MIRRORS roster
+// names this repo, so a drift here reddens hub CI rather than this repo's. Treat any
+// change as a manual all-copies edit. Nothing here reads either one; they are
+// re-exports for consumers.
 
 // Coarse global sanity ceiling on an ingested price_snapshots value (pre-scale,
 // covers pairs like BTC/KRW up to ~$7M BTC with headroom); rejects
