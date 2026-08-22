@@ -1756,11 +1756,22 @@ class Database {
     // scan-order subset that churns between polls; callers diff/page this
     // window as a stable snapshot. Capped at 500 like the explorer's own
     // getDecoderMempoolRows window.
+    //
+    // ACTION-CARRYING ROWS ONLY. This table holds a row for EVERY mempool tx the
+    // decoder observed, not just XChain ones: buildStoredActionRecord blanks
+    // `data` to '' (never NULL) for a money-bearing tx whose ACTION was invalid
+    // or unknown, which on a public chain is nearly all of them (measured on BTC
+    // testnet 2026-08-22: 32 of 32 rows). An unfiltered window is useless to the
+    // consumer, because on a busy chain all 500 slots fill with actionless rows
+    // and the feed renders empty while real pending actions sit deeper in the
+    // table. Consumers drop these rows at decode time anyway, so filter here,
+    // where the LIMIT is applied.
     async getMempoolTransactions(limit) {
         const max = Math.max(1, Math.min(Number(limit) || 200, 500))
         const query = `
             SELECT tx_hash, source, data, first_seen
             FROM mempool_transactions
+            WHERE data IS NOT NULL AND data != ''
             ORDER BY tx_hash
             LIMIT ${max};
         `;
@@ -1776,14 +1787,19 @@ class Database {
         }
     }
 
-    // Total mempool_transactions row count (the XChain-carrying subset of the
-    // node mempool), companion to the bounded window above so getmempool can
-    // report a true total when the table runs past the 500-row cap.
+    // Count of pending ACTION-carrying txs, companion to the bounded window
+    // above so getmempool can report a true total when the matching set runs
+    // past the 500-row cap. Carries the same `data != ''` filter and for the
+    // same reason (see getMempoolTransactions): an unfiltered COUNT(*) here is
+    // the size of the whole node mempool, so publishing it as the XChain
+    // unconfirmed count reports every unrelated payment on the chain as a
+    // pending XChain action.
     async getMempoolTransactionCount() {
         let connection = await this.getConnection()
         const ownLease = (this.transactionConnection == null)
         try {
-            const rows = await connection.query('SELECT COUNT(*) AS count FROM mempool_transactions;')
+            const rows = await connection.query(
+                "SELECT COUNT(*) AS count FROM mempool_transactions WHERE data IS NOT NULL AND data != '';")
             return (rows && rows.length) ? Number(rows[0].count) : 0
         } finally {
             if (ownLease) {
