@@ -27,7 +27,13 @@ CREATE TABLE mempool_transactions (
     data        MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,   -- Decoded data
     -- Mirrors transactions.raw_data so the pending row carries the encoder's second push
     -- (FILE bytes, gated ciphertext) instead of only revealing it at confirmation.
-    raw_data    MEDIUMBLOB
+    raw_data    MEDIUMBLOB,
+    -- When THIS decoder first observed the tx in its node's mempool. Local,
+    -- non-deterministic observation time (like everything in this table); the
+    -- explorer's pending-actions feed renders it as the row's Time column.
+    -- Server-side default so updateMempool's insert-once/delete-on-departure
+    -- cycle stamps it with no writer change. Migration: 2026-08-22-mempool-first-seen.sql.
+    first_seen  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
 -- Mempool rows hold raw strings rather than index_addresses/index_transactions ids.
