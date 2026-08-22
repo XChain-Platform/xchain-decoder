@@ -1748,6 +1748,50 @@ class Database {
         }
     }
 
+    // Bounded read of the current mempool snapshot for the API's getmempool
+    // method. Same raw-string columns the explorer's colocated-DB path reads
+    // (tx_hash/source/data), plus first_seen (2026-08-22-mempool-first-seen.sql).
+    // ORDER BY the unique-indexed tx_hash: the table has no primary key and is
+    // rewritten row-by-row every poll cycle, so a bare LIMIT would return a
+    // scan-order subset that churns between polls; callers diff/page this
+    // window as a stable snapshot. Capped at 500 like the explorer's own
+    // getDecoderMempoolRows window.
+    async getMempoolTransactions(limit) {
+        const max = Math.max(1, Math.min(Number(limit) || 200, 500))
+        const query = `
+            SELECT tx_hash, source, data, first_seen
+            FROM mempool_transactions
+            ORDER BY tx_hash
+            LIMIT ${max};
+        `;
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            const rows = await connection.query(query)
+            return rows || []
+        } finally {
+            if (ownLease) {
+                await connection.release()
+            }
+        }
+    }
+
+    // Total mempool_transactions row count (the XChain-carrying subset of the
+    // node mempool), companion to the bounded window above so getmempool can
+    // report a true total when the table runs past the 500-row cap.
+    async getMempoolTransactionCount() {
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            const rows = await connection.query('SELECT COUNT(*) AS count FROM mempool_transactions;')
+            return (rows && rows.length) ? Number(rows[0].count) : 0
+        } finally {
+            if (ownLease) {
+                await connection.release()
+            }
+        }
+    }
+
     //This is only used in tests
     async dropDatabase(){
         console.log("Droping database")
