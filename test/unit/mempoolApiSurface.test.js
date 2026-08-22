@@ -92,6 +92,11 @@ describe('Database#getMempoolTransactions()', () => {
         assert.deepStrictEqual(rows, [row]);
         const sql = q.firstCall.args[0];
         assert.ok(sql.includes('tx_hash, source, data, first_seen'));
+        // Action-carrying rows only: the table holds a row for EVERY mempool tx
+        // (data blanked to '' when the tx carried no valid ACTION), so an
+        // unfiltered window fills with actionless rows on a busy chain and the
+        // consumer's feed renders empty. Measured on BTC testnet: 32 of 32.
+        assert.ok(/WHERE data IS NOT NULL AND data != ''/.test(sql), 'window must filter to action-carrying rows');
         // No PK and the table is rewritten every poll cycle: the window must be
         // keyed on the unique tx_hash index to be a stable snapshot, and the
         // limit clamps to the same 500-row cap the explorer window uses.
@@ -118,6 +123,11 @@ describe('Database#getMempoolTransactionCount()', () => {
         const { pool } = withConn(q);
         db.pool = pool;
         assert.strictEqual(await db.getMempoolTransactionCount(), 7);
+        // Counts only action-carrying rows. An unfiltered COUNT(*) is the size
+        // of the whole node mempool, which would report every unrelated payment
+        // on the chain as a pending XChain action.
+        assert.ok(/WHERE data IS NOT NULL AND data != ''/.test(q.firstCall.args[0]),
+            'count must filter to action-carrying rows');
 
         const q2 = sinon.stub().resolves([]);
         db.pool = withConn(q2).pool;
