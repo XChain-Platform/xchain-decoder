@@ -1,0 +1,44 @@
+--********************************************************************
+--
+-- Copyright © 2025-2026 Dankest, LLC
+-- Based on XChain Platform by Dankest, LLC - https://dankest.llc
+--
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- This file is part of XChain Platform. Licensed under the GNU Affero
+-- General Public License v3.0 or later; see LICENSE.md. A commercial
+-- license (without AGPL source-disclosure terms) is available -
+-- contact legal@dankest.llc.
+--
+--********************************************************************
+
+-- xchain:migration mode=auto
+-- (auto: purely additive column with a server-side default; no data conversion,
+--  no backfill, no destructive change. mempool_transactions is small and
+--  transient (node mempool size, rewritten row-by-row every poll cycle), so the
+--  ALTER's table rebuild is cheap. Idempotent via ADD COLUMN IF NOT EXISTS.)
+--
+-- Migration: mempool_transactions  ADD  first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+--
+-- WHY
+-- ---
+-- The explorer's mempool view shows pending actions with the same columns as
+-- confirmed history (block / time / action / details), and "time" for a pending
+-- row is when THIS decoder first observed the tx in its node's mempool. The
+-- table had no timestamp at all, so the feed had nothing to render. updateMempool
+-- inserts a row once on first observation and deletes it when the tx leaves the
+-- node mempool (deleteAndCompareTxsNotInList), so a server-side insert default
+-- gives every row a stable first-seen time with no writer change.
+--
+-- CONSENSUS NOTE
+-- --------------
+-- first_seen is LOCAL OBSERVATION TIME ONLY. Mempool observation is per-node and
+-- non-deterministic by design (this whole table is excluded from xchain-sync
+-- replication), and nothing here enters any consensus hash preimage.
+--
+-- IDEMPOTENT: ADD COLUMN IF NOT EXISTS is a no-op once the column exists, and
+-- the schema_migrations ledger records this file once per DB. Fresh installs get
+-- the column from src/sql/mempool_transactions.sql, so on those this migration
+-- is a no-op. Applies automatically at decoder startup.
+
+ALTER TABLE mempool_transactions ADD COLUMN IF NOT EXISTS first_seen TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;

@@ -220,6 +220,10 @@ async function startApi(){
     registerDecoderMetrics(observability.registry, decoder)
 
 
+    // getmempool's shared snapshot cache (see the method's comment). Held here so
+    // every request, whatever its limit, slices one cached 500-row window.
+    let getmempoolCache = null;
+
     const jsonRpcController = {
         // Function to check if xchain-decoder is up
         async ping() {
@@ -298,6 +302,59 @@ async function startApi(){
                 block_index:      status.last_processed_block,
                 node_block_index: status.node_height,
                 is_synced:        decoder.isSynced()
+            };
+        },
+        // Current mempool snapshot for remote explorers. mempool_transactions is
+        // deliberately excluded from xchain-sync replication (node-local,
+        // non-deterministic observation), so an explorer serving from synced
+        // replicas has no DB path to pending actions; this method is that path.
+        // Returns the node's TOTAL mempool tx count (XChain or not, from the
+        // last updateMempool poll; -1 until one has run), the count of
+        // XChain-carrying rows, and a bounded row window (same 500-row cap and
+        // tx_hash ordering as the explorer's colocated-DB read). Rows are
+        // PRE-VALIDATION: the indexer can still reject them at confirmation.
+        //
+        // TTL-cached (default 5s, GETMEMPOOL_CACHE_MS) because this method, unlike
+        // its trivial siblings above, reads the DB: without the cache an
+        // unauthenticated request burst would amplify into pooled-connection
+        // contention against the block loop (the same hazard the batch guard
+        // below exists for). The full 500-row window is cached once and sliced
+        // per-request, so differing limits share one read. A poll-cycle-stale
+        // snapshot is fine: updateMempool itself only rewrites every 60s.
+        async getmempool(params) {
+            const ttl = parseInt(process.env.GETMEMPOOL_CACHE_MS, 10) || 5000;
+            const now = Date.now();
+            const db  = decoder.mempoolDb || decoder.db;
+            if (!getmempoolCache || (now - getmempoolCache.t) >= ttl) {
+                let rows = [], total = 0;
+                if (db) {
+                    try {
+                        rows  = await db.getMempoolTransactions(500);
+                        total = await db.getMempoolTransactionCount();
+                    } catch (err) {
+                        // Serve the stale snapshot if we have one; a mempool read
+                        // must never surface as an API error to remote explorers.
+                        console.error('getmempool: mempool read failed:', err);
+                        rows  = getmempoolCache ? getmempoolCache.rows  : [];
+                        total = getmempoolCache ? getmempoolCache.total : 0;
+                    }
+                }
+                getmempoolCache = { t: now, rows, total };
+            }
+            const limit = Math.max(1, Math.min(parseInt(params && params.limit, 10) || 500, 500));
+            return {
+                node_tx_count: decoder.nodeMempoolTxCount,
+                node_updated_at: decoder.nodeMempoolUpdatedAt,
+                total: getmempoolCache.total,
+                rows: getmempoolCache.rows.slice(0, limit).map(r => ({
+                    tx_hash:    r.tx_hash,
+                    source:     r.source,
+                    // TEXT can come back as a Buffer depending on driver options;
+                    // normalize so the JSON body always carries the UTF-8 string.
+                    data:       Buffer.isBuffer(r.data) ? r.data.toString('utf8') : r.data,
+                    first_seen: (r.first_seen instanceof Date) ? Math.floor(r.first_seen.getTime() / 1000)
+                              : (r.first_seen != null ? r.first_seen : null)
+                }))
             };
         }
     }

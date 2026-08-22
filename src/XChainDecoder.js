@@ -355,6 +355,13 @@ class XChainDecoder {
         this._nodeHeightStaleLogged = false
         this.mempoolInterval = null
         this.mempoolBusy = false
+        // Node-mempool observation snapshot from the last updateMempool cycle:
+        // the coin node's TOTAL mempool tx count (getrawmempool length, XChain or
+        // not) and when it was taken. -1/null until the first successful poll.
+        // Read by the API's getmempool method so the explorer can show
+        // "<node unconfirmed> / <XChain unconfirmed>" without its own node RPC.
+        this.nodeMempoolTxCount = -1
+        this.nodeMempoolUpdatedAt = null
 
         this.stopFlag = false
 
@@ -3258,6 +3265,11 @@ class XChainDecoder {
                 // DB layer searches this array, so no ordering is load-bearing.
                 rawMempool = Array.from(new Set(rawMempoolUnordered))
                     .sort((a, b) => b.localeCompare(a))
+
+                // Snapshot the node's total mempool size for the API's getmempool
+                // method (deduped count, matching what this cycle actually processes).
+                this.nodeMempoolTxCount = rawMempool.length
+                this.nodeMempoolUpdatedAt = Date.now()
 
             } catch (error) {
                 console.log(error)
