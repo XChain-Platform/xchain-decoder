@@ -12,7 +12,14 @@
 --
 --********************************************************************
 
--- xchain:migration mode=manual
+-- xchain:migration mode=manual deploy-precondition=required
+-- (deploy-precondition=required: src/db.js asserts both columns' charset at startup
+--  (_assertActionDataIsUtf8mb4), so code carrying that assertion cannot run against a
+--  database that has not applied this file; it crash-loops on boot. The deploy tool
+--  reads this tag out of the source tree it is about to deploy and refuses the deploy
+--  while the target DB's schema_migrations lacks this row, instead of the crash-loop
+--  being what surfaces the requirement.)
+--
 -- (manual: a charset conversion re-encodes and rewrites every row of `transactions`,
 --  which can be large. Never run that unattended at startup on a validator fleet.)
 --

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The migrations this service asserts at startup are now declared to the deploy tool, and one whose end state already holds is recorded as applied without re-running its statement.
+
 ### Added
 - The API serves a `getmempool` method so remote explorers can read the live mempool, including the node's total unconfirmed count.
 - Mempool rows record when this decoder first observed them, applied as an automatic additive migration.
