@@ -119,24 +119,24 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-mainnet'), 950000)
         })
 
-        it('should return 147500 for bitcoin-testnet', () => {
-            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 147500)
+        it('should return 149700 for bitcoin-testnet', () => {
+            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 149700)
         })
 
         it('[REGRESSION P2] R-NET-005: should return 3120000 for litecoin-mainnet', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-mainnet'), 3120000)
         })
 
-        it('should return 4855000 for litecoin-testnet', () => {
-            assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-testnet'), 4855000)
+        it('should return 4862500 for litecoin-testnet', () => {
+            assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-testnet'), 4862500)
         })
 
         it('[REGRESSION P2] R-NET-005: should return 6240000 for dogecoin-mainnet', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-mainnet'), 6240000)
         })
 
-        it('should return 67815000 for dogecoin-testnet', () => {
-            assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-testnet'), 67815000)
+        it('should return 67847500 for dogecoin-testnet', () => {
+            assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-testnet'), 67847500)
         })
 
         it('[REGRESSION P2] R-NET-005: should return 0 for all regtest networks', () => {
