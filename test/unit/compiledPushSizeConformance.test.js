@@ -96,6 +96,61 @@ describe('compiled-push-size arbiter conformance', function () {
             const v = require(VALIDATOR);
             assert.strictEqual(v.MAX_COMPILED_ACTION_DATA_LENGTH, XChainDecoder.MAX_ACTION_DATA_LENGTH);
         });
+
+        // The envelope band, which the sweep above cannot reach.
+        //
+        // The lane's two sides measure the same bytes with different machinery
+        // ON PURPOSE. compiledPushSize has no OP_PUSHDATA4 branch, so above
+        // 0xffff it under-counts a real compiled push by 2; the encoder corrects
+        // for that in envelopePushSize before comparing against the envelope
+        // ceiling, and the decoder instead refuses to re-measure an envelope
+        // payload at all (the `!envelopeCarrier` guard in parseTransaction).
+        // Both sides carried that reasoning as a COMMENT and neither asserted
+        // it, while the only cross-service sweep stopped at n=8300 - three
+        // orders of magnitude below where the divergence opens and 381,700
+        // bytes below the ENVELOPE_MAX_PAYLOAD ceiling it decides.
+        describe('envelope push band (0xffff .. ENVELOPE_MAX_PAYLOAD)', function () {
+
+            // Straddles every branch the correction touches: the last
+            // OP_PUSHDATA2 length, the first OP_PUSHDATA4 length, the one after
+            // it, a mid-band value, and the ceiling itself.
+            const BAND = [8192, 65534, 65535, 65536, 65537, 200000, 390000];
+
+            it('envelopePushSize equals the real compiled push length across the band', function () {
+                const envelopePushSize = require(VALIDATOR).envelopePushSize;
+                assert.strictEqual(typeof envelopePushSize, 'function',
+                    'xchain-encoder validator must export envelopePushSize');
+                for (const n of BAND) {
+                    const compiled = bitcoin.script.compile([buf(n)]).length;
+                    assert.strictEqual(envelopePushSize(n), compiled,
+                        `envelopePushSize(${n}) must equal bitcoin.script.compile length (${compiled})`);
+                }
+            });
+
+            it('the decoder helper under-counts by exactly 2 above 0xffff, and not below', function () {
+                const envelopePushSize = require(VALIDATOR).envelopePushSize;
+                for (const n of BAND) {
+                    const expected = n > 0xffff ? 2 : 0;
+                    assert.strictEqual(envelopePushSize(n) - pushSize(n), expected,
+                        `at ${n} the encoder envelope correction must be exactly ${expected} bytes ` +
+                        `(got ${envelopePushSize(n) - pushSize(n)}); this is the gap that makes the ` +
+                        'decoder refuse to re-measure an envelope payload');
+                }
+            });
+
+            it('re-measuring at the ceiling would under-count, which is why the decoder does not', function () {
+                const C = require('../../src/protocol/constants.js');
+                assert.strictEqual(C.ENVELOPE_MAX_PAYLOAD, 390000);
+                // The negative control for the guard above: state the failure the
+                // `!envelopeCarrier` branch exists to avoid, as arithmetic rather
+                // than as a comment. If compiledPushSize ever grew a PUSHDATA4
+                // band, this assertion is what says so.
+                const real = bitcoin.script.compile([buf(C.ENVELOPE_MAX_PAYLOAD)]).length;
+                assert.strictEqual(real - pushSize(C.ENVELOPE_MAX_PAYLOAD), 2,
+                    'compiledPushSize must still under-count a ceiling-sized push by 2; the decoder ' +
+                    'skips the re-measure on that exact basis');
+            });
+        });
     });
 
     // The OP_PUSHDATA2 overhead used to be a bare `+ 3` literal here, invisible to any
