@@ -28,7 +28,7 @@ const ecc = require('tiny-secp256k1')
 const BlockchainConnector = require('./BlockchainConnector')
 const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
-const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('./oracleFeeOutput')
+const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress, V0_GIVE_COIN_INDEX, V0_GET_COIN_INDEX, V0_GET_ADDRESS_INDEX, V0_REQUIRED_FIELD_COUNT, ORACLE_ADDRESS_INDEX, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('./oracleFeeOutput')
 const { isDispenserExpiryRealignActive } = require('./dispenserExpiryRealign')
 const { captureCommands, collapseDispenserRegistrations, isBatchSubCommandCaptureActive } = require('./batchSubCommandCapture')
 const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./chainIdentity')
@@ -707,7 +707,14 @@ class XChainDecoder {
         return await this.parseTransaction(this.xchainBlockDecoder.transactionFromHex(rawTransaction))
     }
     
-    async getSourceFromOutput(txId, outputIndex){
+    // `capture`, when given, receives the parsed FIRST-HOP transaction for `txId` as
+    // `capture.sourceTransaction`. On the P2SH/P2WSH chunk lane that transaction is the
+    // same commit findFundingFeeOutputs would otherwise fetch a second time, so the
+    // caller can hand it over as prefetchedFundingTx. It is an out-parameter rather than
+    // a widened return value on purpose: the return contract (a source address or null)
+    // is stubbed and asserted across the suite, and a caller that ignores `capture`
+    // behaves exactly as before.
+    async getSourceFromOutput(txId, outputIndex, capture = null){
         let source = null
         let output = null
         let outputTransaction = null
@@ -733,6 +740,11 @@ class XChainDecoder {
             // LTC decoder instance permanently. transactionFromHex is the same parser the
             // block path uses; for BTC/DOGE and non-flagged txs it is a plain parse.
             outputTransaction = this.xchainBlockDecoder.transactionFromHex(outputRawTransaction)
+            // Publish the FIRST-HOP tx here, before the P2SH/P2WSH walk-back below can
+            // reassign `output`. The walk-back fetches the commit's own funder, a
+            // different transaction; handing that to the fee resolver would attribute
+            // another tx's outputs into this action's reserved FUNDING_VOUT_BASE domain.
+            if (capture) capture.sourceTransaction = outputTransaction
         } catch (err){
             this.rpcErrors++
             console.error(`getSourceFromOutput: failed to fetch tx ${txId} (output ${outputIndex}): `, err)
@@ -996,7 +1008,8 @@ class XChainDecoder {
         // prefetchedFundingTx: the Taproot-envelope path fetches the commit
         // exactly once (spec §3.8) and hands the parsed tx in here, so the fee
         // resolver extends to the commit without a second RPC round trip. The
-        // chunk lanes keep the fetch below.
+        // P2SH/P2WSH chunk lanes hand in the commit getSourceFromOutput already
+        // parsed, so the fetch below is the fallback for a caller that has none.
         let fundingTx = prefetchedFundingTx
         if (!fundingTx){
             try {
@@ -1073,7 +1086,7 @@ class XChainDecoder {
     // create took a payment and dispensed nothing; the same create with an
     // explicit EXPIRATION (15 tokens) dispensed correctly.
     hasRequiredDispenserCreateFields(decodedDataSplit){
-        return Array.isArray(decodedDataSplit) && decodedDataSplit.length >= 10
+        return Array.isArray(decodedDataSplit) && decodedDataSplit.length >= V0_REQUIRED_FIELD_COUNT
     }
 
     // The ORACLE_ADDRESSes whose native-coin outputs this transaction's payment-output
@@ -1134,7 +1147,7 @@ class XChainDecoder {
                 // (addressRefFields.js `noCompact`), so this is a third-party composer or
                 // a historical replay.
                 this.parseErrors++
-                console.error(`Oracle-fee output NOT captured for tx ${transactionHash}: compacted ORACLE_ADDRESS reference '${fields[13]}' cannot be resolved by the decoder, so the indexer will reject this dispenser create`)
+                console.error(`Oracle-fee output NOT captured for tx ${transactionHash}: compacted ORACLE_ADDRESS reference '${fields[ORACLE_ADDRESS_INDEX]}' cannot be resolved by the decoder, so the indexer will reject this dispenser create`)
                 return []
             }
             let createOracleAddress = oracleAddressFromCreate(fields)
@@ -1628,10 +1641,11 @@ class XChainDecoder {
             //Envelope reveals attribute differently (§3.4): ins[0]'s prevout is the
             //one-time P2TR commit output, so the source is the address funding the
             //COMMIT (its ins[0] prevout), resolved from the already-fetched commit.
+            let sourceCommitCapture = {}
             if (getSource && (source == null)){
                 source = envelopeCarrier
                     ? await this.getEnvelopeSourceFromCommit(envelopeCommitTransaction)
-                    : await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index)
+                    : await this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index, sourceCommitCapture)
             }
 
             //Extract and store public key from the first input if source was found
@@ -1648,7 +1662,15 @@ class XChainDecoder {
             //For a P2SH/P2WSH reveal, attribute the native-coin fee output (which lives on the funding
             //commit tx) to this action so the indexer can validate it (see findFundingFeeOutputs).
             if (p2shFundingTxId){
-                let fundingFeeOutputs = await this.findFundingFeeOutputs(p2shFundingTxId, envelopeCommitTransaction)
+                // The chunk lanes set p2shFundingTxId = firstInputTxId, which getSourceFromOutput
+                // above has already fetched and parsed, so reuse it instead of paying a second
+                // RPC round trip (with its own 10-attempt retry budget) for the same txid. The
+                // txid equality guard matters: getSourceFromOutput does not run when the source
+                // was already known or not needed, and findFundingFeeOutputs must still fetch
+                // for itself in that case.
+                let prefetchedFundingTx = envelopeCommitTransaction
+                    || ((p2shFundingTxId === firstInputTxId && sourceCommitCapture.sourceTransaction) || null)
+                let fundingFeeOutputs = await this.findFundingFeeOutputs(p2shFundingTxId, prefetchedFundingTx)
                 for (let feeOutput of fundingFeeOutputs){
                     // Remap the FUNDING tx's vout into the reserved funding domain before this output
                     // is stored under the REVEAL's tx_index, so it can never collide on the
@@ -2932,9 +2954,9 @@ class XChainDecoder {
                                     // ORACLE_ADDRESS; see hasRequiredDispenserCreateFields for
                                     // the field map and for what the old >= 14 gate cost.
                                     if (dispenserFormat === 0 && this.hasRequiredDispenserCreateFields(decodedDataSplit)){
-                                        let giveCoin = decodedDataSplit[2]
-                                        let getCoin = decodedDataSplit[7]
-                                        let getAddress = decodedDataSplit[10]
+                                        let giveCoin = decodedDataSplit[V0_GIVE_COIN_INDEX]
+                                        let getCoin = decodedDataSplit[V0_GET_COIN_INDEX]
+                                        let getAddress = decodedDataSplit[V0_GET_ADDRESS_INDEX]
 
                                         // Treat a missing token OR an empty-string token as an
                                         // omitted EXPIRATION and substitute the same default the

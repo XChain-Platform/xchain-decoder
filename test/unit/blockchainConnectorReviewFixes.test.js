@@ -99,6 +99,42 @@ describe('BlockchainConnector RPC error accounting and reporting', () => {
         }).timeout(5000)
     })
 
+    describe('#getRawTransaction() classifies an HTTP-200 JSON-RPC error body', () => {
+        // A node honouring the jsonrpc:"2.0" request field (Bitcoin Core >= v28)
+        // returns RPC errors with HTTP 200, so axios never throws and the retry /
+        // backoff / accounting classifier below the success path is never reached.
+        it('retries a -429 queue-full error with the 5s backoff and counts it once', async () => {
+            const delays = []
+            connector.sleep = async (ms) => { delays.push(ms) }
+            axiosStub.resolves({ status: 200, data: { result: null, error: { code: -429, message: 'Work queue depth exceeded' } } })
+
+            await assert.rejects(
+                () => connector.getRawTransaction('txid'),
+                (err) => /failed after 10 attempts/.test(err.message) && /-429/.test(err.message)
+            )
+            assert.strictEqual(axiosStub.callCount, 10, 'the 10-attempt loop must run')
+            assert.strictEqual(connector.rpcErrors, 1, 'rpc_errors_total must see the failure')
+            assert.deepStrictEqual([...new Set(delays)], [5000], 'every backoff is the queue-full 5s one')
+        }).timeout(5000)
+
+        it('retries a transient -28 and resolves the tx once the node is ready', async () => {
+            axiosStub.onCall(0).resolves({ status: 200, data: { result: null, error: { code: -28, message: 'Loading block index' } } })
+            axiosStub.onCall(1).resolves({ status: 200, data: { result: 'deadbeef' } })
+
+            assert.strictEqual(await connector.getRawTransaction('txid'), 'deadbeef')
+            assert.strictEqual(axiosStub.callCount, 2)
+            assert.strictEqual(connector.rpcErrors, 0)
+        }).timeout(5000)
+
+        it('still resolves null on the first attempt for a -5 eviction', async () => {
+            axiosStub.resolves({ status: 200, data: { result: null, error: { code: -5, message: 'No such mempool or blockchain transaction' } } })
+
+            assert.strictEqual(await connector.getRawTransaction('txid'), null)
+            assert.strictEqual(axiosStub.callCount, 1, 'eviction tolerance must not burn retries')
+            assert.strictEqual(connector.rpcErrors, 0)
+        }).timeout(5000)
+    })
+
     describe('block-path methods surface the HTTP-500 JSON-RPC error code', () => {
         it('getBlockHash rethrows an error carrying the node rpcCode/rpcMessage', async () => {
             const rpcErr = Object.assign(new Error('Request failed with status code 500'), {
@@ -148,5 +184,46 @@ describe('BlockchainConnector RPC error accounting and reporting', () => {
             axiosStub.resolves({ data: { result: 0, error: { code: -8, message: 'Block height out of range' } } })
             await assert.rejects(() => connector.getBlockHash(0), /RPC error -8: Block height out of range/)
         }).timeout(5000)
+    })
+
+    describe('envInt() falls back on values that used to parse to NaN', () => {
+        // NODE_RPC_TIMEOUT feeds axios.defaults.timeout, which axios gates on
+        // `if (config.timeout)`. A NaN there installs NO timeout, so a node that
+        // accepts the connection and never answers hangs forever and the whole
+        // ECONNABORTED retry / endpoint-failover ladder is unreachable.
+        const { envInt } = BlockchainConnector
+        let warnStub
+
+        beforeEach(() => { warnStub = sinon.stub(console, 'warn') })
+
+        it('uses the default when the variable is unset', () => {
+            assert.strictEqual(envInt(undefined, 30000, 'NODE_RPC_TIMEOUT'), 30000)
+            assert.strictEqual(warnStub.callCount, 0, 'an unset variable is normal, not a misconfiguration')
+        })
+
+        it('uses the default (and warns) when the variable is present but empty', () => {
+            assert.strictEqual(envInt('', 30000, 'NODE_RPC_TIMEOUT'), 30000)
+            assert.strictEqual(envInt('   ', 30000, 'NODE_RPC_TIMEOUT'), 30000)
+            assert.strictEqual(warnStub.callCount, 2)
+        })
+
+        it('rejects a unit-suffixed value instead of truncating it to 30ms', () => {
+            assert.strictEqual(envInt('30s', 30000, 'NODE_RPC_TIMEOUT'), 30000)
+            assert.strictEqual(envInt('1e4', 30000, 'NODE_RPC_TIMEOUT'), 30000)
+        })
+
+        it('rejects zero and negatives at the default minimum of 1', () => {
+            assert.strictEqual(envInt('0', 30000, 'NODE_RPC_TIMEOUT'), 30000)
+            assert.strictEqual(envInt('-5', 30000, 'NODE_RPC_TIMEOUT'), 30000)
+        })
+
+        it('keeps 0 usable where the call site documents it (the retry backoff)', () => {
+            assert.strictEqual(envInt('0', 500, 'RPC_TIMEOUT_RETRY_DELAY_MS', 0), 0)
+        })
+
+        it('passes a valid value through unchanged and silently', () => {
+            assert.strictEqual(envInt('45000', 30000, 'NODE_RPC_TIMEOUT'), 45000)
+            assert.strictEqual(warnStub.callCount, 0)
+        })
     })
 })
