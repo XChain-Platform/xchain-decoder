@@ -19,7 +19,30 @@
  ********************************************************************/
 
 const axios = require('axios');
-axios.defaults.timeout = parseInt(process.env.NODE_RPC_TIMEOUT ?? '30000', 10)
+
+// Read an integer env var, falling back on anything that is not a clean integer.
+// `??` only substitutes for null/undefined, so a present-but-empty value (a bare
+// `VAR=` line in a .env or compose file) reaches parseInt('') and yields NaN, and
+// a unit-suffixed one ('30s') truncates to a wrong magnitude. Both matter for the
+// RPC timeout below, which axios gates on `if (config.timeout)`: NaN is falsy, so
+// no timeout is installed at all and a black-holed node hangs forever instead of
+// raising ECONNABORTED, taking the whole timeout-retry and endpoint-failover
+// ladder with it. Warn on a discarded value so a mis-set env is visible in logs.
+function envInt(raw, fallback, name, min = 1) {
+    const s = (raw === undefined || raw === null) ? '' : String(raw).trim()
+    if (s === '') {
+        if (raw !== undefined && raw !== null) console.warn(`[config] ${name} is set but empty; using ${fallback}`)
+        return fallback
+    }
+    const n = /^-?\d+$/.test(s) ? Number(s) : NaN
+    if (!Number.isInteger(n) || n < min) {
+        console.warn(`[config] ${name}="${s}" is not an integer >= ${min}; using ${fallback}`)
+        return fallback
+    }
+    return n
+}
+
+axios.defaults.timeout = envInt(process.env.NODE_RPC_TIMEOUT, 30000, 'NODE_RPC_TIMEOUT')
 
 // Sanitize an axios error before it is logged or re-thrown. Every RPC call passes
 // `auth: { username: rpcUser, password: rpcPassword }`, and axios attaches the request
@@ -336,7 +359,9 @@ class BlockchainConnector {
     // timing out precisely because it is overloaded. Matches getRawTransaction's
     // sleep-based backoff. Env-tunable so tests can set it to 0.
     async backoffOnTimeout() {
-        const delay = parseInt(process.env.RPC_TIMEOUT_RETRY_DELAY_MS ?? '500', 10)
+        // min 0, not 1: the comment above documents 0 as a supported test setting
+        // (test/unit/setup.js relies on it), so it must survive the validation.
+        const delay = envInt(process.env.RPC_TIMEOUT_RETRY_DELAY_MS, 500, 'RPC_TIMEOUT_RETRY_DELAY_MS', 0)
         if (delay > 0) await this.sleep(delay)
     }
 
@@ -615,6 +640,26 @@ class BlockchainConnector {
 
                     const response = await this.rpcPost(data)
 
+                    // A JSON-RPC 2.0 node (Bitcoin Core >= v28) answers an RPC error with
+                    // HTTP 200 and a body error object, so axios never throws and the
+                    // classifier below is never reached. Re-shape a coded error into the
+                    // same error the HTTP-500 transport produces so both transports are
+                    // classified at one point: -429 keeps its 5s backoff, -28 and auth
+                    // faults keep their retries, and rpcErrors still counts them.
+                    // -5 is the node's "tx absent" answer and stays the tolerant path
+                    // below; an error object with no numeric code is not classifiable, so
+                    // it keeps the pre-existing tolerant behaviour rather than gaining a
+                    // new failure mode here.
+                    const httpRpcError = response.data?.error
+                    if (httpRpcError && typeof httpRpcError.code === 'number' && httpRpcError.code !== -5) {
+                        // Build a fresh error each attempt and copy (never alias) the axios
+                        // response: sanitizeRpcError scrubs error.response in place, so a
+                        // shared object would carry the JSON body only on the first read.
+                        const err = new Error(`getRawTransaction: RPC error ${httpRpcError.code}: ${httpRpcError.message}`)
+                        err.response = { status: response.status, data: { error: { code: httpRpcError.code, message: httpRpcError.message } } }
+                        throw err
+                    }
+
                     // Return (not break) so
                     // a success on the final attempt cannot fall through to the failure
                     // guard below and inflate rpcErrors on a recovered fetch.
@@ -762,3 +807,5 @@ module.exports.encodeVarintHex = encodeVarintHex
 // Exported for the cross-repo strip-parity test.
 module.exports.stripAuxPowFromBlockHex = stripAuxPowFromBlockHex
 module.exports.skipAuxPow = skipAuxPow
+// Exported for the env-parsing regression test.
+module.exports.envInt = envInt

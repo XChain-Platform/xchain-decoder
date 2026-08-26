@@ -12,7 +12,14 @@
 --
 --********************************************************************
 
--- xchain:migration mode=manual
+-- xchain:migration mode=manual deploy-precondition=required
+-- (deploy-precondition=required: src/db.js asserts this column's type at startup
+--  (_assertDispenserExpirationIsBigintUnsigned), so code carrying that assertion
+--  cannot run against a database that has not applied this file; it crash-loops on
+--  boot. The deploy tool reads this tag out of the source tree it is about to deploy
+--  and refuses the deploy while the target DB's schema_migrations lacks this row,
+--  instead of the crash-loop being what surfaces the requirement.)
+--
 -- (manual: a one-time column TYPE change with a value conversion. Run with the
 --  decoder stopped, take a backup first; see HOW TO RUN below.)
 -- Migration: dispensers.expiration  DATETIME  ->  BIGINT UNSIGNED (raw unix seconds).

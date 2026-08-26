@@ -14,11 +14,11 @@
   <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20security%20%7C%20fuzz%20%7C%20chaos%20%7C%20mutation%20%7C%20regression%20%7C%20benchmarks%20%7C%20smoke-brightgreen" alt="Coverage">
 </p>
 
-Transaction extraction service for the XChain Platform. Polls cryptocurrency nodes (Bitcoin, Litecoin, Dogecoin) via JSON-RPC, parses every block, identifies XChain-encoded transactions, deobfuscates the embedded ACTION payloads using AES-128-CTR, and writes the raw decoded data to a MariaDB database for the indexer to process.
+Transaction extraction service for the XChain Platform. Polls the coin nodes of every supported chain (Bitcoin, Litecoin, and Dogecoin today) via JSON-RPC, parses every block, identifies XChain-encoded transactions, deobfuscates the embedded ACTION payloads using AES-128-CTR, and writes the raw decoded data to a MariaDB database for the indexer to process.
 
 ## Features
 
-- **Multi-chain support**: Bitcoin, Litecoin, and Dogecoin on mainnet, testnet, and regtest
+- **Multi-chain support**: Bitcoin, Litecoin, and Dogecoin today on mainnet, testnet, and regtest
 - **AES-128-CTR deobfuscation**: derives key and IV from the first input's txid
 - **Four encoding formats**: OP_RETURN, P2SH (reassembled from scriptSigs), P2WSH (reassembled from witness data), and 1-of-3 multisig
 - **Chain-specific parsing**: Litecoin MWEB/HogEx flag stripping; Dogecoin AuxPoW header stripping

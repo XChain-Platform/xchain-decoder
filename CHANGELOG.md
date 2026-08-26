@@ -5,11 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.11.0] - 2026-08-25
 
 ### Added
 - The API serves a `getmempool` method so remote explorers can read the live mempool, including the node's total unconfirmed count.
 - Mempool rows record when this decoder first observed them, applied as an automatic additive migration.
+
+### Changed
+- Updated the BTC mainnet validator reward pool address.
+- Moved the BTC, LTC and DOGE testnet genesis start points forward to just under the live chain tip and regenerated the consensus pin, so the public testnet launches with no pre-announcement test history.
+
+### Fixed
+- The migrations this service asserts at startup are now declared to the deploy tool, and one whose end state already holds is recorded as applied without re-running its statement.
+- Cumulative log-shipper totals are now reported as counters instead of gauges, so rate queries over them return correct values instead of being undefined.
+- Mempool counts and feeds now include only action-carrying rows, instead of every transaction the node's mempool holds.
+- A malformed or blank RPC timeout environment variable no longer silently disables the request timeout, which could leave a stalled node connection hanging indefinitely.
+- RPC error responses from newer node software that reply with HTTP 200 (Bitcoin Core 28 and later) are now classified and retried the same as other RPC failures.
 
 ## [0.10.0] - 2026-08-18
 
@@ -92,7 +103,6 @@ set of software rather than a rough era.
 - Construction fails fast on a coin outside `KNOWN_WIRE_COINS` instead of decoding with the wrong byte parameters.
 - The `migrate.js` CLI is covered by unit tests.
 - The committed-migration DDL guard splits statements quote-aware.
-
 
 ## [1.11.14] - 2026-06-20
 

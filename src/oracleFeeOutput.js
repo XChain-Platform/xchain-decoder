@@ -41,9 +41,29 @@ const { ORACLE_FEE_OUTPUT_ACTIVATION, ORACLE_FEE_SET_CAPTURE_ACTIVATION } = requ
 // Decoder offset = indexer format position + 1, because the decoder splits with the
 // ACTION token ('DISPENSER') at 0 while the indexer's format string starts at VERSION.
 // The comment is no longer the only contract: test/unit/dispenserFieldOffsets.test.js
-// derives all three offsets from the live sibling Dispenser's this.formats.
+// derives every one of these offsets from the live sibling Dispenser's this.formats.
+//
+// EVERY v0 position the decoder reads is named here, not just the ones oracle-fee
+// capture needs. GET_ADDRESS is the operating address the dispenser row is
+// registered under (dispensers.address_id), and that address set is what decides
+// which native-coin outputs reach transaction_outputs at all - the only outputs the
+// indexer ever sees. A field inserted ahead of it in the indexer's v0 format would
+// register the dispenser on the wrong token, capture nothing, and emit no DISPENSE
+// while the indexer kept the dispenser open and escrowed: the money-bearing
+// under-capture direction, and silent while every literal read still matched itself.
+const V0_GIVE_COIN_INDEX = 2
+const V0_GET_COIN_INDEX = 7
+const V0_GET_ADDRESS_INDEX = 10
 const ORACLE_ADDRESS_INDEX = 13
 const V0_EXPIRATION_INDEX = 14
+
+// Length of the REQUIRED run of a v0 create. Everything from GET_ADDRESS on is
+// optional (GET_ADDRESS defaults to SOURCE, EXPIRATION to a block-time window), so
+// the run ends at GET_AMOUNT (offset 9) and a conforming create is at least 10
+// tokens. It equals V0_GET_ADDRESS_INDEX only because the optional tail starts
+// exactly there; it is a COUNT, not a position, and the offsets test derives it
+// from GET_AMOUNT rather than from that coincidence.
+const V0_REQUIRED_FIELD_COUNT = 10
 
 // Field positions in the DISPENSER v2 (edit) wire format, same +1 convention
 // (indexer this.formats[2]):
@@ -118,6 +138,10 @@ function isCompactedOracleAddress(fields){
 }
 
 module.exports = {
+    V0_GIVE_COIN_INDEX,
+    V0_GET_COIN_INDEX,
+    V0_GET_ADDRESS_INDEX,
+    V0_REQUIRED_FIELD_COUNT,
     ORACLE_ADDRESS_INDEX,
     V0_EXPIRATION_INDEX,
     V2_EXPIRATION_INDEX,

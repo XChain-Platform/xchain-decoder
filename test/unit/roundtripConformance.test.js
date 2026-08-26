@@ -62,10 +62,21 @@ const SOURCE_ADDRESS = 'mh5CE8Nbj38iND267s4XnvhSmhDW7yWc6Q'
 const DUMMY_SIG = Buffer.concat([Buffer.from([0x30]), Buffer.alloc(70, 0xab)])
 const DUMMY_PUBKEY = Buffer.concat([Buffer.from([0x02]), Buffer.alloc(32, 0xcd)])
 
-// Block height these cases parse at. Below every chain's Taproot-envelope
-// recognition height, so the envelope surface stays inert and these legacy
-// carriers parse exactly as they do on the shipped fleet today.
-const PRE_ENVELOPE_HEIGHT = 0
+// Block height these cases parse at. bitcoin-regtest's Taproot-envelope
+// recognition height is 0 (ENVELOPE_RECOGNITION_ACTIVATION in
+// src/protocol/constants.js: testnet and regtest are genesis-active, the flag
+// day only ever applied to mainnet) and the predicate is
+// `blockHeight >= activationHeight`, so the envelope surface is ACTIVE here.
+// The envelope lane below needs that; the legacy carriers are unaffected,
+// because recognition is a pure witness pattern match and none of their
+// spend-side fillers match the grammar.
+//
+// This constant was called PRE_ENVELOPE_HEIGHT and documented as sitting below
+// every chain's recognition height. It never did on this decoder: the comment
+// described an inert surface while the suite ran against a live one, so a
+// regression that pulled a legacy carrier into the envelope branch would have
+// read as impossible here rather than being caught.
+const PARSE_HEIGHT = 0
 
 // Only the node RPC is faked. getSourceFromOutput, the pubkey extraction and
 // every gate stay on the production path; the connector returns a real
@@ -138,6 +149,27 @@ function buildP2shTransaction (c, chunkCount) {
   return tx
 }
 
+// Taproot-envelope reveal: ins[0] spends the commit output, and its witness is
+// the BIP341 script-path stack the envelope grammar is matched against, indexed
+// from the END - [..., <envelope tapscript>, <control block>]. The control
+// block is leaf version 0xc0 (parity in the low bit) followed by the 32-byte
+// internal key, with no merkle path, which is what a single-leaf commit spends.
+// No annex: an annex-bearing stack is never an envelope (spec §3.8).
+//
+// ins[0] MUST be the envelope input (§3.5) and no other carrier may be present,
+// or the parse rejects the whole envelope deterministically, so this builder
+// pays to a plain address rather than adding an OP_RETURN marker the way the
+// P2SH lane does.
+function buildEnvelopeTransaction (decoder, c) {
+  const envelopeScript = Buffer.from(c.envelopeScriptHex, 'hex')
+  const controlBlock = Buffer.concat([Buffer.from([0xc0]), Buffer.from(c.internalPubkeyHex, 'hex')])
+  const tx = new bitcoin.Transaction()
+  tx.addInput(reversedTxid(c.firstInputTxid), 0)
+  tx.ins[0].witness = [DUMMY_SIG, envelopeScript, controlBlock]
+  tx.addOutput(bitcoin.address.toOutputScript(SOURCE_ADDRESS, decoder.network), 1000)
+  return tx
+}
+
 // Expected fate of each fixture case once it reaches the storage gate. Only the
 // FATE is pinned here; the stored bytes themselves are always derived from the
 // fixture's own encoder inputs below, so this table can never drift into being a
@@ -168,7 +200,12 @@ const STORED_FATE = {
   // alias rewrite
   'alias rewrite TRANSFER -> SEND': { storable: true, skip: false },
   'alias rewrite MSG -> MESSAGE': { storable: true, skip: false },
-  'alias rewrite CAST -> BROADCAST at the compiled ceiling': { storable: true, skip: false }
+  'alias rewrite CAST -> BROADCAST at the compiled ceiling': { storable: true, skip: false },
+  // TAPROOT envelope
+  'envelope action-only (SEND)': { storable: true, skip: false },
+  'envelope action + rawData (ISSUE + metadata)': { storable: true, skip: false },
+  'envelope multi-chunk BROADCAST': { storable: true, skip: false },
+  'envelope final-chunk rebalance boundary (last byte 0x05)': { storable: true, skip: false }
 }
 
 // The stored ACTION string this case must produce: the encoder's own input,
@@ -184,7 +221,7 @@ function expectedStoredRawDataHex (c) {
 
 // Drive one fixture case all the way to the record the row INSERT receives.
 async function storedRecordFor (decoder, db, transaction) {
-  const parseResult = await decoder.parseTransaction(transaction, new Set(), db, PRE_ENVELOPE_HEIGHT)
+  const parseResult = await decoder.parseTransaction(transaction, new Set(), db, PARSE_HEIGHT)
   const storable = decoder.hasStorableContent(parseResult)
   const record = storable
     ? decoder.buildStoredActionRecord(parseResult, transaction.getId(), false)
@@ -239,7 +276,7 @@ describe('roundtrip conformance fixture: every case reaches the stored record', 
 
   it('pins a stored-record expectation for every fixture case, and no stale ones', function () {
     const fixtureNames = []
-    for (const key of ['cases', 'multisignCases', 'p2shCases', 'aliasCases']) {
+    for (const key of ['cases', 'multisignCases', 'p2shCases', 'aliasCases', 'envelopeCases']) {
       assert.ok(fixture[key].length > 0, `fixture.${key} is empty`)
       for (const c of fixture[key]) fixtureNames.push(c.name)
     }
@@ -265,6 +302,45 @@ describe('roundtrip conformance fixture: every case reaches the stored record', 
 
   it('drives every alias case to the record the row INSERT receives', async function () {
     for (const c of fixture.aliasCases) await assertCase(decoder, db, c, buildOpReturnTransaction(c))
+  })
+
+  it('drives every TAPROOT envelope case to the record the row INSERT receives', async function () {
+    for (const c of fixture.envelopeCases) {
+      await assertCase(decoder, db, c, buildEnvelopeTransaction(decoder, c))
+    }
+  })
+
+  it('recognizes each envelope as the carrier, with the envelope ceiling', async function () {
+    // The lane's own routing, not shared with any other group: recognition must
+    // actually fire (a witness that stopped matching would silently fall back to
+    // "no carrier", and assertCase's dropped-gate branch would pass on an empty
+    // payload for the wrong reason), and the per-encoding ceiling must be the
+    // envelope one rather than the 8,192-byte legacy cap.
+    for (const c of fixture.envelopeCases) {
+      const tx = buildEnvelopeTransaction(decoder, c)
+      const parseResult = await decoder.parseTransaction(tx, new Set(), db, PARSE_HEIGHT)
+      assert.strictEqual(parseResult.envelope, true, `${c.name}: not recognized as an envelope carrier`)
+      assert.strictEqual(parseResult.payloadCeiling, XChainDecoder.ENVELOPE_MAX_PAYLOAD,
+        `${c.name}: envelope must carry the envelope payload ceiling`)
+    }
+  })
+
+  it('reassembles the envelope payload as the encoder compiled it, chunk boundaries included', async function () {
+    // The envelope payload is raw (spec §3.3), so the decoder's reassembly is a
+    // plain concat of the leaf's payload pushes. Assert against the fixture's
+    // compiled stream rather than against the parsed ACTION, so a chunk dropped
+    // or reordered at a 520-byte boundary fails here even when the surviving
+    // prefix would still decompile to something.
+    for (const c of fixture.envelopeCases) {
+      const detected = decoder.detectEnvelopeWitness([
+        DUMMY_SIG,
+        Buffer.from(c.envelopeScriptHex, 'hex'),
+        Buffer.concat([Buffer.from([0xc0]), Buffer.from(c.internalPubkeyHex, 'hex')])
+      ])
+      assert.ok(detected != null, `${c.name}: witness did not match the envelope grammar`)
+      assert.strictEqual(detected.payload.toString('hex'), c.compiledHex,
+        `${c.name}: reassembled envelope payload diverges from the encoder's compiled stream`)
+    }
   })
 })
 

@@ -548,7 +548,8 @@ class Database {
                 throw new Error(
                     'dispensers.expiration has type ' + columnType.toUpperCase() + ' but BIGINT UNSIGNED is required ' +
                     '(FROM_UNIXTIME/DATETIME silently NULLs any expiration past 2038, which the decoder then never expires). ' +
-                    'Run the pending migration: node src/migrate.js --file 2026-06-13-dispensers-expiration-bigint.sql'
+                    'Run the pending migration: node src/migrate.js --file ' +
+                    Database.startupAssertedMigrationFile('_assertDispenserExpirationIsBigintUnsigned')
                 );
             }
             if(dataType !== 'bigint'){
@@ -602,7 +603,8 @@ class Database {
                 throw new Error(
                     'pubkeys.pubkey holds ' + len + ' chars but VARCHAR(' + UNCOMPRESSED_PUBKEY_HEX_LENGTH + ') is required ' +
                     'for uncompressed keys; narrower silently NULLs or truncates the source_pubkey seam field. ' +
-                    'Run the pending migration: node src/migrate.js'
+                    'Run the pending migration: node src/migrate.js --file ' +
+                    Database.startupAssertedMigrationFile('_assertPubkeyColumnIsUncompressedWide')
                 );
             }
         } finally {
@@ -641,7 +643,8 @@ class Database {
                         String(row.tbl) + '.data uses charset ' + cs + ' but utf8mb4 is required; a non-BMP ' +
                         'ACTION (e.g. an emoji MEMO) is rejected with errno 1366 and the fee-paid transaction ' +
                         'is quarantined with no ACTION row, diverging this node from a migrated one. ' +
-                        'Run the pending migration: node src/migrate.js'
+                        'Run the pending migration: node src/migrate.js --file ' +
+                        Database.startupAssertedMigrationFile('_assertActionDataIsUtf8mb4')
                     );
                 }
             }
@@ -2687,12 +2690,14 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
         ],
         to:   '1d8406192690e5a754ec9430fcd9115e907f34944f340a70b776166a62f83868',  // ec36bd4 (HEAD)
     },
-    // Comment-only edit: the header claimed mode=manual left the file
+    // Comment-only edits: the header claimed mode=manual left the file
     // "pending and harmless on fresh DBs" and that IF [NOT] EXISTS made a partial
     // run resumable. Both were false and both invited the corrupting blanket run,
-    // so the header now names MIGRATION_PRECONDITIONS below as the actual guard.
-    // The four statements are unchanged since authorship (63fc384): stripping
-    // `--` comment lines and blank lines leaves the identical residue
+    // so the header names MIGRATION_PRECONDITIONS below as the actual guard, and
+    // now also carries the `deploy-precondition=required` tag so the deploy tool can
+    // see the same requirement from a cloned source tree. The four statements are
+    // unchanged since authorship (63fc384): stripping `--` comment lines and blank
+    // lines leaves the identical residue
     // 820a0b2ae5b662a4e963dd2301f6ac86d2f67feaa6b59527c23fabec3c1a678c at every
     // revision pinned here.
     '2026-06-13-dispensers-expiration-bigint.sql': {
@@ -2700,8 +2705,27 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
             '8b163db63932ec7940fc0c4ff83abb6a52d27ab4a192c377ce5195c3ca4b969f',  // 63fc384
             'c4d622adc34b3190a7cc43954b4c815a3c79bb6c6b7374be39c16d66454d1549',  // ec36bd4 (license header)
             '44901ce7272347e6665ffe29655dbd7b8f3e45ba58b26671e50d07c0c629caef',  // header correction
+            '2e20aceb9a446f03ff8ef7a9fd2cc6dede722c30610de57c0d1ef25a455b4dca',  // comment tidy
         ],
-        to:   '2e20aceb9a446f03ff8ef7a9fd2cc6dede722c30610de57c0d1ef25a455b4dca',  // comment tidy (HEAD)
+        to:   '0e871ed4aea8649d6a5ffe866d78af38ceee37e5cd07d651287cfe1e8c99c8b2',  // deploy-precondition tag (HEAD)
+    },
+    // Comment-only edit: added the `deploy-precondition=required` header tag (and the
+    // comment explaining it) so the deploy tool can see, from the source tree it is
+    // about to deploy, that this migration is a startup-assertion precondition. The
+    // single ALTER is unchanged since authorship; this is the file's only prior
+    // committed revision.
+    '2026-07-24-pubkeys-widen-uncompressed.sql': {
+        from: '2dccc278c37935e1e5b0fc2b0a8c4514a24d5381936a1d9bc1fc5ce8d8473c43',
+        to:   '156fca3b75b332ef099e8dd5d28624d9ebc26d34e143e37e1f9503b6c0da0c1d',  // deploy-precondition tag (HEAD)
+    },
+    // Comment-only edit: added the `deploy-precondition=required` header tag (and the
+    // comment explaining it) so the deploy tool can see, from the source tree it is
+    // about to deploy, that this migration is a startup-assertion precondition. The
+    // two ALTER statements are unchanged since authorship; this is the file's only
+    // prior committed revision.
+    '2026-08-10-action-data-utf8mb4.sql': {
+        from: '027a643d3ff0be087b38889f947fdde2b4d8c696682c3b3642f288553f419068',
+        to:   '0b3b2fefb780da1fb96a0d5518967b67b215676cc1ac02efc08ec1672d9091b2',  // deploy-precondition tag (HEAD)
     },
     // Comment-only edit: the header prose was tidied and a stale operator note
     // dropped. The executable statements are unchanged since a0f826b, which is
@@ -2784,6 +2808,58 @@ Database.MIGRATION_PRECONDITIONS = {
                    ', so there is no DATETIME to convert and UNIX_TIMESTAMP() would NULL every row.';
         }
     },
+
+    // Widens pubkeys.pubkey to hold an uncompressed key (130 hex chars). It is
+    // mode=manual, so it stays PENDING on a database created from the current
+    // src/sql/pubkeys.sql (already VARCHAR(130) or wider), and a fresh install has no
+    // narrow column to widen. Baseline only while the live column is already 130
+    // characters or more, the same threshold _assertPubkeyColumnIsUncompressedWide
+    // enforces at startup.
+    //
+    // Absent table/column, or an unreadable/NULL length, is deliberately NOT
+    // baselined: that state needs an operator, and the startup assertion fails
+    // closed on it.
+    '2026-07-24-pubkeys-widen-uncompressed.sql': {
+        sql: "SELECT CHARACTER_MAXIMUM_LENGTH AS len FROM information_schema.columns " +
+             "WHERE table_schema = ? AND table_name = 'pubkeys' AND column_name = 'pubkey'",
+        skipWhen: (rows) => {
+            // No column, or a length we could not read: never baseline on an absent
+            // answer, let the file speak for itself and the assertion fail closed after it.
+            if(!rows.length || rows[0].len == null) return null;
+            const len = Number(rows[0].len);
+            if(Number.isNaN(len)) return null;
+            if(len >= 130) return 'pubkeys.pubkey is already ' + len + ' characters wide, so there is no narrow column to widen.';
+            return null;
+        }
+    },
+
+    // Widens transactions.data and mempool_transactions.data from utf8mb3 to utf8mb4.
+    // It is mode=manual (a charset conversion rewrites every row), so it stays PENDING
+    // on a database created from the current src/sql (already utf8mb4), and a fresh
+    // install has no utf8mb3 column to convert. Baseline only while BOTH columns
+    // already carry the utf8mb4 charset, the same query and per-column condition
+    // _assertActionDataIsUtf8mb4 enforces at startup.
+    //
+    // A half-converted pair (one column already utf8mb4, the other not) is
+    // deliberately NOT baselined: the file still has real work to do on the lagging
+    // column, so it must run. Either column absent, or an unreadable/NULL charset, is
+    // also NOT baselined: that state needs an operator, and the startup assertion
+    // fails closed on it.
+    '2026-08-10-action-data-utf8mb4.sql': {
+        sql: "SELECT table_name AS tbl, character_set_name AS cs FROM information_schema.columns " +
+             "WHERE table_schema = ? AND column_name = 'data' AND table_name IN ('transactions', 'mempool_transactions')",
+        skipWhen: (rows) => {
+            // Fewer than both columns found: never baseline on an incomplete answer,
+            // let the file run and the assertion fail closed on whichever column it
+            // could not see.
+            if(rows.length < 2) return null;
+            for(const row of rows){
+                const cs = row.cs == null ? null : String(row.cs).toLowerCase();
+                if(cs !== 'utf8mb4') return null;
+            }
+            return 'transactions.data and mempool_transactions.data are already utf8mb4, so there is no utf8mb3 column left to convert.';
+        }
+    },
 };
 
 // Backdating guard for the auto-apply path, mirroring xchain-indexer/src/db.js. Apply
@@ -2817,6 +2893,83 @@ Database.backdatedFrontierViolation = function(pendingName, appliedNames){
     }
     if(frontier === null) return null;
     return (String(pendingName) < frontier) ? frontier : null;
+};
+
+// The header token that marks a migration as a DEPLOY PRECONDITION: code in this
+// tree asserts it at startup, so a build carrying that assertion must not be
+// deployed against a database that has not applied it. It rides on the existing
+// `-- xchain:migration` directive line, next to `mode=`:
+//
+//   -- xchain:migration mode=manual deploy-precondition=required
+//
+// Only a mode=manual file needs it. An `auto` file applies itself at the first
+// startup that sees it, so it can never be the missing precondition.
+Database.DEPLOY_PRECONDITION_TAG = 'deploy-precondition=required';
+
+// Migrations this tree ASSERTS at startup: the service refuses to run when the
+// target database has not applied them.
+//
+// WHY THIS LIST EXISTS
+// --------------------
+// A v0.10.0 fleet deploy put five of nine decoders into Restarting(1) crash-loops.
+// The three startup assertions above (_assertDispenserExpirationIsBigintUnsigned,
+// _assertPubkeyColumnIsUncompressedWide, _assertActionDataIsUtf8mb4) each require a
+// mode=manual migration, and none of the three migration files carried a header the
+// deploy tool could read, so nothing checked the precondition at deploy time and the
+// crash-loop itself was the only thing that surfaced the requirement.
+//
+// The registry is the in-code half of the fix. The machine-readable half is the
+// DEPLOY_PRECONDITION_TAG in each listed migration's own header, which the deploy
+// tool reads out of the source tree it is about to deploy and checks against the
+// target DB's schema_migrations BEFORE the container is recreated.
+// test/unit/migration-preconditions.test.js keeps the halves in step: every entry
+// here must exist, be mode=manual, and carry the tag.
+//
+// ADDING A STARTUP ASSERTION: register it here and tag its migration file, or the
+// next fleet deploy discovers the requirement as a crash-loop again.
+Database.STARTUP_ASSERTED_MIGRATIONS = [
+    {
+        file:      '2026-06-13-dispensers-expiration-bigint.sql',
+        assertion: '_assertDispenserExpirationIsBigintUnsigned',
+        symptom:   'Fatal decoder error: dispensers.expiration has type DATETIME but BIGINT UNSIGNED is required'
+    },
+    {
+        file:      '2026-07-24-pubkeys-widen-uncompressed.sql',
+        assertion: '_assertPubkeyColumnIsUncompressedWide',
+        symptom:   'Fatal decoder error: pubkeys.pubkey holds 66 chars but VARCHAR(130) is required'
+    },
+    {
+        file:      '2026-08-10-action-data-utf8mb4.sql',
+        assertion: '_assertActionDataIsUtf8mb4',
+        symptom:   'Fatal decoder error: transactions.data uses charset utf8mb3 but utf8mb4 is required'
+    },
+];
+
+// Registry lookup by assertion method name. Throws rather than returning undefined:
+// an assertion that names a migration nobody registered would otherwise render as
+// "--file undefined" in the very error an operator reads mid-outage.
+Database.startupAssertedMigrationFile = function(assertion){
+    const entry = Database.STARTUP_ASSERTED_MIGRATIONS.find(m => m.assertion === assertion);
+    if(!entry) throw new Error('startupAssertedMigrationFile: ' + assertion +
+        ' is not registered in Database.STARTUP_ASSERTED_MIGRATIONS');
+    return entry.file;
+};
+
+// Does this migration file's header declare itself a deploy precondition?
+// Prologue-anchored exactly like _migrationMode (the scan stops at the first
+// non-blank, non-comment line), so a token buried in body prose or a data literal
+// cannot arm it. Pure string logic, unit-tested directly.
+//
+// Twin: the deploy tool carries the same parser, because it reads these files from a
+// source tree it has only cloned and cannot require this module. Keep the two in step.
+Database.migrationDeclaresDeployPrecondition = function(raw){
+    const prologue = [];
+    for(const line of String(raw).split('\n')){
+        const trimmed = line.trim();
+        if(trimmed === '' || trimmed.startsWith('--')){ prologue.push(line); continue; }
+        break;
+    }
+    return /^\s*--\s*xchain:migration\b[^\n]*\bdeploy-precondition\s*=\s*required\b/im.test(prologue.join('\n'));
 };
 
 module.exports = Database

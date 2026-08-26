@@ -338,6 +338,12 @@ describe('DISPENSER PRICE v1 oracle-fee output capture', function () {
         assert.strictEqual(decoder.captured.length, 0)
         assert.ok(errors.some(e => e.includes('compacted ORACLE_ADDRESS')),
             'the unresolvable reference is surfaced, not silently dropped')
+        // The message must quote the token from the SAME slot the capture decision read,
+        // or the field-position-drift investigation this line exists to serve is handed a
+        // neighbouring field. '^57' sits at ORACLE_ADDRESS_INDEX; its neighbours in this
+        // fixture are '' (FIAT_AMOUNT) and the expiration, so a slot slip shows up here.
+        assert.ok(errors.some(e => e.includes("reference '^57'")),
+            'the log quotes the ORACLE_ADDRESS slot itself, not a neighbouring field')
         assert.strictEqual(model.rows[0].oracleAddress, null,
             'and no junk ^<id> token is stored on the dispenser row')
     })
