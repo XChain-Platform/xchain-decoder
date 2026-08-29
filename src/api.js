@@ -102,6 +102,21 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
         // and /live answered 200 forever. GATES health, unlike node_height_stale
         // below: a dead loop is exactly the wedge a restart does fix.
         const pollSilent = typeof decoder.isPollSilent === 'function' ? decoder.isPollSilent() : false
+        // Latent REORG_HALT marker, reported on the one surface the monitor and the
+        // container healthcheck actually poll. /status and the JSON-RPC health method
+        // already carry it, and neither is polled, so a decoder carrying a durable halt
+        // row rendered fully green everywhere an operator looks. TTL-cached inside
+        // checkReorgHalt (60s) with concurrent probes collapsed, so a healthcheck burst
+        // costs at most one DB query per minute.
+        //
+        // Deliberately NOT in the healthy gate below, for the reason given at /status
+        // and the health method: the marker survives restarts and is cleared only by a
+        // resync, while the halted decoder keeps parsing forward, so gating would make
+        // autoheal restart-loop a service that is doing useful work and fix nothing.
+        let reorgHalt = { halted: false, reason: null, at: null }
+        if (dbOk && typeof decoder.checkReorgHalt === 'function'){
+            try { reorgHalt = await decoder.checkReorgHalt() } catch (_) {}
+        }
         const syncStatus = decoder.getSyncStatus()
         const healthy = decoderRunning && dbOk && !stalled && !pollSilent
         res.status(healthy ? 200 : 503).json({
@@ -111,6 +126,9 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
             stalled,
             poll_silent: pollSilent,
             last_poll_at: decoder.lastPollAt || null,
+            reorg_halted:      reorgHalt.halted === true,
+            reorg_halt_reason: reorgHalt.reason || null,
+            reorg_halted_at:   reorgHalt.at || null,
             // A frozen node tip, reported but deliberately NOT gating. isStalled()
             // returns false while the tip is stale on purpose: restarting the container
             // cannot fix an upstream node outage, and gating on it re-opens the

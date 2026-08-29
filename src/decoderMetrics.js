@@ -37,7 +37,9 @@ const DECODER_GAUGES = [
     ['last_block_advance_timestamp_seconds',  'Unix time of the last forward block advance'],
     ['node_height_stale',                     '1 when the cached node tip is frozen (two or more consecutive tip polls failed)'],
     ['synced',                                '1 when the decoder is caught up to a fresh node tip'],
-    ['stalled',                               '1 when the block loop is wedged (the /live liveness signal)'],
+    ['stalled',                               '1 when the block loop is wedged on one height (/live gates on poll_silent too)'],
+    ['poll_silent',                           '1 when the block loop has stopped ITERATING; gates /live health beside stalled'],
+    ['last_poll_timestamp_seconds',           'Unix time of the last block-loop iteration, whether or not a block arrived'],
     ['last_reorg_depth',                      'Blocks rolled back by the most recent reorg']
 ];
 
@@ -91,6 +93,20 @@ function registerDecoderMetrics(registry, decoder) {
         }
         if (typeof decoder.isSynced === 'function')  gauges.synced.set({},  decoder.isSynced()  ? 1 : 0);
         if (typeof decoder.isStalled === 'function') gauges.stalled.set({}, decoder.isStalled() ? 1 : 0);
+
+        // The dead-loop signal `stalled` is structurally blind to: isStalled() reports
+        // chain progress, which a caught-up decoder makes none of while perfectly
+        // healthy, so a loop that dies while caught up leaves stalled 0 forever. /live
+        // gates health on this one alongside stalled (api.js registerLiveRoute); a
+        // metrics-only deployment saw neither until now. Boolean always emits, matching
+        // isPollSilent()'s own "0 means not silent" answer before the first iteration;
+        // the timestamp stays absent until then, since 0 would read as 1970.
+        if (typeof decoder.isPollSilent === 'function') {
+            gauges.poll_silent.set({}, decoder.isPollSilent() ? 1 : 0);
+        }
+        if (decoder.lastPollAt > 0) {
+            setIf(gauges.last_poll_timestamp_seconds, decoder.lastPollAt / 1000);
+        }
 
         // setMonotonic, not inc: these mirror lifetime counters the decoder already
         // keeps, and a re-read must not double-count what the last scrape saw.

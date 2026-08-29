@@ -305,7 +305,10 @@ class BlockchainConnector {
         for (const fallback of fallbacks) this.endpoints.push(normalizeEndpoint(fallback, port))
         this.activeEndpointIndex = 0
         this.connectionFailures = 0
-        this.failoverThreshold = Math.max(1, parseInt(process.env.NODE_FAILOVER_THRESHOLD, 10) || 3)
+        // envInt, not parseInt: a unit-suffixed value ('5m') truncates to a wrong
+        // magnitude and a bare `VAR=` line yields NaN, both silently. Every RPC knob in
+        // this file validates and reports the same way.
+        this.failoverThreshold = envInt(process.env.NODE_FAILOVER_THRESHOLD, 3, 'NODE_FAILOVER_THRESHOLD')
     }
 
     // Active RPC base URL. A getter (not a stored string) so every retry loop
@@ -365,131 +368,94 @@ class BlockchainConnector {
         if (delay > 0) await this.sleep(delay)
     }
 
-    async getNetworkInfo(){
+    // The single retry-and-classify ladder for the block-path RPC methods. Seven of
+    // them carried a byte-identical copy of it, differing only in the payload and two
+    // log strings, while the eighth (getRawTransaction, which owns its own ladder for
+    // the -5 eviction and -429 queue-full cases) drifted away from them: a correction
+    // to what the node's failure modes ARE could land in one place and miss the rest.
+    //
+    // The retry semantics here are the seven copies' own, deliberately unchanged. Only
+    // ECONNABORTED retries; every other error is logged and rethrown at once with
+    // error.code, error.rpcCode and error.rpcMessage intact. Adding getRawTransaction's
+    // 5s-x10 queue-full ladder here would be a behaviour change, not a de-duplication:
+    // the decoder's wedge signal counts CONSECUTIVE fetch failures at one height
+    // (XChainDecoder._fetchErrorCount, STALL_FETCH_ATTEMPTS) and reaches its verdict in
+    // about a minute at the block loop's 3s sleep. At ~50s per in-call ladder the same
+    // twenty attempts take a quarter of an hour, so isStalled() and the container
+    // healthcheck would go blind for exactly the outage they exist to report.
+    //
+    // Exhaustion is the one behaviour correction: it now counts toward rpcErrors and
+    // carries the last sanitized cause, matching getRawTransaction. A node that
+    // black-holed every request timed out ten times and threw a bare sentence, leaving
+    // rpc_errors_total ("Node RPC errors seen since process start") flat throughout.
+    //
+    // `label` names the subject in the timeout and error logs; `resultLabel` and
+    // `exhausted` override the two messages whose wording differs per method.
+    async rpcCallWithTimeoutRetry(data, label, { resultLabel, exhausted } = {}){
         let tries = 10
+        let lastErrorSummary = null
 
         while (tries > 0) {
             try {
-                const data = {
-                    jsonrpc: '2.0',
-                    method: 'getnetworkinfo',
-                    id: 1
-                }
-
                 const response = await this.rpcPost(data)
 
-                return rpcResult(response, 'Error getting network info');
+                return rpcResult(response, resultLabel || `Error getting ${label}`);
             } catch (error) {
                 if (error.code === 'ECONNABORTED') {
                     tries = tries - 1
-                    console.log("Getting timeout trying to get network info, trying again...")
+                    console.log(`Getting timeout trying to get ${label}, trying again...`)
+                    lastErrorSummary = sanitizeRpcError(error)
                     await this.backoffOnTimeout()
                 } else {
                     this.rpcErrors++
-                    console.error('Error getting network info:', sanitizeRpcError(error));
+                    console.error(`Error getting ${label}:`, sanitizeRpcError(error));
                     throw error;
                 }
             }
         }
 
-        throw new Error("There were problems getting network info.")
+        this.rpcErrors++
+        const message = exhausted || `There were problems getting ${label}.`
+        throw new Error(lastErrorSummary ? `${message} ${lastErrorSummary}` : message)
     }
-    
+
+    async getNetworkInfo(){
+        return await this.rpcCallWithTimeoutRetry({
+            jsonrpc: '2.0',
+            method: 'getnetworkinfo',
+            id: 1
+        }, 'network info')
+    }
+
     async getBlockchainInfo(){
-        let tries = 10
-
-        while (tries > 0) {
-            try {
-                const data = {
-                    jsonrpc: '2.0',
-                    method: 'getblockchaininfo',
-                    id: 1
-                }
-
-                const response = await this.rpcPost(data)
-
-                return rpcResult(response, 'Error getting blockchain info');
-            } catch (error) {
-                if (error.code === 'ECONNABORTED') {
-                    tries = tries - 1
-                    console.log("Getting timeout trying to get blockchain info, trying again...")
-                    await this.backoffOnTimeout()
-                } else {
-                    this.rpcErrors++
-                    console.error('Error getting blockchain info:', sanitizeRpcError(error));
-                    throw error;
-                }
-            }
-        }
-
-        throw new Error("There were problems getting blockchain info.")
+        return await this.rpcCallWithTimeoutRetry({
+            jsonrpc: '2.0',
+            method: 'getblockchaininfo',
+            id: 1
+        }, 'blockchain info')
     }
 
     async getBlockHash(blockindex) {
-        let tries = 10
-
         // getblockhash takes an integer height; a BigInt (BIGINT UNSIGNED columns decode as
         // BigInt) is never a valid JSON-RPC param and makes axios' JSON.stringify throw
         // "Do not know how to serialize a BigInt". Coerce defensively at the RPC boundary.
         blockindex = Number(blockindex)
 
-        while (tries > 0) {
-            try {
-                const data = {
-                    jsonrpc: '2.0',
-                    method: 'getblockhash',
-                    params: [blockindex],
-                    id: 1,
-                }
-
-                const response = await this.rpcPost(data)
-
-                return rpcResult(response, 'Error getting block hash');
-            } catch (error) {
-                if (error.code === 'ECONNABORTED') {
-                    tries = tries - 1
-                    console.log("Getting timeout trying to get block hash, trying again...")
-                    await this.backoffOnTimeout()
-                } else {
-                    this.rpcErrors++
-                    console.error('Error getting block hash:', sanitizeRpcError(error));
-                    throw error;
-                }
-            }
-        }
-
-        throw new Error("There were problems getting block hash.")
+        return await this.rpcCallWithTimeoutRetry({
+            jsonrpc: '2.0',
+            method: 'getblockhash',
+            params: [blockindex],
+            id: 1,
+        }, 'block hash')
     }
 
     async getBlockHeader(blockhash, hexFormat = true) {
-        let tries = 10
-
-        while (tries > 0) {
-            try {
-                const data = {
-                    jsonrpc: '2.0',
-                    method: 'getblockheader',
-                    params: [blockhash, !hexFormat],
-                    id: 1,
-                }
-
-                const response = await this.rpcPost(data)
-
-                return rpcResult(response, 'Error getting block header');
-            } catch (error) {
-                if (error.code === 'ECONNABORTED') {
-                    tries = tries - 1
-                    console.log("Getting timeout trying to get block header, trying again...")
-                    await this.backoffOnTimeout()
-                } else {
-                    this.rpcErrors++
-                    console.error('Error getting block header:', sanitizeRpcError(error));
-                    throw error;
-                }
-            }
-        }
-
-        throw new Error("There were problems getting a block header. ")
+        return await this.rpcCallWithTimeoutRetry({
+            jsonrpc: '2.0',
+            method: 'getblockheader',
+            params: [blockhash, !hexFormat],
+            id: 1,
+        }, 'block header', { exhausted: 'There were problems getting a block header. ' })
     }
 
     // The RPC fetches below are deliberately OUTSIDE the try. A transport fault (a
@@ -560,64 +526,20 @@ class BlockchainConnector {
     }
 
     async getBlockVerbose(blockhash) {
-        let tries = 10
-
-        while (tries > 0) {
-            try {
-                const data = {
-                    jsonrpc: '2.0',
-                    method: 'getblock',
-                    params: [blockhash, true],
-                    id: 1,
-                }
-
-                const response = await this.rpcPost(data)
-
-                return rpcResult(response, 'Error getting verbose block');
-            } catch (error) {
-                if (error.code === 'ECONNABORTED') {
-                    tries = tries - 1
-                    console.log("Getting timeout trying to get verbose block, trying again...")
-                    await this.backoffOnTimeout()
-                } else {
-                    this.rpcErrors++
-                    console.error('Error getting verbose block:', sanitizeRpcError(error));
-                    throw error;
-                }
-            }
-        }
-
-        throw new Error("There were problems getting verbose block.")
+        return await this.rpcCallWithTimeoutRetry({
+            jsonrpc: '2.0',
+            method: 'getblock',
+            params: [blockhash, true],
+            id: 1,
+        }, 'verbose block')
     }
 
     async getRawMempool(){
-        let tries = 10
-
-        while (tries > 0) {
-            try {
-                const data = {
-                    jsonrpc: '2.0',
-                    method: 'getrawmempool',
-                    id: 1
-                }
-
-                const response = await this.rpcPost(data)
-
-                return rpcResult(response, 'Error getting raw mempool info');
-            } catch (error) {
-                if (error.code === 'ECONNABORTED') {
-                    tries = tries - 1
-                    console.log("Getting timeout trying to get raw mempool, trying again...")
-                    await this.backoffOnTimeout()
-                } else {
-                    this.rpcErrors++
-                    console.error('Error getting raw mempool:', sanitizeRpcError(error));
-                    throw error;
-                }
-            }
-        }
-
-        throw new Error("There were problems getting raw mempool.")
+        return await this.rpcCallWithTimeoutRetry({
+            jsonrpc: '2.0',
+            method: 'getrawmempool',
+            id: 1
+        }, 'raw mempool', { resultLabel: 'Error getting raw mempool info' })
     }
 
     async getRawTransaction(txid){
@@ -737,7 +659,11 @@ class BlockchainConnector {
     // connection drops) on a large mempool, each retried up to 10x. Requests
     // now run in order-preserving sub-batches; tune via DECODER_RPC_CONCURRENCY.
     async getRawTransactions(txIdArray){
-        const concurrency = Math.max(1, parseInt(process.env.DECODER_RPC_CONCURRENCY, 10) || 50)
+        // envInt, not parseInt: 'DECODER_RPC_CONCURRENCY=100x' truncated to 100 sockets
+        // against the operator's node with no log line, which is the fan-out this bound
+        // exists to cap. Read per call, not cached, so a test (and an operator) can
+        // retune it without rebuilding the connector.
+        const concurrency = envInt(process.env.DECODER_RPC_CONCURRENCY, 50, 'DECODER_RPC_CONCURRENCY')
         const results = []
         for (let i = 0; i < txIdArray.length; i += concurrency){
             const slice = txIdArray.slice(i, i + concurrency)
@@ -770,34 +696,12 @@ class BlockchainConnector {
     }
 
     async getBlock(blockhash, hexFormat=true) {
-        let tries = 10
-
-        while (tries > 0) {
-            try {
-                const data = {
-                    jsonrpc: '2.0',
-                    method: 'getblock',
-                    params: [blockhash, !hexFormat],
-                    id: 1,
-                }
-
-                const response = await this.rpcPost(data)
-
-                return rpcResult(response, 'Error getting block hex');
-            } catch (error) {
-                if (error.code === 'ECONNABORTED') {
-                    tries = tries - 1
-                    console.log("Getting timeout trying to get block, trying again...")
-                    await this.backoffOnTimeout()
-                } else {
-                    this.rpcErrors++
-                    console.error('Error getting block:', sanitizeRpcError(error));
-                    throw error;
-                }
-            }
-        }
-
-        throw new Error("There were problems getting block.")
+        return await this.rpcCallWithTimeoutRetry({
+            jsonrpc: '2.0',
+            method: 'getblock',
+            params: [blockhash, !hexFormat],
+            id: 1,
+        }, 'block', { resultLabel: 'Error getting block hex' })
     }
 }
 

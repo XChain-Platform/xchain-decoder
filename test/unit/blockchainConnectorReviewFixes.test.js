@@ -226,4 +226,126 @@ describe('BlockchainConnector RPC error accounting and reporting', () => {
             assert.strictEqual(warnStub.callCount, 0)
         })
     })
+
+    describe('the block-path RPC ladder is one implementation', () => {
+        // Seven methods each carried a byte-identical retry-and-classify block while
+        // getRawTransaction's classifier grew apart from them, so a correction to what
+        // the node's failure modes ARE could land in one copy and miss six.
+        const LADDER_METHODS = [
+            ['getNetworkInfo',    [],     'getnetworkinfo'],
+            ['getBlockchainInfo', [],     'getblockchaininfo'],
+            ['getBlockHash',      [0],    'getblockhash'],
+            ['getBlockHeader',    ['aa'], 'getblockheader'],
+            ['getBlockVerbose',   ['aa'], 'getblock'],
+            ['getRawMempool',     [],     'getrawmempool'],
+            ['getBlock',          ['aa'], 'getblock'],
+        ]
+
+        it('routes every block-path method through the shared ladder', async () => {
+            const seen = []
+            connector.rpcCallWithTimeoutRetry = async (data) => { seen.push(data.method); return 'ok' }
+
+            for (const [name, args] of LADDER_METHODS) {
+                assert.strictEqual(await connector[name](...args), 'ok',
+                    `${name} must go through the shared ladder, not a private copy`)
+            }
+            assert.deepStrictEqual(seen, LADDER_METHODS.map(([, , rpc]) => rpc))
+        }).timeout(5000)
+
+        it('counts an exhausted timeout ladder toward rpc_errors_total and keeps the cause', async () => {
+            // A node that black-holes every request only ever raises ECONNABORTED, which
+            // the copies retried ten times and then rethrew as a bare sentence: the
+            // counter described as "Node RPC errors seen since process start" stayed 0
+            // through a total outage, and the cause was discarded with it.
+            axiosStub.callsFake(async () => {
+                throw Object.assign(new Error('timeout of 30000ms exceeded'), { code: 'ECONNABORTED' })
+            })
+
+            await assert.rejects(
+                () => connector.getBlockHash(0),
+                (err) => {
+                    assert.ok(/There were problems getting block hash\./.test(err.message),
+                        'the per-method exhaustion message is unchanged')
+                    assert.ok(/timeout of 30000ms exceeded/.test(err.message),
+                        'the last sanitized cause survives the exhaustion throw')
+                    return true
+                }
+            )
+            assert.strictEqual(axiosStub.callCount, 10, 'the 10-attempt timeout ladder is unchanged')
+            assert.strictEqual(connector.rpcErrors, 1, 'a black-holing node must move rpc_errors_total')
+        }).timeout(5000)
+
+        it('keeps the block path failing FAST on a queue-full answer', async () => {
+            // Deliberately NOT getRawTransaction's 5s x10 queue-full ladder. The wedge
+            // signal counts consecutive fetch failures at one height
+            // (XChainDecoder._fetchErrorCount vs STALL_FETCH_ATTEMPTS) and reaches its
+            // verdict in about a minute at the block loop's 3s sleep; at ~50s per
+            // in-call ladder the same twenty attempts take a quarter of an hour.
+            axiosStub.rejects(Object.assign(new Error('Request failed with status code 500'), {
+                code: 'ERR_BAD_RESPONSE',
+                response: { status: 500, data: { error: { code: -429, message: 'Work queue depth exceeded' } } }
+            }))
+
+            await assert.rejects(() => connector.getBlockHash(0), (err) => {
+                assert.strictEqual(err.rpcCode, -429, 'the node code reaches the caller intact')
+                return true
+            })
+            assert.strictEqual(axiosStub.callCount, 1, 'no in-call retry for a non-timeout error')
+            assert.strictEqual(connector.rpcErrors, 1)
+        }).timeout(5000)
+    })
+
+    describe('every RPC knob in the file goes through envInt', () => {
+        // The two remaining env reads used bare parseInt behind a `|| default` guard,
+        // which absorbs NaN but not magnitude: NODE_FAILOVER_THRESHOLD=5m became 5 and
+        // DECODER_RPC_CONCURRENCY=100x became 100 sockets at the operator's node, both
+        // silently. They are knobs on the same seam as NODE_RPC_TIMEOUT and must
+        // validate and report identically.
+        let warnStub
+
+        beforeEach(() => {
+            warnStub = sinon.stub(console, 'warn')
+            delete process.env.NODE_FAILOVER_THRESHOLD
+            delete process.env.DECODER_RPC_CONCURRENCY
+        })
+
+        afterEach(() => {
+            delete process.env.NODE_FAILOVER_THRESHOLD
+            delete process.env.DECODER_RPC_CONCURRENCY
+        })
+
+        it('NODE_FAILOVER_THRESHOLD=5m warns and keeps the default, not 5', () => {
+            process.env.NODE_FAILOVER_THRESHOLD = '5m'
+            const c = new BlockchainConnector('127.0.0.1', 8332, 'user', 'pass')
+            assert.strictEqual(c.failoverThreshold, 3)
+            assert.strictEqual(warnStub.callCount, 1, 'a mis-set knob must be visible in logs')
+        })
+
+        it('NODE_FAILOVER_THRESHOLD passes a valid value through silently', () => {
+            process.env.NODE_FAILOVER_THRESHOLD = '7'
+            const c = new BlockchainConnector('127.0.0.1', 8332, 'user', 'pass')
+            assert.strictEqual(c.failoverThreshold, 7)
+            assert.strictEqual(warnStub.callCount, 0)
+        })
+
+        it('DECODER_RPC_CONCURRENCY=100x warns and keeps the default, not 100 sockets', async () => {
+            process.env.DECODER_RPC_CONCURRENCY = '100x'
+            const c = new BlockchainConnector('127.0.0.1', 8332, 'user', 'pass')
+
+            let inFlight = 0
+            let peak = 0
+            c.getRawTransaction = async () => {
+                inFlight++
+                peak = Math.max(peak, inFlight)
+                await new Promise((r) => setImmediate(r))
+                inFlight--
+                return 'hex'
+            }
+
+            const ids = Array.from({ length: 60 }, (_, i) => 'tx' + i)
+            assert.strictEqual((await c.getRawTransactions(ids)).length, 60)
+            assert.ok(peak <= 50, `sub-batch must stay at the default 50, saw ${peak}`)
+            assert.ok(warnStub.callCount >= 1, 'a mis-set knob must be visible in logs')
+        }).timeout(5000)
+    })
 })

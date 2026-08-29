@@ -726,31 +726,38 @@ class XChainDecoder {
         // so a block is only ever committed from fully-resolved lookups. The prevout of a
         // confirmed tx always exists on a txindex node, so an empty RPC result is a
         // lookup failure too, never "absent".
+        let outputRawTransaction
         try {
-            let outputRawTransaction = await this.connector.getRawTransaction(txId)
+            outputRawTransaction = await this.connector.getRawTransaction(txId)
             if (!outputRawTransaction){
                 throw new Error(`empty getrawtransaction result for confirmed prevout tx ${txId}`)
             }
-            // MUST parse through transactionFromHex (strips the LTC MWEB marker+flag), not
-            // bitcoin.Transaction.fromHex. A funding/prevout tx on Litecoin can carry the
-            // MWEB flag (0x08/0x09); vanilla strict parsing throws a deterministic UInt64
-            // range error, which the catch below then mis-tags as rpcLookupFailure=true.
-            // The block loop treats rpcLookupFailure as transient node trouble and retries
-            // the block FOREVER, so a deterministic content-parse error would wedge every
-            // LTC decoder instance permanently. transactionFromHex is the same parser the
-            // block path uses; for BTC/DOGE and non-flagged txs it is a plain parse.
-            outputTransaction = this.xchainBlockDecoder.transactionFromHex(outputRawTransaction)
-            // Publish the FIRST-HOP tx here, before the P2SH/P2WSH walk-back below can
-            // reassign `output`. The walk-back fetches the commit's own funder, a
-            // different transaction; handing that to the fee resolver would attribute
-            // another tx's outputs into this action's reserved FUNDING_VOUT_BASE domain.
-            if (capture) capture.sourceTransaction = outputTransaction
         } catch (err){
             this.rpcErrors++
             console.error(`getSourceFromOutput: failed to fetch tx ${txId} (output ${outputIndex}): `, err)
             err.rpcLookupFailure = true
             throw err
         }
+        // Decode OUTSIDE the tagged try. getRawTransaction either yields a whole
+        // JSON-decoded hex string or fails, so a wire-decode throw here is deterministic
+        // CONTENT, identical on every instance, not a transport fault. Tagging it
+        // rpcLookupFailure routed it to the block loop's UNBOUNDED height retry and wedged
+        // the decoder at that height forever; untagged it reaches the retry-then-quarantine
+        // ladder (TX_PARSE_MAX_RETRIES), which is parity-safe exactly because the fault is
+        // deterministic. start() refuses to run a Dogecoin decoder whose BigInt-safe
+        // bufferutils reader is inactive for the same reason: that is the one decode fault
+        // that would differ between instances.
+        // MUST parse through transactionFromHex (strips the LTC MWEB marker+flag), not
+        // bitcoin.Transaction.fromHex: a Litecoin funding/prevout tx can carry the MWEB
+        // flag (0x08/0x09) and vanilla strict parsing throws a UInt64 range error on it.
+        // transactionFromHex is the same parser the block path uses; for BTC/DOGE and
+        // non-flagged txs it is a plain parse.
+        outputTransaction = this.xchainBlockDecoder.transactionFromHex(outputRawTransaction)
+        // Publish the FIRST-HOP tx here, before the P2SH/P2WSH walk-back below can
+        // reassign `output`. The walk-back fetches the commit's own funder, a
+        // different transaction; handing that to the fee resolver would attribute
+        // another tx's outputs into this action's reserved FUNDING_VOUT_BASE domain.
+        if (capture) capture.sourceTransaction = outputTransaction
         // An out-of-range output index is deterministic content (the same on every
         // instance), so it may still resolve to a null source below.
         output = outputTransaction.outs[outputIndex]
@@ -777,22 +784,23 @@ class XChainDecoder {
             if (isP2sh || isP2wsh){
                 let prevOutputIndex = outputTransaction.ins[0].index
                 let prevTxHash = util.uint8ArrayToHex(Buffer.from(outputTransaction.ins[0].hash).reverse())
-                // Same fail-loud contract as the first fetch: tag the failure so the
+                // Same fail-loud contract as the first fetch: tag the FETCH failure so the
                 // block loop retries the block instead of quarantining the tx.
-                let prevTransaction
+                let prevRawTransaction
                 try {
-                    let prevRawTransaction = await this.connector.getRawTransaction(prevTxHash)
+                    prevRawTransaction = await this.connector.getRawTransaction(prevTxHash)
                     if (!prevRawTransaction){
                         throw new Error(`empty getrawtransaction result for confirmed commit-funding tx ${prevTxHash}`)
                     }
-                    // transactionFromHex (MWEB-flag-safe), not bitcoin.Transaction.fromHex; see above.
-                    prevTransaction = this.xchainBlockDecoder.transactionFromHex(prevRawTransaction)
                 } catch (err){
                     this.rpcErrors++
                     console.error(`getSourceFromOutput: failed to fetch commit-funding tx ${prevTxHash}: `, err)
                     err.rpcLookupFailure = true
                     throw err
                 }
+                // Decode outside the tagged try; see the first fetch above.
+                // transactionFromHex (MWEB-flag-safe), not bitcoin.Transaction.fromHex.
+                let prevTransaction = this.xchainBlockDecoder.transactionFromHex(prevRawTransaction)
                 output = prevTransaction.outs[prevOutputIndex]
             }
             
@@ -947,20 +955,21 @@ class XChainDecoder {
         if (!commitTransaction.ins || commitTransaction.ins.length === 0) return null
         const prevTxHash = util.uint8ArrayToHex(Buffer.from(commitTransaction.ins[0].hash).reverse())
         const prevOutputIndex = commitTransaction.ins[0].index
-        let prevTransaction
+        let prevRawTransaction
         try {
-            const prevRawTransaction = await this.connector.getRawTransaction(prevTxHash)
+            prevRawTransaction = await this.connector.getRawTransaction(prevTxHash)
             if (!prevRawTransaction){
                 throw new Error(`empty getrawtransaction result for confirmed commit-funding tx ${prevTxHash}`)
             }
-            // transactionFromHex (MWEB-flag-safe), not bitcoin.Transaction.fromHex.
-            prevTransaction = this.xchainBlockDecoder.transactionFromHex(prevRawTransaction)
         } catch (err){
             this.rpcErrors++
             console.error(`getEnvelopeSourceFromCommit: failed to fetch commit-funding tx ${prevTxHash}: `, err)
             err.rpcLookupFailure = true
             throw err
         }
+        // Decode outside the tagged try; see getSourceFromOutput.
+        // transactionFromHex (MWEB-flag-safe), not bitcoin.Transaction.fromHex.
+        const prevTransaction = this.xchainBlockDecoder.transactionFromHex(prevRawTransaction)
         const output = prevTransaction.outs[prevOutputIndex]
         if (output == null) return null
         let source = null
@@ -979,18 +988,20 @@ class XChainDecoder {
     // confirmed-prevout fetch: the commit of a confirmed reveal always exists
     // on a txindex node, so an empty result is a lookup failure, never absence.
     async fetchEnvelopeCommitTransaction(commitTxId){
+        let rawTransaction
         try {
-            const rawTransaction = await this.connector.getRawTransaction(commitTxId)
+            rawTransaction = await this.connector.getRawTransaction(commitTxId)
             if (!rawTransaction){
                 throw new Error(`empty getrawtransaction result for confirmed envelope commit tx ${commitTxId}`)
             }
-            return this.xchainBlockDecoder.transactionFromHex(rawTransaction)
         } catch (err){
             this.rpcErrors++
             console.error(`fetchEnvelopeCommitTransaction: failed to fetch commit tx ${commitTxId}: `, err)
             err.rpcLookupFailure = true
             throw err
         }
+        // Decode outside the tagged try; see getSourceFromOutput.
+        return this.xchainBlockDecoder.transactionFromHex(rawTransaction)
     }
 
     // For a P2SH/P2WSH reveal, the native-coin fee output lives on the funding (commit) transaction:
@@ -1012,19 +1023,21 @@ class XChainDecoder {
         // parsed, so the fetch below is the fallback for a caller that has none.
         let fundingTx = prefetchedFundingTx
         if (!fundingTx){
+            let fundingTxHex
             try {
-                let fundingTxHex = await this.connector.getRawTransaction(fundingTxId)
+                fundingTxHex = await this.connector.getRawTransaction(fundingTxId)
                 if (!fundingTxHex){
                     throw new Error(`empty getrawtransaction result for confirmed funding tx ${fundingTxId}`)
                 }
-                // transactionFromHex (MWEB-flag-safe), not bitcoin.Transaction.fromHex; see getSourceFromOutput.
-                fundingTx = this.xchainBlockDecoder.transactionFromHex(fundingTxHex)
             } catch (err){
                 this.rpcErrors++
                 console.error(`findFundingFeeOutputs: failed to fetch funding tx ${fundingTxId}:`, err.message)
                 err.rpcLookupFailure = true
                 throw err
             }
+            // Decode outside the tagged try; see getSourceFromOutput.
+            // transactionFromHex (MWEB-flag-safe), not bitcoin.Transaction.fromHex.
+            fundingTx = this.xchainBlockDecoder.transactionFromHex(fundingTxHex)
         }
         for (let vout = 0; vout < fundingTx.outs.length; vout++){
             let output = fundingTx.outs[vout]
@@ -2032,11 +2045,19 @@ class XChainDecoder {
         // by XChainBlockDecoder), so this can only fire if that module regresses or a stray
         // bitcoinjs-lib copy shadows the patched one; keep the backstop so any such
         // regression is loud at startup rather than a mid-operation fleet halt.
+        // Refuse to start rather than warn. A prevout wire-decode fault now reaches the
+        // retry-then-quarantine ladder instead of the unbounded rpcLookupFailure retry
+        // (getSourceFromOutput), and quarantine is parity-safe only for a fault that is
+        // the SAME on every instance. An inactive patch is ENVIRONMENT-dependent: this
+        // instance would quarantine and skip a DOGE transaction every correctly patched
+        // instance decodes, committing instance-dependent block contents. Same
+        // util.throwError contract as the database checks below, so api.js start() and
+        // health() report it.
         if (this.xchainBlockDecoder && this.xchainBlockDecoder.coin === 'dogecoin' && !bigIntBufferutilsActive()){
-            console.error('CRITICAL: bitcoinjs-lib bufferutils BigInt-safe 64-bit reader is NOT active on a ' +
+            util.throwError(new Error('CRITICAL: bitcoinjs-lib bufferutils BigInt-safe 64-bit reader is NOT active on a ' +
                 'Dogecoin decoder. A DOGE output > 2^53-1 sat (~90.07M DOGE) will throw during block decode ' +
                 'and wedge this decoder permanently. src/applyBufferutilsPatch.js should have applied it ' +
-                'in-process; investigate before running on mainnet.')
+                'in-process; investigate before running on mainnet.'))
         }
 
         let dbStatus   = await this.db.createDatabase();
