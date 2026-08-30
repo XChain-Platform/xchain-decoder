@@ -15,6 +15,14 @@
 // reject 10x with ECONNABORTED do not spend real seconds sleeping.
 process.env.RPC_TIMEOUT_RETRY_DELAY_MS = '0'
 
+// The suites stub, spy on and outright reassign the global console in dozens of
+// files, and any test file that pulls in src/api.js would otherwise install the
+// console patch for the whole run: from that point every assertion about a log
+// line would be reading a formatted, level-gated line instead of what the code
+// under test actually passed. The patch is a production wiring concern and is
+// covered directly in the observability shim's own unit tests, which opt back in.
+process.env.XCHAIN_LOG_PATCH = '0'
+
 const Module = require('module')
 const originalResolveFilename = Module._resolveFilename
 

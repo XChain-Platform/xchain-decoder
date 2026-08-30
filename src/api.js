@@ -21,6 +21,17 @@
 const dotenv = require('dotenv')
 dotenv.config()
 
+// Before anything else logs. The env-validation failure at startApi()'s
+// DECODER_API_PORT check is exactly the line an operator needs levelled and
+// timestamped, and installObservability does not run until ~200 lines further
+// down.
+const { patchConsole } = require('./observability');
+patchConsole({
+    service: 'xchain-decoder',
+    version: require('../package.json').version,
+    coin:    process.env.COIN || '',
+    network: process.env.NETWORK || ''
+});
 
 const express = require('express');
 const bodyParser = require('body-parser');
