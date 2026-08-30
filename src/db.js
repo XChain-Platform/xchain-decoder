@@ -21,6 +21,7 @@
 const mariadb = require('mariadb');
 const fs      = require('fs');
 const util    = require('./util')
+const { getLogger } = require('./observability')
 
 const SATOSHIS_DECIMALS = 8
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/
@@ -253,6 +254,15 @@ class Database {
             // so releaseConnection() (which only releases transactionConnection)
             // would be a no-op. Release the lease itself, or a fresh-DB boot leaks
             // one connection per created table plus this one and exhausts the pool.
+            //
+            // The swallow is deliberate here and at the eight sibling release sites
+            // in this file. release() rejects only when the connection is already
+            // ended or already back in the pool, so there is nothing left to leak and
+            // nothing an operator would act on; every one of these sits in a finally
+            // beside a catch that already reports the real cause. A line per site
+            // would name the same fault twice and spend the log-retention window on
+            // shutdown noise. The one exception is the temp-table drop in
+            // deleteAndCompareTxsNotInList, which has a consequence on a LATER query.
             try { await db.release(); } catch(_){}
         }
         console.log('Database and tables verified (' + checked + ' tables, ' + created + ' created).');
@@ -2132,7 +2142,19 @@ class Database {
         } finally {
             // Drop the temp table so a pooled connection never leaks it into an
             // unrelated later query, then release the lease we acquired.
-            try { await connection.query('DROP TEMPORARY TABLE IF EXISTS ' + TMP) } catch (_) {}
+            // Unlike the pool-release catches elsewhere in this file, a failed drop
+            // has a DEFERRED consequence on another query: the temp table rides the
+            // pooled connection into unrelated work and the next mempool diff fails
+            // on a table it did not create, with nothing naming the drop that lost.
+            try { await connection.query('DROP TEMPORARY TABLE IF EXISTS ' + TMP) }
+            catch (e) {
+                try {
+                    getLogger().warn('DB_TEMP_TABLE_DROP_FAILED', {
+                        table: TMP,
+                        err: e && e.message ? e.message : String(e)
+                    })
+                } catch (_) { /* cleanup must not become the failure */ }
+            }
             if (ownLease) {
                 await connection.release()
             }

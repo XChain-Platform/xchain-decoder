@@ -32,6 +32,11 @@ const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFrom
 const { isDispenserExpiryRealignActive } = require('./dispenserExpiryRealign')
 const { captureCommands, collapseDispenserRegistrations, isBatchSubCommandCaptureActive } = require('./batchSubCommandCapture')
 const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./chainIdentity')
+// REORG_HALT rides getLogger() rather than this.logError, because a patched
+// console line carries no structured fields and coin/network/reason/depth are
+// the whole content of the event. getLogger() resolves lazily, so requiring it
+// here is safe before patchConsole()/installObservability() has run.
+const { getLogger } = require('./observability')
 const strictTextDecoder = new TextDecoder('utf-8', { fatal: true })
 const lenientTextDecoder = new TextDecoder('utf-8')
 
@@ -1756,7 +1761,32 @@ class XChainDecoder {
             this.reorgHaltReason = reason
             this.reorgHaltAt = new Date().toISOString()
             this.reorgHaltCheckedAt = Date.now()
-            if (typeof this.db.markReorgHalted !== 'function') return
+
+            // A decoder that decides to halt and cannot record it anywhere is the
+            // worst shape this surface has: the process stops, every health route
+            // reads the durable marker that was never written, and the operator gets
+            // a stopped decoder with no reason on any surface they poll. The event
+            // goes out BEFORE the write is attempted, so the reason survives even
+            // when nothing durable can.
+            const canPersist = typeof this.db.markReorgHalted === 'function'
+            try {
+                getLogger().error('REORG_HALT', {
+                    coin:    this.coinTick,
+                    network: this.consensusNetwork,
+                    reason:  reason,
+                    depth:   blocksDeleted.length,
+                    marker_persisted: canPersist,
+                    // Spelled out rather than left for the reader to infer from the
+                    // boolean: this is the one halt that /status and /live cannot
+                    // report, because the marker they read is never written.
+                    detail: canPersist ? undefined
+                        : 'db.markReorgHalted is unavailable: the durable halt marker cannot be persisted, '
+                        + 'so GET /status, GET /live and the JSON-RPC health method will NOT report this halt. '
+                        + 'This log line is the only record of it.'
+                })
+            } catch (_) { /* a diagnostic must never mask the abort it describes */ }
+
+            if (!canPersist) return
             try {
                 await this.db.markReorgHalted(reason)
             } catch (e) {
