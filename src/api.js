@@ -21,6 +21,17 @@
 const dotenv = require('dotenv')
 dotenv.config()
 
+// Before anything else logs. The env-validation failure at startApi()'s
+// DECODER_API_PORT check is exactly the line an operator needs levelled and
+// timestamped, and installObservability does not run until ~200 lines further
+// down.
+const { patchConsole } = require('./observability');
+patchConsole({
+    service: 'xchain-decoder',
+    version: require('../package.json').version,
+    coin:    process.env.COIN || '',
+    network: process.env.NETWORK || ''
+});
 
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -30,8 +41,60 @@ const rateLimit = require('express-rate-limit');
 const XChainDecoder  = require('./XChainDecoder');
 const { resolveFeeDestination } = require('./feeDestination');
 const jsonRouter = require('express-json-rpc-router')
-const { installObservability } = require('./observability');   // default-off /metrics + structured log shim
+const { installObservability, getLogger } = require('./observability');   // default-off /metrics + structured log shim
 const { registerDecoderMetrics } = require('./decoderMetrics'); // decoder feed-freshness gauges
+
+// Records a health probe that threw, so the route's answer is not the only thing
+// an operator has. The failure this closes is specific: when checkReorgHalt()
+// throws, /live and /status answer reorg_halted false, so a decoder carrying a
+// durable halt marker reads as clean on every surface an operator or the
+// container healthcheck polls. db.ping() is the same shape: the probe fails, the
+// route still answers, and nothing names which probe it was.
+//
+// Throttled per probe because these routes are caller-driven: the express rate
+// limiter admits 100 requests per minute per IP, and a DB outage would otherwise
+// turn each of them into a log line, spending the retention window this service's
+// log caps are sized for on one repeated fault. The count of what was suppressed
+// rides the next line out, so a throttled flood stays measurable.
+const PROBE_LOG_WINDOW_MS = 60000;
+const _probeLogState = new Map();   // probe key -> { suppressed, lastLoggedAt }
+
+function noteProbeFailure(probe, route, err) {
+    try {
+        const key = probe + '|' + route;
+        const now = Date.now();
+        const seen = _probeLogState.get(key);
+        if (seen && (now - seen.lastLoggedAt) < PROBE_LOG_WINDOW_MS) {
+            seen.suppressed += 1;
+            return null;
+        }
+        const suppressed = seen ? seen.suppressed : 0;
+        _probeLogState.set(key, { suppressed: 0, lastLoggedAt: now });
+        const fields = {
+            probe,
+            route,
+            err: err && err.message ? err.message : String(err)
+        };
+        if (suppressed > 0) fields.suppressed = suppressed;
+        return getLogger().warn('HEALTH_PROBE_FAILED', fields);
+    } catch (_) {
+        // A health route must answer even when the thing describing it is broken.
+        return null;
+    }
+}
+
+// Tests only: the throttle table is module-wide, so a case asserting a first line
+// must not inherit the previous case's window.
+function _resetProbeLogState() { _probeLogState.clear(); }
+
+// Tests only: rewinds every window past its edge while KEEPING the suppressed
+// counts, so a case can assert what the next line reports about the flood it
+// swallowed. Clearing the table instead would drop exactly the number under test.
+function _ageProbeLogState() {
+    for (const entry of _probeLogState.values()) {
+        entry.lastLoggedAt -= (PROBE_LOG_WINDOW_MS + 1);
+    }
+}
 
 
 const NETWORK = process.env.NETWORK
@@ -92,7 +155,7 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
         const decoderRunning = isDecoderRunning()
         let dbOk = false
         if (decoder.db) {
-            try { dbOk = await decoder.db.ping() } catch (_) {}
+            try { dbOk = await decoder.db.ping() } catch (e) { noteProbeFailure('db_ping', '/live', e) }
         }
         const stalled = typeof decoder.isStalled === 'function' ? decoder.isStalled() : false
         // The parse loop has stopped ITERATING, which every other field here is
@@ -102,6 +165,21 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
         // and /live answered 200 forever. GATES health, unlike node_height_stale
         // below: a dead loop is exactly the wedge a restart does fix.
         const pollSilent = typeof decoder.isPollSilent === 'function' ? decoder.isPollSilent() : false
+        // Latent REORG_HALT marker, reported on the one surface the monitor and the
+        // container healthcheck actually poll. /status and the JSON-RPC health method
+        // already carry it, and neither is polled, so a decoder carrying a durable halt
+        // row rendered fully green everywhere an operator looks. TTL-cached inside
+        // checkReorgHalt (60s) with concurrent probes collapsed, so a healthcheck burst
+        // costs at most one DB query per minute.
+        //
+        // Deliberately NOT in the healthy gate below, for the reason given at /status
+        // and the health method: the marker survives restarts and is cleared only by a
+        // resync, while the halted decoder keeps parsing forward, so gating would make
+        // autoheal restart-loop a service that is doing useful work and fix nothing.
+        let reorgHalt = { halted: false, reason: null, at: null }
+        if (dbOk && typeof decoder.checkReorgHalt === 'function'){
+            try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', '/live', e) }
+        }
         const syncStatus = decoder.getSyncStatus()
         const healthy = decoderRunning && dbOk && !stalled && !pollSilent
         res.status(healthy ? 200 : 503).json({
@@ -111,6 +189,9 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
             stalled,
             poll_silent: pollSilent,
             last_poll_at: decoder.lastPollAt || null,
+            reorg_halted:      reorgHalt.halted === true,
+            reorg_halt_reason: reorgHalt.reason || null,
+            reorg_halted_at:   reorgHalt.at || null,
             // A frozen node tip, reported but deliberately NOT gating. isStalled()
             // returns false while the tip is stale on purpose: restarting the container
             // cannot fix an upstream node outage, and gating on it re-opens the
@@ -149,9 +230,27 @@ async function startApi(){
         console.log('Decoder parse loop exited; reporting not-running.')
         decoderRunning = false
     }).catch((err) => {
-        console.error('Decoder crashed:', err)
         decoderRunning = false
         decoderError = err
+        // One record, not a record plus a prose twin. A collector reading warn+
+        // lines would file the same crash as two separate residue items, and the
+        // record carries strictly more than the prose line did (message, stack,
+        // and the halt state below).
+        //
+        // The halt state rides the crash record because the two failures look
+        // identical from outside: an exited container, restart policy cycling it.
+        // A decoder that aborted a rollback past the dispenser safe-depth window
+        // needs an operator resync, while an ordinary crash needs a restart, and
+        // the process is gone before any health route can be asked which it was.
+        try {
+            getLogger().error('CRASH', {
+                kind:  'startFailure',
+                err:   err && err.message ? err.message : String(err),
+                stack: err && err.stack ? err.stack : undefined,
+                reorgHalted:     decoder.reorgHalted === true,
+                reorgHaltReason: decoder.reorgHaltReason || null
+            })
+        } catch (_) { /* never mask the crash */ }
         // A decoder whose start() rejected does no work: the parse loop never runs and
         // the process would otherwise linger as a permanently-unhealthy but RUNNING
         // container that `--restart unless-stopped` never recycles. Exit non-zero so the
@@ -173,8 +272,40 @@ async function startApi(){
     process.on('SIGTERM', shutdown)
     process.on('SIGINT', shutdown)
 
+    // Crash visibility. Registered inside startApi(), not at module scope: several
+    // unit suites require this module in-process under mocha to reach registerLiveRoute
+    // and makeRpcBatchGuard, and mocha installs its own handlers. A module-scope
+    // handler that calls process.exit would abort the whole run instead of failing one
+    // test. Same placement as xchain-sync/src/api.js.
+    //
+    // An uncaughtException leaves the parse loop and the DB pool in an unknown shape
+    // mid-block, so the process exits after logging and lets the restart policy act.
+    // An unhandledRejection logs and CONTINUES, which is the choice this file already
+    // made: a single unresolved promise does not by itself corrupt shared state.
+    process.on('uncaughtException', (err) => {
+        try {
+            getLogger().error('CRASH', {
+                kind:  'uncaughtException',
+                err:   err && err.message ? err.message : String(err),
+                stack: err && err.stack ? err.stack : undefined,
+                reorgHalted:     decoder.reorgHalted === true,
+                reorgHaltReason: decoder.reorgHaltReason || null
+            })
+        } catch (_) { /* never mask the crash */ }
+        process.exit(1)
+    })
+
     process.on('unhandledRejection', (reason) => {
-        console.error('Unhandled promise rejection:', reason)
+        const err = reason instanceof Error ? reason : new Error(String(reason))
+        try {
+            getLogger().error('CRASH', {
+                kind:  'unhandledRejection',
+                err:   err.message,
+                stack: err.stack,
+                reorgHalted:     decoder.reorgHalted === true,
+                reorgHaltReason: decoder.reorgHaltReason || null
+            })
+        } catch (_) { /* never mask the rejection */ }
     })
 
     const app = express();
@@ -249,8 +380,9 @@ async function startApi(){
                     await decoder.db.ping()
                     dbOk = true
                     dbPhase = 'running'
-                } catch(_) {
+                } catch(e) {
                     dbPhase = 'db-unreachable'
+                    noteProbeFailure('db_ping', 'rpc:health', e)
                 }
             }
 
@@ -263,7 +395,7 @@ async function startApi(){
             // own field instead, and let the operator/watchdog act on it.
             let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
             if (dbOk && typeof decoder.checkReorgHalt === 'function'){
-                try { reorgHalt = await decoder.checkReorgHalt() } catch (_) {}
+                try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', 'rpc:health', e) }
             }
 
             const healthy = decoderRunning && dbOk
@@ -367,14 +499,14 @@ async function startApi(){
         let dbOk = false
         if (decoder.db) {
             // db.ping() uses its own pooled connection; see the health method note.
-            try { dbOk = await decoder.db.ping() } catch (_) {}
+            try { dbOk = await decoder.db.ping() } catch (e) { noteProbeFailure('db_ping', '/status', e) }
         }
         // Latent halt marker, reported here too so an operator can see it on
         // the cheap probe. The HTTP code stays keyed on running+db for the reason given
         // in health() above: a dormant halt must not make an advancing decoder look dead.
         let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
         if (dbOk && typeof decoder.checkReorgHalt === 'function'){
-            try { reorgHalt = await decoder.checkReorgHalt() } catch (_) {}
+            try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', '/status', e) }
         }
         const healthy = decoderRunning && dbOk
         res.status(healthy ? 200 : 503).json({
@@ -411,4 +543,7 @@ async function startApi(){
 // tests without opening a DB connection / listening socket.
 if (require.main === module) startApi()
 
-module.exports = { makeRpcBatchGuard, registerLiveRoute }
+// startApi is exported so the crash handlers it installs can be driven for real
+// rather than asserted against the source text; the require.main guard above
+// still keeps a plain require from opening a port or a DB connection.
+module.exports = { makeRpcBatchGuard, registerLiveRoute, startApi, noteProbeFailure, _resetProbeLogState, _ageProbeLogState, PROBE_LOG_WINDOW_MS }

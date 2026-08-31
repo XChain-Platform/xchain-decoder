@@ -143,6 +143,43 @@ describe('/live gates on the poll-loop heartbeat', function () {
         assert.strictEqual(res.body.poll_silent, false, 'the drain is crisp, not window-delayed');
     });
 
+    // The latent REORG_HALT marker was published on /status and the JSON-RPC health
+    // method, neither of which anything polls, and omitted from /live, which the
+    // monitor and the container healthcheck do poll. So the one surface that is read
+    // rendered a halted decoder fully green.
+
+    it('reports a latent REORG_HALT marker on the surface that is actually polled', async function () {
+        const decoder = caughtUpDecoder();
+        decoder.db.getReorgHaltMarker = async () => ({ halted: true, reason: 'delete failed at 149', at: '2026-08-20T04:00:00.000Z' });
+        const res = await getLive(liveApp(decoder));
+        assert.strictEqual(res.body.reorg_halted, true);
+        assert.strictEqual(res.body.reorg_halt_reason, 'delete failed at 149');
+        assert.strictEqual(res.body.reorg_halted_at, '2026-08-20T04:00:00.000Z');
+    });
+
+    it('still answers 200 while halted, so autoheal cannot restart-loop a resync case', async function () {
+        // The regression that matters. The marker survives restarts and is cleared only
+        // by a resync, and the halted decoder keeps parsing forward, so gating health on
+        // it would recycle a working container forever and fix nothing.
+        const decoder = caughtUpDecoder();
+        decoder.db.getReorgHaltMarker = async () => ({ halted: true, reason: 'aborted rollback', at: null });
+        const res = await getLive(liveApp(decoder));
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual(res.body.status, 'healthy');
+        assert.strictEqual(res.body.reorg_halted, true);
+    });
+
+    it('reports the halt as a stable false, not an absent key, when there is no marker', async function () {
+        // An absent key and "not halted" must not look alike to the monitor: the rail
+        // reads a missing field as unknown, so a decoder that answers `false` is what
+        // lets it tell a healthy decoder from an unupgraded one.
+        const decoder = caughtUpDecoder();
+        decoder.db.getReorgHaltMarker = async () => ({ halted: false, reason: null, at: null });
+        const res = await getLive(liveApp(decoder));
+        assert.strictEqual(res.body.reorg_halted, false);
+        assert.strictEqual(res.body.reorg_halt_reason, null);
+    });
+
     it('answers 503 when the DB ping fails, which the heartbeat must not mask', async function () {
         const decoder = caughtUpDecoder();
         decoder.db = { ping: async () => { throw new Error('pool gone'); } };

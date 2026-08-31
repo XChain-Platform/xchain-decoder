@@ -218,6 +218,48 @@ describe('registerDecoderMetrics() feed-freshness gauges', function () {
         assert.match(body, /^xchain_decoder_node_height_stale 0$/m);
     });
 
+    // Poll silence was the one /live gate the Prometheus surface did not carry, so an
+    // alert written against `stalled` -- whose help text called itself THE liveness
+    // signal -- read 0 through a parse loop that had died while caught up.
+
+    it('exports the poll-silence gate /live health depends on', function () {
+        const registry = new Registry();
+        const decoder = makeRunningDecoder();
+        decoder.lastPollAt = Date.now();
+        registerDecoderMetrics(registry, decoder);
+
+        const body = registry.render();
+        assert.match(body, /^xchain_decoder_poll_silent 0$/m);
+        assert.match(body, /^xchain_decoder_last_poll_timestamp_seconds \d/m);
+    });
+
+    it('shows a loop that died while caught up, which stalled cannot', function () {
+        // The headline gap. A caught-up decoder makes no chain progress, so isStalled()
+        // reads false BY DESIGN; only the iteration heartbeat separates "idle because
+        // there is nothing to do" from "the loop is gone". Both series in one case,
+        // because it is their disagreement that is the signal.
+        const registry = new Registry();
+        const decoder = makeRunningDecoder();
+        decoder.lastProcessedBlockIndex = 150;
+        decoder.blockchainInfoLastBlock = 150;
+        decoder.lastPollAt = Date.now() - (4 * 900000);
+        registerDecoderMetrics(registry, decoder);
+
+        const body = registry.render();
+        assert.match(body, /^xchain_decoder_poll_silent 1$/m);
+        assert.match(body, /^xchain_decoder_stalled 0$/m);
+    });
+
+    it('emits no last-poll timestamp before the first iteration, but still reports not-silent', function () {
+        // lastPollAt 0 means the loop has not run yet (long initial sync), which
+        // isPollSilent() reads as not silent; a 0 timestamp series would read as 1970.
+        const registry = new Registry();
+        registerDecoderMetrics(registry, makeDecoder());
+        const body = registry.render();
+        assert.ok(!/xchain_decoder_last_poll_timestamp_seconds/.test(body));
+        assert.match(body, /^xchain_decoder_poll_silent 0$/m);
+    });
+
     // Reorg churn had no decoder-side signal at all: the durable REORG rows are
     // DB-only and the indexer's reorgsProcessed needs the indexer to be up, so a
     // metrics-only deployment could watch a decoder thrash through shallow reorgs

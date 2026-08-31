@@ -21,6 +21,7 @@
 const mariadb = require('mariadb');
 const fs      = require('fs');
 const util    = require('./util')
+const { getLogger } = require('./observability')
 
 const SATOSHIS_DECIMALS = 8
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/
@@ -44,6 +45,32 @@ function resolveQueryTimeout(raw, defaultMs = DEFAULT_QUERY_TIMEOUT_MS) {
     const parsed = parseInt(raw, 10)
     if (Number.isNaN(parsed) || parsed < 0) return defaultMs
     return parsed
+}
+
+// True when str[i] opens a backslash escape inside the currently open quoted span.
+//
+// MariaDB/MySQL honour `\<char>` inside `'` and `"` string literals by default, so a
+// `\'` does NOT close the literal. Every quote walker below must consult this helper
+// instead of closing a span on the next matching quote: a span closed at the `\'`
+// desyncs the scan from the statements the server would run. `INSERT ... VALUES
+// ('it\'s fine'); DROP TABLE balances;` then re-opens at the literal's real closing
+// quote and swallows the `;` and the DROP into one chunk whose first keyword is
+// INSERT - invisible to the ^-anchored destructive checks in
+// _destructiveAutoStatement, which would score the file auto-eligible.
+//
+// Backtick spans are excluded: a backslash inside an identifier quote is a literal
+// character there, so consuming the next char would desync in the other direction.
+// A trailing lone backslash opens nothing, so no walker indexes past end-of-input.
+//
+// Module-level, not a method: hasUnquotedHash is deliberately a local closure because
+// runMigrations' callers build partial `this` objects, and a prototype hop would break
+// the guard on those (see the comment at that closure).
+//
+// Holds only while sql_mode omits NO_BACKSLASH_ESCAPES. Nothing in this tree sets
+// sql_mode and the pool params below set none; if that ever changes, every caller of
+// this helper must be revisited. Kept byte-for-byte in sync with xchain-indexer/src/db.js.
+function opensBackslashEscape(str, i, quote){
+    return str[i] === '\\' && quote !== '`' && i + 1 < str.length;
 }
 
 class Database {
@@ -227,6 +254,15 @@ class Database {
             // so releaseConnection() (which only releases transactionConnection)
             // would be a no-op. Release the lease itself, or a fresh-DB boot leaks
             // one connection per created table plus this one and exhausts the pool.
+            //
+            // The swallow is deliberate here and at the eight sibling release sites
+            // in this file. release() rejects only when the connection is already
+            // ended or already back in the pool, so there is nothing left to leak and
+            // nothing an operator would act on; every one of these sits in a finally
+            // beside a catch that already reports the real cause. A line per site
+            // would name the same fault twice and spend the log-retention window on
+            // shutdown noise. The one exception is the temp-table drop in
+            // deleteAndCompareTxsNotInList, which has a consequence on a LATER query.
             try { await db.release(); } catch(_){}
         }
         console.log('Database and tables verified (' + checked + ' tables, ' + created + ' created).');
@@ -714,6 +750,7 @@ class Database {
             for(let i = 0; i < s.length; i++){
                 const c = s[i];
                 if(q){
+                    if(opensBackslashEscape(s, i, q)){ i++; continue; }
                     if(c === q){
                         if(s[i + 1] === q){ i++; }
                         else { q = null; }
@@ -860,6 +897,7 @@ class Database {
         for(; i < stmt.length; i++){
             const ch = stmt[i];
             if(quote){
+                if(opensBackslashEscape(stmt, i, quote)){ i++; continue; }
                 if(ch === quote){
                     if(stmt[i + 1] === quote){ i++; }    // doubled-quote escape
                     else { quote = null; }
@@ -915,6 +953,7 @@ class Database {
             const ch = sql[i];
             if(quote){
                 out += ch;
+                if(opensBackslashEscape(sql, i, quote)){ out += sql[++i]; continue; }
                 if(ch === quote){
                     if(sql[i + 1] === quote){ out += sql[++i]; }
                     else { quote = null; }
@@ -946,7 +985,7 @@ class Database {
     // ship, and _destructiveAutoStatement ends up classifying fragments rather than
     // real statements. `--` and `#` line comments are stripped first (same rule as
     // the callers used); the quote model matches stripSqlLineComments exactly
-    // (single/double-quote and backtick spans, doubled quotes treated as escapes).
+    // (single/double-quote and backtick spans, doubled-quote and backslash escapes).
     // Returns trimmed, non-empty statements. Mirrors xchain-indexer/src/db.js.
     splitSqlStatements(sql){
         const stripped = this.stripSqlLineComments(sql);
@@ -957,6 +996,7 @@ class Database {
             const ch = stripped[i];
             if(quote){
                 current += ch;
+                if(opensBackslashEscape(stripped, i, quote)){ current += stripped[++i]; continue; }
                 if(ch === quote){
                     if(stripped[i + 1] === quote){ current += stripped[++i]; }
                     else { quote = null; }
@@ -2102,7 +2142,19 @@ class Database {
         } finally {
             // Drop the temp table so a pooled connection never leaks it into an
             // unrelated later query, then release the lease we acquired.
-            try { await connection.query('DROP TEMPORARY TABLE IF EXISTS ' + TMP) } catch (_) {}
+            // Unlike the pool-release catches elsewhere in this file, a failed drop
+            // has a DEFERRED consequence on another query: the temp table rides the
+            // pooled connection into unrelated work and the next mempool diff fails
+            // on a table it did not create, with nothing naming the drop that lost.
+            try { await connection.query('DROP TEMPORARY TABLE IF EXISTS ' + TMP) }
+            catch (e) {
+                try {
+                    getLogger().warn('DB_TEMP_TABLE_DROP_FAILED', {
+                        table: TMP,
+                        err: e && e.message ? e.message : String(e)
+                    })
+                } catch (_) { /* cleanup must not become the failure */ }
+            }
             if (ownLease) {
                 await connection.release()
             }

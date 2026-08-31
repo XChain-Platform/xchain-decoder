@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-08-30
+
+### Added
+- ROLLCALL is decoded from the wire.
+
+### Fixed
+- The MariaDB connector moves to 3.5.3, closing three high-severity advisories against the pinned 3.5.2.
+- RPC faults keep their identity, and tuning environment variables go through the shared validator.
+- A halt the service cannot record no longer passes unnoticed.
+
+### Changed
+- Service logging routes through the shared log shim, one line per console call.
+
 ## [0.11.0] - 2026-08-25
 
 ### Added
