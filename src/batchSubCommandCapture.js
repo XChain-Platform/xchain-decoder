@@ -51,7 +51,10 @@ const ACTION_ALIASES = require('./actionAliases.js')
 const { COMMAND_LIMIT,
         ACTION_LIMITS,
         GATED_ACTION_LIMITS,
-        CHILD_ISSUE_KEY } = require('./protocol/indexerBatchLimits.js')
+        CHILD_ISSUE_KEY,
+        WEIGHT_BUDGET,
+        COMMAND_WEIGHTS,
+        COST_WEIGHTING_ACTIVATION } = require('./protocol/indexerBatchLimits.js')
 
 // The BATCH FORMAT versions the indexer registers (xchain-indexer/src/actions/batch.js
 // `this.formats`, which today holds only 0 = 'VERSION|COMMAND'). A BATCH whose FORMAT is
@@ -174,10 +177,11 @@ function subCommandActionName(command){
 // verdict this file can reach on its own evidence.
 //
 // The rest of the class is now closed as far as it is provable, in hasProvablyRejectedBatch
-// below: the nested BATCH, the per-ACTION caps and the 250-command cap, against the indexer's
-// cap tables vendored canonically in src/protocol/indexerBatchLimits.js. The UNKNOWN NAME is
-// still the one cause left open, and deliberately, for the reason this paragraph gives: a
-// vendored name LIST is not closed under registry growth, so a stale one under-captures.
+// below: the nested BATCH, the per-ACTION caps, the 250-command cap and the
+// BATCH_COST_WEIGHTING weight budget, against the indexer's tables vendored canonically in
+// src/protocol/indexerBatchLimits.js. The UNKNOWN NAME is still the one cause left open, and
+// deliberately, for the reason this paragraph gives: a vendored name LIST is not closed under
+// registry growth, so a stale one under-captures.
 //
 // A '' name is reachable two ways and both are covered, because both are what
 // `split('|')[0]` yields: an EMPTY element (a trailing ';', a ';;', or the whole command
@@ -399,10 +403,18 @@ function maxIdenticalMintTicks(ticks){
 //   * THE AGGREGATE GAS PRE-CHECK ('invalid: GAS (insufficient)'). Same reason: it reads the
 //     SOURCE's balances and the token set from the indexer database.
 //
+// A FOURTH cause, the BATCH_COST_WEIGHTING weight budget, IS mirrored, and unlike the caps
+// above it is gated on its own vendored instant rather than assumed on (see
+// isBatchCostWeightingActive). Its one deliberate under-estimate, the DEPLOY discount, is
+// argued at subCommandCostWeight.
+//
 // Order of the checks is irrelevant to the verdict (any one of them means "rejected"), so
 // this does NOT reproduce the indexer's error precedence, which decides only WHICH string a
 // rejected batch reports.
-function hasProvablyRejectedBatch(subCommands, aliases){
+//
+// `consensusNetwork` and `blockTime` are OPTIONAL and default to "the weight budget is not
+// provably active", so every caller written before the budget existed keeps today's verdicts.
+function hasProvablyRejectedBatch(subCommands, aliases, consensusNetwork, blockTime){
     if (!Array.isArray(subCommands)) return false
     // The global command cap, counted over the raw ';'-split list with empty elements
     // included - the same list, and the same counting rule, the indexer caps.
@@ -427,7 +439,72 @@ function hasProvablyRejectedBatch(subCommands, aliases){
                                           : (tally.get(action) || 0)
         if (count > caps[action]) return true
     }
+
+    // The weighted budget, which the indexer applies INSTEAD of the flat count at/after
+    // BATCH_COST_WEIGHTING. The count cap above stays a sound pre-filter either way, because
+    // every weight is >= 1 and the budget is the same number.
+    if (isBatchCostWeightingActive(consensusNetwork, blockTime) &&
+        batchCostWeight(subCommands, aliases) > WEIGHT_BUDGET) return true
+
     return false
+}
+
+// Is the indexer's BATCH_COST_WEIGHTING weight budget in force at this block?
+//
+// Its own vendored per-network instant, NOT the ordering argument the caps lean on. That
+// argument is specific to BATCH_ISSUANCE_LIMITS, whose instant the decoder's capture gate is
+// required to sit at or after; the weighting flag has no such relationship and today it is
+// the counter-example, with mainnet capture ARMED and the weighting instant still on the
+// house sentinel. An absent or DISARMED (null) entry is inactive at every block time, which
+// leaves today's over-capture in place rather than inventing a suppression rule.
+function isBatchCostWeightingActive(consensusNetwork, blockTime){
+    const activation = COST_WEIGHTING_ACTIVATION[consensusNetwork]
+    if (typeof activation !== 'number') return false
+    const t = Number(blockTime)
+    if (!Number.isFinite(t)) return false
+    return t >= activation
+}
+
+// The cost weight of ONE sub-command: a strict LOWER BOUND on the indexer's subCommandWeight.
+//
+// The bound is the whole design, because the directions are not symmetric. Charging MORE than
+// the indexer pushes the sum over the budget for a batch the indexer really dispatches, which
+// suppresses capture and loses a settlement output; charging LESS only leaves today's
+// over-capture open for that shape.
+//
+// So DEPLOY is deliberately UNDER-charged at the default 1 rather than its table weight of
+// 30: the indexer discounts a format-4 chunk carrier back to 1, and this module does not read
+// FORMAT versions. DEPLOY is capped at 1 per BATCH by GATED_ACTION_LIMITS, so the whole
+// under-estimate is bounded at 29 of the 250 budget. Every other weighted ACTION
+// (AIRDROP/DIVIDEND/EXECUTE/XEXEC) is charged unconditionally by the indexer, so the table
+// value is exact there.
+//
+// Alias expansion matches the indexer's, which normalizes the name before weighing; the
+// module header's ordering argument covers that BATCH_SUBACTION_NORMALIZATION is on wherever
+// capture runs. A name the table does not carry weighs 1, and hasOwnProperty keeps
+// `constructor`/`__proto__` off the prototype chain.
+function subCommandCostWeight(command, aliases){
+    const rawName = subCommandActionName(command)
+    if (rawName === null) return 1
+    const action = expandAliasName(rawName, aliases)
+    if (action === 'DEPLOY') return 1
+    if (!Object.prototype.hasOwnProperty.call(COMMAND_WEIGHTS, action)) return 1
+    const weight = COMMAND_WEIGHTS[action]
+    return (Number.isInteger(weight) && weight >= 1) ? weight : 1
+}
+
+// Total cost weight of a BATCH: the sum of subCommandCostWeight over the raw ';'-split list,
+// empty elements included, exactly the list the indexer weighs. Never throws (a crash here
+// would take down block decoding); an unweighable list falls back to 0, which is "not
+// provably rejected".
+function batchCostWeight(subCommands, aliases){
+    try {
+        let total = 0
+        for (const command of subCommands) total += subCommandCostWeight(command, aliases)
+        return total
+    } catch (e) {
+        return 0
+    }
 }
 
 // The list of action strings the output-capture decision should be taken over.
@@ -465,7 +542,7 @@ function captureCommands(decodedData, consensusNetwork, blockTime){
         return [decodedData]
     const subCommands = batchSubCommands(decodedData)
     if (subCommands === null) return [decodedData]
-    if (hasProvablyRejectedBatch(subCommands, ACTION_ALIASES)) return []
+    if (hasProvablyRejectedBatch(subCommands, ACTION_ALIASES, consensusNetwork, blockTime)) return []
     return subCommands.map(command => expandSubCommandAlias(command, ACTION_ALIASES))
 }
 
@@ -532,6 +609,9 @@ module.exports = {
     subCommandActionName,
     hasProvablyRejectedSubCommand,
     hasProvablyRejectedBatch,
+    isBatchCostWeightingActive,
+    subCommandCostWeight,
+    batchCostWeight,
     expandSubCommandAlias,
     expandAliasName,
     isNumeric,
@@ -545,4 +625,7 @@ module.exports = {
     ACTION_LIMITS,
     GATED_ACTION_LIMITS,
     CHILD_ISSUE_KEY,
+    WEIGHT_BUDGET,
+    COMMAND_WEIGHTS,
+    COST_WEIGHTING_ACTIVATION,
 }

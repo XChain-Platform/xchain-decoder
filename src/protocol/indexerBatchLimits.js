@@ -57,9 +57,37 @@ const GATED_ACTION_LIMITS = {
 // BATCH_ISSUANCE_LIMITS, so child issuance is exempt from the top-level ISSUE cap.
 const CHILD_ISSUE_KEY = "ISSUE.CHILD";
 
+// Weighted per-BATCH cost budget (indexer: this.weightBudget), which REPLACES the flat
+// command cap at/after BATCH_COST_WEIGHTING. Breached => 'invalid: COMMAND (limit)', the
+// same string, whole batch.
+const WEIGHT_BUDGET = 250;
+
+// Per-ACTION cost weights (indexer: this.commandWeights). An ACTION absent from this table
+// weighs the DEFAULT of 1, which is every ordinary action.
+const COMMAND_WEIGHTS = {
+    "AIRDROP": 25,
+    "DEPLOY": 30,
+    "DIVIDEND": 25,
+    "EXECUTE": 30,
+    "XEXEC": 30,
+};
+
+// Per-network BATCH_COST_WEIGHTING activation instants (block TIME, >=), read off the
+// sibling's protocol-change registry. Unlike BATCH_ISSUANCE_LIMITS this flag is NOT provably
+// on wherever the decoder's capture gate is: mainnet capture is armed while this instant is
+// still the house sentinel. null means DISARMED, which is inactive at every block time.
+const COST_WEIGHTING_ACTIVATION = {
+    "mainnet": 9999999999,
+    "testnet": 0,
+    "regtest": 0,
+};
+
 module.exports = {
     COMMAND_LIMIT,
     ACTION_LIMITS,
     GATED_ACTION_LIMITS,
     CHILD_ISSUE_KEY,
+    WEIGHT_BUDGET,
+    COMMAND_WEIGHTS,
+    COST_WEIGHTING_ACTIVATION,
 };

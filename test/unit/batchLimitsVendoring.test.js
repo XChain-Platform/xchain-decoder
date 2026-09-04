@@ -42,6 +42,9 @@ const path   = require('path');
 const VENDORED_MODULE = require('../../src/protocol/indexerBatchLimits.js');
 const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
         hasProvablyRejectedBatch,
+        captureCommands,
+        batchCostWeight,
+        subCommandCostWeight,
         subCommandLimitKey,
         subCommandTick,
         CHILD_ISSUE_KEY } = require('../../src/batchSubCommandCapture.js');
@@ -84,10 +87,13 @@ function realBatch(opts) {
     util.addAddressTicker      = () => {};
     util.detectFeePaymentMode  = () => 'native';
 
+    // Network and block time are overridable so the weight-budget cases can drive the SAME
+    // handler where BATCH_COST_WEIGHTING is armed and where it is not.
+    const blockTime = (opts.blockTime === undefined) ? T0 : opts.blockTime;
     const changes = new ProtocolChanges({
-        config:    { NETWORK: 'regtest' },
+        config:    { NETWORK: opts.network || 'regtest' },
         util:      util,
-        decoderDb: { getBlockTime: async () => T0 },
+        decoderDb: { getBlockTime: async () => blockTime },
     });
 
     const ids = opts.tickIds || new Map();
@@ -195,6 +201,31 @@ describe('BATCH limit vendoring and cross-repo conformance', function () {
             assert.deepStrictEqual(VENDORED_MODULE.GATED_ACTION_LIMITS, derived.GATED_ACTION_LIMITS);
         });
 
+        it('carries the live weight budget, weight table and activation instants', function () {
+            // A retune of either number in the sibling moves indexer verdicts, and before this
+            // pin the decoder had no copy of them at all, so the retune was invisible here.
+            if (!siblingOrSkip(this, sync.INDEXER_BATCH)) return;
+            const derived = sync.deriveFromSibling();
+            assert.strictEqual(VENDORED_MODULE.WEIGHT_BUDGET, derived.WEIGHT_BUDGET);
+            assert.deepStrictEqual(VENDORED_MODULE.COMMAND_WEIGHTS, derived.COMMAND_WEIGHTS);
+            assert.deepStrictEqual(VENDORED_MODULE.COST_WEIGHTING_ACTIVATION,
+                                   derived.COST_WEIGHTING_ACTIVATION);
+        });
+
+        it('keeps every weight an integer >= 1, which is what makes the count cap a sound pre-filter', function () {
+            // The decoder still checks the raw count first. That is exact rather than
+            // conservative only while no weight can be below 1.
+            assert.ok(Number.isInteger(VENDORED_MODULE.WEIGHT_BUDGET) &&
+                      VENDORED_MODULE.WEIGHT_BUDGET > 0);
+            for (const action of Object.keys(VENDORED_MODULE.COMMAND_WEIGHTS)) {
+                const weight = VENDORED_MODULE.COMMAND_WEIGHTS[action];
+                assert.ok(Number.isInteger(weight) && weight >= 1,
+                    action + ' weighs ' + weight + '; a weight below 1 would let a batch whose ' +
+                    'raw count exceeds the budget still weigh in under it, and the count ' +
+                    'pre-filter would start rejecting batches the indexer runs');
+            }
+        });
+
         it('keeps the ungated and gated caps in the tables they came from', function () {
             // Placement is not cosmetic: everything in ACTION_LIMITS binds in BOTH flag
             // states, so mirroring it needs no flag reasoning at all, while everything in
@@ -263,10 +294,142 @@ describe('BATCH limit vendoring and cross-repo conformance', function () {
                     'cap and the DEPLOY cap would be enforced here and nowhere else');
             }
         });
+
+        it('registers BATCH_COST_WEIGHTING with no block-index threshold, so a TIME mirror is sound', function () {
+            // The decoder mirrors this flag on block TIME alone. isEnabled ANDs a block-index
+            // leg onto that, so a non-zero threshold could hold the flag off past its instant
+            // while the decoder already applied the budget: suppression where the indexer
+            // dispatches, the money-bearing direction.
+            if (!siblingOrSkip(this, sync.INDEXER_CHANGES)) return;
+            const { change } = sync.costWeightingChange();
+            assert.ok(change, 'BATCH_COST_WEIGHTING must be registered in the sibling');
+            for (const network of ['mainnet', 'testnet', 'regtest'])
+                assert.strictEqual(change[network + '_block'], 0,
+                    network + ' BATCH_COST_WEIGHTING grew a block-index threshold that the ' +
+                    'vendored instant map cannot express');
+        });
+
+        it('registers it at or below the indexer compiled consensus version', function () {
+            // Same AND: the version leg could hold the flag off after its instant.
+            if (!siblingOrSkip(this, sync.INDEXER_CHANGES)) return;
+            const { change, consensusVersion } = sync.costWeightingChange();
+            const current = consensusVersion.split('.').map(Number);
+            const at      = [change.version_major, change.version_minor, change.version_revision];
+            const ordered = (at[0] !== current[0]) ? at[0] < current[0]
+                          : (at[1] !== current[1]) ? at[1] < current[1]
+                          : at[2] <= current[2];
+            assert.ok(ordered,
+                'BATCH_COST_WEIGHTING is registered at ' + at.join('.') + ' but the indexer ' +
+                'compiles ' + consensusVersion + ': the version leg of isEnabled would hold ' +
+                'the flag off while the decoder applied the budget');
+        });
+
+        it('carries the weighting instants the sibling registers, per network', function () {
+            if (!siblingOrSkip(this, sync.INDEXER_CHANGES)) return;
+            const { change } = sync.costWeightingChange();
+            for (const network of ['mainnet', 'testnet', 'regtest'])
+                assert.strictEqual(VENDORED_MODULE.COST_WEIGHTING_ACTIVATION[network],
+                    change[network + '_time'],
+                    network + ': the vendored weighting instant drifted from the sibling. ' +
+                    'EARLIER here than there means the decoder suppresses capture for batches ' +
+                    'the indexer still dispatches');
+        });
+
+        it('does NOT assume the weighting flag is on wherever capture is, which is why it is gated', function () {
+            // The counter-example that killed the ordering shortcut, pinned so it stays a
+            // counter-example: mainnet capture is armed and mainnet weighting is not. An
+            // ungated budget would suppress mainnet capture today.
+            const captureGate = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet;
+            const weightGate  = VENDORED_MODULE.COST_WEIGHTING_ACTIVATION.mainnet;
+            if (captureGate === null || typeof weightGate !== 'number') return;
+            assert.ok(captureGate < weightGate,
+                'mainnet capture (' + captureGate + ') is no longer earlier than mainnet ' +
+                'weighting (' + weightGate + '); re-read isBatchCostWeightingActive before ' +
+                'relying on the gate, and re-derive whether the budget may now be unconditional');
+        });
     });
 
     // -------------------------------------------------------------------------------------
     describe('tier 3: driven against the REAL indexer Batch handler', function () {
+
+        // The weight budget, driven on BOTH sides of its own flag. Every wire here is under
+        // the 250-COUNT cap, so nothing in the pre-weighting rule set can explain a rejection:
+        // the only thing that moves is the summed weight.
+        const WEIGHT_VECTORS = [
+            { name: '9x EXECUTE + SEND', weight: 271,
+              wire: 'BATCH|0|SEND|0|BTC|TICK|1|addr;' +
+                    Array.from({ length: 9 }, () => 'EXECUTE|0|1|a').join(';') },
+            { name: '11x AIRDROP', weight: 275,
+              wire: 'BATCH|0|' +
+                    Array.from({ length: 11 }, () => 'AIRDROP|0|BTC|TICK|1|a').join(';') },
+        ];
+        const UNDER_BUDGET = [
+            { name: '8x EXECUTE + SEND', weight: 241,
+              wire: 'BATCH|0|SEND|0|BTC|TICK|1|addr;' +
+                    Array.from({ length: 8 }, () => 'EXECUTE|0|1|a').join(';') },
+            { name: '10x AIRDROP', weight: 250,
+              wire: 'BATCH|0|' +
+                    Array.from({ length: 10 }, () => 'AIRDROP|0|BTC|TICK|1|a').join(';') },
+        ];
+        const MAINNET_LIVE = 1800000000;   // above mainnet capture, below the weighting sentinel
+
+        it('suppresses an over-budget batch on regtest, where the handler rejects it whole', async function () {
+            if (!siblingOrSkip(this, sync.INDEXER_BATCH)) return;
+            for (const vector of WEIGHT_VECTORS) {
+                assert.strictEqual(subCommandsOf(vector.wire).length <= VENDORED_MODULE.COMMAND_LIMIT,
+                    true, vector.name + ' must stay under the COUNT cap or it proves nothing');
+                assert.strictEqual(
+                    batchCostWeight(subCommandsOf(vector.wire), ACTION_ALIASES), vector.weight);
+                const status = await indexerStatus(vector.wire, { network: 'regtest', blockTime: 0 });
+                assert.strictEqual(status, 'invalid: COMMAND (limit)',
+                    vector.name + ': premise wrong, the real handler said ' + status);
+                assert.deepStrictEqual(captureCommands(vector.wire, 'regtest', 0), [],
+                    vector.name + ' still captures on regtest; the weight budget is not mirrored');
+            }
+        });
+
+        it('still captures an over-budget batch on MAINNET, where the flag is unarmed', async function () {
+            // The under-capture control, and the reason the rule is gated instead of
+            // unconditional. Pre-gate reasoning would have suppressed these.
+            if (!siblingOrSkip(this, sync.INDEXER_BATCH)) return;
+            for (const vector of WEIGHT_VECTORS) {
+                const status = await indexerStatus(vector.wire,
+                    { network: 'mainnet', blockTime: MAINNET_LIVE });
+                assert.strictEqual(status, 'valid',
+                    vector.name + ': premise wrong, mainnet handler said ' + status);
+                const view = captureCommands(vector.wire, 'mainnet', MAINNET_LIVE);
+                assert.strictEqual(view.length, subCommandsOf(vector.wire).length,
+                    'UNDER-CAPTURE on mainnet: the mirror suppressed ' + vector.name +
+                    ', which the real handler dispatches in full');
+            }
+        });
+
+        it('leaves a batch AT the budget alone on both networks', async function () {
+            if (!siblingOrSkip(this, sync.INDEXER_BATCH)) return;
+            for (const vector of UNDER_BUDGET) {
+                assert.strictEqual(
+                    batchCostWeight(subCommandsOf(vector.wire), ACTION_ALIASES), vector.weight);
+                assert.strictEqual(await indexerStatus(vector.wire, { network: 'regtest', blockTime: 0 }),
+                    'valid', vector.name + ': premise wrong on regtest');
+                assert.strictEqual(captureCommands(vector.wire, 'regtest', 0).length,
+                    subCommandsOf(vector.wire).length,
+                    'UNDER-CAPTURE: ' + vector.name + ' weighs exactly the budget and is valid');
+            }
+        });
+
+        it('under-charges DEPLOY rather than guessing its format, which is the safe direction', async function () {
+            // The indexer charges DEPLOY 30 and discounts a format-4 chunk carrier to 1. This
+            // module reads no FORMAT, so it charges 1 for both: an UNDER-estimate bounded at 29
+            // by the one-DEPLOY-per-batch cap. Charging 30 would suppress a batch carrying a
+            // chunk carrier the indexer runs.
+            if (!siblingOrSkip(this, sync.INDEXER_BATCH)) return;
+            assert.strictEqual(VENDORED_MODULE.COMMAND_WEIGHTS.DEPLOY, 30,
+                'the sibling stopped weighting DEPLOY at 30; re-derive the discount argument');
+            assert.strictEqual(subCommandCostWeight('DEPLOY|0|code', ACTION_ALIASES), 1);
+            assert.strictEqual(subCommandCostWeight('DEPLOY|4|chunk', ACTION_ALIASES), 1);
+            assert.strictEqual(VENDORED_MODULE.GATED_ACTION_LIMITS.DEPLOY, 1,
+                'the per-batch DEPLOY cap is what bounds the under-estimate at 29');
+        });
 
         it('agrees with it on every vector, and never suppresses a batch it accepts', async function () {
             if (!siblingOrSkip(this, sync.INDEXER_BATCH)) return;

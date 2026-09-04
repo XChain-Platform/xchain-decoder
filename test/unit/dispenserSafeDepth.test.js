@@ -32,7 +32,7 @@ const XChainDecoder = require('../../src/XChainDecoder.js');
 
 // Baseline floor (always asserted, even without the sibling checkout).
 // Mirrors xchain-utxo-tracker/src/undo-blocks.js DEFAULT_UNDO_BLOCKS.
-const DEEPEST_UNDO_WINDOW = 120; // DOGE (BTC 12 / LTC 48 / DOGE 120)
+const DEEPEST_UNDO_WINDOW = 120; // LTC and DOGE (BTC 12 / LTC 120 / DOGE 120)
 
 // Headroom above the deepest window so a small undo-window re-tune can never
 // land exactly at the purge threshold. Matches the margin baked into
@@ -40,7 +40,7 @@ const DEEPEST_UNDO_WINDOW = 120; // DOGE (BTC 12 / LTC 48 / DOGE 120)
 const SAFETY_MARGIN = 6;
 
 describe('DISPENSER_EXPIRE_SAFE_DEPTH', function () {
-    it('is at least as deep as the deepest per-chain reorg window (DOGE = 120) + margin', function () {
+    it('is at least as deep as the deepest per-chain reorg window (LTC and DOGE = 120) + margin', function () {
         assert.ok(
             XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH >= DEEPEST_UNDO_WINDOW + SAFETY_MARGIN,
             `SAFE_DEPTH (${XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH}) must be >= ${DEEPEST_UNDO_WINDOW + SAFETY_MARGIN} ` +

@@ -102,15 +102,16 @@ const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // reorg-recovery window, or a row is deleted before a legal in-window reorg can
 // restore it (deleteBlockByIndex then matches zero rows), permanently losing a
 // money-bearing dispenser on the reorged node. The platform's deepest window is
-// DOGE = 120 (xchain-utxo-tracker DEFAULT_UNDO_BLOCKS: BTC 12 / LTC 48 / DOGE 120);
-// the previous flat 100 sat BELOW DOGE's window. Invariant: SAFE_DEPTH >=
+// 120, and TWO chains now sit on it (xchain-utxo-tracker DEFAULT_UNDO_BLOCKS:
+// BTC 12 / LTC 120 / DOGE 120; LTC was 48 until a 2026-09-01 testnet fork walked
+// past it); the previous flat 100 sat BELOW that window. Invariant: SAFE_DEPTH >=
 // deepest undo window + margin. The +6 margin means a small undo-window re-tune
 // cannot land exactly at the purge threshold; dispenserSafeDepth.test.js
 // enforces the invariant with a conformance read of undo-blocks.js, so raising
 // any chain's window past the margin fails the suite until this is bumped.
 // Purging deeper is the conservative direction (rows are merely retained longer
 // before hard-purge; expiry semantics and action evaluation are unchanged).
-const DISPENSER_EXPIRE_SAFE_DEPTH = 126 // 120 (DOGE undo window) + 6 margin
+const DISPENSER_EXPIRE_SAFE_DEPTH = 126 // 120 (deepest undo window, LTC and DOGE) + 6 margin
 // There is deliberately no DISPENSER_CLOSE_DELAY twin of the indexer's here: the decoder
 // does not mirror dispenser cancels, so it never needs to close a row at the height the
 // indexer's DISPENSER_CLOSE fires. Reintroducing a closing mirror would need that pinned
