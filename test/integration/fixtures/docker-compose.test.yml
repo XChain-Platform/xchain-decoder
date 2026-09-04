@@ -23,7 +23,7 @@ name: xchain-decoder-it
 
 services:
   bitcoind-test:
-    image: bitcoin/bitcoin:28.1
+    image: bitcoin/bitcoin:31.1
     command:
       - bitcoind
       - -regtest
