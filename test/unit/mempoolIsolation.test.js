@@ -100,4 +100,56 @@ describe('updateMempool DB isolation', function () {
     assert.ok(!calls.db.includes('endTransaction'), 'mempool failure must not roll back the block db')
     assert.strictEqual(decoder.mempoolBusy, false, 'the busy flag must be cleared after the cycle')
   })
+
+  // getrawmempool answers with an array of txids, and the JSON-RPC unwrap only checks that a
+  // result member is present. A malformed-but-iterable answer is the destructive one: a bare
+  // string dedups into per-character "txids", and deleteAndCompareTxsNotInList anti-joins the
+  // stored table against that snapshot and deletes every pending row.
+  it('a non-array getrawmempool answer skips the poll instead of reaching the delete', async () => {
+    const { decoder, calls } = buildDecoder(true)
+    decoder.connector.getRawMempool = async () => 'aabbcc'
+    await decoder.updateMempool()
+    assert.deepStrictEqual(calls.mempoolDb, [], 'a shape fault must not reach the mempool DB at all')
+    assert.deepStrictEqual(calls.db, [])
+    assert.strictEqual(decoder.mempoolBusy, false, 'the busy flag must be cleared so the next poll runs')
+  })
+
+  it('an empty node mempool still reaches the delete, so departed txs are pruned', async () => {
+    // [] is a legitimate answer, not a shape fault: the anti-join is exactly what prunes the
+    // stored rows when the node's mempool has drained.
+    const { decoder } = buildDecoder(true)
+    let received = null
+    decoder.mempoolDb.deleteAndCompareTxsNotInList = async (list) => {
+      received = list.slice(); return { transactionsDeleted: 0 }
+    }
+    decoder.connector.getRawMempool = async () => []
+    await decoder.updateMempool()
+    assert.deepStrictEqual(received, [], 'an empty snapshot must still be handed to the diff')
+  })
+
+  // deleteAndCompareTxsNotInList empties and refills the caller's array in place, leaving it
+  // holding only the new arrivals, so the cycle summary must not read that array for the
+  // mempool size: in steady state that reads 0 against a full table, which an operator takes
+  // for "mempool tracking has stopped".
+  it('the cycle summary reports the node mempool size, not the post-diff new arrivals', async () => {
+    const { decoder } = buildDecoder(true)
+    decoder.connector.getRawMempool = async () => ['ccc', 'bbb', 'aaa']
+    decoder.connector.getRawTransactions = async () => []
+    // Steady state: every txid the node reported is already stored, so the diff empties the list.
+    decoder.mempoolDb.deleteAndCompareTxsNotInList = async (list) => {
+      list.length = 0; return { transactionsDeleted: 0 }
+    }
+    const lines = []
+    const realLog = console.log
+    console.log = (...args) => { lines.push(args.join(' ')) }
+    try {
+      await decoder.updateMempool()
+    } finally {
+      console.log = realLog
+    }
+    const summary = lines.find((line) => line.startsWith('Mempool updated!'))
+    assert.ok(summary, 'the cycle must emit its summary line')
+    assert.match(summary, /3 in mempool/, 'the summary must report the size the node reported')
+    assert.match(summary, /0 new/, 'the post-diff length is the new-arrival count and must be labelled so')
+  })
 })

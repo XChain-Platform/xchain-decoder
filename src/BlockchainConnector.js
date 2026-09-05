@@ -521,7 +521,26 @@ class BlockchainConnector {
             }
             return headerHex + encodeVarintHex(txHexes.length) + txHexes.join('')
         } catch (err) {
-            throw new Error("There were problems reassembling a block without auxpow. " + err.message)
+            // Carry the fault's identity out with the message. The three RPC fetches above
+            // sit INSIDE this try, so a transport fault (an ECONNRESET from a saturated
+            // Dogecoin 1.14 RPC queue, an ECONNABORTED timeout, a node restart) lands here
+            // beside a genuine content fault, and only error.code and the rpcCode/rpcMessage
+            // sanitizeRpcError attaches separate the two. _auxPowParseErrorCount never
+            // decays, so once a height has escalated to this path every later failure at
+            // that height arrives through this catch, which is precisely where an operator
+            // has to tell an unreachable node from a block whose bytes are unusable.
+            // Mirrors the cause attachment getBlockWithoutAuxPow makes above.
+            //
+            // Deliberately NOT tagged auxPowParseFailure: that flag is the only signal
+            // fetchBlockHex escalates on, and aiming a per-tx fan-out at a node that is
+            // merely unreachable is the failure the comment above getBlockWithoutAuxPow
+            // describes. Errors leaving these RPC helpers have already passed through
+            // sanitizeRpcError, which scrubs config.auth, the Authorization header and
+            // error.request in place, so attaching one as cause carries no credential.
+            const reassembleErr = new Error("There were problems reassembling a block without auxpow. " + err.message)
+            reassembleErr.cause = err
+            if (err && err.code !== undefined) reassembleErr.code = err.code
+            throw reassembleErr
         }
     }
 

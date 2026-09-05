@@ -418,6 +418,12 @@ class XChainDecoder {
         this.reorgHaltReason = null
         this.reorgHaltAt = null
         this.reorgHaltCheckedAt = 0
+        // Whether a REORG_HALT row is known to be READABLE, as distinct from
+        // whether this decoder is halted. null = no halt has been raised or read
+        // yet; false = a halt exists in memory whose durable write could not be
+        // confirmed, which is the one state where a restart silently resumes the
+        // rollback and the bootstrap gate finds nothing to refuse on.
+        this.reorgHaltMarkerPersisted = null
         this._reorgHaltProbeInFlight = null
     }
 
@@ -633,6 +639,11 @@ class XChainDecoder {
                 this.reorgHaltReason    = (marker && marker.reason) || null
                 this.reorgHaltAt        = (marker && marker.at) || null
                 this.reorgHaltCheckedAt = now
+                // A marker this probe just READ is durable by observation, whatever the
+                // write that produced it reported. Raised here and never cleared here:
+                // finding no row is exactly the state an unconfirmed in-process halt
+                // leaves behind, so clearing on absence would erase the one signal.
+                if (this.reorgHalted) this.reorgHaltMarkerPersisted = true
                 if (this.reorgHalted && !wasHalted){
                     console.error('XChainDecoder: LATENT REORG_HALT MARKER PRESENT - this decoder carries a durable ' +
                         'REORG_HALT row from an aborted rollback. It will keep parsing forward and look healthy, but ' +
@@ -656,13 +667,17 @@ class XChainDecoder {
 
     // Cached view of the halt marker for health surfaces. `checked_at` is null until
     // the first successful probe, so a consumer can tell "not halted" apart from
-    // "never looked".
+    // "never looked". `marker_persisted` splits the halt from its evidence: null when
+    // no halt has been raised or seen, false when this process halted and could not
+    // confirm the durable row, true when a row is known readable.
     getReorgHaltStatus(){
         return {
             halted:     !!this.reorgHalted,
             reason:     this.reorgHaltReason || null,
             at:         this.reorgHaltAt || null,
-            checked_at: this.reorgHaltCheckedAt || null
+            checked_at: this.reorgHaltCheckedAt || null,
+            marker_persisted: (this.reorgHaltMarkerPersisted === null || this.reorgHaltMarkerPersisted === undefined)
+                ? null : !!this.reorgHaltMarkerPersisted
         }
     }
 
@@ -1753,8 +1768,10 @@ class XChainDecoder {
             throw new Error(msg)
         }
 
-        // Persist the durable halt marker before an abort throws (best-effort: swallow
-        // write errors so a marker failure never masks the loud abort). Feature-detected.
+        // Persist the durable halt marker before an abort throws. Feature-detected, and
+        // non-throwing so a marker failure never masks the loud abort, but NOT silent:
+        // the outcome is honoured, published on the health surface and logged, because
+        // an unrecorded halt is the one state where a restart resumes the rollback.
         const haltReorg = async (reason) => {
             // Set the in-memory health state first: the durable write is best-effort,
             // but this decoder is halted either way and every health surface must say
@@ -1777,9 +1794,12 @@ class XChainDecoder {
                     network: this.consensusNetwork,
                     reason:  reason,
                     depth:   blocksDeleted.length,
-                    marker_persisted: canPersist,
+                    // 'attempting', not 'persisted': this record is emitted BEFORE the
+                    // write, so it cannot know the outcome and must not claim one. The
+                    // REORG_HALT_MARKER record below carries the real answer.
+                    marker_write: canPersist ? 'attempting' : 'unavailable',
                     // Spelled out rather than left for the reader to infer from the
-                    // boolean: this is the one halt that /status and /live cannot
+                    // field: this is the one halt that /status and /live cannot
                     // report, because the marker they read is never written.
                     detail: canPersist ? undefined
                         : 'db.markReorgHalted is unavailable: the durable halt marker cannot be persisted, '
@@ -1788,11 +1808,60 @@ class XChainDecoder {
                 })
             } catch (_) { /* a diagnostic must never mask the abort it describes */ }
 
-            if (!canPersist) return
+            if (!canPersist) {
+                this.reorgHaltMarkerPersisted = false
+                return
+            }
+
+            // Honour the write result. markReorgHalted confirms the row by read-back
+            // and returns false when it cannot; the catch below only ever fires for a
+            // connection or SELECT fault, because insertEvent eats the INSERT error.
+            // Retried ONCE and without a sleep: a failed insertEvent rolls the open
+            // block transaction back (db.js insertEvent -> endTransaction), so the
+            // second attempt runs on a freshly leased pooled connection, which is a
+            // materially different attempt rather than the same one repeated. No
+            // backoff, because this sits directly in front of the abort throw and a
+            // marker write must never delay the fault it is describing.
+            let persisted = false
+            let lastError = null
+            let attempts  = 0
+            while (attempts < 2 && !persisted){
+                attempts++
+                try {
+                    persisted = (await this.db.markReorgHalted(reason)) === true
+                } catch (e) {
+                    lastError = e
+                }
+            }
+            this.reorgHaltMarkerPersisted = persisted
+
+            // The outcome record. Separate from the one above because the two answer
+            // different questions ("what halted, and why" vs "did the evidence land"),
+            // and because collapsing them would put the reason behind the write that
+            // may be the thing failing.
             try {
-                await this.db.markReorgHalted(reason)
-            } catch (e) {
-                console.error('verifyReorg: failed to persist REORG_HALT marker:', e)
+                getLogger().error('REORG_HALT_MARKER', {
+                    coin:    this.coinTick,
+                    network: this.consensusNetwork,
+                    marker_persisted: persisted,
+                    attempts: attempts,
+                    err: lastError ? (lastError.message || String(lastError)) : undefined
+                })
+            } catch (_) { /* a diagnostic must never mask the abort it describes */ }
+
+            if (!persisted){
+                // The incident shape the bootstrap gate exists to stop: the process is
+                // about to exit, the restart policy recycles the container, the entry
+                // guard reads a marker that was never written, the decoder finishes the
+                // over-deep rollback, and the gate counts zero markers and publishes
+                // this database as known-good. Nothing durable records it, so this line
+                // is the only evidence and it has to name the required action.
+                console.error('verifyReorg: the durable REORG_HALT marker could NOT be persisted after '
+                    + attempts + ' attempt(s)'
+                    + (lastError ? ' (' + (lastError.message || String(lastError)) + ')' : '')
+                    + '. This database is NOT a valid bootstrap source: a restart will re-enter verifyReorg '
+                    + 'with a zeroed depth counter and silently resume the over-deep rollback. '
+                    + 'REQUIRED OPERATOR ACTION: full resync from a known-good snapshot.')
             }
         }
 
@@ -3326,8 +3395,23 @@ class XChainDecoder {
             let mempoolStartTime = Date.now()
             this.mempoolBusy = true
             let rawMempool = []
+            // Mempool size as the node reported it, held separately because
+            // deleteAndCompareTxsNotInList below empties and refills rawMempool in place.
+            let nodeMempoolCount = 0
             try {
                 let rawMempoolUnordered = await this.connector.getRawMempool()
+
+                // getrawmempool answers with an array of txids; rpcResult only guarantees the
+                // result member is present, never its type. Reject any other shape HERE, at the
+                // boundary, and let the catch below skip the poll: a malformed-but-iterable
+                // answer (a bare string from an RPC proxy or a trimmed body) dedups into
+                // per-character "txids", and deleteAndCompareTxsNotInList then anti-joins the
+                // stored table against that snapshot and deletes every pending row, blanking
+                // the published feed until a healthy poll refills it. Mirrors the shape check
+                // the verbose-block consumer makes in BlockchainConnector.getBlockReassembled.
+                if (!Array.isArray(rawMempoolUnordered)) {
+                    throw new Error('getrawmempool did not return an array')
+                }
 
                 // Dedup + single O(n log n) sort. The old per-txid binary-insert
                 // (bs + splice) was O(n^2) in mempool size every poll cycle, a CPU
@@ -3343,7 +3427,8 @@ class XChainDecoder {
 
                 // Snapshot the node's total mempool size for the API's getmempool
                 // method (deduped count, matching what this cycle actually processes).
-                this.nodeMempoolTxCount = rawMempool.length
+                nodeMempoolCount = rawMempool.length
+                this.nodeMempoolTxCount = nodeMempoolCount
                 this.nodeMempoolUpdatedAt = Date.now()
 
             } catch (error) {
@@ -3362,7 +3447,10 @@ class XChainDecoder {
             let deletedInfo = await this.mempoolDb.deleteAndCompareTxsNotInList(rawMempool)
 
             let deletedTransactionsCount = deletedInfo.transactionsDeleted
-            
+            // Read the length before the batch loop, while it still means "new arrivals":
+            // the call above truncated rawMempool down to the txids this node has not stored.
+            let newArrivalsCount = rawMempool.length
+
             let i = 0
             while (i < rawMempool.length) {
                 let nextRawMempoolChunk = rawMempool.slice(i, i + MEMPOOL_BATCH_SIZE)
@@ -3465,8 +3553,10 @@ class XChainDecoder {
             let mempoolEndTime = Date.now()
             let timeString = this.millisecondsToTimeString(mempoolEndTime - mempoolStartTime)
 
+            // nodeMempoolCount, not rawMempool.length: the db diff empties and refills
+            // rawMempool in place, so by here its length is the new-arrival count.
             console.log("Mempool updated!"
-                + " Transactions (" + rawMempool.length + " in mempool, " + validTransactionsCount + " valid, " + deletedTransactionsCount + " less) [" + timeString + "]")
+                + " Transactions (" + nodeMempoolCount + " in mempool, " + newArrivalsCount + " new, " + validTransactionsCount + " valid, " + deletedTransactionsCount + " less) [" + timeString + "]")
             } finally {
                 // Always clear the busy flag, even if a DB or parse operation above threw.
                 // Otherwise a single transient failure would leave mempool tracking frozen

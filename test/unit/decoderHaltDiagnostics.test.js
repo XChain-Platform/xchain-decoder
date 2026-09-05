@@ -48,8 +48,11 @@ function installSink() {
     })
 }
 
+// Match the EVENT, not a substring of it. formatTextLine renders
+// `<ts> <level> [<service>] <msg> k=v ...`, so REORG_HALT_MARKER contains
+// REORG_HALT and a bare includes() would fold the two records into one count.
 function linesFor(event) {
-    return sink.lines.filter((l) => l.includes(event))
+    return sink.lines.filter((l) => l.includes('] ' + event + ' ') || l.endsWith('] ' + event))
 }
 
 function makeDecoder() {
@@ -96,21 +99,89 @@ describe('REORG_HALT: a halt the marker cannot record still leaves a record', fu
             'the record must carry the depth it was about to persist: ' + line)
         assert.ok(/reason="[^"]*safe-depth[^"]*"/.test(line),
             'the record must carry the reason it was about to persist: ' + line)
-        assert.ok(line.includes('marker_persisted=false'),
+        assert.ok(line.includes('marker_write=unavailable'),
             'the record must say the marker could not be written: ' + line)
         assert.ok(line.includes('/status') && line.includes('/live'),
             'the record must say which surfaces will NOT report the halt: ' + line)
+        // Nothing was attempted, so nothing may report an outcome.
+        assert.strictEqual(linesFor('REORG_HALT_MARKER').length, 0)
+        assert.strictEqual(decoder.getReorgHaltStatus().marker_persisted, false)
     })
 
     it('still emits REORG_HALT on the normal path, and says the marker was written', async function () {
         let marked = null
-        const decoder = haltingDecoder({ markReorgHalted: async (r) => { marked = r } })
+        // The db contract markReorgHalted answers on: TRUE only once a REORG_HALT row
+        // is readable. A stub returning undefined would be a stub asserting a write it
+        // never confirmed, which is the exact defect these cases exist for.
+        const decoder = haltingDecoder({ markReorgHalted: async (r) => { marked = r; return true } })
         await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/)
 
         const halts = linesFor('REORG_HALT')
         assert.strictEqual(halts.length, 1)
-        assert.ok(halts[0].includes('marker_persisted=true'), halts[0])
+        assert.ok(halts[0].includes('marker_write=attempting'), halts[0])
+        // The pre-write record cannot know the outcome, so it must not claim one.
+        assert.ok(!halts[0].includes('marker_persisted='),
+            'the pre-write record must not assert persistence: ' + halts[0])
+
+        const outcome = linesFor('REORG_HALT_MARKER')
+        assert.strictEqual(outcome.length, 1, 'the write outcome must produce exactly one record')
+        assert.ok(outcome[0].includes('marker_persisted=true'), outcome[0])
+        assert.ok(outcome[0].includes('attempts=1'), outcome[0])
         assert.ok(marked && /safe-depth/.test(marked), 'the durable marker is still written')
+        assert.strictEqual(decoder.getReorgHaltStatus().marker_persisted, true)
+    })
+
+    // The failure the bootstrap gate exists to stop: the marker write fails, the
+    // process exits, the restart policy recycles the container, the entry guard reads
+    // a row that was never written, and the gate counts zero markers and publishes the
+    // database as known-good. Before this, insertEvent swallowed the write error and
+    // returned false, markReorgHalted handed that straight back, haltReorg discarded
+    // it, and the one structured record said marker_persisted=true regardless.
+    it('reports marker_persisted=false when the durable write is refused, and still aborts', async function () {
+        const errors = []
+        const realError = console.error
+        console.error = (...a) => { errors.push(a.map(String).join(' ')) }
+        let attempts = 0
+        try {
+            const decoder = haltingDecoder({ markReorgHalted: async () => { attempts++; return false } })
+            await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/,
+                'a marker failure must never mask or replace the abort')
+
+            const outcome = linesFor('REORG_HALT_MARKER')
+            assert.strictEqual(outcome.length, 1)
+            assert.ok(outcome[0].includes('marker_persisted=false'),
+                'a refused write must never report as persisted: ' + outcome[0])
+            assert.strictEqual(attempts, 2, 'a refused write is retried once on a fresh connection')
+            assert.ok(outcome[0].includes('attempts=2'), outcome[0])
+            assert.strictEqual(decoder.getReorgHaltStatus().marker_persisted, false)
+            assert.strictEqual(decoder.getReorgHaltStatus().halted, true)
+        } finally {
+            console.error = realError
+        }
+        const critical = errors.filter((l) => l.includes('could NOT be persisted'))
+        assert.strictEqual(critical.length, 1,
+            'the only live evidence of an unrecorded halt must be logged: ' + JSON.stringify(errors))
+        assert.ok(/full resync/i.test(critical[0]),
+            'the line must name the required operator action: ' + critical[0])
+        assert.ok(/not a valid bootstrap source/i.test(critical[0]), critical[0])
+    })
+
+    it('carries the cause when the marker write throws rather than returning false', async function () {
+        const realError = console.error
+        console.error = () => {}
+        try {
+            const decoder = haltingDecoder({
+                markReorgHalted: async () => { throw new Error('lost connection to server') }
+            })
+            await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/)
+            const outcome = linesFor('REORG_HALT_MARKER')
+            assert.strictEqual(outcome.length, 1)
+            assert.ok(outcome[0].includes('marker_persisted=false'), outcome[0])
+            assert.ok(outcome[0].includes('lost connection to server'),
+                'the cause must ride the record: ' + outcome[0])
+        } finally {
+            console.error = realError
+        }
     })
 
     it('reports the halt in memory even when nothing durable can be written', async function () {
@@ -286,5 +357,45 @@ describe('db: a failed temp-table drop stops being silent', function () {
         assert.strictEqual(warned.length, 1)
         assert.ok(warned[0].includes('table=_mempool_node_snapshot'), warned[0])
         assert.ok(warned[0].includes('lost connection to server'), warned[0])
+    })
+})
+
+// api.js registers GET /status inside startApi(), which builds a real decoder and
+// opens a listening socket, so the route is not reachable from a unit test. The
+// contract is pinned at the source instead, the same way this repo pins the
+// getmempool JSON-RPC method (test/unit/mempoolApiSurface.test.js).
+//
+// What is pinned: reorg_halted never ships without reorg_halt_checked_at.
+// xchain-node's BootstrapHealthGate refuses a payload that owns the boolean and
+// carries a null/absent timestamp, because a decoder whose fail-soft marker probe
+// has NEVER completed publishes exactly what a clean one publishes. That gate probes
+// the JSON-RPC health surface first and falls back to GET /status, so the boolean
+// must never appear alone in either body.
+describe('api.js GET /status halt surface (source pin)', function () {
+    const fs   = require('fs')
+    const path = require('path')
+    const src  = fs.readFileSync(path.join(__dirname, '../../src/api.js'), 'utf8')
+
+    function statusRouteBody() {
+        const at = src.indexOf("app.get('/status'")
+        assert.ok(at > -1, 'GET /status route missing from api.js')
+        return src.slice(at, at + 3000)
+    }
+
+    it('publishes reorg_halt_checked_at beside reorg_halted', function () {
+        const body = statusRouteBody()
+        assert.ok(/reorg_halted:\s+reorgHalt\.halted/.test(body),
+            'GET /status no longer publishes reorg_halted')
+        assert.ok(/reorg_halt_checked_at:\s*reorgHalt\.checked_at/.test(body),
+            'GET /status publishes reorg_halted without the probe timestamp its consumers ' +
+            'need to tell "clean" apart from "never looked"')
+    })
+
+    it('spells the key exactly as the JSON-RPC health surface does', function () {
+        // The gate reads one key name across both surfaces; a near-miss spelling on
+        // the fallback body reads as an absent timestamp and refuses every decoder.
+        const occurrences = src.match(/reorg_halt_checked_at/g) || []
+        assert.ok(occurrences.length >= 2,
+            'reorg_halt_checked_at must appear on both the health result and GET /status')
     })
 })

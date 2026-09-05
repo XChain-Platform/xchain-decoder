@@ -613,8 +613,6 @@ module.exports = {
     subCommandCostWeight,
     batchCostWeight,
     expandSubCommandAlias,
-    expandAliasName,
-    isNumeric,
     isLegacyActionFormat,
     subCommandTick,
     subCommandLimitKey,

@@ -2702,9 +2702,29 @@ class Database {
     // Called on every verifyReorg abort path BEFORE the throw, so a restart cannot
     // resume the over-deep rollback. Best-effort by design; the caller swallows any
     // error so a marker-write failure never masks the original loud abort.
+    //
+    // Returns TRUE only when a REORG_HALT row is readable afterwards, never merely
+    // "the INSERT reported no error". insertEvent swallows every write error and
+    // returns false, so the boolean it hands back is the only failure signal that
+    // exists here, and a caller that trusts it without a read-back is trusting a
+    // driver's ack for a row nobody has seen. That distinction is the whole point:
+    // this marker is the only thing standing between a restarted decoder and a
+    // silently resumed over-deep rollback, and every consumer of it (the entry
+    // guard, the health surfaces, the bootstrap gate) reads the ROW, not the ack.
     async markReorgHalted(reason){
         if (await this.isReorgHalted()) return true
-        return this.insertEvent('REORG_HALT', { reason: reason, at: new Date().toISOString() })
+        const written = await this.insertEvent('REORG_HALT', { reason: reason, at: new Date().toISOString() })
+        // Anything other than a clean insert is a failure. DUPLICATED_TRANSACTION
+        // is truthy and would otherwise read as success, so the read-back below
+        // decides that case on the row rather than on the errno.
+        if (written === false) return false
+        try {
+            return await this.isReorgHalted()
+        } catch (_) {
+            // The write may well have landed, but nothing here can say so, and an
+            // unconfirmed marker must never report as a confirmed one.
+            return false
+        }
     }
 }
 
