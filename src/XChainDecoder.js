@@ -1471,9 +1471,37 @@ class XChainDecoder {
                                 // P2WSH chunk carrier: same shape as P2SH, chunks in the witness.
                                 } else if (dataWithoutObfuscation.subarray(MAGIC_WORD.length).equals(P2WSH_BUFFER)){
                                     p2shFundingTxId = firstInputTxId // commit tx carrying any native-coin fee output
+                                    // A chain that declares no segwit has no witness carrier, so refuse
+                                    // to read payload out of a witness stack there instead of trusting
+                                    // upstream node validation to keep one from ever arriving. Same
+                                    // per-chain capability gate the taproot envelope lane already carries
+                                    // (envelopeRecognitionHeight), which this older lane never got.
+                                    //
+                                    // `=== false`, never a falsy test: supportsSegwit is declared only on
+                                    // the non-segwit coin (src/coins/DOGE.js), so it is undefined on
+                                    // BTC/LTC and `!this.network.supportsSegwit` would disable the whole
+                                    // P2WSH lane on the chains that DO use it and change how already
+                                    // indexed history decodes.
+                                    //
+                                    // Placed inside the branch body rather than in the `else if`
+                                    // condition, and after p2shFundingTxId is set, on purpose. Folding it
+                                    // into the condition would fall through to the trailing `else`, which
+                                    // appends the marker remainder as raw payload; clearing the funding
+                                    // txid would drop the commit's native-fee attribution. Both are
+                                    // behaviour changes on a live chain, and this is a capability gate.
+                                    // Against chain-realistic input it is a strict no-op: a non-segwit
+                                    // transaction carries no witness stack, so every input already failed
+                                    // the shape check below and nextDataBuffer already stayed empty.
                                     for (let txInputIndex=0;txInputIndex < transaction.ins.length;txInputIndex++){
                                         let nextInput = transaction.ins[txInputIndex]
                                         try {
+                                            // Per-chain capability gate (see above). `continue`, not
+                                            // `break`: this branch sits inside the enclosing OUTPUT loop,
+                                            // so breaking here would stop scanning the transaction's
+                                            // remaining outputs. Same idiom and same meaning as the
+                                            // witness-shape check on the next line: this input carries no
+                                            // payload for us.
+                                            if (this.network.supportsSegwit === false) continue
                                             if (!nextInput["witness"] || nextInput["witness"].length < 3 || !Buffer.isBuffer(nextInput["witness"][2])) continue
                                             let decodedRedeemScript = bitcoin.script.decompile(nextInput["witness"][2])
                                             if (!decodedRedeemScript || decodedRedeemScript.length < 1 || !Buffer.isBuffer(decodedRedeemScript[0])) continue
@@ -1768,6 +1796,46 @@ class XChainDecoder {
             throw new Error(msg)
         }
 
+        // Depth already rolled back and not yet re-synced, carried across restarts.
+        //
+        // The guard above depends on a marker written on the ABORT path, which is
+        // exactly when the database may be the thing failing: markReorgHalted is
+        // best-effort, so two failed writes leave the halt recorded nowhere and this
+        // entry guard sees a clean database. The counter below does not have that
+        // hole, because deleteBlockByIndex commits each block's REORG marker inside
+        // the same transaction as the delete: whatever else fails, the evidence of a
+        // completed delete is durable. Counting the marked heights above the current
+        // tip therefore reconstructs the depth of an interrupted rollback, and the
+        // ceiling holds across a restart with no successful abort-time write.
+        //
+        // Fail-closed: an unreadable count is retried, and a persistent fault throws
+        // out of verifyReorg BEFORE any delete. Deliberately NOT a haltReorg - like
+        // the walk's read-fault catch below, a read fault is infrastructure, and a
+        // durable REORG_HALT would block every later reorg until an operator cleared
+        // it. Feature-detected so the minimal-mock verifyReorg tests stay unaffected.
+        let priorDepth = 0
+        if (typeof this.db.countReorgDeletesAboveTip === 'function'){
+            let seedErr = null
+            for (let attempt = 1; attempt <= 3; attempt++){
+                try {
+                    priorDepth = await this.db.countReorgDeletesAboveTip()
+                    seedErr = null
+                    break
+                } catch (err){
+                    seedErr = err
+                    console.error(`reorg: could not read the prior rollback depth (attempt ${attempt}/3)`, err)
+                    if (attempt < 3) await this.sleep(3000)
+                }
+            }
+            if (seedErr){
+                const msg = 'verifyReorg: the prior rollback depth could not be read, so the dispenser '
+                    + 'safe-depth ceiling cannot be enforced across a restart. Refusing to delete any block: '
+                    + (seedErr.message || String(seedErr))
+                console.error(msg)
+                throw new Error(msg)
+            }
+        }
+
         // Persist the durable halt marker before an abort throws. Feature-detected, and
         // non-throwing so a marker failure never masks the loud abort, but NOT silent:
         // the outcome is honoured, published on the health surface and logged, because
@@ -1875,11 +1943,19 @@ class XChainDecoder {
         // strictly safer than a silently corrupt DB: stop and require an
         // operator-driven resync. Called BEFORE each delete attempt (outside
         // the per-block retry try/catch, so the throw is not retried away).
+        //
+        // The ceiling is measured over priorDepth + this run's deletes, because the
+        // dispenser purge window is a property of the DATABASE, not of one process:
+        // 100 blocks deleted before a restart and 100 after are 200 blocks past the
+        // tip either way, and counting only the current invocation is what let a
+        // restart finish an aborted over-deep rollback.
         const assertWithinSafeDepth = async (lastBlockIndex) => {
-            if (blocksDeleted.length >= DISPENSER_EXPIRE_SAFE_DEPTH){
+            if (priorDepth + blocksDeleted.length >= DISPENSER_EXPIRE_SAFE_DEPTH){
                 const msg = "verifyReorg: reorg depth exceeds the dispenser safe-depth window "
                     + "(DISPENSER_EXPIRE_SAFE_DEPTH=" + DISPENSER_EXPIRE_SAFE_DEPTH + "). Already rolled back "
-                    + blocksDeleted.length + " blocks; soft-expired dispenser rows for block height "
+                    + (priorDepth + blocksDeleted.length) + " blocks (" + blocksDeleted.length
+                    + " in this run, resumed from " + priorDepth + " already deleted above the tip); "
+                    + "soft-expired dispenser rows for block height "
                     + lastBlockIndex + " and below have already been hard-purged, so continuing would "
                     + "silently lose money-bearing dispenser state. Aborting. Recovery: perform a full "
                     + "resync from a known-good snapshot."
