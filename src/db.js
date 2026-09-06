@@ -2540,16 +2540,39 @@ class Database {
     // distinguishable, because decoding a block against a silently-empty set would
     // drop every dispense output on this instance only (instance-dependent block
     // contents). The block loop retries the block on null.
-    async getAllOpenDispenserAddresses(){
+    //
+    // CANCELLATION GRACE. `graceFloor` is the oldest expiration still eligible for capture,
+    // computed by dispenserCancelGrace.cancelGraceFloor from the block's own header time, and
+    // null below DISPENSER_CANCEL_GRACE_ACTIVATION. A finite floor admits rows the soft-expire
+    // has already stamped whose expiration is no older than it, which is how the decoder keeps
+    // capturing payments to a dispenser the indexer holds fillable through its cancellation
+    // grace period. It widens THIS query and nothing else: the expiry mark, the extend mirror,
+    // the oracle-address resolution and the hard purge keep their timing, so the divergence
+    // stays in the over-capture direction the advisory contract above calls safe. Rationale and
+    // the reason the MARK must not move instead: src/dispenserCancelGrace.js.
+    async getAllOpenDispenserAddresses(graceFloor){
         let db    = await this.getConnection();
-        let query =
-            `SELECT ia.address AS address
+        // Strict number test, not Number(): `Number(null)` is 0, which would arm a floor of
+        // 1970 on the null cancelGraceFloor returns below the gate and widen the capture set
+        // on an unarmed network. Fail closed on anything that is not already a finite number.
+        const floor       = graceFloor
+        const graceActive = (typeof floor === 'number') && Number.isFinite(floor)
+        // Two literal statements rather than one composed string: the below-gate query must
+        // stay exactly the text the fleet has been running, so a re-decode of pre-flag-day
+        // history cannot drift on a formatting edit.
+        let query = graceActive
+            ? `SELECT ia.address AS address
+            FROM dispensers op
+            LEFT JOIN index_addresses ia ON ia.id = op.address_id
+            WHERE op.expired_block_index IS NULL
+               OR op.expiration >= ?`
+            : `SELECT ia.address AS address
             FROM dispensers op
             LEFT JOIN index_addresses ia ON ia.id = op.address_id
             WHERE op.expired_block_index IS NULL`
         let addresses = new Set()
         try {
-            let rows = await db.query(query);
+            let rows = graceActive ? await db.query(query, [floor]) : await db.query(query);
             for (let row of rows){
                 if (row["address"] != null)
                     addresses.add(row["address"])

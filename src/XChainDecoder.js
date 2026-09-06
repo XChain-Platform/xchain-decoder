@@ -30,6 +30,7 @@ const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
 const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress, V0_GIVE_COIN_INDEX, V0_GET_COIN_INDEX, V0_GET_ADDRESS_INDEX, V0_REQUIRED_FIELD_COUNT, ORACLE_ADDRESS_INDEX, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('./oracleFeeOutput')
 const { isDispenserExpiryRealignActive } = require('./dispenserExpiryRealign')
+const { cancelGraceFloor } = require('./dispenserCancelGrace')
 const { captureCommands, collapseDispenserRegistrations, isBatchSubCommandCaptureActive } = require('./batchSubCommandCapture')
 const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./chainIdentity')
 // REORG_HALT rides getLogger() rather than this.logError, because a patched
@@ -2771,7 +2772,16 @@ class XChainDecoder {
                 // null signals the query failed: decoding the block against an empty set
                 // would silently drop every dispense output on this instance only, so
                 // retry the block instead.
-                let openDispenserAddresses = await this.db.getAllOpenDispenserAddresses()
+                //
+                // CANCELLATION GRACE (at/above DISPENSER_CANCEL_GRACE_ACTIVATION): the floor
+                // widens the set by dispensers whose expiration is inside the indexer's
+                // cancellation grace period, which the indexer keeps fillable for an hour past
+                // a cancel while the decoder's soft-expire knows nothing about cancels. Below
+                // the gate the floor is null and the set is the unwidened one, so a
+                // from-genesis re-decode reproduces what the fleet wrote. The floor derives
+                // only from this block's header time, so every honest node loads the same set.
+                let openDispenserAddresses = await this.db.getAllOpenDispenserAddresses(
+                    cancelGraceFloor(this.consensusNetwork, block.timestamp))
                 if (openDispenserAddresses == null){
                     console.error(`Could not load open dispenser addresses for block ${nextBlockHeight}; retrying block`)
                     await this.db.endTransaction()
