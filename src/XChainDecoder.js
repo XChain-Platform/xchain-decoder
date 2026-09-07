@@ -30,6 +30,7 @@ const CryptoNetworks = require('./CryptoNetworks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
 const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress, V0_GIVE_COIN_INDEX, V0_GET_COIN_INDEX, V0_GET_ADDRESS_INDEX, V0_REQUIRED_FIELD_COUNT, ORACLE_ADDRESS_INDEX, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('./oracleFeeOutput')
 const { isDispenserExpiryRealignActive } = require('./dispenserExpiryRealign')
+const { cancelGraceFloor } = require('./dispenserCancelGrace')
 const { captureCommands, collapseDispenserRegistrations, isBatchSubCommandCaptureActive } = require('./batchSubCommandCapture')
 const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./chainIdentity')
 // REORG_HALT rides getLogger() rather than this.logError, because a patched
@@ -102,15 +103,16 @@ const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // reorg-recovery window, or a row is deleted before a legal in-window reorg can
 // restore it (deleteBlockByIndex then matches zero rows), permanently losing a
 // money-bearing dispenser on the reorged node. The platform's deepest window is
-// DOGE = 120 (xchain-utxo-tracker DEFAULT_UNDO_BLOCKS: BTC 12 / LTC 48 / DOGE 120);
-// the previous flat 100 sat BELOW DOGE's window. Invariant: SAFE_DEPTH >=
+// 120, and TWO chains now sit on it (xchain-utxo-tracker DEFAULT_UNDO_BLOCKS:
+// BTC 12 / LTC 120 / DOGE 120; LTC was 48 until a 2026-09-01 testnet fork walked
+// past it); the previous flat 100 sat BELOW that window. Invariant: SAFE_DEPTH >=
 // deepest undo window + margin. The +6 margin means a small undo-window re-tune
 // cannot land exactly at the purge threshold; dispenserSafeDepth.test.js
 // enforces the invariant with a conformance read of undo-blocks.js, so raising
 // any chain's window past the margin fails the suite until this is bumped.
 // Purging deeper is the conservative direction (rows are merely retained longer
 // before hard-purge; expiry semantics and action evaluation are unchanged).
-const DISPENSER_EXPIRE_SAFE_DEPTH = 126 // 120 (DOGE undo window) + 6 margin
+const DISPENSER_EXPIRE_SAFE_DEPTH = 126 // 120 (deepest undo window, LTC and DOGE) + 6 margin
 // There is deliberately no DISPENSER_CLOSE_DELAY twin of the indexer's here: the decoder
 // does not mirror dispenser cancels, so it never needs to close a row at the height the
 // indexer's DISPENSER_CLOSE fires. Reintroducing a closing mirror would need that pinned
@@ -417,6 +419,12 @@ class XChainDecoder {
         this.reorgHaltReason = null
         this.reorgHaltAt = null
         this.reorgHaltCheckedAt = 0
+        // Whether a REORG_HALT row is known to be READABLE, as distinct from
+        // whether this decoder is halted. null = no halt has been raised or read
+        // yet; false = a halt exists in memory whose durable write could not be
+        // confirmed, which is the one state where a restart silently resumes the
+        // rollback and the bootstrap gate finds nothing to refuse on.
+        this.reorgHaltMarkerPersisted = null
         this._reorgHaltProbeInFlight = null
     }
 
@@ -632,6 +640,11 @@ class XChainDecoder {
                 this.reorgHaltReason    = (marker && marker.reason) || null
                 this.reorgHaltAt        = (marker && marker.at) || null
                 this.reorgHaltCheckedAt = now
+                // A marker this probe just READ is durable by observation, whatever the
+                // write that produced it reported. Raised here and never cleared here:
+                // finding no row is exactly the state an unconfirmed in-process halt
+                // leaves behind, so clearing on absence would erase the one signal.
+                if (this.reorgHalted) this.reorgHaltMarkerPersisted = true
                 if (this.reorgHalted && !wasHalted){
                     console.error('XChainDecoder: LATENT REORG_HALT MARKER PRESENT - this decoder carries a durable ' +
                         'REORG_HALT row from an aborted rollback. It will keep parsing forward and look healthy, but ' +
@@ -655,13 +668,17 @@ class XChainDecoder {
 
     // Cached view of the halt marker for health surfaces. `checked_at` is null until
     // the first successful probe, so a consumer can tell "not halted" apart from
-    // "never looked".
+    // "never looked". `marker_persisted` splits the halt from its evidence: null when
+    // no halt has been raised or seen, false when this process halted and could not
+    // confirm the durable row, true when a row is known readable.
     getReorgHaltStatus(){
         return {
             halted:     !!this.reorgHalted,
             reason:     this.reorgHaltReason || null,
             at:         this.reorgHaltAt || null,
-            checked_at: this.reorgHaltCheckedAt || null
+            checked_at: this.reorgHaltCheckedAt || null,
+            marker_persisted: (this.reorgHaltMarkerPersisted === null || this.reorgHaltMarkerPersisted === undefined)
+                ? null : !!this.reorgHaltMarkerPersisted
         }
     }
 
@@ -1455,9 +1472,37 @@ class XChainDecoder {
                                 // P2WSH chunk carrier: same shape as P2SH, chunks in the witness.
                                 } else if (dataWithoutObfuscation.subarray(MAGIC_WORD.length).equals(P2WSH_BUFFER)){
                                     p2shFundingTxId = firstInputTxId // commit tx carrying any native-coin fee output
+                                    // A chain that declares no segwit has no witness carrier, so refuse
+                                    // to read payload out of a witness stack there instead of trusting
+                                    // upstream node validation to keep one from ever arriving. Same
+                                    // per-chain capability gate the taproot envelope lane already carries
+                                    // (envelopeRecognitionHeight), which this older lane never got.
+                                    //
+                                    // `=== false`, never a falsy test: supportsSegwit is declared only on
+                                    // the non-segwit coin (src/coins/DOGE.js), so it is undefined on
+                                    // BTC/LTC and `!this.network.supportsSegwit` would disable the whole
+                                    // P2WSH lane on the chains that DO use it and change how already
+                                    // indexed history decodes.
+                                    //
+                                    // Placed inside the branch body rather than in the `else if`
+                                    // condition, and after p2shFundingTxId is set, on purpose. Folding it
+                                    // into the condition would fall through to the trailing `else`, which
+                                    // appends the marker remainder as raw payload; clearing the funding
+                                    // txid would drop the commit's native-fee attribution. Both are
+                                    // behaviour changes on a live chain, and this is a capability gate.
+                                    // Against chain-realistic input it is a strict no-op: a non-segwit
+                                    // transaction carries no witness stack, so every input already failed
+                                    // the shape check below and nextDataBuffer already stayed empty.
                                     for (let txInputIndex=0;txInputIndex < transaction.ins.length;txInputIndex++){
                                         let nextInput = transaction.ins[txInputIndex]
                                         try {
+                                            // Per-chain capability gate (see above). `continue`, not
+                                            // `break`: this branch sits inside the enclosing OUTPUT loop,
+                                            // so breaking here would stop scanning the transaction's
+                                            // remaining outputs. Same idiom and same meaning as the
+                                            // witness-shape check on the next line: this input carries no
+                                            // payload for us.
+                                            if (this.network.supportsSegwit === false) continue
                                             if (!nextInput["witness"] || nextInput["witness"].length < 3 || !Buffer.isBuffer(nextInput["witness"][2])) continue
                                             let decodedRedeemScript = bitcoin.script.decompile(nextInput["witness"][2])
                                             if (!decodedRedeemScript || decodedRedeemScript.length < 1 || !Buffer.isBuffer(decodedRedeemScript[0])) continue
@@ -1752,8 +1797,50 @@ class XChainDecoder {
             throw new Error(msg)
         }
 
-        // Persist the durable halt marker before an abort throws (best-effort: swallow
-        // write errors so a marker failure never masks the loud abort). Feature-detected.
+        // Depth already rolled back and not yet re-synced, carried across restarts.
+        //
+        // The guard above depends on a marker written on the ABORT path, which is
+        // exactly when the database may be the thing failing: markReorgHalted is
+        // best-effort, so two failed writes leave the halt recorded nowhere and this
+        // entry guard sees a clean database. The counter below does not have that
+        // hole, because deleteBlockByIndex commits each block's REORG marker inside
+        // the same transaction as the delete: whatever else fails, the evidence of a
+        // completed delete is durable. Counting the marked heights above the current
+        // tip therefore reconstructs the depth of an interrupted rollback, and the
+        // ceiling holds across a restart with no successful abort-time write.
+        //
+        // Fail-closed: an unreadable count is retried, and a persistent fault throws
+        // out of verifyReorg BEFORE any delete. Deliberately NOT a haltReorg - like
+        // the walk's read-fault catch below, a read fault is infrastructure, and a
+        // durable REORG_HALT would block every later reorg until an operator cleared
+        // it. Feature-detected so the minimal-mock verifyReorg tests stay unaffected.
+        let priorDepth = 0
+        if (typeof this.db.countReorgDeletesAboveTip === 'function'){
+            let seedErr = null
+            for (let attempt = 1; attempt <= 3; attempt++){
+                try {
+                    priorDepth = await this.db.countReorgDeletesAboveTip()
+                    seedErr = null
+                    break
+                } catch (err){
+                    seedErr = err
+                    console.error(`reorg: could not read the prior rollback depth (attempt ${attempt}/3)`, err)
+                    if (attempt < 3) await this.sleep(3000)
+                }
+            }
+            if (seedErr){
+                const msg = 'verifyReorg: the prior rollback depth could not be read, so the dispenser '
+                    + 'safe-depth ceiling cannot be enforced across a restart. Refusing to delete any block: '
+                    + (seedErr.message || String(seedErr))
+                console.error(msg)
+                throw new Error(msg)
+            }
+        }
+
+        // Persist the durable halt marker before an abort throws. Feature-detected, and
+        // non-throwing so a marker failure never masks the loud abort, but NOT silent:
+        // the outcome is honoured, published on the health surface and logged, because
+        // an unrecorded halt is the one state where a restart resumes the rollback.
         const haltReorg = async (reason) => {
             // Set the in-memory health state first: the durable write is best-effort,
             // but this decoder is halted either way and every health surface must say
@@ -1776,9 +1863,12 @@ class XChainDecoder {
                     network: this.consensusNetwork,
                     reason:  reason,
                     depth:   blocksDeleted.length,
-                    marker_persisted: canPersist,
+                    // 'attempting', not 'persisted': this record is emitted BEFORE the
+                    // write, so it cannot know the outcome and must not claim one. The
+                    // REORG_HALT_MARKER record below carries the real answer.
+                    marker_write: canPersist ? 'attempting' : 'unavailable',
                     // Spelled out rather than left for the reader to infer from the
-                    // boolean: this is the one halt that /status and /live cannot
+                    // field: this is the one halt that /status and /live cannot
                     // report, because the marker they read is never written.
                     detail: canPersist ? undefined
                         : 'db.markReorgHalted is unavailable: the durable halt marker cannot be persisted, '
@@ -1787,11 +1877,60 @@ class XChainDecoder {
                 })
             } catch (_) { /* a diagnostic must never mask the abort it describes */ }
 
-            if (!canPersist) return
+            if (!canPersist) {
+                this.reorgHaltMarkerPersisted = false
+                return
+            }
+
+            // Honour the write result. markReorgHalted confirms the row by read-back
+            // and returns false when it cannot; the catch below only ever fires for a
+            // connection or SELECT fault, because insertEvent eats the INSERT error.
+            // Retried ONCE and without a sleep: a failed insertEvent rolls the open
+            // block transaction back (db.js insertEvent -> endTransaction), so the
+            // second attempt runs on a freshly leased pooled connection, which is a
+            // materially different attempt rather than the same one repeated. No
+            // backoff, because this sits directly in front of the abort throw and a
+            // marker write must never delay the fault it is describing.
+            let persisted = false
+            let lastError = null
+            let attempts  = 0
+            while (attempts < 2 && !persisted){
+                attempts++
+                try {
+                    persisted = (await this.db.markReorgHalted(reason)) === true
+                } catch (e) {
+                    lastError = e
+                }
+            }
+            this.reorgHaltMarkerPersisted = persisted
+
+            // The outcome record. Separate from the one above because the two answer
+            // different questions ("what halted, and why" vs "did the evidence land"),
+            // and because collapsing them would put the reason behind the write that
+            // may be the thing failing.
             try {
-                await this.db.markReorgHalted(reason)
-            } catch (e) {
-                console.error('verifyReorg: failed to persist REORG_HALT marker:', e)
+                getLogger().error('REORG_HALT_MARKER', {
+                    coin:    this.coinTick,
+                    network: this.consensusNetwork,
+                    marker_persisted: persisted,
+                    attempts: attempts,
+                    err: lastError ? (lastError.message || String(lastError)) : undefined
+                })
+            } catch (_) { /* a diagnostic must never mask the abort it describes */ }
+
+            if (!persisted){
+                // The incident shape the bootstrap gate exists to stop: the process is
+                // about to exit, the restart policy recycles the container, the entry
+                // guard reads a marker that was never written, the decoder finishes the
+                // over-deep rollback, and the gate counts zero markers and publishes
+                // this database as known-good. Nothing durable records it, so this line
+                // is the only evidence and it has to name the required action.
+                console.error('verifyReorg: the durable REORG_HALT marker could NOT be persisted after '
+                    + attempts + ' attempt(s)'
+                    + (lastError ? ' (' + (lastError.message || String(lastError)) + ')' : '')
+                    + '. This database is NOT a valid bootstrap source: a restart will re-enter verifyReorg '
+                    + 'with a zeroed depth counter and silently resume the over-deep rollback. '
+                    + 'REQUIRED OPERATOR ACTION: full resync from a known-good snapshot.')
             }
         }
 
@@ -1805,11 +1944,19 @@ class XChainDecoder {
         // strictly safer than a silently corrupt DB: stop and require an
         // operator-driven resync. Called BEFORE each delete attempt (outside
         // the per-block retry try/catch, so the throw is not retried away).
+        //
+        // The ceiling is measured over priorDepth + this run's deletes, because the
+        // dispenser purge window is a property of the DATABASE, not of one process:
+        // 100 blocks deleted before a restart and 100 after are 200 blocks past the
+        // tip either way, and counting only the current invocation is what let a
+        // restart finish an aborted over-deep rollback.
         const assertWithinSafeDepth = async (lastBlockIndex) => {
-            if (blocksDeleted.length >= DISPENSER_EXPIRE_SAFE_DEPTH){
+            if (priorDepth + blocksDeleted.length >= DISPENSER_EXPIRE_SAFE_DEPTH){
                 const msg = "verifyReorg: reorg depth exceeds the dispenser safe-depth window "
                     + "(DISPENSER_EXPIRE_SAFE_DEPTH=" + DISPENSER_EXPIRE_SAFE_DEPTH + "). Already rolled back "
-                    + blocksDeleted.length + " blocks; soft-expired dispenser rows for block height "
+                    + (priorDepth + blocksDeleted.length) + " blocks (" + blocksDeleted.length
+                    + " in this run, resumed from " + priorDepth + " already deleted above the tip); "
+                    + "soft-expired dispenser rows for block height "
                     + lastBlockIndex + " and below have already been hard-purged, so continuing would "
                     + "silently lose money-bearing dispenser state. Aborting. Recovery: perform a full "
                     + "resync from a known-good snapshot."
@@ -2625,7 +2772,16 @@ class XChainDecoder {
                 // null signals the query failed: decoding the block against an empty set
                 // would silently drop every dispense output on this instance only, so
                 // retry the block instead.
-                let openDispenserAddresses = await this.db.getAllOpenDispenserAddresses()
+                //
+                // CANCELLATION GRACE (at/above DISPENSER_CANCEL_GRACE_ACTIVATION): the floor
+                // widens the set by dispensers whose expiration is inside the indexer's
+                // cancellation grace period, which the indexer keeps fillable for an hour past
+                // a cancel while the decoder's soft-expire knows nothing about cancels. Below
+                // the gate the floor is null and the set is the unwidened one, so a
+                // from-genesis re-decode reproduces what the fleet wrote. The floor derives
+                // only from this block's header time, so every honest node loads the same set.
+                let openDispenserAddresses = await this.db.getAllOpenDispenserAddresses(
+                    cancelGraceFloor(this.consensusNetwork, block.timestamp))
                 if (openDispenserAddresses == null){
                     console.error(`Could not load open dispenser addresses for block ${nextBlockHeight}; retrying block`)
                     await this.db.endTransaction()
@@ -3325,8 +3481,23 @@ class XChainDecoder {
             let mempoolStartTime = Date.now()
             this.mempoolBusy = true
             let rawMempool = []
+            // Mempool size as the node reported it, held separately because
+            // deleteAndCompareTxsNotInList below empties and refills rawMempool in place.
+            let nodeMempoolCount = 0
             try {
                 let rawMempoolUnordered = await this.connector.getRawMempool()
+
+                // getrawmempool answers with an array of txids; rpcResult only guarantees the
+                // result member is present, never its type. Reject any other shape HERE, at the
+                // boundary, and let the catch below skip the poll: a malformed-but-iterable
+                // answer (a bare string from an RPC proxy or a trimmed body) dedups into
+                // per-character "txids", and deleteAndCompareTxsNotInList then anti-joins the
+                // stored table against that snapshot and deletes every pending row, blanking
+                // the published feed until a healthy poll refills it. Mirrors the shape check
+                // the verbose-block consumer makes in BlockchainConnector.getBlockReassembled.
+                if (!Array.isArray(rawMempoolUnordered)) {
+                    throw new Error('getrawmempool did not return an array')
+                }
 
                 // Dedup + single O(n log n) sort. The old per-txid binary-insert
                 // (bs + splice) was O(n^2) in mempool size every poll cycle, a CPU
@@ -3342,7 +3513,8 @@ class XChainDecoder {
 
                 // Snapshot the node's total mempool size for the API's getmempool
                 // method (deduped count, matching what this cycle actually processes).
-                this.nodeMempoolTxCount = rawMempool.length
+                nodeMempoolCount = rawMempool.length
+                this.nodeMempoolTxCount = nodeMempoolCount
                 this.nodeMempoolUpdatedAt = Date.now()
 
             } catch (error) {
@@ -3361,7 +3533,10 @@ class XChainDecoder {
             let deletedInfo = await this.mempoolDb.deleteAndCompareTxsNotInList(rawMempool)
 
             let deletedTransactionsCount = deletedInfo.transactionsDeleted
-            
+            // Read the length before the batch loop, while it still means "new arrivals":
+            // the call above truncated rawMempool down to the txids this node has not stored.
+            let newArrivalsCount = rawMempool.length
+
             let i = 0
             while (i < rawMempool.length) {
                 let nextRawMempoolChunk = rawMempool.slice(i, i + MEMPOOL_BATCH_SIZE)
@@ -3464,8 +3639,10 @@ class XChainDecoder {
             let mempoolEndTime = Date.now()
             let timeString = this.millisecondsToTimeString(mempoolEndTime - mempoolStartTime)
 
+            // nodeMempoolCount, not rawMempool.length: the db diff empties and refills
+            // rawMempool in place, so by here its length is the new-arrival count.
             console.log("Mempool updated!"
-                + " Transactions (" + rawMempool.length + " in mempool, " + validTransactionsCount + " valid, " + deletedTransactionsCount + " less) [" + timeString + "]")
+                + " Transactions (" + nodeMempoolCount + " in mempool, " + newArrivalsCount + " new, " + validTransactionsCount + " valid, " + deletedTransactionsCount + " less) [" + timeString + "]")
             } finally {
                 // Always clear the busy flag, even if a DB or parse operation above threw.
                 // Otherwise a single transient failure would leave mempool tracking frozen

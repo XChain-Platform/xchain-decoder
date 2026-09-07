@@ -97,6 +97,49 @@ describe('malformed-AuxPoW block reassembly fallback', function () {
             })
             await assert.rejects(() => connector.getBlockReassembled('hash'), /no raw tx for in-block txid/)
         })
+
+        // The three RPC fetches sit inside the try, so a transport fault is wrapped by the
+        // same catch that wraps a content fault. Once _auxPowParseErrorCount has escalated a
+        // height into this path it never decays, so every later failure at that height comes
+        // through here, and error.code is the only thing separating "the node is unreachable"
+        // from "this block's bytes are unusable" in the operator log.
+        it('preserves error.code and the original error as cause on a transport fault', async function () {
+            const transportErr = new Error('socket hang up')
+            transportErr.code = 'ECONNRESET'
+            const connector = makeConnector({
+                getBlockHeader: async () => { throw transportErr },
+            })
+            await assert.rejects(
+                () => connector.getBlockReassembled('hash'),
+                (err) => {
+                    assert.strictEqual(err.code, 'ECONNRESET', 'error.code must survive the wrap')
+                    assert.strictEqual(err.cause, transportErr, 'the original error must travel as cause')
+                    assert.match(err.message, /^There were problems reassembling a block without auxpow\. /,
+                        'the message prefix must stay byte-identical for existing log greps')
+                    assert.strictEqual(err.auxPowParseFailure, undefined,
+                        'a transport fault must never carry the escalation tag')
+                    return true
+                }
+            )
+        })
+
+        // A content fault raised inside the try has no .code, so the wrapper must not invent
+        // one, and must still stay untagged: escalation is getBlockWithoutAuxPow's to signal.
+        it('wraps a content fault with a cause and no invented code', async function () {
+            const connector = makeConnector({
+                getBlockHeader: async () => HEADER_HEX,
+                getBlockVerbose: async () => ({ tx: 'not-an-array' }),
+            })
+            await assert.rejects(
+                () => connector.getBlockReassembled('hash'),
+                (err) => {
+                    assert.strictEqual(err.code, undefined, 'no code exists to copy, so none may be set')
+                    assert.match(err.cause.message, /verbose getblock returned no tx array/)
+                    assert.strictEqual(err.auxPowParseFailure, undefined)
+                    return true
+                }
+            )
+        })
     })
 
     describe('BlockchainConnector.probeTxIndex', function () {

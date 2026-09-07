@@ -427,6 +427,59 @@ const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
     regtest: 0,
 };
 
+// DISPENSER_CANCEL_GRACE_ACTIVATION (dispenser cancellation grace capture): the flag-day
+// at/above which the DECODER keeps a just-expired dispenser in the block loop's payment
+// CAPTURE SET for a grace window past its expiration. Keyed on BLOCK TIME with the same >=
+// semantics as DISPENSER_EXPIRY_REALIGN_ACTIVATION, because dispensers settle on BTC, LTC
+// and DOGE, whose heights diverge.
+//
+// WHY IT EXISTS: the indexer keeps a CANCELLED dispenser fillable past its own expiration.
+// It excludes `cancelling` rows from its expiration pass (xchain-indexer/src/db.js
+// getExpiredItems, `s2.status='open'`), keeps them matchable through
+// `status IN ('open','cancelling')` in findMatchingDispensers, and closes only at the
+// cancel's block time plus DISPENSER_CLOSE_DELAY (3600s). The decoder mirrors no cancel at
+// all, by design, so it soft-expires that dispenser at its raw expiration and drops the
+// address from the capture set. Cancel a funded dispenser shortly before its expiration and
+// a window opens: the indexer still settles fills, the decoder captures no output, and the
+// buyer's native coin reaches the seller with no DISPENSE record and no inventory release.
+//
+// At/above the gate the CAPTURE SET alone widens: a row whose expiration is no older than
+// the grace window stays an eligible payment destination even once the soft-expire has
+// stamped it. The soft-expire itself, the expiry MARK, the extend mirror, the oracle-address
+// resolution and the hard purge all keep their current timing, which confines the change to
+// the over-capture direction the decoder's advisory contract (xchain-decoder/src/db.js,
+// above extendOpenDispenserExpirationBySource) calls safe. Delaying the MARK instead reaches
+// the legacy single-pick oracle resolution, whose ORDER BY ... LIMIT 1 then ranks a dead row
+// first and captures nothing at all: the under-capture direction, a second money-bearing
+// defect rather than a fix. Widen the capture set, never the mark.
+//
+// CONSENSUS-AFFECTING: it changes the set of outputs persisted to transaction_outputs, so an
+// ungated widening breaks from-genesis byte-identity and forks validators. The unwidened
+// capture set therefore stays live BELOW the gate, and a re-decode of pre-flag-day history
+// reproduces exactly what the fleet wrote.
+//
+// null means DISARMED (never active), the fail-closed default: mainnet keeps the unwidened
+// capture set until that network's maintainers ratify an instant, chosen with the fleet's
+// upgrade state in hand, because arming it too early forks the chain and arming it in the
+// past rewrites agreed history.
+//
+// DEPLOY DEADLINE, once an instant is armed: EVERY decoder on that network MUST be running
+// the armed value before the instant, or the fleet splits on the first block whose header
+// time passes a cancelled dispenser's expiration.
+//
+// Vendored byte-equal into xchain-decoder/src/protocol/constants.js; the conformance suite
+// keeps the two copies in lockstep.
+const DISPENSER_CANCEL_GRACE_ACTIVATION = {
+    mainnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
+    // ARMED AT GENESIS (instant 0 = always in force), matching the sibling
+    // DISPENSER_EXPIRY_REALIGN_ACTIVATION under the pre-launch ruling that every feature must
+    // be ACTIVE on testnet. This gate closes a defect that spends a payer's native coin and
+    // gives nothing back, so a public testnet WILL hit it. Safe at 0 because testnet
+    // decoder/indexer state is REBUILT from the chain before launch.
+    testnet: 0,
+    regtest: 0,
+};
+
 // BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION (output capture AND open-dispenser registration
 // through a BATCH): the flag-day at/above which the DECODER reads a BATCH's SUB-COMMANDS
 // instead of only its top-level ACTION name, both when deciding which native-coin outputs to
@@ -619,6 +672,7 @@ module.exports = {
     ORACLE_FEE_OUTPUT_ACTIVATION,
     ORACLE_FEE_SET_CAPTURE_ACTIVATION,
     DISPENSER_EXPIRY_REALIGN_ACTIVATION,
+    DISPENSER_CANCEL_GRACE_ACTIVATION,
     BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
     ENVELOPE_MAX_PAYLOAD,
     ENVELOPE_RECOGNITION_ACTIVATION,

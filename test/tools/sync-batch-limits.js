@@ -43,6 +43,15 @@
  * answered; the ordering, its block-index gates and its consensus-version gate are asserted
  * in batchLimitsVendoring.test.js instead.
  *
+ * WHAT IT DOES VENDOR, AND WHY THE PARAGRAPH ABOVE DOES NOT COVER IT: the
+ * BATCH_COST_WEIGHTING activation INSTANT. That ordering invariant is specific to
+ * BATCH_ISSUANCE_LIMITS and it does NOT hold for the weighting flag: mainnet capture is
+ * ARMED at 1786838400 while the weighting instant is still the 9999999999 house sentinel,
+ * so mainnet is a live block time where this module's rules run and the weight budget does
+ * NOT apply. Applying the budget there would suppress capture for batches the indexer
+ * dispatches, which is the money-bearing under-capture direction. The instant is therefore
+ * carried per network and the rule is gated on it, rather than assumed on.
+ *
  * Lives under test/ rather than bin/ because it is a maintenance tool for the conformance
  * suite that consumes it: batchLimitsVendoring.test.js requires deriveFromSibling() and
  * renderModule() from HERE, so the check and the fix can never implement two different ideas
@@ -84,7 +93,42 @@ function deriveFromSibling(){
         ACTION_LIMITS:       sortedCopy(batch.actionLimits),
         GATED_ACTION_LIMITS: sortedCopy(batch.gatedActionLimits),
         CHILD_ISSUE_KEY:     batch.childIssueKey,
+        WEIGHT_BUDGET:       batch.weightBudget,
+        COMMAND_WEIGHTS:     sortedCopy(batch.commandWeights),
+        COST_WEIGHTING_ACTIVATION: costWeightingActivation(),
     };
+}
+
+// The BATCH_COST_WEIGHTING per-network activation instants, read off a REAL ProtocolChanges
+// instance. The registration carries all three networks in one object, so one read gives the
+// whole map whatever NETWORK the instance was built for. Unlike BATCH_ISSUANCE_LIMITS this
+// one IS written into the vendored module: see the header for why no ordering invariant
+// excuses it.
+function costWeightingChange(){
+    const ProtocolChanges = require(INDEXER_CHANGES);
+    const changes = new ProtocolChanges({
+        config:    { NETWORK: 'regtest' },
+        decoderDb: { getBlockTime: async () => 0 },
+    });
+    return { change: changes.changes['BATCH_COST_WEIGHTING'], consensusVersion: changes.version };
+}
+
+// The per-network instant map the vendored module carries.
+function costWeightingActivation(){
+    const { change } = costWeightingChange();
+    // A flag the sibling does not register at all reads as DISARMED everywhere, which leaves
+    // today's over-capture in place rather than inventing a suppression rule.
+    if (!change) return { mainnet: null, testnet: null, regtest: null };
+    return {
+        mainnet: instantOf(change.mainnet_time),
+        testnet: instantOf(change.testnet_time),
+        regtest: instantOf(change.regtest_time),
+    };
+}
+
+// A registered instant, or null when the field is not a finite number (DISARMED).
+function instantOf(value){
+    return Number.isFinite(Number(value)) ? Number(value) : null;
 }
 
 // Key order is normalized so a reordering in the sibling cannot show up as drift, and so the
@@ -171,11 +215,29 @@ const GATED_ACTION_LIMITS = ${renderTable(derived.GATED_ACTION_LIMITS, 0)};
 // BATCH_ISSUANCE_LIMITS, so child issuance is exempt from the top-level ISSUE cap.
 const CHILD_ISSUE_KEY = ${literal(derived.CHILD_ISSUE_KEY)};
 
+// Weighted per-BATCH cost budget (indexer: this.weightBudget), which REPLACES the flat
+// command cap at/after BATCH_COST_WEIGHTING. Breached => 'invalid: COMMAND (limit)', the
+// same string, whole batch.
+const WEIGHT_BUDGET = ${literal(derived.WEIGHT_BUDGET)};
+
+// Per-ACTION cost weights (indexer: this.commandWeights). An ACTION absent from this table
+// weighs the DEFAULT of 1, which is every ordinary action.
+const COMMAND_WEIGHTS = ${renderTable(derived.COMMAND_WEIGHTS, 0)};
+
+// Per-network BATCH_COST_WEIGHTING activation instants (block TIME, >=), read off the
+// sibling's protocol-change registry. Unlike BATCH_ISSUANCE_LIMITS this flag is NOT provably
+// on wherever the decoder's capture gate is: mainnet capture is armed while this instant is
+// still the house sentinel. null means DISARMED, which is inactive at every block time.
+const COST_WEIGHTING_ACTIVATION = ${renderTable(derived.COST_WEIGHTING_ACTIVATION, 0)};
+
 module.exports = {
     COMMAND_LIMIT,
     ACTION_LIMITS,
     GATED_ACTION_LIMITS,
     CHILD_ISSUE_KEY,
+    WEIGHT_BUDGET,
+    COMMAND_WEIGHTS,
+    COST_WEIGHTING_ACTIVATION,
 };
 `;
 }
@@ -211,5 +273,6 @@ module.exports = {
     VENDORED,
     deriveFromSibling,
     issuanceLimitsChange,
+    costWeightingChange,
     renderModule,
 };

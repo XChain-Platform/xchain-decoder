@@ -28,7 +28,7 @@ name: xchain-decoder-e2e
 
 services:
   bitcoind-test:
-    image: bitcoin/bitcoin:28.1
+    image: bitcoin/bitcoin:31.1
     command:
       - bitcoind
       - -regtest

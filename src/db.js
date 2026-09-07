@@ -2540,16 +2540,39 @@ class Database {
     // distinguishable, because decoding a block against a silently-empty set would
     // drop every dispense output on this instance only (instance-dependent block
     // contents). The block loop retries the block on null.
-    async getAllOpenDispenserAddresses(){
+    //
+    // CANCELLATION GRACE. `graceFloor` is the oldest expiration still eligible for capture,
+    // computed by dispenserCancelGrace.cancelGraceFloor from the block's own header time, and
+    // null below DISPENSER_CANCEL_GRACE_ACTIVATION. A finite floor admits rows the soft-expire
+    // has already stamped whose expiration is no older than it, which is how the decoder keeps
+    // capturing payments to a dispenser the indexer holds fillable through its cancellation
+    // grace period. It widens THIS query and nothing else: the expiry mark, the extend mirror,
+    // the oracle-address resolution and the hard purge keep their timing, so the divergence
+    // stays in the over-capture direction the advisory contract above calls safe. Rationale and
+    // the reason the MARK must not move instead: src/dispenserCancelGrace.js.
+    async getAllOpenDispenserAddresses(graceFloor){
         let db    = await this.getConnection();
-        let query =
-            `SELECT ia.address AS address
+        // Strict number test, not Number(): `Number(null)` is 0, which would arm a floor of
+        // 1970 on the null cancelGraceFloor returns below the gate and widen the capture set
+        // on an unarmed network. Fail closed on anything that is not already a finite number.
+        const floor       = graceFloor
+        const graceActive = (typeof floor === 'number') && Number.isFinite(floor)
+        // Two literal statements rather than one composed string: the below-gate query must
+        // stay exactly the text the fleet has been running, so a re-decode of pre-flag-day
+        // history cannot drift on a formatting edit.
+        let query = graceActive
+            ? `SELECT ia.address AS address
+            FROM dispensers op
+            LEFT JOIN index_addresses ia ON ia.id = op.address_id
+            WHERE op.expired_block_index IS NULL
+               OR op.expiration >= ?`
+            : `SELECT ia.address AS address
             FROM dispensers op
             LEFT JOIN index_addresses ia ON ia.id = op.address_id
             WHERE op.expired_block_index IS NULL`
         let addresses = new Set()
         try {
-            let rows = await db.query(query);
+            let rows = graceActive ? await db.query(query, [floor]) : await db.query(query);
             for (let row of rows){
                 if (row["address"] != null)
                     addresses.add(row["address"])
@@ -2663,6 +2686,73 @@ class Database {
         }
     }
 
+    // How many distinct block heights above the current tip have already been
+    // rolled back and not yet re-synced.
+    //
+    // This is the restart-durable half of the safe-depth ceiling. The REORG_HALT
+    // marker above is best-effort by construction: markReorgHalted runs on the
+    // abort path, so a DB fault at exactly that moment leaves the halt recorded
+    // nowhere, and a restarted decoder re-entered verifyReorg with a zeroed depth
+    // counter and finished the over-deep rollback. The evidence this method reads
+    // cannot be lost that way, because deleteBlockByIndex commits the REORG marker
+    // INSIDE the same transaction as the block delete: a deleted block and its
+    // marker are atomic, so the marker rows above the tip ARE the rollback depth.
+    //
+    // Distinct heights, not a row count: a height deleted, re-synced and deleted
+    // again writes two markers and is one block of depth. Bounded scan: the ceiling
+    // is 126, so the newest few thousand REORG rows cover every reachable depth, and
+    // (code, id) is indexed (src/sql/events.sql). THROWS on an unreadable or
+    // unparseable result - "we could not tell" must never reach the caller as "no
+    // prior rollback", which is the exact collapse this whole guard exists to stop.
+    async countReorgDeletesAboveTip(scanLimit = 5000){
+        // Throws (after its own retries) rather than returning a sentinel, so an
+        // unknown tip cannot silently become "everything is above it" or "nothing is".
+        const tip = await this.getLastBlockIndex()
+        // Interpolated, not bound: LIMIT placeholders are not used anywhere else in
+        // this file, so the bound is range-checked here instead and the SQL stays the
+        // plain shape the rest of the module uses. The value is internal, never
+        // operator input, and the guard is what makes that literal safe.
+        const limit = Number(scanLimit)
+        if (!Number.isInteger(limit) || limit < 1 || limit > 1000000)
+            throw new Error('countReorgDeletesAboveTip: refusing an out-of-range scan limit: ' + scanLimit)
+        const query = `SELECT id, data FROM events WHERE code = 'REORG' ORDER BY id DESC LIMIT ${limit};`
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            const rows = await connection.query(query)
+            if (!Array.isArray(rows))
+                throw new Error('countReorgDeletesAboveTip: the REORG marker scan returned no readable rows')
+            const heightsAboveTip = new Set()
+            for (const row of rows){
+                let payload
+                try {
+                    payload = (typeof row.data === 'string') ? JSON.parse(row.data) : row.data
+                } catch (err){
+                    throw new Error('countReorgDeletesAboveTip: REORG marker id ' + row.id
+                        + ' has an unreadable payload, so the rollback depth cannot be bounded: ' + err.message)
+                }
+                // Both marker shapes are arrays of {block_index, block_hash} (one entry
+                // per row since M-12, several on older rows); anything else means this
+                // is not the marker whose depth we are counting.
+                if (!Array.isArray(payload))
+                    throw new Error('countReorgDeletesAboveTip: REORG marker id ' + row.id
+                        + ' is not the expected array payload, so the rollback depth cannot be bounded')
+                for (const entry of payload){
+                    const height = Number(entry && entry.block_index)
+                    if (!Number.isFinite(height))
+                        throw new Error('countReorgDeletesAboveTip: REORG marker id ' + row.id
+                            + ' carries a non-numeric block_index, so the rollback depth cannot be bounded')
+                    if (height > tip) heightsAboveTip.add(height)
+                }
+            }
+            return heightsAboveTip.size
+        } finally {
+            if (ownLease){
+                await connection.release()
+            }
+        }
+    }
+
     // Read the durable halt marker WITH its detail. isReorgHalted() above
     // answers the one question verifyReorg asks (may I roll back?) and deliberately
     // stays a bare existence probe on the hot reorg path. Operator-facing surfaces
@@ -2702,9 +2792,29 @@ class Database {
     // Called on every verifyReorg abort path BEFORE the throw, so a restart cannot
     // resume the over-deep rollback. Best-effort by design; the caller swallows any
     // error so a marker-write failure never masks the original loud abort.
+    //
+    // Returns TRUE only when a REORG_HALT row is readable afterwards, never merely
+    // "the INSERT reported no error". insertEvent swallows every write error and
+    // returns false, so the boolean it hands back is the only failure signal that
+    // exists here, and a caller that trusts it without a read-back is trusting a
+    // driver's ack for a row nobody has seen. That distinction is the whole point:
+    // this marker is the only thing standing between a restarted decoder and a
+    // silently resumed over-deep rollback, and every consumer of it (the entry
+    // guard, the health surfaces, the bootstrap gate) reads the ROW, not the ack.
     async markReorgHalted(reason){
         if (await this.isReorgHalted()) return true
-        return this.insertEvent('REORG_HALT', { reason: reason, at: new Date().toISOString() })
+        const written = await this.insertEvent('REORG_HALT', { reason: reason, at: new Date().toISOString() })
+        // Anything other than a clean insert is a failure. DUPLICATED_TRANSACTION
+        // is truthy and would otherwise read as success, so the read-back below
+        // decides that case on the row rather than on the errno.
+        if (written === false) return false
+        try {
+            return await this.isReorgHalted()
+        } catch (_) {
+            // The write may well have landed, but nothing here can say so, and an
+            // unconfirmed marker must never report as a confirmed one.
+            return false
+        }
     }
 }
 

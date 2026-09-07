@@ -213,3 +213,57 @@ describe('Database.getReorgHaltMarker', function () {
         assert.strictEqual(marker.at, '2026-07-26 03:30:31')
     })
 })
+
+// The marker is the only thing standing between a restarted decoder and a silently
+// resumed over-deep rollback, and every consumer of it reads the ROW: the entry
+// guard, the health surfaces, and xchain-node's BootstrapHealthGate, which counts
+// `events WHERE code='REORG_HALT'` before publishing a database as a bootstrap
+// source. insertEvent swallows every write error and returns false, so a caller that
+// trusts its ack without reading the row back certifies a marker nobody has seen.
+describe('Database.markReorgHalted reports the row, not the ack', function () {
+
+    function stubMarkerDb({ alreadyHalted = false, insertResult = true, readBack = true, readBackThrows = false } = {}) {
+        const db = new Database('127.0.0.1', 3306, 'test_db', 'u', 'p')
+        const calls = { insert: 0, probes: 0 }
+        db.isReorgHalted = async () => {
+            calls.probes++
+            if (calls.probes === 1) return alreadyHalted
+            if (readBackThrows) throw new Error('connection lost during read-back')
+            return readBack
+        }
+        db.insertEvent = async () => { calls.insert++; return insertResult }
+        return { db, calls }
+    }
+
+    it('returns true when the row is readable after the insert', async function () {
+        const { db, calls } = stubMarkerDb()
+        assert.strictEqual(await db.markReorgHalted('over-deep'), true)
+        assert.strictEqual(calls.insert, 1)
+        assert.strictEqual(calls.probes, 2, 'the write must be confirmed by a read-back')
+    })
+
+    it('returns false when insertEvent swallowed the write error', async function () {
+        const { db } = stubMarkerDb({ insertResult: false })
+        assert.strictEqual(await db.markReorgHalted('over-deep'), false)
+    })
+
+    // The case the old contract got wrong: insertEvent answers truthy and no row
+    // exists (the transaction was rolled back under it, or the errno was 1062 and
+    // DUPLICATED_TRANSACTION came back, which is truthy and is not a written row).
+    it('returns false when the insert claims success but no row is readable', async function () {
+        const { db } = stubMarkerDb({ readBack: false })
+        assert.strictEqual(await db.markReorgHalted('over-deep'), false,
+            'an unconfirmed marker must never report as a confirmed one')
+    })
+
+    it('returns false rather than throwing when the read-back itself fails', async function () {
+        const { db } = stubMarkerDb({ readBackThrows: true })
+        assert.strictEqual(await db.markReorgHalted('over-deep'), false)
+    })
+
+    it('stays idempotent: an existing marker is true without a second write', async function () {
+        const { db, calls } = stubMarkerDb({ alreadyHalted: true })
+        assert.strictEqual(await db.markReorgHalted('over-deep'), true)
+        assert.strictEqual(calls.insert, 0)
+    })
+})

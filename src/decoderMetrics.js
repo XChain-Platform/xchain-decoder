@@ -124,4 +124,4 @@ function registerDecoderMetrics(registry, decoder) {
     return { gauges, counters, collector };
 }
 
-module.exports = { registerDecoderMetrics, DECODER_GAUGES, DECODER_COUNTERS };
+module.exports = { registerDecoderMetrics };

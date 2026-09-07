@@ -203,7 +203,10 @@ describe('XChainDecoder.verifyReorg durable halt (restart-mid-reorg)', function 
       deleteBlockByIndex: async (h) => { deleted.push(h); dbState.top = h - 1 },
       insertEvent: async () => true,
       isReorgHalted: async () => store.halted,
-      markReorgHalted: async () => { store.halted = true }
+      // Answers the db contract (true = a REORG_HALT row is now readable) rather
+      // than shrugging with undefined: haltReorg honours this value, and a stub
+      // that shrugs models a decoder whose marker write silently failed.
+      markReorgHalted: async () => { store.halted = true; return true }
     }
     return { decoder, deleted }
   }

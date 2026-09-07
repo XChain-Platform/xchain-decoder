@@ -16,9 +16,15 @@ DROP TABLE IF EXISTS mempool_transactions;
 CREATE TABLE mempool_transactions (
     tx_hash     VARCHAR(250),     -- raw transaction hash (NOT an index_transactions id)
     source      VARCHAR(120),     -- raw source address (NOT an index_addresses id)
-    destination VARCHAR(120),     -- raw destination address (NOT an index_addresses id)
-    amount      BIGINT,           -- BTC amount sent
-    fee         BIGINT,           -- BTC Fee paid (miners fee)
+    -- These three mirror the confirmed twin's shape (transactions.destination_id/amount/fee)
+    -- so a pending row and its confirmed row line up column for column, and like that twin
+    -- the decoder is not their authority. The single mempool writer
+    -- (XChainDecoder.updateMempool -> Database.insertMempoolTransaction) binds
+    -- parseTransaction's result, whose only success return hardcodes destination:null and
+    -- carries no amount key, plus a literal fee of 0.
+    destination VARCHAR(120),     -- Not authoritative: always NULL (parseTransaction hardcodes destination:null). Typed to hold a raw address (NOT an index_addresses id) like source. A pending tx's destinations live inside the decoded ACTION string in data, which callers parse.
+    amount      BIGINT,           -- Not authoritative: always NULL (parseTransaction emits no amount, so the writer binds undefined). The indexer derives COIN_AMOUNT from transaction_outputs at confirmation.
+    fee         BIGINT,           -- Not authoritative: the writer binds a literal 0 (miner fee is not tracked here), mirroring transactions.fee.
     -- utf8mb4 per column, mirroring transactions.data: a pending row must accept exactly
     -- what its confirmed twin accepts, or a non-BMP ACTION fails the mempool INSERT with
     -- errno 1366 and the tx is skipped on every poll. The table default stays utf8mb3 so
@@ -44,4 +50,9 @@ CREATE TABLE mempool_transactions (
 -- block-confirmation processing; this transient table keeps the raw values verbatim.
 CREATE UNIQUE INDEX mempool_tx_hash     ON mempool_transactions (tx_hash);
 CREATE        INDEX mempool_source      ON mempool_transactions (source);
+-- mempool_destination covers a column the writer always binds NULL, so it holds exactly one
+-- distinct value and selects nothing. It is kept so this table's index set stays a mirror of
+-- the confirmed twin's; dropping it needs a dated mode=manual migration plus an operator
+-- migrate run per node, since reconcileTableIndexes re-adds any index declared here. Consumers
+-- must not filter on destination expecting rows: see xchain-explorer getDecoderMempoolRows.
 CREATE        INDEX mempool_destination ON mempool_transactions (destination);

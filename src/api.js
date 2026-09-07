@@ -515,7 +515,15 @@ async function startApi(){
             running: decoderRunning,
             reorg_halted:      reorgHalt.halted,
             reorg_halt_reason: reorgHalt.reason,
-            reorg_halted_at:   reorgHalt.at
+            reorg_halted_at:   reorgHalt.at,
+            // Ships beside the boolean, never without it. "Not halted" is only an answer
+            // if something looked, and the probe is fail-soft: its state starts at
+            // not-halted with checked_at null, so a decoder that has NEVER completed a
+            // probe publishes exactly what a clean one publishes. Consumers that gate on
+            // this body (xchain-node's BootstrapHealthGate falls back to GET /status when
+            // the JSON-RPC health surface is unavailable) can only tell those two apart
+            // if this route carries the timestamp the health method already carries.
+            reorg_halt_checked_at: reorgHalt.checked_at
         })
     })
 
