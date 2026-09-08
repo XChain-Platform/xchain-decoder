@@ -192,6 +192,9 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
             reorg_halted:      reorgHalt.halted === true,
             reorg_halt_reason: reorgHalt.reason || null,
             reorg_halted_at:   reorgHalt.at || null,
+            // { node_height, stored_height, since } while the parse loop is waiting out
+            // a node in initial block download below our tip, null otherwise.
+            node_catching_up:  (decoder && decoder.nodeCatchingUp) || null,
             // A frozen node tip, reported but deliberately NOT gating. isStalled()
             // returns false while the tip is stale on purpose: restarting the container
             // cannot fix an upstream node outage, and gating on it re-opens the
@@ -393,7 +396,7 @@ async function startApi(){
             // restart-loop a service that is doing useful work while fixing nothing (the
             // marker survives restarts and is only cleared by a resync). Report it as its
             // own field instead, and let the operator/watchdog act on it.
-            let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
+            let reorgHalt = { halted: false, reason: null, at: null, cleared_at: null, cleared_reason: null, checked_at: null }
             if (dbOk && typeof decoder.checkReorgHalt === 'function'){
                 try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', 'rpc:health', e) }
             }
@@ -409,6 +412,13 @@ async function startApi(){
                 reorg_halted:        reorgHalt.halted,
                 reorg_halt_reason:   reorgHalt.reason,
                 reorg_halted_at:     reorgHalt.at,
+                // { node_height, stored_height, since } while the parse loop is waiting
+                // out a node in initial block download below our tip, null otherwise.
+                node_catching_up:    (decoder && decoder.nodeCatchingUp) || null,
+                // Set once an operator cleared a halt (db.clearReorgHalt); null while a
+                // halt is live or none was ever recorded.
+                reorg_halt_cleared_at:     reorgHalt.cleared_at || null,
+                reorg_halt_cleared_reason: reorgHalt.cleared_reason || null,
                 reorg_halt_checked_at: reorgHalt.checked_at,
                 ...syncStatus,
                 lastProcessedBlock: syncStatus.last_processed_block,
@@ -516,6 +526,9 @@ async function startApi(){
             reorg_halted:      reorgHalt.halted,
             reorg_halt_reason: reorgHalt.reason,
             reorg_halted_at:   reorgHalt.at,
+            // { node_height, stored_height, since } while the parse loop is waiting out
+            // a node in initial block download below our tip, null otherwise.
+            node_catching_up:  (decoder && decoder.nodeCatchingUp) || null,
             // Ships beside the boolean, never without it. "Not halted" is only an answer
             // if something looked, and the probe is fail-soft: its state starts at
             // not-halted with checked_at null, so a decoder that has NEVER completed a

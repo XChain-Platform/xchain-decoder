@@ -61,11 +61,14 @@ function makeDecoder() {
     )
 }
 
-// A decoder holding blocks far above the node's tip, so verifyReorg takes its
-// above-tip delete branch and rolls back one block per pass until the
-// safe-depth ceiling aborts. The db carries only what that walk reads, so the
-// halt these cases assert on is the real one and not a stubbed shortcut.
-const NODE_TIP = 100
+// A decoder one block above the node's tip whose every stored hash disagrees
+// with the node, so verifyReorg deletes the above-tip block and then walks the
+// hash-compare back one block per pass until the safe-depth ceiling aborts. (A
+// gap the ceiling could not absorb is refused before the first delete and never
+// reaches the halt; that is nodeCatchUpWait.test.js.) The db carries only what
+// that walk reads, so the halt these cases assert on is the real one and not a
+// stubbed shortcut.
+const NODE_TIP = 299
 
 function haltingDecoder(db) {
     const decoder = makeDecoder()
@@ -75,7 +78,7 @@ function haltingDecoder(db) {
         getBlockByIndex: async (i) => (i < 0 ? null : { block_index: i, block_hash: 'aa'.repeat(32) }),
         deleteBlockByIndex: async () => { height -= 1; return true }
     }, db)
-    decoder.connector = { rpcErrors: 0 }
+    decoder.connector = { rpcErrors: 0, getBlockHash: async () => 'bb'.repeat(32) }
     return decoder
 }
 

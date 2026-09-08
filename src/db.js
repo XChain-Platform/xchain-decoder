@@ -2672,18 +2672,109 @@ class Database {
     // is persisted as a REORG_HALT row in the events table (an existing durable
     // store); a full resync from a known-good snapshot rebuilds the schema and so
     // clears it, matching the recovery the abort message already demands.
+    //
+    // An operator can CLEAR a halt through clearReorgHalt (src/clear-reorg-halt.js,
+    // `xchain-node clear-reorg-halt`): that writes a REORG_HALT_CLEARED row carrying
+    // the reason and the checks that passed, and the NEWEST of the two codes decides.
+    // The halt row is never deleted, so the audit trail survives, and a later halt
+    // writes a newer REORG_HALT row that is live again.
     async isReorgHalted(){
-        const query = `SELECT 1 FROM events WHERE code = 'REORG_HALT' LIMIT 1;`
+        return (await this.readReorgHaltState()).halted
+    }
+
+    // The newest REORG_HALT / REORG_HALT_CLEARED row, ordered on the (code, id)
+    // index. Returns { halted, id, at, reason, cleared_at, cleared_reason }.
+    // Fail-closed: a halt row whose id or payload cannot be read still counts as
+    // live, because "we could not tell" must never reach a caller as "not halted".
+    async readReorgHaltState(){
+        const query = `SELECT id, time, code, data FROM events WHERE code IN ('REORG_HALT', 'REORG_HALT_CLEARED') ORDER BY id DESC LIMIT 1;`
+        const none = { halted: false, id: null, at: null, reason: null, cleared_at: null, cleared_reason: null }
         let connection = await this.getConnection()
         const ownLease = (this.transactionConnection == null)
         try {
             const rows = await connection.query(query)
-            return Array.isArray(rows) ? rows.length > 0 : false
+            if (!Array.isArray(rows) || rows.length === 0) return none
+            const row = rows[0]
+            let payload = null
+            try {
+                payload = (typeof row.data === 'string') ? JSON.parse(row.data) : row.data
+            } catch (_) {
+                payload = null
+            }
+            const at = (payload && payload.at) ? payload.at : (row.time != null ? String(row.time) : null)
+            const reason = (payload && payload.reason) ? payload.reason : null
+            if (row.code === 'REORG_HALT_CLEARED'){
+                return { ...none, cleared_at: at, cleared_reason: reason }
+            }
+            // Any other shape (the expected REORG_HALT, or a row whose code could not
+            // be read) is a live halt.
+            return { halted: true, id: (row.id != null ? row.id : null), at: at, reason: reason, cleared_at: null, cleared_reason: null }
         } finally {
             if (ownLease){
                 await connection.release()
             }
         }
+    }
+
+    // Number of rows in the dispensers table. The clear tool's first precondition:
+    // a database that holds no dispenser state cannot have lost any to the purge.
+    async countDispensers(){
+        const query = `SELECT COUNT(*) AS n FROM dispensers;`
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            const rows = await connection.query(query)
+            if (!Array.isArray(rows) || rows.length === 0 || rows[0].n == null)
+                throw new Error('countDispensers: the dispensers count could not be read')
+            return Number(rows[0].n)
+        } finally {
+            if (ownLease){
+                await connection.release()
+            }
+        }
+    }
+
+    // Whether this database has EVER decoded a DISPENSER action. A purged
+    // dispenser leaves no row behind, so an empty dispensers table alone does not
+    // prove nothing was purged; a database with no DISPENSER transaction at all does.
+    // LIMIT 1 stops at the first hit; a database with none scans the table once,
+    // which is acceptable for a one-off operator command.
+    async hasDispenserTransactions(){
+        const query = `SELECT 1 FROM transactions WHERE data LIKE 'DISPENSER|%' LIMIT 1;`
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            const rows = await connection.query(query)
+            if (!Array.isArray(rows)) throw new Error('hasDispenserTransactions: the DISPENSER probe could not be read')
+            return rows.length > 0
+        } finally {
+            if (ownLease){
+                await connection.release()
+            }
+        }
+    }
+
+    // Audited operator clear of a live REORG_HALT marker. Writes a
+    // REORG_HALT_CLEARED row carrying the reason, the check results and the halt it
+    // supersedes, then confirms by read-back exactly as markReorgHalted does.
+    // Returns { cleared, alreadyClear }. Never deletes the halt row.
+    async clearReorgHalt({ reason, checks = {}, forced = false } = {}){
+        if (typeof reason !== 'string' || reason.trim().length < 8)
+            throw new Error('clearReorgHalt: a reason of at least 8 characters is required; it is recorded with the clear')
+        const state = await this.readReorgHaltState()
+        if (!state.halted) return { cleared: false, alreadyClear: true }
+        const written = await this.insertEvent('REORG_HALT_CLEARED', {
+            reason: reason.trim(),
+            at: new Date().toISOString(),
+            forced: !!forced,
+            checks: checks,
+            cleared_halt_id: state.id,
+            cleared_halt_at: state.at,
+            cleared_halt_reason: state.reason
+        })
+        if (written !== true) return { cleared: false, alreadyClear: false }
+        const after = await this.readReorgHaltState()
+        return { cleared: after.halted === false, alreadyClear: false }
     }
 
     // How many distinct block heights above the current tip have already been
@@ -2762,29 +2853,18 @@ class Database {
     // are null when the row exists but its payload is unreadable (an older marker, or
     // JSON written by a different revision), which must never turn a real halt into a
     // reported non-halt.
+    //
+    // Honours an operator clear: after clearReorgHalt the marker reads as not
+    // halted and carries `cleared_at` / `cleared_reason` instead, so the health
+    // surface can show that a halt WAS here and who cleared it.
     async getReorgHaltMarker(){
-        const query = `SELECT time, data FROM events WHERE code = 'REORG_HALT' ORDER BY id DESC LIMIT 1;`
-        let connection = await this.getConnection()
-        const ownLease = (this.transactionConnection == null)
-        try {
-            const rows = await connection.query(query)
-            if (!Array.isArray(rows) || rows.length === 0) return { halted: false, at: null, reason: null }
-            const row = rows[0]
-            let payload = null
-            try {
-                payload = (typeof row.data === 'string') ? JSON.parse(row.data) : row.data
-            } catch (_) {
-                payload = null
-            }
-            return {
-                halted: true,
-                at:     (payload && payload.at) ? payload.at : (row.time != null ? String(row.time) : null),
-                reason: (payload && payload.reason) ? payload.reason : null
-            }
-        } finally {
-            if (ownLease){
-                await connection.release()
-            }
+        const state = await this.readReorgHaltState()
+        return {
+            halted:         state.halted,
+            at:             state.at,
+            reason:         state.reason,
+            cleared_at:     state.cleared_at,
+            cleared_reason: state.cleared_reason
         }
     }
 

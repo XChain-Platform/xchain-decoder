@@ -113,6 +113,19 @@ const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // Purging deeper is the conservative direction (rows are merely retained longer
 // before hard-purge; expiry semantics and action evaluation are unchanged).
 const DISPENSER_EXPIRE_SAFE_DEPTH = 126 // 120 (deepest undo window, LTC and DOGE) + 6 margin
+
+// Whether a getblockchaininfo reply says the node is still in initial block
+// download. While it is, a node tip BELOW the stored tip is not a rollback: the
+// node has simply not yet validated blocks this database already holds (an
+// operator's fresh mainnet node, a reindex, a node restored behind a decoder that
+// followed another endpoint). Reconciling against that tip deletes valid blocks
+// to the safe-depth ceiling and writes a durable halt for a reorg that never
+// happened; the right move is to wait until the node passes the stored tip and
+// let the forward hash compare decide. Strict === true: an absent field (an
+// older node, a trimmed proxy) keeps the pre-existing behaviour.
+function nodeStillCatchingUp(info){
+    return !!info && info["initialblockdownload"] === true
+}
 // There is deliberately no DISPENSER_CLOSE_DELAY twin of the indexer's here: the decoder
 // does not mirror dispenser cancels, so it never needs to close a row at the height the
 // indexer's DISPENSER_CLOSE fires. Reintroducing a closing mirror would need that pinned
@@ -426,6 +439,15 @@ class XChainDecoder {
         // rollback and the bootstrap gate finds nothing to refuse on.
         this.reorgHaltMarkerPersisted = null
         this._reorgHaltProbeInFlight = null
+
+        // Non-null only while the parse loop is waiting out a node in initial block
+        // download whose tip sits below our stored tip (see the wait branch in
+        // start()). That wait is otherwise indistinguishable from a wedge on every
+        // health surface: the height stops moving and nothing says why. Published
+        // verbatim as node_catching_up so `xchain-node ps` can name the wait.
+        // Shape: { node_height, stored_height, since } where since is the ISO
+        // timestamp the CURRENT wait began, held fixed until it ends.
+        this.nodeCatchingUp = null
     }
 
     async sleep(ms) {
@@ -639,6 +661,10 @@ class XChainDecoder {
                 this.reorgHalted        = !!(marker && marker.halted)
                 this.reorgHaltReason    = (marker && marker.reason) || null
                 this.reorgHaltAt        = (marker && marker.at) || null
+                // An operator clear (db.clearReorgHalt) supersedes the halt; surface
+                // when and why so a cleared database still tells its history.
+                this.reorgHaltClearedAt     = (marker && marker.cleared_at) || null
+                this.reorgHaltClearedReason = (marker && marker.cleared_reason) || null
                 this.reorgHaltCheckedAt = now
                 // A marker this probe just READ is durable by observation, whatever the
                 // write that produced it reported. Raised here and never cleared here:
@@ -676,6 +702,8 @@ class XChainDecoder {
             halted:     !!this.reorgHalted,
             reason:     this.reorgHaltReason || null,
             at:         this.reorgHaltAt || null,
+            cleared_at:     this.reorgHaltClearedAt || null,
+            cleared_reason: this.reorgHaltClearedReason || null,
             checked_at: this.reorgHaltCheckedAt || null,
             marker_persisted: (this.reorgHaltMarkerPersisted === null || this.reorgHaltMarkerPersisted === undefined)
                 ? null : !!this.reorgHaltMarkerPersisted
@@ -2010,6 +2038,35 @@ class XChainDecoder {
             // always passes the freshly-refreshed tip.
             if (nodeTip != null && lastBlockIndex > nodeTip){
                 await assertWithinSafeDepth(lastBlockIndex)
+
+                // This branch knows its depth up front: every stored height above the
+                // node tip is a delete. When that alone (on top of what is already
+                // rolled back) would cross the ceiling, refuse NOW, before the first
+                // delete, and WITHOUT the durable halt: nothing has been rolled back
+                // past the window, so nothing is lost and no resync is owed. The
+                // ceiling check above stays the authority once deletes have happened;
+                // this only stops a run that is doomed from its first block from
+                // spending the whole window to find that out (an operator's mainnet
+                // node 2666 blocks behind lost 126 valid blocks and forty hours to
+                // exactly that, 2026-09-07). Tagged so the parse loop can wait on it
+                // instead of exiting into a restart loop.
+                const aboveTip = lastBlockIndex - nodeTip
+                const alreadyRolledBack = priorDepth + blocksDeleted.length
+                if (alreadyRolledBack + aboveTip > DISPENSER_EXPIRE_SAFE_DEPTH){
+                    const msg = "verifyReorg: the node's tip (" + nodeTip + ") is " + aboveTip
+                        + " blocks below the stored tip (" + lastBlockIndex + "), which"
+                        + (alreadyRolledBack > 0 ? " with " + alreadyRolledBack + " block(s) already rolled back" : "")
+                        + " exceeds the dispenser safe-depth window (DISPENSER_EXPIRE_SAFE_DEPTH="
+                        + DISPENSER_EXPIRE_SAFE_DEPTH + "). Refusing before any further delete: nothing has been "
+                        + "rolled back past the window, no REORG_HALT marker was written and this database needs "
+                        + "no resync. Either the node is still catching up (wait for it to pass " + lastBlockIndex
+                        + ") or it was rolled back below this database's tip (operator action)."
+                    // Not logged here: the parse loop retries this every poll and logs
+                    // the refusal once per transition; other callers let it escape.
+                    const err = new Error(msg)
+                    err.tipBelowStoredTip = true
+                    throw err
+                }
                 try {
                     // Pass the block hash so the delete and its REORG audit marker commit
                     // atomically; see deleteBlockByIndex for the durability rationale.
@@ -2315,6 +2372,12 @@ class XChainDecoder {
         
         
         let nodeSyncedProblem = false
+        // Node-tip-below-ours latches, one line per transition each: the node is
+        // still in initial block download (wait, never reconcile), or the gap is
+        // too deep to reconcile and verifyReorg refused before deleting (wait,
+        // keep running, say so once).
+        let nodeCatchingUpProblem = false
+        let tipBelowStoredTipRefused = false
 
         // Wrong-tier endpoint latch, same shape as nodeSyncedProblem: the refusal
         // repeats every 3-second retry, so log it on the transition only.
@@ -2493,6 +2556,15 @@ class XChainDecoder {
                     continue
                 }
                 
+                // The usual end of an IBD wait: the node's tip reached our height, so the
+                // tip-regression branch below is simply never entered again and the
+                // in-branch clear cannot fire. Without this the finished wait would stay
+                // on every health payload for the life of the process. The log latch is
+                // deliberately NOT cleared here: it speaks only for the branch below.
+                if (this.nodeCatchingUp && lastProcessedBlockIndex <= this.blockchainInfoLastBlock){
+                    this.nodeCatchingUp = null
+                }
+
                 if (lastProcessedBlockIndex > this.blockchainInfoLastBlock){
                     if (lastProcessedBlockIndex == this.startBlockIndex - 1){
                         // Benign: we have processed nothing yet and the node simply
@@ -2501,6 +2573,35 @@ class XChainDecoder {
                         await this.sleep(5000)
                         continue
                     }
+
+                    // A node still in initial block download has not validated up to
+                    // our height yet; its tip below ours is a node catching up, not a
+                    // rollback. Wait for it to pass the stored tip, then the forward
+                    // hash compare below decides whether anything diverged. Measured
+                    // on an operator's fresh BTC mainnet node 2026-09-07: reconciling
+                    // here rolled back 126 valid blocks, hit the safe-depth ceiling,
+                    // wrote the durable halt and crash-looped 279 times over a reorg
+                    // that never happened. The wait is also published as
+                    // this.nodeCatchingUp (health payloads: node_catching_up), because a
+                    // silent wait is indistinguishable from a wedge: the height stops
+                    // moving and every surface still reads green. Both heights are
+                    // re-read each poll; `since` is carried over so it keeps naming the
+                    // instant THIS wait began.
+                    if (nodeStillCatchingUp(lastBlockchainInfo)){
+                        if (!nodeCatchingUpProblem){
+                            this.logWarn("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+"), but the node reports initialblockdownload=true: it is still catching up, not rolled back. Waiting for it to pass "+lastProcessedBlockIndex+" instead of reconciling; the hash compare decides then.")
+                        }
+                        const since = (this.nodeCatchingUp && this.nodeCatchingUp.since) || new Date().toISOString()
+                        this.nodeCatchingUp = { node_height: this.blockchainInfoLastBlock, stored_height: lastProcessedBlockIndex, since }
+                        nodeCatchingUpProblem = true
+                        await this.sleep(5000)
+                        continue
+                    }
+                    if (nodeCatchingUpProblem){
+                        this.log("The node has left initial block download with its tip ("+this.blockchainInfoLastBlock+") still below the last processed block ("+lastProcessedBlockIndex+"); treating the gap as a rollback from here on.")
+                        nodeCatchingUpProblem = false
+                    }
+                    this.nodeCatchingUp = null
 
                     // The node's tip has dropped BELOW our last-processed height (deep
                     // reorg, node rollback, or restart onto a shorter/different chain).
@@ -2513,9 +2614,30 @@ class XChainDecoder {
                     // deterministic height compare, then walks the hash-compare back to
                     // the fork point. blockchainInfoLastBlock was just refreshed above, so
                     // the tip is current.
-                    this.log("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+"). Reconciling orphan blocks...")
+                    if (!tipBelowStoredTipRefused){
+                        this.log("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+"). Reconciling orphan blocks...")
+                    }
                     await this.db.endTransaction()
-                    await this.verifyReorg(this.blockchainInfoLastBlock)
+                    try {
+                        await this.verifyReorg(this.blockchainInfoLastBlock)
+                    } catch (err){
+                        // A gap too deep to reconcile, refused BEFORE any delete (nothing
+                        // rolled back, no durable halt). Exiting here would only restart
+                        // into the same refusal; stay up, say it once, and re-check the
+                        // tip every poll so a node that is merely catching up (without
+                        // reporting IBD) resolves it on its own and a real rollback stays
+                        // visible on the status surface as node_height below the tip.
+                        if (err && err.tipBelowStoredTip){
+                            if (!tipBelowStoredTipRefused){
+                                this.logError(err.message)
+                            }
+                            tipBelowStoredTipRefused = true
+                            await this.sleep(5000)
+                            continue
+                        }
+                        throw err
+                    }
+                    tipBelowStoredTipRefused = false
                     // Re-clamp: a deep reorg can empty the blocks table, causing
                     // getLastBlockIndex() to return -1 and nextBlockHeight to become 0
                     // on a nonzero-start network. Clamp here, the same as the pre-loop guard.
@@ -3668,6 +3790,7 @@ module.exports.compiledPushSize = compiledPushSize
 module.exports.OP_RETURN_PUSH_OVERHEAD = OP_RETURN_PUSH_OVERHEAD
 // Exported so a regression test can pin it >= the deepest per-chain reorg window.
 module.exports.DISPENSER_EXPIRE_SAFE_DEPTH = DISPENSER_EXPIRE_SAFE_DEPTH
+module.exports.nodeStillCatchingUp = nodeStillCatchingUp
 // Exported so the funding-fee-output collision regression test can assert attributed
 // funding outputs are stored at vout + FUNDING_VOUT_BASE (never colliding with real vouts).
 module.exports.FUNDING_VOUT_BASE = FUNDING_VOUT_BASE
