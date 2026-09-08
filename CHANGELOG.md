@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `npm run clear-reorg-halt -- --reason "..."` clears a durable REORG_HALT marker after verifying the database is intact, recording the reason and checks as a REORG_HALT_CLEARED event.
+- The health surface reports `reorg_halt_cleared_at` and `reorg_halt_cleared_reason` once a halt has been cleared.
+
 ### Fixed
 - A node still in initial block download with its tip below the stored tip is waited on instead of being reconciled as a reorg.
 - A node-tip gap deeper than the dispenser safe-depth window is refused before the first delete, with no durable halt and no resync owed.

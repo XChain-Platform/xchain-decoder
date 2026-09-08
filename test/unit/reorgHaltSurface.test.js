@@ -193,7 +193,7 @@ describe('Database.getReorgHaltMarker', function () {
     it('returns halted:false when no marker row exists', async function () {
         const { db, wasReleased } = stubDb([])
         const marker = await db.getReorgHaltMarker()
-        assert.deepStrictEqual(marker, { halted: false, at: null, reason: null })
+        assert.deepStrictEqual(marker, { halted: false, at: null, reason: null, cleared_at: null, cleared_reason: null })
         assert.ok(wasReleased(), 'the pooled connection must be released')
     })
 

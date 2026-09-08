@@ -652,6 +652,10 @@ class XChainDecoder {
                 this.reorgHalted        = !!(marker && marker.halted)
                 this.reorgHaltReason    = (marker && marker.reason) || null
                 this.reorgHaltAt        = (marker && marker.at) || null
+                // An operator clear (db.clearReorgHalt) supersedes the halt; surface
+                // when and why so a cleared database still tells its history.
+                this.reorgHaltClearedAt     = (marker && marker.cleared_at) || null
+                this.reorgHaltClearedReason = (marker && marker.cleared_reason) || null
                 this.reorgHaltCheckedAt = now
                 // A marker this probe just READ is durable by observation, whatever the
                 // write that produced it reported. Raised here and never cleared here:
@@ -689,6 +693,8 @@ class XChainDecoder {
             halted:     !!this.reorgHalted,
             reason:     this.reorgHaltReason || null,
             at:         this.reorgHaltAt || null,
+            cleared_at:     this.reorgHaltClearedAt || null,
+            cleared_reason: this.reorgHaltClearedReason || null,
             checked_at: this.reorgHaltCheckedAt || null,
             marker_persisted: (this.reorgHaltMarkerPersisted === null || this.reorgHaltMarkerPersisted === undefined)
                 ? null : !!this.reorgHaltMarkerPersisted

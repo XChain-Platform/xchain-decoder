@@ -393,7 +393,7 @@ async function startApi(){
             // restart-loop a service that is doing useful work while fixing nothing (the
             // marker survives restarts and is only cleared by a resync). Report it as its
             // own field instead, and let the operator/watchdog act on it.
-            let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
+            let reorgHalt = { halted: false, reason: null, at: null, cleared_at: null, cleared_reason: null, checked_at: null }
             if (dbOk && typeof decoder.checkReorgHalt === 'function'){
                 try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', 'rpc:health', e) }
             }
@@ -409,6 +409,10 @@ async function startApi(){
                 reorg_halted:        reorgHalt.halted,
                 reorg_halt_reason:   reorgHalt.reason,
                 reorg_halted_at:     reorgHalt.at,
+                // Set once an operator cleared a halt (db.clearReorgHalt); null while a
+                // halt is live or none was ever recorded.
+                reorg_halt_cleared_at:     reorgHalt.cleared_at || null,
+                reorg_halt_cleared_reason: reorgHalt.cleared_reason || null,
                 reorg_halt_checked_at: reorgHalt.checked_at,
                 ...syncStatus,
                 lastProcessedBlock: syncStatus.last_processed_block,
