@@ -140,9 +140,12 @@ describe('XChainDecoder.verifyReorg depth guard', function () {
       'must stop deleting exactly at DISPENSER_EXPIRE_SAFE_DEPTH blocks')
   })
 
-  it('also guards the above-tip orphan branch', async function () {
-    // Blocks stored above the node tip are deleted via a separate branch; a node
-    // rollback deeper than the window must trip the same fail-closed abort.
+  it('also guards the above-tip orphan branch, and there it refuses BEFORE the first delete', async function () {
+    // Blocks stored above the node tip are deleted via a separate branch. That
+    // branch knows its depth up front, so a node tip deeper below us than the
+    // window must not spend the window finding out: it refuses with nothing
+    // deleted and no durable halt (nothing was lost). The full contract is in
+    // nodeCatchUpWait.test.js.
     const decoder = new XChainDecoder(
       'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
     )
@@ -159,7 +162,8 @@ describe('XChainDecoder.verifyReorg depth guard', function () {
     }
     // Node tip far below the stored tip: every stored block above it is an orphan.
     await assert.rejects(() => decoder.verifyReorg(10000 - SAFE_DEPTH - 50), /dispenser safe-depth window/)
-    assert.strictEqual(deleted.length, SAFE_DEPTH)
+    assert.strictEqual(deleted.length, 0)
+    assert.strictEqual(decoder.getReorgHaltStatus().halted, false)
   })
 })
 

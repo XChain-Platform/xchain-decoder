@@ -29,7 +29,11 @@ const XChainDecoder = require('../../src/XChainDecoder')
 const Database = require('../../src/db.js')
 
 const SAFE_DEPTH = 126
-const NODE_TIP   = 100
+// One block above the node tip, so the walk's known above-tip depth never trips
+// the pre-delete refusal (a gap the ceiling could not absorb is refused before
+// the first delete and is its own test file); the fork below the tip is what
+// these cases spend the window on.
+const NODE_TIP   = 299
 
 function makeDecoder() {
     return new XChainDecoder(
@@ -37,9 +41,10 @@ function makeDecoder() {
     )
 }
 
-// A decoder holding blocks far above the node tip, so verifyReorg takes its
-// above-tip delete branch and rolls back one block per pass. `db` overrides let
-// each case state only the restart evidence it is about.
+// A decoder one block above the node tip whose every stored hash disagrees with
+// the node, so verifyReorg deletes the above-tip block and then walks the
+// hash-compare back one block per pass until the ceiling fires. `db` overrides
+// let each case state only the restart evidence it is about.
 function restartedDecoder(db) {
     const decoder = makeDecoder()
     let height = 300
@@ -53,7 +58,7 @@ function restartedDecoder(db) {
         isReorgHalted:      async () => false,
         markReorgHalted:    async () => true
     }, db)
-    decoder.connector = { rpcErrors: 0 }
+    decoder.connector = { rpcErrors: 0, getBlockHash: async () => 'bb'.repeat(32) }
     // The seed read retries with a 3s sleep; no test may pay for that in wall time.
     decoder.sleep = async () => {}
     return { decoder, deleted }
