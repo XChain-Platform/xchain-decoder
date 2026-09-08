@@ -439,6 +439,15 @@ class XChainDecoder {
         // rollback and the bootstrap gate finds nothing to refuse on.
         this.reorgHaltMarkerPersisted = null
         this._reorgHaltProbeInFlight = null
+
+        // Non-null only while the parse loop is waiting out a node in initial block
+        // download whose tip sits below our stored tip (see the wait branch in
+        // start()). That wait is otherwise indistinguishable from a wedge on every
+        // health surface: the height stops moving and nothing says why. Published
+        // verbatim as node_catching_up so `xchain-node ps` can name the wait.
+        // Shape: { node_height, stored_height, since } where since is the ISO
+        // timestamp the CURRENT wait began, held fixed until it ends.
+        this.nodeCatchingUp = null
     }
 
     async sleep(ms) {
@@ -2547,6 +2556,15 @@ class XChainDecoder {
                     continue
                 }
                 
+                // The usual end of an IBD wait: the node's tip reached our height, so the
+                // tip-regression branch below is simply never entered again and the
+                // in-branch clear cannot fire. Without this the finished wait would stay
+                // on every health payload for the life of the process. The log latch is
+                // deliberately NOT cleared here: it speaks only for the branch below.
+                if (this.nodeCatchingUp && lastProcessedBlockIndex <= this.blockchainInfoLastBlock){
+                    this.nodeCatchingUp = null
+                }
+
                 if (lastProcessedBlockIndex > this.blockchainInfoLastBlock){
                     if (lastProcessedBlockIndex == this.startBlockIndex - 1){
                         // Benign: we have processed nothing yet and the node simply
@@ -2563,11 +2581,18 @@ class XChainDecoder {
                     // on an operator's fresh BTC mainnet node 2026-09-07: reconciling
                     // here rolled back 126 valid blocks, hit the safe-depth ceiling,
                     // wrote the durable halt and crash-looped 279 times over a reorg
-                    // that never happened.
+                    // that never happened. The wait is also published as
+                    // this.nodeCatchingUp (health payloads: node_catching_up), because a
+                    // silent wait is indistinguishable from a wedge: the height stops
+                    // moving and every surface still reads green. Both heights are
+                    // re-read each poll; `since` is carried over so it keeps naming the
+                    // instant THIS wait began.
                     if (nodeStillCatchingUp(lastBlockchainInfo)){
                         if (!nodeCatchingUpProblem){
                             this.logWarn("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+"), but the node reports initialblockdownload=true: it is still catching up, not rolled back. Waiting for it to pass "+lastProcessedBlockIndex+" instead of reconciling; the hash compare decides then.")
                         }
+                        const since = (this.nodeCatchingUp && this.nodeCatchingUp.since) || new Date().toISOString()
+                        this.nodeCatchingUp = { node_height: this.blockchainInfoLastBlock, stored_height: lastProcessedBlockIndex, since }
                         nodeCatchingUpProblem = true
                         await this.sleep(5000)
                         continue
@@ -2576,6 +2601,7 @@ class XChainDecoder {
                         this.log("The node has left initial block download with its tip ("+this.blockchainInfoLastBlock+") still below the last processed block ("+lastProcessedBlockIndex+"); treating the gap as a rollback from here on.")
                         nodeCatchingUpProblem = false
                     }
+                    this.nodeCatchingUp = null
 
                     // The node's tip has dropped BELOW our last-processed height (deep
                     // reorg, node rollback, or restart onto a shorter/different chain).

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - A node still in initial block download with its tip below the stored tip is waited on instead of being reconciled as a reorg.
+- The health and status payloads carry `node_catching_up` while that wait runs, so `xchain-node ps` can show it instead of a stopped height.
 - A node-tip gap deeper than the dispenser safe-depth window is refused before the first delete, with no durable halt and no resync owed.
 
 ## [0.15.0] - 2026-09-07
