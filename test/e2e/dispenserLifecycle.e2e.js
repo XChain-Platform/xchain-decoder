@@ -113,8 +113,9 @@ describe('E2E: DISPENSER Lifecycle', function () {
             // sweep runs AFTER the block's own transactions, exactly where the indexer's
             // processExpirations sits. An already-past expiration is therefore stamped by
             // the block that CARRIES the create, not the one after it. (Below the gate the
-            // sweep ran first and a create could never be expired by its own block, which
-            // is the legacy behavior mainnet/testnet keep until an instant is ratified.)
+            // sweep ran first and a create could never be expired by its own block. Every
+            // network is armed at genesis since the 2026-09-09 ruling, so that legacy path
+            // is what a re-decode runs only on a network armed mid-chain.)
             //
             // Expiry is a SOFT expire, not a delete: db.deleteOpenDispensers stamps
             // the expiring block height into expired_block_index so a reorg can

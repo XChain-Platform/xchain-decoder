@@ -453,10 +453,12 @@ function hasProvablyRejectedBatch(subCommands, aliases, consensusNetwork, blockT
 //
 // Its own vendored per-network instant, NOT the ordering argument the caps lean on. That
 // argument is specific to BATCH_ISSUANCE_LIMITS, whose instant the decoder's capture gate is
-// required to sit at or after; the weighting flag has no such relationship and today it is
-// the counter-example, with mainnet capture ARMED and the weighting instant still on the
-// house sentinel. An absent or DISARMED (null) entry is inactive at every block time, which
-// leaves today's over-capture in place rather than inventing a suppression rule.
+// required to sit at or after; the weighting flag has the opposite relationship. Since the
+// 2026-09-09 ruling armed it at mainnet genesis it sits BELOW capture there, and that is
+// safe because the indexer applies the budget only inside its BATCH_ISSUANCE_LIMITS guard,
+// which shares capture's instant: below it neither side weighs, and this mirror captures
+// nothing to suppress. An absent or DISARMED (null) entry is inactive at every block time,
+// which leaves over-capture in place rather than inventing a suppression rule.
 function isBatchCostWeightingActive(consensusNetwork, blockTime){
     const activation = COST_WEIGHTING_ACTIVATION[consensusNetwork]
     if (typeof activation !== 'number') return false

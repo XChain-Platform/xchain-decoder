@@ -20,11 +20,14 @@
 //     matching what the fleet wrote live;
 //   * arming it on a network whose decoders are not all running the value forks the fleet at
 //     the first block that passes a cancelled dispenser's expiration.
-// So mainnet is DISARMED (null) until the operator ratifies an instant, and the helper fails
-// closed on anything that is not a number.
+// mainnet is ARMED AT GENESIS (instant 0) by the 2026-09-09 ruling. Arming it there rewrites
+// nothing: the indexed mainnet history holds 0 dispensers and 0 dispenses (measured
+// 2026-09-09), so the widened capture set admits no output the unwidened one missed. The helper
+// still fails closed on anything that is not a number, which is what the null sentinel remains
+// for on any network that has not armed.
 //
 // Two tiers, so a one-sided edit fails somewhere no matter which checkout is present:
-//   1. PIN  - the vendored map has the disarmed/genesis-on shape, in this repo alone.
+//   1. PIN  - the vendored map has the genesis-on shape on every network, in this repo alone.
 //   2. DOCS - it is value-identical to the canonical map in
 //             xchain-documentation/protocol/constants.js.
 // Tier 2 skips when the sibling checkout is absent (standalone deploy); set
@@ -67,12 +70,24 @@ function indexerCloseDelay(){
 
 describe('DISPENSER_CANCEL_GRACE_ACTIVATION conformance', function () {
 
-    it('keeps mainnet DISARMED, with testnet and regtest genesis-on', function () {
-        // Teeth for the ratification requirement: a number on MAINNET means someone armed a
-        // consensus boundary without the operator's ratified instant.
-        assert.strictEqual(DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet, null);
+    it('arms mainnet at genesis by the 2026-09-09 ruling, with testnet and regtest genesis-on', function () {
+        // Teeth for the ruling: mainnet sits at instant 0, which is identity on the indexed
+        // mainnet history (0 dispensers, 0 dispenses, measured 2026-09-09). Any other mainnet
+        // value re-introduces a boundary block the fleet could split on, so it fails here.
+        assert.strictEqual(DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet, 0);
         assert.strictEqual(DISPENSER_CANCEL_GRACE_ACTIVATION.testnet, 0);
         assert.strictEqual(DISPENSER_CANCEL_GRACE_ACTIVATION.regtest, 0);
+    });
+
+    it('mainnet carries the grace from block time 0 upward, floor and all', function () {
+        // The behaviour the arm buys: every mainnet block, the genesis instant included, keeps
+        // a just-expired dispenser in the capture set for one grace window, so a cancelled
+        // dispenser can never take a payment the decoder drops.
+        assert.strictEqual(isDispenserCancelGraceActive('mainnet', 0), true);
+        assert.strictEqual(isDispenserCancelGraceActive('mainnet', 1786060800), true);
+        assert.strictEqual(isDispenserCancelGraceActive('mainnet', 4000000000), true);
+        assert.strictEqual(cancelGraceFloor('mainnet', 4000000000),
+            4000000000 - DISPENSER_CANCEL_GRACE_SECONDS);
     });
 
     it('is value-identical to the canonical map in xchain-documentation', function () {
@@ -89,13 +104,23 @@ describe('DISPENSER_CANCEL_GRACE_ACTIVATION conformance', function () {
             'the decoder fleet at the first block that passes a cancelled dispenser expiration');
     });
 
-    it('a DISARMED network is inactive at every block time, including absurd ones', function () {
-        // A `time >= null` coercion would read 0 and arm mainnet from genesis, which is the
-        // failure this pins.
-        assert.strictEqual(isDispenserCancelGraceActive('mainnet', 0), false);
-        assert.strictEqual(isDispenserCancelGraceActive('mainnet', 1786060800), false);
-        assert.strictEqual(isDispenserCancelGraceActive('mainnet', 4000000000), false);
-        assert.strictEqual(cancelGraceFloor('mainnet', 4000000000), null);
+    it('a DISARMED (null) network is inactive at every block time, including absurd ones', function () {
+        // No network carries the null sentinel now that mainnet is armed, so disarm one in
+        // place for the length of this test and drive the REAL helper. A `time >= null`
+        // coercion would read 0 and widen the capture set from genesis on a network whose
+        // fleet never armed it, which is the failure this pins.
+        const saved = DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet;
+        DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet = null;
+        try {
+            assert.strictEqual(isDispenserCancelGraceActive('mainnet', 0), false);
+            assert.strictEqual(isDispenserCancelGraceActive('mainnet', 1786060800), false);
+            assert.strictEqual(isDispenserCancelGraceActive('mainnet', 4000000000), false);
+            assert.strictEqual(cancelGraceFloor('mainnet', 4000000000), null);
+        } finally {
+            DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet = saved;
+        }
+        assert.strictEqual(DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet, 0,
+            'the map must be back to the genesis arm after the probe');
     });
 
     it('testnet and regtest are active from genesis', function () {
@@ -119,11 +144,11 @@ describe('DISPENSER_CANCEL_GRACE_ACTIVATION conformance', function () {
         assert.strictEqual(cancelGraceFloor('regtest', NaN), null);
     });
 
-    it('flips exactly at the armed instant once a network IS armed (>= semantics)', function () {
-        // The map is disarmed today, so arm a network in place for the length of this test and
+    it('flips exactly at the armed instant when a network is armed mid-chain (>= semantics)', function () {
+        // Mainnet arms at 0, so move it to a mid-chain instant for the length of this test and
         // drive the REAL helper (the module reads the map per call, so the mutation is
-        // visible). This pins the boundary the operator will ratify onto: >=, so the block AT
-        // the instant already carries the grace, matching every protocol_changes gate.
+        // visible). This pins the boundary semantics any later arm inherits: >=, so the block
+        // AT the instant already carries the grace, matching every protocol_changes gate.
         const ARMED = 1789430400;
         const saved = DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet;
         DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet = ARMED;
@@ -139,8 +164,10 @@ describe('DISPENSER_CANCEL_GRACE_ACTIVATION conformance', function () {
         } finally {
             DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet = saved;
         }
-        assert.strictEqual(isDispenserCancelGraceActive('mainnet', ARMED), false,
-            'the map must be back to DISARMED after the probe');
+        assert.strictEqual(DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet, 0,
+            'the map must be back to the genesis arm after the probe');
+        assert.strictEqual(isDispenserCancelGraceActive('mainnet', ARMED - 1), true,
+            'and the restored genesis arm covers the block the probe held below its instant');
     });
 
     it('the floor is exactly one grace window below the block time', function () {

@@ -237,11 +237,41 @@ describe('DISPENSER PRICE v1 oracle-fee output capture', function () {
               outputs: [{ destinationAddress: payTo, vout: 0, amount: '0.00000600' }] },
         ])
 
-        // regtest is genesis-on for both gates; mainnet at the base flag-day has capture on
-        // and set capture still DISARMED, which is the pre-fix behavior to preserve.
+        // regtest is genesis-on for both gates. mainnet arms set capture at the base gate's own
+        // instant since the 2026-09-09 ruling, so no mainnet block time sits between the two
+        // gates any more: the pre-fix single-pick behavior is reached by disarming the set gate
+        // in place instead. It stays live code for any network that arms mid-chain, and a
+        // re-decode of pre-flag-day history must still reproduce it.
         const ABOVE = { network: 'bitcoin-regtest', blockTime: T0 }
         const BELOW = { network: 'bitcoin-mainnet', blockTime: ORACLE_FEE_OUTPUT_ACTIVATION.mainnet,
                         feeDestination: null }
+
+        // Run `fn` with mainnet set capture disarmed, restoring the ruling's armed value even
+        // if the body throws, so a failure here cannot leak a null into a later test.
+        async function withSetCaptureDisarmed(fn){
+            const saved = ORACLE_FEE_SET_CAPTURE_ACTIVATION.mainnet
+            ORACLE_FEE_SET_CAPTURE_ACTIVATION.mainnet = null
+            try { await fn() }
+            finally { ORACLE_FEE_SET_CAPTURE_ACTIVATION.mainnet = saved }
+            assert.strictEqual(ORACLE_FEE_SET_CAPTURE_ACTIVATION.mainnet,
+                ORACLE_FEE_OUTPUT_ACTIVATION.mainnet,
+                'the map must be back to the armed instant after the probe')
+        }
+
+        it('captures the oracle of a NON-top-ranked open dispenser on ARMED mainnet', async () => {
+            // The state the 2026-09-09 ruling put mainnet in, driven at the armed instant: the
+            // refill of the older row captures its own oracle, not the top-ranked one's.
+            const model = new DispenserModel()
+            const decoder = buildDecoder(twoOpenThenRefill(ORACLE_A), model,
+                { network: 'bitcoin-mainnet', blockTime: ORACLE_FEE_SET_CAPTURE_ACTIVATION.mainnet,
+                  feeDestination: null })
+
+            await decoder.start()
+
+            assert.strictEqual(model.rows.length, 2, 'both creates registered open dispensers')
+            assert.strictEqual(decoder.captured.length, 1)
+            assert.strictEqual(decoder.captured[0].destinationAddress, ORACLE_A)
+        })
 
         it('captures the oracle of a NON-top-ranked open dispenser above the gate', async () => {
             const model = new DispenserModel()
@@ -281,23 +311,27 @@ describe('DISPENSER PRICE v1 oracle-fee output capture', function () {
             // The defect itself, pinned. Changing this is a consensus change: a re-decode
             // of pre-flag-day history must reproduce the output set the fleet wrote live.
             const model = new DispenserModel()
-            const decoder = buildDecoder(twoOpenThenRefill(ORACLE_A), model, BELOW)
+            await withSetCaptureDisarmed(async () => {
+                const decoder = buildDecoder(twoOpenThenRefill(ORACLE_A), model, BELOW)
 
-            await decoder.start()
+                await decoder.start()
 
-            assert.strictEqual(model.rows.length, 2, 'both creates registered open dispensers')
-            assert.strictEqual(decoder.captured.length, 0,
-                'below the gate the wrong oracle is resolved and no output is persisted')
+                assert.strictEqual(model.rows.length, 2, 'both creates registered open dispensers')
+                assert.strictEqual(decoder.captured.length, 0,
+                    'below the gate the wrong oracle is resolved and no output is persisted')
+            })
         })
 
         it('keeps the legacy single-pick below the gate: the top-ranked row still captures', async () => {
             const model = new DispenserModel()
-            const decoder = buildDecoder(twoOpenThenRefill(ORACLE_B), model, BELOW)
+            await withSetCaptureDisarmed(async () => {
+                const decoder = buildDecoder(twoOpenThenRefill(ORACLE_B), model, BELOW)
 
-            await decoder.start()
+                await decoder.start()
 
-            assert.strictEqual(decoder.captured.length, 1)
-            assert.strictEqual(decoder.captured[0].destinationAddress, ORACLE_B)
+                assert.strictEqual(decoder.captured.length, 1)
+                assert.strictEqual(decoder.captured[0].destinationAddress, ORACLE_B)
+            })
         })
     })
 

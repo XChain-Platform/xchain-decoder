@@ -47,6 +47,7 @@ const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
         subCommandCostWeight,
         subCommandLimitKey,
         subCommandTick,
+        isBatchCostWeightingActive,
         CHILD_ISSUE_KEY } = require('../../src/batchSubCommandCapture.js');
 const ACTION_ALIASES = require('../../src/actionAliases.js');
 const sync = require('../tools/sync-batch-limits.js');
@@ -55,6 +56,12 @@ const CORPUS = require('../fixtures/regtestBatchCorpus.json');
 
 const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 const T0 = 1700000000;
+
+// One over-budget wire the gate blocks can drive without reaching into tier 3's vectors:
+// 10 sub-commands, well under the 250-COUNT cap, weighing 271 against the 250 budget, so
+// only the WEIGHT budget can ever suppress it. Same shape as tier 3's '9x EXECUTE + SEND'.
+const WEIGHT_PROBE = 'BATCH|0|SEND|0|BTC|TICK|1|addr;' +
+    Array.from({ length: 9 }, () => 'EXECUTE|0|1|a').join(';');
 
 function siblingOrSkip(ctx, file) {
     if (fs.existsSync(file)) return true;
@@ -335,17 +342,67 @@ describe('BATCH limit vendoring and cross-repo conformance', function () {
                     'the indexer still dispatches');
         });
 
-        it('does NOT assume the weighting flag is on wherever capture is, which is why it is gated', function () {
-            // The counter-example that killed the ordering shortcut, pinned so it stays a
-            // counter-example: mainnet capture is armed and mainnet weighting is not. An
-            // ungated budget would suppress mainnet capture today.
+        it('never applies the budget where the indexer would not: capture is the narrower gate', function () {
+            // The ordering that protects the money-bearing direction, re-derived after the
+            // 2026-09-09 genesis arm moved mainnet weighting from the house sentinel to 0.
+            //
+            // The old shape of this test pinned "mainnet capture is armed and mainnet
+            // weighting is not", which was true and is not any more. What replaces it is
+            // stronger, because it holds in the direction that costs money rather than
+            // merely being a fact about two numbers:
+            //
+            //   * the indexer's budget is a strict refinement of BATCH_ISSUANCE_LIMITS.
+            //     src/actions/batch.js reads its BATCH_COST_WEIGHTING verdict ONLY inside
+            //     `if(limitsActive)` blocks, so below that gate's mainnet instant no bound
+            //     runs at all, whatever the weighting instant says;
+            //   * this decoder cannot suppress there either, because captureCommands exits
+            //     with the un-expanded passthrough while the CAPTURE gate is inactive, and
+            //     mainnet capture arms at that same instant.
+            //
+            // So the window where the vendored weighting instant reads "on" but the indexer
+            // applies no budget is exactly the window where this module captures nothing to
+            // suppress. Under-capture, the direction that loses a settlement output, is
+            // impossible in it. Both halves are driven, not asserted about the constants.
             const captureGate = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet;
             const weightGate  = VENDORED_MODULE.COST_WEIGHTING_ACTIVATION.mainnet;
             if (captureGate === null || typeof weightGate !== 'number') return;
-            assert.ok(captureGate < weightGate,
-                'mainnet capture (' + captureGate + ') is no longer earlier than mainnet ' +
-                'weighting (' + weightGate + '); re-read isBatchCostWeightingActive before ' +
-                'relying on the gate, and re-derive whether the budget may now be unconditional');
+
+            assert.ok(weightGate <= captureGate,
+                'mainnet weighting (' + weightGate + ') now arms AFTER capture (' + captureGate +
+                '); a batch could then be captured with the budget still off here while the ' +
+                'indexer applied it, which is over-capture in the other direction');
+
+            // Inside the window: the vendored weighting gate reads active, and capture does
+            // not, so no batch reaches the budget.
+            const inside = captureGate - 1;
+            assert.strictEqual(isBatchCostWeightingActive('mainnet', inside), true,
+                'the vendored mainnet weighting instant is 0, so it must read active below capture');
+            assert.deepStrictEqual(
+                captureCommands(WEIGHT_PROBE, 'mainnet', inside), [WEIGHT_PROBE],
+                'capture must still be OFF inside the window: an over-budget batch that ' +
+                'reached the budget here would be suppressed while the indexer dispatched it');
+
+            // At and above the instant both gates are on together, which is the state the
+            // tier 3 block drives against the real handler.
+            assert.strictEqual(isBatchCostWeightingActive('mainnet', captureGate), true);
+            assert.deepStrictEqual(captureCommands(WEIGHT_PROBE, 'mainnet', captureGate), [],
+                'at the shared instant the mirror must suppress the over-budget batch, ' +
+                'because the indexer rejects it there');
+        });
+
+        it('testnet and regtest have no such window: capture and weighting both arm at genesis', function () {
+            // The two networks the window argument does not need, pinned so a future
+            // per-network re-pin cannot open one quietly.
+            for (const network of ['testnet', 'regtest']) {
+                const captureGate = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION[network];
+                const weightGate  = VENDORED_MODULE.COST_WEIGHTING_ACTIVATION[network];
+                assert.strictEqual(captureGate, 0, network + ' capture is no longer genesis-active');
+                assert.strictEqual(weightGate, 0, network + ' weighting is no longer genesis-active');
+                assert.strictEqual(isBatchCostWeightingActive(network, 0), true,
+                    network + ' must weigh from block 0');
+                assert.deepStrictEqual(captureCommands(WEIGHT_PROBE, network, 0), [],
+                    network + ' must suppress the over-budget batch from block 0');
+            }
         });
     });
 
@@ -371,7 +428,14 @@ describe('BATCH limit vendoring and cross-repo conformance', function () {
               wire: 'BATCH|0|' +
                     Array.from({ length: 10 }, () => 'AIRDROP|0|BTC|TICK|1|a').join(';') },
         ];
-        const MAINNET_LIVE = 1800000000;   // above mainnet capture, below the weighting sentinel
+        // Above mainnet capture, which since the 2026-09-09 genesis arm is also above the
+        // point where the indexer's own weight budget becomes reachable (its BATCH_COST_
+        // WEIGHTING verdict is read only inside the BATCH_ISSUANCE_LIMITS guard, and that
+        // gate's mainnet instant is the capture instant). Both sides weigh here.
+        const MAINNET_LIVE = 1800000000;
+        // Inside the inverted window instead: the weighting instant is 0 so the vendored
+        // gate reads active, but capture is off here and the indexer applies no bound.
+        const MAINNET_WINDOW = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet - 1;
 
         it('suppresses an over-budget batch on regtest, where the handler rejects it whole', async function () {
             if (!siblingOrSkip(this, sync.INDEXER_BATCH)) return;
@@ -388,19 +452,44 @@ describe('BATCH limit vendoring and cross-repo conformance', function () {
             }
         });
 
-        it('still captures an over-budget batch on MAINNET, where the flag is unarmed', async function () {
-            // The under-capture control, and the reason the rule is gated instead of
-            // unconditional. Pre-gate reasoning would have suppressed these.
+        it('still captures an over-budget batch inside the inverted MAINNET window', async function () {
+            // The under-capture control, re-aimed at the window the 2026-09-09 genesis arm
+            // opened. Mainnet BATCH_COST_WEIGHTING is now 0, so the vendored gate reads
+            // active below the capture instant; the real handler applies NO bound there,
+            // because it reads that verdict only inside its BATCH_ISSUANCE_LIMITS guard and
+            // that gate arms at the capture instant. This is the case that would lose a
+            // settlement output if the mirror ever suppressed on the weighting instant alone.
+            if (!siblingOrSkip(this, sync.INDEXER_BATCH)) return;
+            for (const vector of WEIGHT_VECTORS) {
+                const status = await indexerStatus(vector.wire,
+                    { network: 'mainnet', blockTime: MAINNET_WINDOW });
+                assert.strictEqual(status, 'valid',
+                    vector.name + ': premise wrong, mainnet handler said ' + status +
+                    ' inside the window; the budget is no longer nested under BATCH_ISSUANCE_LIMITS');
+                // Capture is off here, so the mirror hands back the un-expanded batch rather
+                // than suppressing it. Nothing the handler dispatches is dropped.
+                assert.deepStrictEqual(captureCommands(vector.wire, 'mainnet', MAINNET_WINDOW),
+                    [vector.wire],
+                    'UNDER-CAPTURE on mainnet: the mirror suppressed ' + vector.name +
+                    ' inside the window, which the real handler dispatches in full');
+            }
+        });
+
+        it('and agrees with the handler ABOVE the shared instant, where both weigh', async function () {
+            // The other side of the same boundary, and the state mainnet is actually in
+            // today. Once capture is on, BATCH_ISSUANCE_LIMITS is on too, so the indexer's
+            // budget is reachable and both sides must reach the same verdict. Without this
+            // the case above would also pass if the mirror had simply stopped suppressing.
             if (!siblingOrSkip(this, sync.INDEXER_BATCH)) return;
             for (const vector of WEIGHT_VECTORS) {
                 const status = await indexerStatus(vector.wire,
                     { network: 'mainnet', blockTime: MAINNET_LIVE });
-                assert.strictEqual(status, 'valid',
-                    vector.name + ': premise wrong, mainnet handler said ' + status);
-                const view = captureCommands(vector.wire, 'mainnet', MAINNET_LIVE);
-                assert.strictEqual(view.length, subCommandsOf(vector.wire).length,
-                    'UNDER-CAPTURE on mainnet: the mirror suppressed ' + vector.name +
-                    ', which the real handler dispatches in full');
+                assert.strictEqual(status, 'invalid: COMMAND (limit)',
+                    vector.name + ': the mainnet handler said ' + status + ' above the ' +
+                    'capture instant, where the weight budget is reachable');
+                assert.deepStrictEqual(captureCommands(vector.wire, 'mainnet', MAINNET_LIVE), [],
+                    'OVER-CAPTURE on mainnet: the mirror captured ' + vector.name +
+                    ', which the real handler rejects whole');
             }
         });
 

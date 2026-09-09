@@ -19,11 +19,14 @@
 //     what the fleet wrote live;
 //   * arming it on a network whose decoders are not all running the value forks the fleet at the
 //     first boundary block.
-// So the map is DISARMED (null) on mainnet and testnet until the operator ratifies a per-network
-// instant, and the helper fails closed on anything that is not a number.
+// mainnet is ARMED AT GENESIS (instant 0) by the 2026-09-09 ruling. Arming it there rewrites
+// nothing: the indexed mainnet history holds 0 dispensers and 0 dispenses (measured 2026-09-09),
+// so no mainnet block ever carried an expiry boundary the realigned soft-expire could move. The
+// helper still fails closed on anything that is not a number, which is what the null sentinel
+// remains for on any network that has not armed.
 //
 // Two tiers, so a one-sided edit fails somewhere no matter which checkout is present:
-//   1. PIN  - the vendored map has the disarmed/genesis-on shape, in this repo alone.
+//   1. PIN  - the vendored map has the genesis-on shape on every network, in this repo alone.
 //   2. DOCS - it is value-identical to the canonical map in
 //             xchain-documentation/protocol/constants.js.
 // Tier 2 skips when the sibling checkout is absent (standalone deploy); set
@@ -51,14 +54,24 @@ function siblingOrSkip(ctx, file){
 
 describe('DISPENSER_EXPIRY_REALIGN_ACTIVATION conformance', function () {
 
-    it('keeps mainnet DISARMED, with testnet and regtest genesis-on', function () {
-        // Teeth for the ratification requirement: a number on MAINNET means someone armed a
-        // consensus boundary without the operator's ratified instant. Testnet was ratified at
+    it('arms mainnet at genesis by the 2026-09-09 ruling, with testnet and regtest genesis-on', function () {
+        // Teeth for the ruling: mainnet sits at instant 0, which is identity on the indexed
+        // mainnet history (0 dispensers, 0 dispenses, measured 2026-09-09). Any other mainnet
+        // value re-introduces a boundary block, so it has to fail here. Testnet was ratified at
         // instant 0 on 2026-08-18 (pre-launch, every feature active on testnet), which is safe
         // only because testnet decoder/indexer state is rebuilt from the chain before launch.
-        assert.strictEqual(DISPENSER_EXPIRY_REALIGN_ACTIVATION.mainnet, null);
+        assert.strictEqual(DISPENSER_EXPIRY_REALIGN_ACTIVATION.mainnet, 0);
         assert.strictEqual(DISPENSER_EXPIRY_REALIGN_ACTIVATION.testnet, 0);
         assert.strictEqual(DISPENSER_EXPIRY_REALIGN_ACTIVATION.regtest, 0);
+    });
+
+    it('mainnet is realigned from block time 0 upward, with no boundary block left', function () {
+        // The behaviour the arm buys: every mainnet block, including the genesis instant
+        // itself, measures expiry where the indexer does, so no header time can fall on a
+        // side of the gate the fleet disagrees about.
+        assert.strictEqual(isDispenserExpiryRealignActive('mainnet', 0), true);
+        assert.strictEqual(isDispenserExpiryRealignActive('mainnet', 1786060800), true);
+        assert.strictEqual(isDispenserExpiryRealignActive('mainnet', 4000000000), true);
     });
 
     it('is value-identical to the canonical map in xchain-documentation', function () {
@@ -75,12 +88,22 @@ describe('DISPENSER_EXPIRY_REALIGN_ACTIVATION conformance', function () {
             'the decoder fleet at the first boundary block');
     });
 
-    it('a DISARMED network is inactive at every block time, including absurd ones', function () {
-        // Mainnet is the network still carrying the null sentinel. A `time >= null` coercion
-        // would read 0 and arm it from genesis, which is the failure this pins.
-        assert.strictEqual(isDispenserExpiryRealignActive('mainnet', 0), false);
-        assert.strictEqual(isDispenserExpiryRealignActive('mainnet', 1786060800), false);
-        assert.strictEqual(isDispenserExpiryRealignActive('mainnet', 4000000000), false);
+    it('a DISARMED (null) network is inactive at every block time, including absurd ones', function () {
+        // No network carries the null sentinel now that mainnet is armed, so disarm one in
+        // place for the length of this test and drive the REAL helper. A `time >= null`
+        // coercion would read 0 and arm the network from genesis, which is the failure this
+        // pins for whichever network is next added to the map unarmed.
+        const saved = DISPENSER_EXPIRY_REALIGN_ACTIVATION.mainnet;
+        DISPENSER_EXPIRY_REALIGN_ACTIVATION.mainnet = null;
+        try {
+            assert.strictEqual(isDispenserExpiryRealignActive('mainnet', 0), false);
+            assert.strictEqual(isDispenserExpiryRealignActive('mainnet', 1786060800), false);
+            assert.strictEqual(isDispenserExpiryRealignActive('mainnet', 4000000000), false);
+        } finally {
+            DISPENSER_EXPIRY_REALIGN_ACTIVATION.mainnet = saved;
+        }
+        assert.strictEqual(DISPENSER_EXPIRY_REALIGN_ACTIVATION.mainnet, 0,
+            'the map must be back to the genesis arm after the probe');
     });
 
     it('testnet is active from genesis, so the launch runs the realigned path', function () {
@@ -107,11 +130,11 @@ describe('DISPENSER_EXPIRY_REALIGN_ACTIVATION conformance', function () {
         assert.strictEqual(isDispenserExpiryRealignActive('regtest', 'not-a-time'), false);
     });
 
-    it('flips exactly at the armed instant once a network IS armed (>= semantics)', function () {
-        // The map is disarmed today, so arm a network in place for the length of this test and
+    it('flips exactly at the armed instant when a network is armed mid-chain (>= semantics)', function () {
+        // Mainnet arms at 0, so move it to a mid-chain instant for the length of this test and
         // drive the REAL helper (the module reads the map per call, so the mutation is visible).
-        // This pins the boundary the operator will ratify onto: >=, so the block AT the instant
-        // is already realigned, matching every protocol_changes gate.
+        // This pins the boundary semantics any later arm inherits: >=, so the block AT the
+        // instant is already realigned, matching every protocol_changes gate.
         const ARMED = 1789430400;
         const saved = DISPENSER_EXPIRY_REALIGN_ACTIVATION.mainnet;
         DISPENSER_EXPIRY_REALIGN_ACTIVATION.mainnet = ARMED;
@@ -125,7 +148,9 @@ describe('DISPENSER_EXPIRY_REALIGN_ACTIVATION conformance', function () {
         } finally {
             DISPENSER_EXPIRY_REALIGN_ACTIVATION.mainnet = saved;
         }
-        assert.strictEqual(isDispenserExpiryRealignActive('mainnet', ARMED), false,
-            'the map must be back to DISARMED after the probe');
+        assert.strictEqual(DISPENSER_EXPIRY_REALIGN_ACTIVATION.mainnet, 0,
+            'the map must be back to the genesis arm after the probe');
+        assert.strictEqual(isDispenserExpiryRealignActive('mainnet', ARMED - 1), true,
+            'and the restored genesis arm covers the block the probe held below its instant');
     });
 });

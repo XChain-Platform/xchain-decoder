@@ -96,9 +96,20 @@ describe('ORACLE_FEE_OUTPUT_ACTIVATION conformance', function () {
 // membership over every open Mode B dispenser of the paying source. That changes the set of
 // outputs persisted to transaction_outputs, so it is consensus-affecting in both directions:
 // arming it early on a fleet that has not deployed forks the chain, and arming it in the past
-// rewrites agreed history on a re-decode. null means DISARMED, which is the fail-closed
-// default a network sits at until its maintainers ratify an instant.
+// rewrites agreed history on a re-decode. mainnet is ARMED by the 2026-09-09 ruling at the base
+// gate's own instant, the earliest the ordering below permits, and rewrites nothing because the
+// indexed mainnet history holds 0 dispensers (measured 2026-09-09). null stays the fail-closed
+// reading for any network that has not armed.
 describe('ORACLE_FEE_SET_CAPTURE_ACTIVATION conformance', function () {
+
+    it('arms mainnet at the base gate instant by the 2026-09-09 ruling', function () {
+        // Teeth for the ruling AND for its ordering constraint in one place: the widening
+        // starts exactly where capture itself starts, so no mainnet block sits between the two
+        // gates, and a re-decode of the (dispenser-free) history persists the same output set.
+        assert.strictEqual(ORACLE_FEE_SET_CAPTURE_ACTIVATION.mainnet, PINNED_MAINNET_ACTIVATION);
+        assert.strictEqual(ORACLE_FEE_SET_CAPTURE_ACTIVATION.mainnet,
+            ORACLE_FEE_OUTPUT_ACTIVATION.mainnet);
+    });
 
     it('carries a block time or null (DISARMED) per network, regtest genesis-on', function () {
         const networks = Object.keys(ORACLE_FEE_SET_CAPTURE_ACTIVATION);
