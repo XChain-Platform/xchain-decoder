@@ -5,7 +5,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-0.16.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-2%2C030%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-2%2C074%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -113,7 +113,7 @@ neither source sets one, so these defaults hold on an unconfigured box:
 | `npm run migrate` | Apply pending database migrations (auto + manual; `--file <name>` scopes to specific migration(s)) |
 | `npm run ci` | The full no-external-services gate: unit, security, smoke, regression, chaos, and a 100-iteration fuzz pass (about a minute) |
 | `npm run test:smoke` | Smoke tests (58 tests, no external services) |
-| `npm run test:unit` | Unit tests (1,549 tests, no external services) |
+| `npm run test:unit` | Unit tests (1,593 tests, no external services) |
 | `npm run test:security` | Security tests (83 tests, no external services) |
 | `npm run test:integration` | Integration tests (30 tests; brings up its own throwaway regtest node and MariaDB, requires Docker) |
 | `npm run test:e2e` | End-to-end tests (72 tests; brings up its own throwaway regtest node and MariaDB on separate ports, requires Docker) |
