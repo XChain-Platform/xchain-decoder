@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - The health and status payloads carry `node_last_ok_at` and `node_unreachable`, so a coin node that has never answered is visible.
 
+### Fixed
+- Nodes that applied the original `2026-05-28-unique-index-tables.sql` are healed instead of logging a checksum mismatch at every startup.
+
 ## [0.16.0] - 2026-09-08
 
 ### Added

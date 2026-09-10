@@ -2905,9 +2905,10 @@ class Database {
 // DBs recorded whichever revision they applied first). Executable SQL is
 // byte-identical across every pinned revision (verified: strip `--` comment
 // lines and blank lines; the residue hashes identically from first commit to
-// HEAD) for every entry EXCEPT the byte-order one at the bottom, which is
-// justified by a measured data equivalence instead and carries that argument in
-// full at its own entry rather than relying on this blanket sentence.
+// HEAD) for every entry EXCEPT two, which are justified by a measured data
+// equivalence instead and each carry that argument in full at its own entry
+// rather than relying on this blanket sentence: the byte-order one at the
+// bottom, and the 8151979 revision of the unique-index one.
 // Applied fleet-wide through code deploy: both the startup auto-run and
 // `node src/migrate.js` pass through this heal before the mismatch guard, so no
 // direct schema_migrations SQL is ever needed. Mirrors xchain-indexer/src/db.js.
@@ -2980,12 +2981,42 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
         ],
         to:   'b03b41b6fcabef9c959851ede9b75cc9089cef7c015bdd69cfcea74ad5acea7a',  // comment tidy (HEAD)
     },
-    // Comment-only edit: the fleet recorded 50a5e83, which is the revision that ADDED the
-    // `@mempool_has_ids` guard, so the guarded UPDATEs are what actually ran. 7817e6c then
-    // added the license header. Stripped residue verified IDENTICAL between 50a5e83 and
-    // HEAD, so this entry meets the ordinary contract above.
+    // TWO revisions are pinned here and they are blessed for DIFFERENT reasons, so both are
+    // stated rather than filed together under the blanket sentence above.
+    //
+    //   50a5e83 (8845b9ad): the revision that ADDED the `@mempool_has_ids` guard, so the
+    //   guarded UPDATEs are what actually ran. 7817e6c then added the license header.
+    //   Stripped residue verified IDENTICAL between 50a5e83 and HEAD: ordinary contract.
+    //
+    //   8151979 (e1f7df79): the ORIGINAL shipped revision, applied by every node deployed in
+    //   the 2026-06-10 .. 2026-07-10 window (one production BTC node among them, which is why its decoder
+    //   logged the mismatch every startup). Its residue is NOT identical to HEAD's: 50a5e83
+    //   rewrote four mempool_transactions repoints from bare statements into
+    //   `SET @s := IF(@mempool_has_ids, '<the same statement>', 'DO 0')` + PREPARE/EXECUTE.
+    //   This is therefore a DATA equivalence, not a text one, and it is decided by the
+    //   ledger row itself rather than assumed:
+    //
+    //     - the recorded row EXISTS, so the file ran to completion on that database;
+    //     - the 8151979 form references mempool_transactions.source_id / destination_id /
+    //       tx_hash_id unguarded, so completion is only possible where those columns were
+    //       present (otherwise MariaDB aborts the statement with errno 1054 and the runner
+    //       records nothing);
+    //     - columns present is exactly the branch HEAD's guard takes (@mempool_has_ids = 1),
+    //       and the string it then PREPAREs is the same UPDATE / DELETE text.
+    //
+    //   So on every database this heals, the two revisions executed the identical statements.
+    //   The guard only diverges on the post-2026-06-15-mempool-raw-strings schema, where the
+    //   old form could not have been recorded as applied in the first place.
+    //
+    // The check to re-run before extending this entry to a new database: if a row for this
+    // file can ever be present WITHOUT the migration having completed (a runner that stamps
+    // before applying, or a hand-inserted ledger row), the argument above does not carry and
+    // the schema must be reconciled instead.
     '2026-05-28-unique-index-tables.sql': {
-        from: '8845b9addc0990b0433f8862969b57cb472535474b4b4d5576c408db777b57ce',  // 50a5e83..7817e6c^
+        from: [
+            'e1f7df7973881b6fcaa5535fe5aca86b82bb7f45fa4e7e5fdcf9c5859c468207',  // 8151979..50a5e83^
+            '8845b9addc0990b0433f8862969b57cb472535474b4b4d5576c408db777b57ce',  // 50a5e83..7817e6c^
+        ],
         to:   '4f7f53ea5423d5ad50e0a2136243dab9e215033e6a110c7b47e66ba5361d44c2',  // 7817e6c (HEAD)
     },
     // THE ONE ENTRY THAT DOES NOT MEET THE BYTE-IDENTICAL-SQL CONTRACT ABOVE, said plainly

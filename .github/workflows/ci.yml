@@ -19,6 +19,16 @@ on:
 jobs:
   ci:
     uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@6f4d39ae85787fc31e90a31588d87610a2c33103 # pin: XChain-Platform/.github @ master 2026-08-14; bump deliberately
+    with:
+      # On a release or hotfix PR, check the siblings out at the PR's own
+      # branch so a release-branch-only change to a file a cross-repo guard
+      # reads is tested against the train, not against develop. The shared
+      # workflow otherwise pins siblings at develop for any pull request,
+      # which is what let this repo's release PRs go red on commits that
+      # touch neither the guard nor the file it reads. Empty everywhere
+      # else, which keeps the existing behaviour. Same expression as
+      # xchain-indexer and xchain-explorer.
+      siblings-ref: ${{ (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')) && github.head_ref || '' }}
 
   # Cross-repo drift guards: this repo vendors the canonical coin registry from
   # xchain-hub, and per-repo CI cannot see sibling repos, so a drifted vendored
@@ -109,6 +119,12 @@ jobs:
       # Same roster (.ci-siblings) and same layout the shared workflow uses.
       - name: Check out declared sibling repositories
         uses: XChain-Platform/.github/actions/checkout-siblings@master # one definition for every call site; see the action for why this tracks master
+        # The ratchet re-runs the unit suite, so it needs the same release/hotfix
+        # awareness as the gate's own siblings-ref above, or it measures a suite
+        # whose cross-repo guards disagree with the gate for a reason that exists
+        # nowhere but in CI.
+        with:
+          ref: ${{ (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')) && github.head_ref || '' }}
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4
