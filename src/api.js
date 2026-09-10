@@ -38,6 +38,7 @@ const bodyParser = require('body-parser');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const { createShutdown, createDecoderDrain } = require('./shutdown');
 const XChainDecoder  = require('./XChainDecoder');
 const { resolveFeeDestination } = require('./feeDestination');
 const jsonRouter = require('express-json-rpc-router')
@@ -248,7 +249,9 @@ async function startApi(){
     const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DECODER_DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD, AUX_POW, FEE_DESTINATION);
     let decoderRunning = true
     let decoderError = null
-    decoder.start().then(() => {
+    // start() awaits the parse loop, so this promise SETTLES when the loop breaks:
+    // on a fatal error here, or on the stopFlag the drain sets at a block boundary.
+    const decoderExited = decoder.start().then(() => {
         // start() awaits the parse loop, so it RESOLVES only when the loop breaks:
         // the SIGTERM/stopFlag path, or any fall-through out of `while (true)`.
         // Without this, decoderRunning only ever went false on a REJECTION, so a
@@ -286,18 +289,6 @@ async function startApi(){
         // REORG_HALT) surface as a visible Exited(1) rather than a silent wedge.
         process.exit(1)
     })
-
-    // Graceful shutdown on process signals
-    const shutdown = () => {
-        console.log('Received shutdown signal, stopping decoder...')
-        // Flip BEFORE stop(): stop() only sets stopFlag, and the loop may take a
-        // whole iteration to notice. A drain must not answer /live with 200 in the
-        // window between the signal and the loop actually breaking.
-        decoderRunning = false
-        decoder.stop()
-    }
-    process.on('SIGTERM', shutdown)
-    process.on('SIGINT', shutdown)
 
     // Crash visibility. Registered inside startApi(), not at module scope: several
     // unit suites require this module in-process under mocha to reach registerLiveRoute
@@ -585,9 +576,29 @@ async function startApi(){
     app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
     app.use(jsonRouter({methods: jsonRpcController}))
 
-    app.listen(DECODER_API_PORT, () => {
+    const server = app.listen(DECODER_API_PORT, () => {
       console.log('API listening on port '+DECODER_API_PORT);
     });
+
+    // Graceful shutdown. node is PID 1 in the image, so `docker stop` delivers
+    // SIGTERM here. The earlier handler only set stopFlag: the loop broke, but
+    // this listener and the DB pool kept the process alive and nothing exited,
+    // so every stop ended in docker's SIGKILL. The drain is bounded by its own
+    // hard-exit timer (src/shutdown.js) because installing a handler removes
+    // node's default terminate.
+    const shutdown = createShutdown({
+        drain: createDecoderDrain({
+            decoder:     decoder,
+            server:      server,
+            loopSettled: decoderExited,
+            // Flip BEFORE stop(): stop() only sets stopFlag and the loop may take a
+            // whole iteration to notice. A drain must not answer /live with 200 in
+            // the window between the signal and the loop actually breaking.
+            onDraining:  () => { decoderRunning = false }
+        })
+    })
+    process.on('SIGTERM', () => shutdown('SIGTERM'))
+    process.on('SIGINT', () => shutdown('SIGINT'))
 }
 
 // Auto-start only when run directly (node src/api.js), so the module can be required by

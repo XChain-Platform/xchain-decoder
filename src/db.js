@@ -117,6 +117,21 @@ class Database {
     }
     
 
+    // Drain support (src/shutdown.js): release a transaction connection still
+    // held, which the drain normally never sees because it waits for the parse
+    // loop to break at a block boundary, then end the pool so nothing keeps the
+    // event loop alive. Idempotent: a second call finds no pool and returns.
+    async close(){
+        if(this.transactionConnection){
+            try { await this.transactionConnection.release(); } catch(_){}
+            this.transactionConnection = null;
+        }
+        const pool = this.pool;
+        if(!pool) return;
+        this.pool = null;
+        await pool.end();
+    }
+
     // Seam over the driver: mariadb's createConnection export is
     // non-configurable, so tests stub this method instead of the module.
     _createConnection(connectionParams){
