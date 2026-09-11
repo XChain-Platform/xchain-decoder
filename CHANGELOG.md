@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `GET /status` publishes a `lag` field, so the node's bootstrap health gate no longer refuses the payload when it falls back to this route.
+
 ## [0.17.0] - 2026-09-10
 
 ### Added

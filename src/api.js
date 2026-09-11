@@ -536,11 +536,18 @@ async function startApi(){
         if (dbOk && typeof decoder.checkReorgHalt === 'function'){
             try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', '/status', e) }
         }
+        // RULED 2026-09-01: xchain-node's BootstrapHealthGate refuses any
+        // /status payload with no lag key (lagKeys: lag_blocks, blockLag, lag) once it
+        // falls back to this route. getSyncStatus() already reports the same
+        // node-height-minus-processed-height gap the JSON-RPC health method and /live
+        // publish, null before the first processed block rather than a false zero.
+        const syncStatus = decoder.getSyncStatus()
         const healthy = decoderRunning && dbOk
         res.status(healthy ? 200 : 503).json({
             status: healthy ? 'healthy' : 'unhealthy',
             db: dbOk,
             running: decoderRunning,
+            lag: syncStatus.lag,
             reorg_halted:      reorgHalt.halted,
             reorg_halt_reason: reorgHalt.reason,
             reorg_halted_at:   reorgHalt.at,
