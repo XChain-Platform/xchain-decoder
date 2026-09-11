@@ -38,6 +38,7 @@ const bodyParser = require('body-parser');
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const { createShutdown, createDecoderDrain } = require('./shutdown');
 const XChainDecoder  = require('./XChainDecoder');
 const { resolveFeeDestination } = require('./feeDestination');
 const jsonRouter = require('express-json-rpc-router')
@@ -113,6 +114,26 @@ const AUX_POW = process.env.AUX_POW === 'true' || process.env.AUX_POW === '1'
 // non-mainnet-only env override (see src/feeDestination.js). When resolved, the decoder persists
 // outputs paying it to transaction_outputs so the indexer can validate native-coin fee payments.
 const FEE_DESTINATION = resolveFeeDestination(NETWORK, process.env.FEE_DESTINATION || null)
+
+// Node reachability for the health payloads: `node_last_ok_at` (the last successful
+// node RPC, null if there has never been one) and `node_unreachable` (null, or the
+// outage with its age in seconds). A decoder whose node never answered a single RPC
+// is otherwise indistinguishable from a healthy one on every surface an operator polls;
+// these two fields are that difference, reported and never gating.
+//
+// Fail-soft: an absent connector, or one from a build/test stub predating the method,
+// reports the unknown-but-not-failing pair rather than throwing inside a probe.
+function nodeReachabilityFields(decoder){
+    const connector = decoder && decoder.connector
+    if (!connector || typeof connector.nodeReachability !== 'function'){
+        return { node_last_ok_at: null, node_unreachable: null }
+    }
+    try {
+        return connector.nodeReachability()
+    } catch (e) {
+        return { node_last_ok_at: null, node_unreachable: null }
+    }
+}
 
 // Express middleware that bounds JSON-RPC batch size. express-json-rpc-router runs
 // Promise.all over every element of a batch array, while the per-IP rate limiter counts
@@ -195,6 +216,10 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
             // { node_height, stored_height, since } while the parse loop is waiting out
             // a node in initial block download below our tip, null otherwise.
             node_catching_up:  (decoder && decoder.nodeCatchingUp) || null,
+            // node_last_ok_at + node_unreachable. Same reporting-not-gating contract as
+            // node_height_stale below, and the only surface that separates "the node has
+            // never answered" from "the node is fine".
+            ...nodeReachabilityFields(decoder),
             // A frozen node tip, reported but deliberately NOT gating. isStalled()
             // returns false while the tip is stale on purpose: restarting the container
             // cannot fix an upstream node outage, and gating on it re-opens the
@@ -224,7 +249,9 @@ async function startApi(){
     const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DECODER_DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD, AUX_POW, FEE_DESTINATION);
     let decoderRunning = true
     let decoderError = null
-    decoder.start().then(() => {
+    // start() awaits the parse loop, so this promise SETTLES when the loop breaks:
+    // on a fatal error here, or on the stopFlag the drain sets at a block boundary.
+    const decoderExited = decoder.start().then(() => {
         // start() awaits the parse loop, so it RESOLVES only when the loop breaks:
         // the SIGTERM/stopFlag path, or any fall-through out of `while (true)`.
         // Without this, decoderRunning only ever went false on a REJECTION, so a
@@ -262,18 +289,6 @@ async function startApi(){
         // REORG_HALT) surface as a visible Exited(1) rather than a silent wedge.
         process.exit(1)
     })
-
-    // Graceful shutdown on process signals
-    const shutdown = () => {
-        console.log('Received shutdown signal, stopping decoder...')
-        // Flip BEFORE stop(): stop() only sets stopFlag, and the loop may take a
-        // whole iteration to notice. A drain must not answer /live with 200 in the
-        // window between the signal and the loop actually breaking.
-        decoderRunning = false
-        decoder.stop()
-    }
-    process.on('SIGTERM', shutdown)
-    process.on('SIGINT', shutdown)
 
     // Crash visibility. Registered inside startApi(), not at module scope: several
     // unit suites require this module in-process under mocha to reach registerLiveRoute
@@ -415,6 +430,9 @@ async function startApi(){
                 // { node_height, stored_height, since } while the parse loop is waiting
                 // out a node in initial block download below our tip, null otherwise.
                 node_catching_up:    (decoder && decoder.nodeCatchingUp) || null,
+                // node_last_ok_at + node_unreachable: whether the coin node is answering
+                // this decoder at all, and since when it stopped. Reported, not gated on.
+                ...nodeReachabilityFields(decoder),
                 // Set once an operator cleared a halt (db.clearReorgHalt); null while a
                 // halt is live or none was ever recorded.
                 reorg_halt_cleared_at:     reorgHalt.cleared_at || null,
@@ -529,6 +547,9 @@ async function startApi(){
             // { node_height, stored_height, since } while the parse loop is waiting out
             // a node in initial block download below our tip, null otherwise.
             node_catching_up:  (decoder && decoder.nodeCatchingUp) || null,
+            // node_last_ok_at + node_unreachable: whether the coin node is answering
+            // this decoder at all, and since when it stopped. Reported, not gated on.
+            ...nodeReachabilityFields(decoder),
             // Ships beside the boolean, never without it. "Not halted" is only an answer
             // if something looked, and the probe is fail-soft: its state starts at
             // not-halted with checked_at null, so a decoder that has NEVER completed a
@@ -555,9 +576,29 @@ async function startApi(){
     app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
     app.use(jsonRouter({methods: jsonRpcController}))
 
-    app.listen(DECODER_API_PORT, () => {
+    const server = app.listen(DECODER_API_PORT, () => {
       console.log('API listening on port '+DECODER_API_PORT);
     });
+
+    // Graceful shutdown. node is PID 1 in the image, so `docker stop` delivers
+    // SIGTERM here. The earlier handler only set stopFlag: the loop broke, but
+    // this listener and the DB pool kept the process alive and nothing exited,
+    // so every stop ended in docker's SIGKILL. The drain is bounded by its own
+    // hard-exit timer (src/shutdown.js) because installing a handler removes
+    // node's default terminate.
+    const shutdown = createShutdown({
+        drain: createDecoderDrain({
+            decoder:     decoder,
+            server:      server,
+            loopSettled: decoderExited,
+            // Flip BEFORE stop(): stop() only sets stopFlag and the loop may take a
+            // whole iteration to notice. A drain must not answer /live with 200 in
+            // the window between the signal and the loop actually breaking.
+            onDraining:  () => { decoderRunning = false }
+        })
+    })
+    process.on('SIGTERM', () => shutdown('SIGTERM'))
+    process.on('SIGINT', () => shutdown('SIGINT'))
 }
 
 // Auto-start only when run directly (node src/api.js), so the module can be required by
@@ -567,4 +608,4 @@ if (require.main === module) startApi()
 // startApi is exported so the crash handlers it installs can be driven for real
 // rather than asserted against the source text; the require.main guard above
 // still keeps a plain require from opening a port or a DB connection.
-module.exports = { makeRpcBatchGuard, registerLiveRoute, startApi, noteProbeFailure, _resetProbeLogState, _ageProbeLogState, PROBE_LOG_WINDOW_MS }
+module.exports = { makeRpcBatchGuard, registerLiveRoute, startApi, noteProbeFailure, nodeReachabilityFields, _resetProbeLogState, _ageProbeLogState, PROBE_LOG_WINDOW_MS }

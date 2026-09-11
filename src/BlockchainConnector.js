@@ -286,12 +286,48 @@ function normalizeEndpoint(entry, defaultPort) {
     return protocol + match[2] + ':' + port
 }
 
+// Reduce the three timestamps the connector records into the two fields every health
+// surface publishes. Pure and exported so the rule lives in one place: a surface that
+// re-derived "is the node reachable" from a counter would disagree with this one.
+//
+// Unreachable means the LATEST attempt failed: either nothing has ever succeeded, or
+// the last failure is newer than the last success. `since` dates the outage from the
+// last success when there was one, and from connector construction when there was
+// never one, which is the case the defect report describes: a decoder whose node
+// answered nothing in five and a half days while every surface read green.
+//
+// All three inputs are ms epoch, 0 meaning "never".
+function nodeReachabilityFrom(startedAt, lastNodeOkAt, lastNodeFailAt, now = Date.now()) {
+    const lastOkIso = lastNodeOkAt > 0 ? new Date(lastNodeOkAt).toISOString() : null
+    const failing = lastNodeFailAt > 0 && (lastNodeOkAt === 0 || lastNodeFailAt > lastNodeOkAt)
+    if (!failing) return { node_last_ok_at: lastOkIso, node_unreachable: null }
+    const sinceMs = lastNodeOkAt > 0 ? lastNodeOkAt : startedAt
+    return {
+        node_last_ok_at: lastOkIso,
+        node_unreachable: {
+            since: new Date(sinceMs).toISOString(),
+            last_ok_at: lastOkIso,
+            // Floor, and clamped at 0: a health probe racing the recorded instant
+            // must never publish a negative age.
+            seconds: Math.max(0, Math.floor((now - sinceMs) / 1000))
+        }
+    }
+}
+
 class BlockchainConnector {
     constructor(url, port, rpcUser, rpcPassword) {
         this.port = port
         this.rpcUser = rpcUser
         this.rpcPassword = rpcPassword
         this.rpcErrors = 0
+        // Node reachability, recorded at the single POST choke point below so every
+        // RPC path through this class feeds it. Reported, never gated on: the healthy
+        // verdict deliberately ignores an upstream node outage (a restart cannot fix
+        // one, and gating re-opens the autoheal restart flap), which is exactly why the
+        // outage needs a surface of its own.
+        this.startedAt = Date.now()
+        this.lastNodeOkAt = 0
+        this.lastNodeFailAt = 0
         // RPC endpoint failover. A dead primary endpoint used to stall the
         // decoder forever, because the block loop retries RPC failures
         // indefinitely by design (skipping a block would corrupt the index).
@@ -317,6 +353,12 @@ class BlockchainConnector {
         return this.endpoints[this.activeEndpointIndex]
     }
 
+    // Node reachability as the health surfaces publish it. Cheap and never throws,
+    // so a probe can call it per request.
+    nodeReachability(now = Date.now()) {
+        return nodeReachabilityFrom(this.startedAt, this.lastNodeOkAt, this.lastNodeFailAt, now)
+    }
+
     // Single POST path for every RPC method: resets the consecutive-failure
     // counter on any answer from the node, and counts connection-level errors
     // toward failover before re-throwing for the caller's own retry handling.
@@ -329,8 +371,16 @@ class BlockchainConnector {
                 }
             })
             this.connectionFailures = 0
+            // The node answered. A JSON-RPC error carried in a 200 body (height out of
+            // range, tx not found) still resolves here and still counts as reached:
+            // this pair reports whether the node is ANSWERING, not whether the answer
+            // was the one the caller wanted. rpcErrors already counts the latter.
+            this.lastNodeOkAt = Date.now()
             return response
         } catch (error) {
+            // Timeouts (ECONNABORTED), socket/DNS faults and RPC errors delivered as
+            // HTTP 500 all land here, and all mean this attempt got no usable answer.
+            this.lastNodeFailAt = Date.now()
             if (error && error.response) {
                 // An HTTP-level error (auth, queue-full 500, etc.) still proves
                 // the endpoint is reachable; only unreachability drives failover.
@@ -732,3 +782,5 @@ module.exports.stripAuxPowFromBlockHex = stripAuxPowFromBlockHex
 module.exports.skipAuxPow = skipAuxPow
 // Exported for the env-parsing regression test.
 module.exports.envInt = envInt
+// Exported so the reachability reducer can be tested without a connector or a node.
+module.exports.nodeReachabilityFrom = nodeReachabilityFrom

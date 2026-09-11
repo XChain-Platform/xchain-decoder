@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.17.0] - 2026-09-10
+
+### Added
+- The health and status payloads carry `node_last_ok_at` and `node_unreachable`, so a coin node that has never answered is visible.
+
+### Changed
+- The vendored mainnet activation twins are armed at genesis under the 2026-09-09 ruling.
+
+### Fixed
+- `docker stop` now ends in a clean exit: the SIGTERM drain breaks the parse loop at a block boundary, closes the API listener and both database pools and exits 0 under a `SHUTDOWN_TIMEOUT_MS` hard-exit bound, where before the process parked until docker's SIGKILL.
+- Nodes that applied the original `2026-05-28-unique-index-tables.sql` are healed instead of logging a checksum mismatch at every startup.
+
 ## [0.16.0] - 2026-09-08
 
 ### Added

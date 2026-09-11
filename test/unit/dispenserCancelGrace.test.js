@@ -35,7 +35,8 @@ const sinon  = require('sinon')
 
 const XChainDecoder = require('../../src/XChainDecoder')
 const Database      = require('../../src/db.js')
-const { DISPENSER_CANCEL_GRACE_SECONDS,
+const { DISPENSER_CANCEL_GRACE_ACTIVATION,
+        DISPENSER_CANCEL_GRACE_SECONDS,
         cancelGraceFloor } = require('../../src/dispenserCancelGrace')
 
 const PREV_WIRE = Buffer.from(
@@ -219,11 +220,22 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
     })
 
     it('keeps the unwidened capture set below the flag-day (the other side of the gate)', async () => {
-        // Same blocks, same model, DISARMED network. This is the behavior the fleet runs today
-        // and the behavior a from-genesis re-decode of pre-flag-day history must reproduce.
+        // Same blocks, same model, gate DISARMED. Every network in the map is armed at genesis
+        // since the 2026-09-09 ruling, so the below-gate branch is reached by disarming mainnet
+        // in place for the length of this test. The branch stays live code: it is what a
+        // from-genesis re-decode runs on any network that arms mid-chain, and dropping the
+        // assertion would let the widened set become unconditional without a test noticing.
         const payAt = EXPIRATION + 1800
         const model = fundedCancelledDispenser()
-        await runTwoBlocks('mainnet', EXPIRATION + 1, payAt, model)
+        const saved = DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet
+        DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet = null
+        try {
+            await runTwoBlocks('mainnet', EXPIRATION + 1, payAt, model)
+        } finally {
+            DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet = saved
+        }
+        assert.strictEqual(DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet, 0,
+            'the map must be back to the genesis arm after the probe')
 
         assert.strictEqual(model.rows[0].expiredBlockIndex, 0)
         const payLoad = model.captureLoads[1]
@@ -231,6 +243,21 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
             'below the gate the block loop must pass no floor at all')
         assert.ok(!payLoad.set.has(ADDR),
             'below the gate the expired dispenser stays out of the capture set')
+    })
+
+    it('carries the grace on mainnet at genesis, the state the 2026-09-09 ruling armed', async () => {
+        // The armed mainnet path driven through the real block loop, not just the helper: the
+        // same cancelled dispenser is captured for a payment inside the indexer's fill window.
+        const payAt = EXPIRATION + 1800
+        const model = fundedCancelledDispenser()
+        await runTwoBlocks('mainnet', EXPIRATION + 1, payAt, model)
+
+        assert.strictEqual(model.rows[0].expiredBlockIndex, 0,
+            'block 0 must have soft-expired the dispenser, or this test proves nothing')
+        const payLoad = model.captureLoads[1]
+        assert.strictEqual(payLoad.floor, payAt - DISPENSER_CANCEL_GRACE_SECONDS)
+        assert.ok(payLoad.set.has(ADDR),
+            'mainnet is armed at genesis, so the grace carries the address into the capture set')
     })
 
     it('closes capture once the indexer can no longer settle a fill', async () => {

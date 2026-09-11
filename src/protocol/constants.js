@@ -355,11 +355,12 @@ const ORACLE_FEE_OUTPUT_ACTIVATION = {
 // single-pick therefore stays live BELOW the gate, and a re-decode of pre-flag-day history
 // reproduces exactly what the fleet wrote live.
 //
-// null means DISARMED (never active), the fail-closed default: mainnet and testnet keep the
-// legacy single-pick until that network's maintainers ratify an instant, chosen with the
-// fleet's upgrade state in hand, because arming it too early forks the chain and arming it in
-// the past rewrites agreed history. regtest holds no agreed history (its chains are recreated
-// per run), so it is genesis-on and exercises the set path in the regtest venues.
+// mainnet is ARMED at the base gate's own instant by the 2026-09-09 ruling, the earliest the
+// ordering above permits: the indexed mainnet history holds 0 dispensers (measured
+// 2026-09-09), so set capture persists exactly the output set the legacy single-pick did and
+// the arm rewrites no agreed history. A from-genesis OLD-vs-ON replay witness per chain is the
+// proof. regtest holds no agreed history (its chains are recreated per run), so it is
+// genesis-on and exercises the set path in the regtest venues.
 //
 // DEPLOY DEADLINE, once an instant is armed: EVERY decoder on that network MUST be running the
 // armed value before the instant, or the fleet splits on the first refill of a source holding
@@ -369,7 +370,7 @@ const ORACLE_FEE_OUTPUT_ACTIVATION = {
 // keeps the two copies in lockstep and refuses a value that precedes
 // ORACLE_FEE_OUTPUT_ACTIVATION.
 const ORACLE_FEE_SET_CAPTURE_ACTIVATION = {
-    mainnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
+    mainnet: 1786060800,  // ARMED by the 2026-09-09 ruling at its base gate's own instant, the earliest the ordering above permits; identity on the indexed mainnet history (0 dispensers, measured 2026-09-09)
     // ARMED AT GENESIS (instant 0 = always in force), operator-ratified 2026-08-18 under the
     // pre-launch ruling that every feature must be ACTIVE on testnet. This gate fixes a defect
     // that spends a payer native coin and gives nothing back, so a public testnet WILL hit it.
@@ -405,11 +406,12 @@ const ORACLE_FEE_SET_CAPTURE_ACTIVATION = {
 // The legacy block-start soft-expire therefore stays live BELOW the gate, and a re-decode of
 // pre-flag-day history reproduces exactly what the fleet wrote live.
 //
-// null means DISARMED (never active), the fail-closed default: mainnet and testnet keep the
-// legacy block-start expiry until that network's maintainers ratify an instant, chosen with the
-// fleet's upgrade state in hand, because arming it too early forks the chain and arming it in
-// the past rewrites agreed history. regtest holds no agreed history (its chains are recreated
-// per run), so it is genesis-on and exercises the realigned path in the regtest venues.
+// mainnet is ARMED at genesis (instant 0) by the 2026-09-09 ruling: the indexed mainnet history
+// holds 0 dispensers and 0 dispenses (measured 2026-09-09), so no block ever carried an expiry
+// boundary the realigned soft-expire could move and the arm rewrites no agreed history. A
+// from-genesis OLD-vs-ON replay witness per chain is the proof. regtest holds no agreed history
+// (its chains are recreated per run), so it is genesis-on and exercises the realigned path in
+// the regtest venues.
 //
 // DEPLOY DEADLINE, once an instant is armed: EVERY decoder on that network MUST be running the
 // armed value before the instant, or the fleet splits on the first block whose header time
@@ -418,7 +420,7 @@ const ORACLE_FEE_SET_CAPTURE_ACTIVATION = {
 // Vendored byte-equal into xchain-decoder/src/protocol/constants.js; the conformance suite
 // keeps the two copies in lockstep.
 const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
-    mainnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
+    mainnet: 0,           // ARMED at genesis by the 2026-09-09 ruling: identity on the indexed mainnet history (0 dispensers, 0 dispenses, measured 2026-09-09)
     // ARMED AT GENESIS (instant 0 = always in force), operator-ratified 2026-08-18 under the
     // pre-launch ruling that every feature must be ACTIVE on testnet. This gate fixes a defect
     // that spends a payer native coin and gives nothing back, so a public testnet WILL hit it.
@@ -458,10 +460,10 @@ const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
 // capture set therefore stays live BELOW the gate, and a re-decode of pre-flag-day history
 // reproduces exactly what the fleet wrote.
 //
-// null means DISARMED (never active), the fail-closed default: mainnet keeps the unwidened
-// capture set until that network's maintainers ratify an instant, chosen with the fleet's
-// upgrade state in hand, because arming it too early forks the chain and arming it in the
-// past rewrites agreed history.
+// mainnet is ARMED at genesis (instant 0) by the 2026-09-09 ruling: the indexed mainnet
+// history holds 0 dispensers and 0 dispenses (measured 2026-09-09), so the widened capture
+// set admits no output the unwidened one missed and the arm rewrites no agreed history. A
+// from-genesis OLD-vs-ON replay witness per chain is the proof.
 //
 // DEPLOY DEADLINE, once an instant is armed: EVERY decoder on that network MUST be running
 // the armed value before the instant, or the fleet splits on the first block whose header
@@ -470,7 +472,7 @@ const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
 // Vendored byte-equal into xchain-decoder/src/protocol/constants.js; the conformance suite
 // keeps the two copies in lockstep.
 const DISPENSER_CANCEL_GRACE_ACTIVATION = {
-    mainnet: null,        // DISARMED: awaiting the operator's ratified per-network instant
+    mainnet: 0,           // ARMED at genesis by the 2026-09-09 ruling: identity on the indexed mainnet history (0 dispensers, 0 dispenses, measured 2026-09-09)
     // ARMED AT GENESIS (instant 0 = always in force), matching the sibling
     // DISPENSER_EXPIRY_REALIGN_ACTIVATION under the pre-launch ruling that every feature must
     // be ACTIVE on testnet. This gate closes a defect that spends a payer's native coin and

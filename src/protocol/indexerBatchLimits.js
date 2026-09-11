@@ -77,7 +77,7 @@ const COMMAND_WEIGHTS = {
 // on wherever the decoder's capture gate is: mainnet capture is armed while this instant is
 // still the house sentinel. null means DISARMED, which is inactive at every block time.
 const COST_WEIGHTING_ACTIVATION = {
-    "mainnet": 9999999999,
+    "mainnet": 0,
     "testnet": 0,
     "regtest": 0,
 };
