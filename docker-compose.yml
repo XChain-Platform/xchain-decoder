@@ -3,6 +3,9 @@ version: '3'
 services:
   xchain_decoder:
     build: .
+    # The image bakes no .env (Dockerfile); the README's .env is handed to the
+    # container here instead.
+    env_file: .env
     volumes:
       - xchain_decoder_data:/data/
     networks: 

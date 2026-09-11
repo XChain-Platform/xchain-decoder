@@ -14,7 +14,9 @@ COPY ./src /XChainDecoder/src
 # is also applied in-process at require time (src/applyBufferutilsPatch.js), so
 # non-Docker runs and node_modules refreshes are covered even without this COPY.
 COPY ./src/bufferutils.js /XChainDecoder/node_modules/bitcoinjs-lib/src/bufferutils.js
-COPY ./.en[v] /XChainDecoder/.env
+# No .env is baked in: configuration reaches the container as environment
+# (xchain-node at `docker run`, docker-compose.yml via env_file). An optional
+# `COPY ./.en[v]` glob here builds only under BuildKit.
 
 # Exec-form node, not `npm run api` (which is this exact command). npm builds an
 # npm -> sh -c -> node tree and no wrapper forwards signals, so `docker stop`
