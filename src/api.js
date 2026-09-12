@@ -195,7 +195,8 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
         //
         // Deliberately NOT in the healthy gate below, for the reason given at /status
         // and the health method: the marker survives restarts and is cleared only by a
-        // resync, while the halted decoder keeps parsing forward, so gating would make
+        // resync or by the audited operator clear (`xchain-node clear-reorg-halt`),
+        // while the halted decoder keeps parsing forward, so gating would make
         // autoheal restart-loop a service that is doing useful work and fix nothing.
         let reorgHalt = { halted: false, reason: null, at: null }
         if (dbOk && typeof decoder.checkReorgHalt === 'function'){
@@ -270,8 +271,9 @@ async function startApi(){
         // The halt state rides the crash record because the two failures look
         // identical from outside: an exited container, restart policy cycling it.
         // A decoder that aborted a rollback past the dispenser safe-depth window
-        // needs an operator resync, while an ordinary crash needs a restart, and
-        // the process is gone before any health route can be asked which it was.
+        // needs an operator recovery (a resync, or the audited clear), while an
+        // ordinary crash needs a restart, and the process is gone before any health
+        // route can be asked which it was.
         try {
             getLogger().error('CRASH', {
                 kind:  'startFailure',
@@ -285,7 +287,7 @@ async function startApi(){
         // the process would otherwise linger as a permanently-unhealthy but RUNNING
         // container that `--restart unless-stopped` never recycles. Exit non-zero so the
         // container restart policy (or a supervisor) can act, mirroring the sibling
-        // xchain-indexer fatal handler. Faults that require an operator resync (durable
+        // xchain-indexer fatal handler. Faults that require an operator recovery (durable
         // REORG_HALT) surface as a visible Exited(1) rather than a silent wedge.
         process.exit(1)
     })
@@ -409,8 +411,9 @@ async function startApi(){
             // NOT flip `status` to unhealthy: the decoder healthcheck carries autoheal,
             // and a halted decoder still parses forward, so reporting unhealthy would
             // restart-loop a service that is doing useful work while fixing nothing (the
-            // marker survives restarts and is only cleared by a resync). Report it as its
-            // own field instead, and let the operator/watchdog act on it.
+            // marker survives restarts and is cleared only by a resync or by the audited
+            // operator clear, `xchain-node clear-reorg-halt`). Report it as its own field
+            // instead, and let the operator/watchdog act on it.
             let reorgHalt = { halted: false, reason: null, at: null, cleared_at: null, cleared_reason: null, checked_at: null }
             if (dbOk && typeof decoder.checkReorgHalt === 'function'){
                 try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', 'rpc:health', e) }

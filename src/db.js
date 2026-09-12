@@ -2686,7 +2686,7 @@ class Database {
     // purge window (permanent money-bearing dispenser-state divergence). The halt
     // is persisted as a REORG_HALT row in the events table (an existing durable
     // store); a full resync from a known-good snapshot rebuilds the schema and so
-    // clears it, matching the recovery the abort message already demands.
+    // clears it, which is one of the two recoveries the abort message names.
     //
     // An operator can CLEAR a halt through clearReorgHalt (src/clear-reorg-halt.js,
     // `xchain-node clear-reorg-halt`): that writes a REORG_HALT_CLEARED row carrying

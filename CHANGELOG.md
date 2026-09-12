@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `GET /status` publishes a `lag` field, so the node's bootstrap health gate no longer refuses the payload when it falls back to this route.
+- REORG_HALT recovery messages name `xchain-node clear-reorg-halt` alongside a full resync, instead of telling operators a resync is the only way out.
+- The decoder's halt-clear cache fields are declared with the rest of the halt state, so the reported shape is the same before and after the first probe.
 
 ## [0.17.0] - 2026-09-10
 

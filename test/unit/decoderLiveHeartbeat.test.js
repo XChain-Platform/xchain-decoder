@@ -159,8 +159,9 @@ describe('/live gates on the poll-loop heartbeat', function () {
 
     it('still answers 200 while halted, so autoheal cannot restart-loop a resync case', async function () {
         // The regression that matters. The marker survives restarts and is cleared only
-        // by a resync, and the halted decoder keeps parsing forward, so gating health on
-        // it would recycle a working container forever and fix nothing.
+        // by a resync or the audited operator clear, and the halted decoder keeps parsing
+        // forward, so gating health on it would recycle a working container forever and
+        // fix nothing.
         const decoder = caughtUpDecoder();
         decoder.db.getReorgHaltMarker = async () => ({ halted: true, reason: 'aborted rollback', at: null });
         const res = await getLive(liveApp(decoder));

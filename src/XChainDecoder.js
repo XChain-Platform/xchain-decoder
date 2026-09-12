@@ -432,6 +432,11 @@ class XChainDecoder {
         this.reorgHaltReason = null
         this.reorgHaltAt = null
         this.reorgHaltCheckedAt = 0
+        // Newest REORG_HALT_CLEARED row's `at`/`reason`, as read by
+        // db.getReorgHaltMarker: the operator clear supersedes the halt, and these
+        // keep its history on the health surface after the halt itself is gone.
+        this.reorgHaltClearedAt = null
+        this.reorgHaltClearedReason = null
         // Whether a REORG_HALT row is known to be READABLE, as distinct from
         // whether this decoder is halted. null = no halt has been raised or read
         // yet; false = a halt exists in memory whose durable write could not be
@@ -675,7 +680,9 @@ class XChainDecoder {
                     console.error('XChainDecoder: LATENT REORG_HALT MARKER PRESENT - this decoder carries a durable ' +
                         'REORG_HALT row from an aborted rollback. It will keep parsing forward and look healthy, but ' +
                         'the NEXT reorg will refuse to roll back and stop the decoder. This database is NOT a valid ' +
-                        'bootstrap source. REQUIRED OPERATOR ACTION: full resync from a known-good snapshot.' +
+                        'bootstrap source. REQUIRED OPERATOR ACTION: a full resync from a known-good snapshot, or ' +
+                        'once the rolled-back range is re-parsed and the database is verified intact, ' +
+                        '`xchain-node clear-reorg-halt <coin> <network> --reason "..."`.' +
                         (this.reorgHaltReason ? ' Marker detail: ' + this.reorgHaltReason : ''))
                 } else if (!this.reorgHalted && wasHalted){
                     console.warn('XChainDecoder: REORG_HALT marker is gone; halt cleared.')
@@ -1809,7 +1816,9 @@ class XChainDecoder {
         // dispenser-state divergence). Every abort path now persists a durable
         // REORG_HALT marker (markReorgHalted); on entry we refuse to proceed while it
         // is set, so a restart cannot resume an over-deep rollback. Recovery is the
-        // full resync the abort message demands (rebuilding the schema clears it).
+        // one the abort message names: a full resync (rebuilding the schema clears
+        // the marker), or the audited `xchain-node clear-reorg-halt` once its checks
+        // pass.
         // Feature-detected so the minimal-mock verifyReorg tests stay unaffected.
         if (typeof this.db.isReorgHalted === 'function' && await this.db.isReorgHalted()){
             // Mirror the durable marker into the in-memory health state so the health
@@ -1819,8 +1828,9 @@ class XChainDecoder {
             const msg = "verifyReorg: decoder is HALTED from a prior over-deep reorg abort. Refusing to "
                 + "roll back further: a restart must not silently resume a rollback past the dispenser "
                 + "safe-depth window (DISPENSER_EXPIRE_SAFE_DEPTH=" + DISPENSER_EXPIRE_SAFE_DEPTH + "), which "
-                + "would permanently lose money-bearing dispenser state. Recovery: perform a full resync "
-                + "from a known-good snapshot."
+                + "would permanently lose money-bearing dispenser state. Recovery: a full resync from a "
+                + "known-good snapshot, or once the rolled-back range is re-parsed and the database is "
+                + "verified intact, `xchain-node clear-reorg-halt <coin> <network> --reason \"...\"`."
             console.error(msg)
             throw new Error(msg)
         }
@@ -1986,8 +1996,9 @@ class XChainDecoder {
                     + " in this run, resumed from " + priorDepth + " already deleted above the tip); "
                     + "soft-expired dispenser rows for block height "
                     + lastBlockIndex + " and below have already been hard-purged, so continuing would "
-                    + "silently lose money-bearing dispenser state. Aborting. Recovery: perform a full "
-                    + "resync from a known-good snapshot."
+                    + "silently lose money-bearing dispenser state. Aborting. Recovery: a full resync from "
+                    + "a known-good snapshot, or once the rolled-back range is re-parsed and the database "
+                    + "is verified intact, `xchain-node clear-reorg-halt <coin> <network> --reason \"...\"`."
                 console.error(msg)
                 await haltReorg(msg)
                 throw new Error(msg)
