@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-11
+
 ### Fixed
 - `GET /status` publishes a `lag` field, so the node's bootstrap health gate no longer refuses the payload when it falls back to this route.
+- The Docker image no longer tries to bake a `.env` file, so the build succeeds on the legacy builder and configuration reaches the container as environment only.
 
 ## [0.17.0] - 2026-09-10
 
