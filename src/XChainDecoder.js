@@ -204,7 +204,11 @@ const VALID_ACTION_NAMES = new Set([
     'DIVIDEND', 'EXECUTE', 'FILE', 'ISSUE', 'LINK', 'LIST', 'MESSAGE', 'MINT',
     'NODEPROOF', 'ORDER', 'PRICE', 'ROLLCALL', 'SEND', 'SLASH', 'SLEEP', 'STAKE',
     'SWAP',
-    'SWEEP', 'UNSTAKE', 'VOTE', 'WITHDRAW'
+    'SWEEP', 'UNSTAKE', 'VOTE', 'WITHDRAW',
+    // Bridge lock/burn. Only the user-broadcast versions (0, 1, 3, 4) ever arrive as a
+    // wire tx; the settle legs (2, 5) are mirror-injected by the indexer and are refused
+    // outright when broadcast, so they need no decoder name of their own.
+    'XBRIDGE'
 ])
 
 // Short-form ACTION-name aliases; see ./actionAliases.js for the table and why it
