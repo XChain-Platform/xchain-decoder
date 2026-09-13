@@ -19,6 +19,7 @@
  ********************************************************************/
 
 const axios = require('axios');
+const config = require('./config');
 
 // Read an integer env var, falling back on anything that is not a clean integer.
 // `??` only substitutes for null/undefined, so a present-but-empty value (a bare
@@ -337,14 +338,14 @@ class BlockchainConnector {
         // Rotation is round-robin, so a recovered primary is retried again if
         // the fallback also dies.
         this.endpoints = [normalizeEndpoint(url, port)]
-        const fallbacks = (process.env.NODE_URL_FALLBACK ?? '').split(',').map(s => s.trim()).filter(Boolean)
+        const fallbacks = config.NODE_URL_FALLBACK.split(',').map(s => s.trim()).filter(Boolean)
         for (const fallback of fallbacks) this.endpoints.push(normalizeEndpoint(fallback, port))
         this.activeEndpointIndex = 0
         this.connectionFailures = 0
         // envInt, not parseInt: a unit-suffixed value ('5m') truncates to a wrong
         // magnitude and a bare `VAR=` line yields NaN, both silently. Every RPC knob in
         // this file validates and reports the same way.
-        this.failoverThreshold = envInt(process.env.NODE_FAILOVER_THRESHOLD, 3, 'NODE_FAILOVER_THRESHOLD')
+        this.failoverThreshold = envInt(config.NODE_FAILOVER_THRESHOLD, 3, 'NODE_FAILOVER_THRESHOLD')
     }
 
     // Active RPC base URL. A getter (not a stored string) so every retry loop
@@ -414,7 +415,7 @@ class BlockchainConnector {
     async backoffOnTimeout() {
         // min 0, not 1: the comment above documents 0 as a supported test setting
         // (test/unit/setup.js relies on it), so it must survive the validation.
-        const delay = envInt(process.env.RPC_TIMEOUT_RETRY_DELAY_MS, 500, 'RPC_TIMEOUT_RETRY_DELAY_MS', 0)
+        const delay = envInt(config.RPC_TIMEOUT_RETRY_DELAY_MS, 500, 'RPC_TIMEOUT_RETRY_DELAY_MS', 0)
         if (delay > 0) await this.sleep(delay)
     }
 
@@ -732,7 +733,7 @@ class BlockchainConnector {
         // against the operator's node with no log line, which is the fan-out this bound
         // exists to cap. Read per call, not cached, so a test (and an operator) can
         // retune it without rebuilding the connector.
-        const concurrency = envInt(process.env.DECODER_RPC_CONCURRENCY, 50, 'DECODER_RPC_CONCURRENCY')
+        const concurrency = envInt(config.DECODER_RPC_CONCURRENCY, 50, 'DECODER_RPC_CONCURRENCY')
         const results = []
         for (let i = 0; i < txIdArray.length; i += concurrency){
             const slice = txIdArray.slice(i, i + concurrency)

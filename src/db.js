@@ -22,6 +22,7 @@ const mariadb = require('mariadb');
 const fs      = require('fs');
 const util    = require('./util')
 const { getLogger } = require('./observability')
+const config = require('./config');
 
 const SATOSHIS_DECIMALS = 8
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/
@@ -104,7 +105,7 @@ class Database {
             port:     this.port,
             connectionLimit:  10,
             insertIdAsNumber: true,
-            queryTimeout:     resolveQueryTimeout(process.env.DB_QUERY_TIMEOUT)
+            queryTimeout:     resolveQueryTimeout(config.DB_QUERY_TIMEOUT)
         };
         this.pool = mariadb.createPool(this.connectionPoolParams);
         this.transactionConnection = null;
@@ -415,7 +416,7 @@ class Database {
                             // instead of silently continuing. Default auto-startup stays non-fatal
                             // (console.error, not warn) to avoid a surprise fleet-wide boot failure.
                             // Mirrors xchain-indexer/src/db.js.
-                            if(includeManual || process.env.MIGRATION_STRICT_CHECKSUM === '1'){
+                            if(includeManual || config.MIGRATION_STRICT_CHECKSUM === '1'){
                                 // Tailor the remedy to which branch actually fired. The operator path
                                 // (includeManual, `node src/migrate.js`) ALWAYS fails closed by design, so
                                 // MIGRATION_STRICT_CHECKSUM has no effect there - telling the operator to
@@ -490,7 +491,7 @@ class Database {
                             // Same dual-mode contract as the checksum guard above: the operator
                             // path and opt-in strict mode fail closed, passive startup logs and
                             // proceeds so a backdated commit cannot black-start the fleet.
-                            if(includeManual || process.env.MIGRATION_STRICT_CHECKSUM === '1') throw new Error(msg);
+                            if(includeManual || config.MIGRATION_STRICT_CHECKSUM === '1') throw new Error(msg);
                             console.error(msg + ' Applying it anyway at this position - review manually.');
                         }
                     }
