@@ -148,8 +148,10 @@ const MIN_VERIFICATION_PROGRESS_TO_PARSE = 0.99 //How much progress the node nee
 // and mempool) compare compiledDataLength, and canonicalizeActionPayload runs AFTER
 // the gate, so an expanding alias grows the persisted payload past this number
 // (CAST -> BROADCAST adds 5 bytes, MSG -> MESSAGE 4, ADDR -> ADDRESS and
-// DROP -> AIRDROP 3 each). That is intended and harmless (transactions.data is
-// MEDIUMTEXT), and deliberately not "fixed" by re-measuring the canonical buffer at
+// DROP -> AIRDROP 3 each), so a payload compiled to exactly 8192 bytes is stored as
+// an 8197-byte BROADCAST string. That is intended and harmless: transactions.data is
+// MEDIUMTEXT, so nothing truncates. It is deliberately not "fixed" by re-measuring
+// the canonical buffer at
 // the gate: tightening it would drop transactions whose on-chain push is legal and
 // that other nodes accept, forking the fleet and retroactively invalidating
 // already-decoded near-cap alias history. Moving the measurement point is a
@@ -238,10 +240,14 @@ const ACTION_ALIASES = require('./protocol/action_aliases.js')
 // the returned buffer themselves, so U+FFFD substitution for invalid UTF-8 is
 // applied exactly once, at the call site.
 //
-// Returns { buffer, rawActionName, actionName, isKnown }. `buffer` is the
-// original reference, unmodified, unless the name was a recognized alias
-// (unknown names are left alone too); `rawActionName` is the name exactly as
-// it appeared on-chain, for logging.
+// Returns { buffer, rawActionName, actionName, isKnown }:
+//   buffer        - the payload with its name portion rewritten to the canonical
+//                   ASCII spelling when the name was a recognized alias; the
+//                   original reference, unmodified, otherwise, which includes
+//                   the case where the name is not one this service knows.
+//   rawActionName - the name exactly as it appeared on-chain, for logging.
+//   actionName    - the same name after any alias has been expanded.
+//   isKnown       - whether that expanded name is one of VALID_ACTION_NAMES.
 function canonicalizeActionPayload(buffer) {
     const pipeIndex = buffer.indexOf(0x7C) // '|'
     const nameEnd = pipeIndex === -1 ? buffer.length : pipeIndex
@@ -585,10 +591,18 @@ class XChainDecoder {
     // flap trade-off was scoped to a deterministically bad BLOCK, never to a transport
     // fault.
     isStalled() {
+        // A process that has never advanced has nothing to be behind on yet.
         if (!this.lastAdvanceAt) return false
+        // Neither height is known, so there is no gap to measure.
         if (this.blockchainInfoLastBlock < 0 || this.lastProcessedBlockIndex < 0) return false
+        // The chain is not waiting on us: a decoder at or one block behind the tip
+        // is caught up, and a caught-up decoder advances only when a block arrives.
         if ((this.blockchainInfoLastBlock - this.lastProcessedBlockIndex) <= 1) return false
+        // The tip reading is stale, so the gap above is measured against a frozen
+        // number. During a node outage both sides stop, and a restart fixes nothing.
         if (this.isNodeHeightStale()) return false
+        // Repeated failures fetching the SAME block is the fast verdict: the
+        // counter resets on any success, so reaching the threshold means stuck.
         if (this._fetchErrorCount >= STALL_FETCH_ATTEMPTS) return true
         return (Date.now() - this.lastAdvanceAt) > STALL_ALERT_MS
     }
@@ -606,6 +620,8 @@ class XChainDecoder {
     // container: lastPollAt 0 (loop has not iterated yet, e.g. a long initial sync)
     // is never silent.
     isPollSilent() {
+        // The loop has not completed a single pass yet, which a long initial sync
+        // does legitimately, so there is no silence to report.
         if (!this.lastPollAt) return false
         return (Date.now() - this.lastPollAt) > POLL_SILENT_MS
     }
@@ -907,6 +923,8 @@ class XChainDecoder {
         // non-segwit scripts like P2PKH (starts with OP_DUP=0x76) would be misclassified.
         if (script.length < 4 || script.length > 42) return false
         let version = script[0]
+        // Verify the witness version is in range: a segwit program's first byte is
+        // OP_2 through OP_16, so anything outside that is a different script kind.
         if (version < 0x52 || version > 0x60) return false
         let pushLen = script[1]
         return pushLen >= 2 && pushLen <= 40 && script.length === pushLen + 2
@@ -972,28 +990,45 @@ class XChainDecoder {
     //   yields null deterministically.
     detectEnvelopeWitness(witness){
         try {
+            // An envelope needs at least a script and a control block, so a stack
+            // with fewer than two items cannot be one.
             if (!witness || witness.length < 2) return null
             let stackTop = witness.length - 1
             const lastItem = witness[stackTop]
+            // The last item must be real bytes: an empty or non-buffer slot is a
+            // malformed stack, not an envelope.
             if (!Buffer.isBuffer(lastItem) || lastItem.length === 0) return null
             // Annex present: at least (script, control, annex) would remain,
             // but the rule is unconditional: annex-bearing => not an envelope.
             if (lastItem[0] === TAPROOT_ANNEX_MARKER) return null
             const controlBlock = witness[stackTop]
+            // The control block's first byte carries the leaf version (its lowest
+            // bit is the parity flag and is ignored); a different version is a
+            // different kind of spend.
             if ((controlBlock[0] & 0xfe) !== TAPROOT_LEAF_VERSION) return null
+            // A control block is a 33-byte head plus a whole number of 32-byte
+            // path hashes. Any other length is not a valid taproot control block.
             if (controlBlock.length < 33 || ((controlBlock.length - 33) % 32) !== 0) return null
             const script = witness[stackTop - 1]
+            // The script sits directly under the control block, and the shortest
+            // possible envelope script is 8 bytes, so anything smaller cannot be one.
             if (!Buffer.isBuffer(script) || script.length < 8) return null
 
             const decompiled = bitcoin.script.decompile(script)
             // Minimum shape: OP_0, OP_IF, magic, format, 1 push, OP_ENDIF, key, OP_CHECKSIG.
             if (!decompiled || decompiled.length < 8) return null
             let i = 0
+            // The envelope opens with a push of nothing followed by OP_IF, which
+            // is what makes the whole block unspendable data rather than logic.
             if (decompiled[i++] !== bitcoin.opcodes.OP_0) return null
             if (decompiled[i++] !== bitcoin.opcodes.OP_IF) return null
+            // The magic word identifies the envelope as this platform's; a
+            // different word means somebody else's data, which is not ours to read.
             if (!Buffer.isBuffer(decompiled[i]) || !decompiled[i].equals(MAGIC_WORD_BUFFER)) return null
             i++
             const formatByte = decompiled[i++]
+            // The format marker is exactly one byte. A longer or absent push is a
+            // malformed envelope rather than a future format.
             if (!Buffer.isBuffer(formatByte) || formatByte.length !== 1) return null
             // Unknown format bytes are not recognized: invisible by design,
             // future formats activate via their own flag heights (§3.2).
@@ -1007,11 +1042,20 @@ class XChainDecoder {
                 payloadPushes.push(decompiled[i])
                 i++
             }
+            // An envelope carrying no payload at all is not one.
             if (payloadPushes.length === 0) return null
+            // The payload run has to end at OP_ENDIF. Stopping anywhere else means
+            // the walk hit something that is not a data push, so the shape is wrong.
             if (decompiled[i++] !== bitcoin.opcodes.OP_ENDIF) return null
+            // After the data block comes the 32-byte key the output is signed
+            // against; any other length is not a key.
             if (!Buffer.isBuffer(decompiled[i]) || decompiled[i].length !== 32) return null
             i++
+            // The key is checked by the final opcode, and that opcode must be the
+            // last thing in the script.
             if (decompiled[i++] !== bitcoin.opcodes.OP_CHECKSIG) return null
+            // Anything trailing the signature check means this is a script that
+            // merely CONTAINS an envelope shape, which the grammar does not accept.
             if (i !== decompiled.length) return null
             return { script, payload: Buffer.concat(payloadPushes) }
         } catch (err){
@@ -1353,6 +1397,9 @@ class XChainDecoder {
         // The || covers results from stubs/older shapes without the field.
         let payloadCeiling = parseResult["payloadCeiling"] || MAX_ACTION_DATA_LENGTH
 
+        // Verify the on-chain push is within the protocol's size cap. This service
+        // is the arbiter for that rule, so an oversized push is dropped rather than
+        // trimmed: accepting one would put a record on the ledger no other node has.
         if (parseResult["compiledDataLength"] > payloadCeiling){
             this.parseErrors++
             logger.error(rejectPrefix + `ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${payloadCeiling})`)
@@ -1377,6 +1424,9 @@ class XChainDecoder {
             logger.error(formatLogLine(utf8Prefix + 'ACTION data contains invalid UTF-8, decoded with replacement characters', e))
         }
 
+        // Verify the ACTION name is one this protocol defines. An unrecognized name
+        // is somebody else's data sharing the chain, not a malformed transaction of
+        // ours, so it is rejected without being recorded as an error against a user.
         if (!canonical.isKnown){
             this.parseErrors++
             logger.error(rejectPrefix + `unknown ACTION name '${canonical.rawActionName.substring(0, 32)}'`)
@@ -1666,6 +1716,11 @@ class XChainDecoder {
                 const carrierRecognitionActive = this.envelopeCarrierRecognitionActiveAt(blockHeight)
                 const otherCarrierPresent = (dataBuffer.length > 0) || (p2shFundingTxId != null)
                     || (carrierRecognitionActive && otherCarrierRecognized)
+                // Verify exactly one envelope, carried alone, in the first input.
+                // Two envelopes, an envelope beside another carrier, or one in a later
+                // input are all ambiguous about which payload the transaction meant,
+                // and the rule refuses ambiguity rather than guessing: every node must
+                // reach the same answer from the same bytes.
                 if (envelopeInputs.length >= 2 || otherCarrierPresent || envelopeInputs[0].index !== 0){
                     this.parseErrors++
                     logger.error(`Tx ${nextTxId}: envelope rejected deterministically (` +
@@ -3562,6 +3617,9 @@ class XChainDecoder {
                                 }
                             }
                         } else {
+                            // Verify a payload that says something has an author. A
+                            // record with no resolvable source address cannot be
+                            // attributed to anyone, so it is skipped rather than stored.
                             if ((parseResult["data"].length > 0) && (parseResult["source"] == null)){
                                 logger.error(`Skipping tx ${nextTransactionHash}: XChain data found but source address could not be resolved`)
                             }
