@@ -27,7 +27,7 @@ const express = require('express')
 const XChainDecoder = require('../../src/XChainDecoder')
 const {
     registerLiveRoute, noteProbeFailure,
-    _resetProbeLogState, _ageProbeLogState, PROBE_LOG_WINDOW_MS
+    resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS
 } = require('../../src/api')
 const observability = require('../../src/observability')
 
@@ -197,8 +197,8 @@ describe('REORG_HALT: a halt the marker cannot record still leaves a record', fu
 
 describe('health probes: a failing probe stops being silent', function () {
 
-    beforeEach(function () { installSink(); _resetProbeLogState() })
-    afterEach(function () { observability._resetObservability(); _resetProbeLogState() })
+    beforeEach(function () { installSink(); resetProbeLogState() })
+    afterEach(function () { observability._resetObservability(); resetProbeLogState() })
 
     function liveApp(decoder, running = true) {
         const app = express()
@@ -282,7 +282,7 @@ describe('health probes: a failing probe stops being silent', function () {
 
         // Age the window rather than sleeping through it, so the suppressed count
         // the next line has to report survives.
-        _ageProbeLogState()
+        ageProbeLogState()
         await getLive(app)
         const warned = linesFor('HEALTH_PROBE_FAILED')
         assert.strictEqual(warned.length, 2)

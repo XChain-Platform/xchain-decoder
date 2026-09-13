@@ -21,7 +21,7 @@
  * span early, the literal's real closing quote re-opened it, and the following
  * `;` plus everything up to the next quote merged into one chunk. A `DROP TABLE`
  * then rode inside a chunk whose first keyword was INSERT, where the ^-anchored
- * keyword checks in _destructiveAutoStatement never saw it and the file scored
+ * keyword checks in destructiveAutoStatement never saw it and the file scored
  * auto-eligible.
  *
  * These assertions fail against the pre-fix walkers: reverting the
@@ -37,9 +37,9 @@ const Database = require('../../src/db');
 // Same binding technique migration-runner.test.js uses: the walkers are pure, so
 // bind them to the prototype rather than standing up a live Database.
 const stripComments = Database.prototype.stripSqlLineComments.bind({});
-const destructiveOf = Database.prototype._destructiveAutoStatement.bind(Database.prototype);
+const destructiveOf = Database.prototype.destructiveAutoStatement.bind(Database.prototype);
 const statementsOf  = (raw) => Database.prototype.splitSqlStatements.call(Database.prototype, raw);
-const isIdRepair    = Database.prototype._isIdRepairUpdate.bind(Database.prototype);
+const isIdRepair    = Database.prototype.isIdRepairUpdate.bind(Database.prototype);
 
 // Build the literal backslash out of a charCode so no layer of source escaping can
 // quietly turn `\'` into `\\'` and make the test assert a different string than the
@@ -118,12 +118,12 @@ describe('SQL quote walkers honour backslash escapes @regression', function () {
         assert.doesNotThrow(() => destructiveOf([raw]));
     });
 
-    it('_isIdRepairUpdate keeps recognising the committed repair shape', function () {
+    it('isIdRepairUpdate keeps recognising the committed repair shape', function () {
         const repair = 'UPDATE `mirror` SET id = (SELECT COALESCE(MAX(t.id), 0) + 1 FROM (SELECT id FROM `mirror`) t) WHERE id = 0';
         assert.strictEqual(isIdRepair(repair), true);
     });
 
-    it('_isIdRepairUpdate is not fooled by a backslash-escaped quote in the subquery', function () {
+    it('isIdRepairUpdate is not fooled by a backslash-escaped quote in the subquery', function () {
         // A `\'` inside the subquery must not close the span early: the paren scan
         // unbalances and rejects a legitimate repair (or accepts a bogus one).
         const repair = 'UPDATE `mirror` SET id = (SELECT COALESCE(MAX(id), 0) + 1 FROM `mirror` WHERE tag = ' +

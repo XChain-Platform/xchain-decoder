@@ -86,12 +86,12 @@ function noteProbeFailure(probe, route, err) {
 
 // Tests only: the throttle table is module-wide, so a case asserting a first line
 // must not inherit the previous case's window.
-function _resetProbeLogState() { _probeLogState.clear(); }
+function resetProbeLogState() { _probeLogState.clear(); }
 
 // Tests only: rewinds every window past its edge while KEEPING the suppressed
 // counts, so a case can assert what the next line reports about the flood it
 // swallowed. Clearing the table instead would drop exactly the number under test.
-function _ageProbeLogState() {
+function ageProbeLogState() {
     for (const entry of _probeLogState.values()) {
         entry.lastLoggedAt -= (PROBE_LOG_WINDOW_MS + 1);
     }
@@ -615,4 +615,4 @@ if (require.main === module) startApi()
 // startApi is exported so the crash handlers it installs can be driven for real
 // rather than asserted against the source text; the require.main guard above
 // still keeps a plain require from opening a port or a DB connection.
-module.exports = { makeRpcBatchGuard, registerLiveRoute, startApi, noteProbeFailure, nodeReachabilityFields, _resetProbeLogState, _ageProbeLogState, PROBE_LOG_WINDOW_MS }
+module.exports = { makeRpcBatchGuard, registerLiveRoute, startApi, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }

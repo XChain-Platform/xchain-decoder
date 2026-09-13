@@ -1409,7 +1409,7 @@ describe('Database#beginTransaction()', () => {
         // beginTransaction checks `if (this.transactionConnection != null)` AFTER acquiring the lock
         // and calls endTransaction() to roll it back. We simulate this by pre-setting
         // transactionConnection and calling beginTransaction with the lock NOT held
-        // (so _acquireTransactionLock resolves immediately).
+        // (so acquireTransactionLock resolves immediately).
         const db = makeDb();
         const rollbackStub = sinon.stub().resolves();
         const oldConn = {
@@ -1426,7 +1426,7 @@ describe('Database#beginTransaction()', () => {
         db.pool = { getConnection: sinon.stub().resolves(newConn) };
 
         // Pre-set transactionConnection to simulate a leaked open transaction.
-        // The lock is NOT held so _acquireTransactionLock resolves immediately.
+        // The lock is NOT held so acquireTransactionLock resolves immediately.
         db.transactionConnection = oldConn;
 
         // beginTransaction should detect transactionConnection != null and call endTransaction
@@ -1514,7 +1514,7 @@ describe('Database#verifyDatabase()', () => {
             query: sinon.stub().resolves([{ schema_name: 'xchain_btc_mainnet' }]),
             end: sinon.stub().resolves()
         };
-        sinon.stub(db, '_createConnection').resolves(fakeConn);
+        sinon.stub(db, 'createConnection').resolves(fakeConn);
         const r = await db.verifyDatabase();
         assert.strictEqual(r, true);
     });
@@ -1525,7 +1525,7 @@ describe('Database#verifyDatabase()', () => {
             query: sinon.stub().resolves([]),
             end: sinon.stub().resolves()
         };
-        sinon.stub(db, '_createConnection').resolves(fakeConn);
+        sinon.stub(db, 'createConnection').resolves(fakeConn);
         const r = await db.verifyDatabase();
         assert.strictEqual(r, false);
     });
@@ -1538,7 +1538,7 @@ describe('Database#verifyDatabase()', () => {
             query: sinon.stub().resolves([{ schema_name: 'xchain_btc_mainnet' }]),
             end: sinon.stub().resolves()
         };
-        sinon.stub(db, '_createConnection')
+        sinon.stub(db, 'createConnection')
             .onFirstCall().rejects(new Error('no db'))
             .onSecondCall().resolves(goodConn);
         const r = await db.verifyDatabase();
@@ -1555,7 +1555,7 @@ describe('Database#createDatabase()', () => {
             query: sinon.stub().resolves([]),
             end: sinon.stub().resolves()
         };
-        sinon.stub(db, '_createConnection').resolves(fakeConn);
+        sinon.stub(db, 'createConnection').resolves(fakeConn);
         const r = await db.createDatabase();
         assert.strictEqual(r, true);
     });
@@ -1568,7 +1568,7 @@ describe('Database#createDatabase()', () => {
             query: sinon.stub().resolves([]),
             end: sinon.stub().resolves()
         };
-        sinon.stub(db, '_createConnection')
+        sinon.stub(db, 'createConnection')
             .onFirstCall().rejects(new Error('transient'))
             .onSecondCall().resolves(goodConn);
         const r = await db.createDatabase();
@@ -1602,10 +1602,10 @@ describe('Database error-path transactionConnection branches', () => {
         assert.ok(id === 11 || id === null);
     });
 
-    // Regression: insertEvent previously called releaseConnection() here, which leaves
-    // the transaction open on the pooled connection and never frees the transaction lock
-    // (_releaseTransactionLock), deadlocking the next beginTransaction(). It must call
-    // endTransaction() like every sibling insert: rollback + release + free the lock.
+    // Regression guard: on a generic error inside an active transaction, insertEvent
+    // must call endTransaction() like every sibling insert (rollback, release, free the
+    // lock). A bare releaseConnection() here leaves the transaction open on the pooled
+    // connection and never runs releaseTransactionLock, deadlocking the next beginTransaction().
     it('insertEvent: calls endTransaction (rollback + frees lock) when a transaction is active on generic error', async () => {
         const db = makeDb();
         const endTxStub = sinon.stub(db, 'endTransaction').resolves();
@@ -1745,16 +1745,16 @@ describe('Database error-path transactionConnection branches', () => {
     });
 });
 
-// _ensureMigrationsLedger: covered cheaply via a fake connection
+// ensureMigrationsLedger: covered cheaply via a fake connection
 
-describe('Database#_ensureMigrationsLedger()', () => {
+describe('Database#ensureMigrationsLedger()', () => {
     afterEach(() => sinon.restore());
 
     it('calls CREATE TABLE IF NOT EXISTS schema_migrations on the connection', async () => {
         const db = makeDb();
         const queryStub = sinon.stub().resolves([]);
         const conn = { query: queryStub, release: sinon.stub().resolves() };
-        await db._ensureMigrationsLedger(conn);
+        await db.ensureMigrationsLedger(conn);
         assert.ok(queryStub.calledOnce);
         assert.ok(/CREATE TABLE IF NOT EXISTS schema_migrations/i.test(queryStub.firstCall.args[0]));
     });

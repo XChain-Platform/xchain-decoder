@@ -454,7 +454,7 @@ describe('Database#parseExpectedColumns()', () => {
     })
 })
 
-// Transaction lock mechanics (_acquireTransactionLock / _releaseTransactionLock)
+// Transaction lock mechanics (acquireTransactionLock / releaseTransactionLock)
 
 describe('Database transaction lock queue', () => {
     let db
@@ -465,24 +465,24 @@ describe('Database transaction lock queue', () => {
 
     it('should acquire lock immediately when not held', async () => {
         assert.strictEqual(db._transactionLock, false)
-        await db._acquireTransactionLock()
+        await db.acquireTransactionLock()
         assert.strictEqual(db._transactionLock, true)
     })
 
     it('should release lock and set flag to false when queue is empty', async () => {
-        await db._acquireTransactionLock()
-        db._releaseTransactionLock()
+        await db.acquireTransactionLock()
+        db.releaseTransactionLock()
         assert.strictEqual(db._transactionLock, false)
     })
 
     it('should queue a second caller and resume it on release', async () => {
         // Acquire first
-        await db._acquireTransactionLock()
+        await db.acquireTransactionLock()
         assert.strictEqual(db._transactionLock, true)
 
         // Start a second acquire (it will block until released)
         let secondAcquired = false
-        const secondPromise = db._acquireTransactionLock().then(() => {
+        const secondPromise = db.acquireTransactionLock().then(() => {
             secondAcquired = true
         })
 
@@ -490,7 +490,7 @@ describe('Database transaction lock queue', () => {
         assert.strictEqual(secondAcquired, false)
 
         // Release first; second should now resolve
-        db._releaseTransactionLock()
+        db.releaseTransactionLock()
 
         await secondPromise
         assert.strictEqual(secondAcquired, true)
@@ -498,7 +498,7 @@ describe('Database transaction lock queue', () => {
         assert.strictEqual(db._transactionLock, true)
 
         // Release the second one
-        db._releaseTransactionLock()
+        db.releaseTransactionLock()
         assert.strictEqual(db._transactionLock, false)
     })
 })

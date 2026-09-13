@@ -15,7 +15,7 @@
  **********************************************************************
  * Schema migration runner: pure-logic contract tests (no live DB).
  *
- * Covers _migrationMode() header parsing and the invariant that every committed
+ * Covers migrationMode() header parsing and the invariant that every committed
  * migration declares its intent explicitly, so a destructive file can never
  * default-silently into the auto-apply path on a validator fleet.
  *
@@ -27,9 +27,9 @@ const path   = require('path');
 
 const Database = require('../../src/db');
 
-const modeOf = Database.prototype._migrationMode.bind({});
+const modeOf = Database.prototype.migrationMode.bind({});
 
-describe('Database._migrationMode() @regression', function () {
+describe('Database.migrationMode() @regression', function () {
 
     it('reads mode=auto from the header tag', function () {
         assert.strictEqual(modeOf('-- xchain:migration mode=auto\nALTER TABLE x ADD COLUMN y INT;'), 'auto');
@@ -71,16 +71,16 @@ describe('Database._migrationMode() @regression', function () {
     });
 });
 
-// Bind to the prototype so _destructiveAutoStatement can reach _isIdRepairUpdate
+// Bind to the prototype so destructiveAutoStatement can reach isIdRepairUpdate
 // (both pure, no instance state).
-const scanOf = Database.prototype._destructiveAutoStatement.bind(Database.prototype);
+const scanOf = Database.prototype.destructiveAutoStatement.bind(Database.prototype);
 // Split exactly the way runMigrations does, through the real quote-aware splitter,
 // so the guard is exercised on the statements it actually classifies at runtime
 // rather than on a naive re-split that the runner no longer uses.
 const splitOf = (raw) => Database.prototype.splitSqlStatements.call(Database.prototype, raw);
 const scanSql = (sql) => scanOf(splitOf(sql));
 
-describe('Database._destructiveAutoStatement() @regression', function () {
+describe('Database.destructiveAutoStatement() @regression', function () {
 
     it('flags DROP TABLE', function () {
         assert.ok(scanSql('DROP TABLE events;'));
@@ -465,7 +465,7 @@ describe('runMigrations() checksum re-bless path @regression', function () {
         db.sqlPath = sqlPath;
         db.dbName  = 'fake_db';
         db.getConnection = async () => conn;
-        db._ensureMigrationsLedger = async () => {};
+        db.ensureMigrationsLedger = async () => {};
         return { db, updates };
     }
 
@@ -598,7 +598,7 @@ describe('runMigrations() --file / opts.only scoping @regression', function () {
         db.sqlPath = sqlPath;
         db.dbName  = 'fake_db';
         db.getConnection = async () => conn;
-        db._ensureMigrationsLedger = async () => {};
+        db.ensureMigrationsLedger = async () => {};
         return { db, applied, executed };
     }
 
@@ -723,7 +723,7 @@ describe('runMigrations() migration preconditions @regression', function () {
         db.sqlPath = sqlPath;
         db.dbName  = 'fake_db';
         db.getConnection = async () => conn;
-        db._ensureMigrationsLedger = async () => {};
+        db.ensureMigrationsLedger = async () => {};
         return { db, ledgered, executed };
     }
 
@@ -807,7 +807,7 @@ describe('runMigrations() migration preconditions @regression', function () {
         const db = Object.create(Database.prototype);
         db.dbName = 'fake_db';
         const conn = { query: async () => { throw new Error('must not query'); } };
-        return db._migrationPreconditionSkip('2026-06-15-events-data-mediumtext.sql', conn)
+        return db.migrationPreconditionSkip('2026-06-15-events-data-mediumtext.sql', conn)
             .then((r) => assert.strictEqual(r, null, 'unlisted files short-circuit without a query'));
     });
 });
@@ -895,7 +895,7 @@ describe('Database schema-contract guards @regression', function () {
     // column passed a check whose own error text demanded BIGINT UNSIGNED. Its query is
     // a LEFT JOIN from information_schema.tables, so an empty result means the table is
     // absent while a NULL dataType means the table exists without the column.
-    const expirationGuard = Database.prototype._assertDispenserExpirationIsBigintUnsigned;
+    const expirationGuard = Database.prototype.assertDispenserExpirationIsBigintUnsigned;
 
     it('accepts dispensers.expiration at BIGINT UNSIGNED', async function () {
         await expirationGuard.call(contextReturning([{ dataType: 'bigint', columnType: 'bigint(20) unsigned' }]));
@@ -961,7 +961,7 @@ describe('Database schema-contract guards @regression', function () {
         assert.strictEqual(bad.releasedCount(), 1);
     });
 
-    const pubkeyGuard = Database.prototype._assertPubkeyColumnIsUncompressedWide;
+    const pubkeyGuard = Database.prototype.assertPubkeyColumnIsUncompressedWide;
 
     it('accepts a pubkeys.pubkey wide enough for an uncompressed key', async function () {
         await pubkeyGuard.call(contextReturning([{ len: 130 }]));
@@ -992,10 +992,10 @@ describe('Database schema-contract guards @regression', function () {
         // (which applies nothing) still fails loud on a half-migrated schema.
         const calls = [];
         const ctx = {
-            _runMigrationsInner: async () => ({ applied: [], pending: [], lockSkipped: true }),
-            _assertDispenserExpirationIsBigintUnsigned: async () => { calls.push('dispenser'); },
-            _assertPubkeyColumnIsUncompressedWide: async () => { calls.push('pubkey'); },
-            _assertActionDataIsUtf8mb4: async () => { calls.push('utf8mb4'); }
+            runMigrationsInner: async () => ({ applied: [], pending: [], lockSkipped: true }),
+            assertDispenserExpirationIsBigintUnsigned: async () => { calls.push('dispenser'); },
+            assertPubkeyColumnIsUncompressedWide: async () => { calls.push('pubkey'); },
+            assertActionDataIsUtf8mb4: async () => { calls.push('utf8mb4'); }
         };
         const result = await Database.prototype.runMigrations.call(ctx);
         assert.deepStrictEqual(calls, ['dispenser', 'pubkey', 'utf8mb4']);
@@ -1007,7 +1007,7 @@ describe('Database schema-contract guards @regression', function () {
     // missed node. `transactions` is replicated by xchain-sync, so an un-migrated node
     // quarantines a non-BMP ACTION that a migrated node stores: a fleet divergence, which
     // is why this fails closed rather than warning.
-    const utf8Guard = Database.prototype._assertActionDataIsUtf8mb4;
+    const utf8Guard = Database.prototype.assertActionDataIsUtf8mb4;
 
     it('accepts both action-text columns already at utf8mb4', async function () {
         await utf8Guard.call(contextReturning([

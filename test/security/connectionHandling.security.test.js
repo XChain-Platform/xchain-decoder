@@ -55,16 +55,16 @@ describe('Security: Connection Handling', () => {
     // --- SEC-07: Transaction lock ---
 
     describe('Transaction lock mechanism', () => {
-        it('should verify _acquireTransactionLock method exists', () => {
+        it('should verify acquireTransactionLock method exists', () => {
             const db = new Database('localhost', 3306, 'test_db', 'root', '')
 
-            assert.ok(typeof db._acquireTransactionLock === 'function')
+            assert.ok(typeof db.acquireTransactionLock === 'function')
         })
 
-        it('should verify _releaseTransactionLock method exists', () => {
+        it('should verify releaseTransactionLock method exists', () => {
             const db = new Database('localhost', 3306, 'test_db', 'root', '')
 
-            assert.ok(typeof db._releaseTransactionLock === 'function')
+            assert.ok(typeof db.releaseTransactionLock === 'function')
         })
 
         it('should initialize lock state correctly', () => {
@@ -78,20 +78,20 @@ describe('Security: Connection Handling', () => {
         it('[REGRESSION P0] R-SEC-003: should acquire lock on first call', async () => {
             const db = new Database('localhost', 3306, 'test_db', 'root', '')
 
-            await db._acquireTransactionLock()
+            await db.acquireTransactionLock()
             assert.strictEqual(db._transactionLock, true)
 
-            db._releaseTransactionLock()
+            db.releaseTransactionLock()
         })
 
         it('should queue second caller when lock is held', async () => {
             const db = new Database('localhost', 3306, 'test_db', 'root', '')
 
-            await db._acquireTransactionLock()
+            await db.acquireTransactionLock()
             assert.strictEqual(db._transactionLock, true)
 
             let secondAcquired = false
-            const secondPromise = db._acquireTransactionLock().then(() => {
+            const secondPromise = db.acquireTransactionLock().then(() => {
                 secondAcquired = true
             })
 
@@ -105,18 +105,18 @@ describe('Security: Connection Handling', () => {
             assert.strictEqual(secondAcquired, false)
             assert.strictEqual(db._transactionLockQueue.length, 1)
 
-            db._releaseTransactionLock()
+            db.releaseTransactionLock()
             await secondPromise
             assert.strictEqual(secondAcquired, true)
 
-            db._releaseTransactionLock()
+            db.releaseTransactionLock()
         })
 
         it('should release lock when queue is empty', () => {
             const db = new Database('localhost', 3306, 'test_db', 'root', '')
 
             db._transactionLock = true
-            db._releaseTransactionLock()
+            db.releaseTransactionLock()
 
             assert.strictEqual(db._transactionLock, false)
             assert.strictEqual(db._transactionLockQueue.length, 0)
@@ -126,11 +126,11 @@ describe('Security: Connection Handling', () => {
             const db = new Database('localhost', 3306, 'test_db', 'root', '')
             const order = []
 
-            await db._acquireTransactionLock()
+            await db.acquireTransactionLock()
 
-            const p1 = db._acquireTransactionLock().then(() => order.push(1))
-            const p2 = db._acquireTransactionLock().then(() => order.push(2))
-            const p3 = db._acquireTransactionLock().then(() => order.push(3))
+            const p1 = db.acquireTransactionLock().then(() => order.push(1))
+            const p2 = db.acquireTransactionLock().then(() => order.push(2))
+            const p3 = db.acquireTransactionLock().then(() => order.push(3))
 
             // Poll for the three waiters to enqueue rather than sleeping a fixed 10ms:
             // the wait is on an observable condition, so a loaded machine cannot under-sleep it.
@@ -140,13 +140,13 @@ describe('Security: Connection Handling', () => {
             }
             assert.strictEqual(db._transactionLockQueue.length, 3)
 
-            db._releaseTransactionLock()
+            db.releaseTransactionLock()
             await p1
-            db._releaseTransactionLock()
+            db.releaseTransactionLock()
             await p2
-            db._releaseTransactionLock()
+            db.releaseTransactionLock()
             await p3
-            db._releaseTransactionLock()
+            db.releaseTransactionLock()
 
             assert.deepStrictEqual(order, [1, 2, 3])
         })
@@ -157,7 +157,7 @@ describe('Security: Connection Handling', () => {
     // deleteBlockByIndex runs four DELETE queries inside a transaction. If one
     // of them throws (DB timeout, deadlock, disk full) the error must not escape
     // with the lock still held. A held lock permanently deadlocks every later
-    // caller waiting on _acquireTransactionLock(), including verifyReorg's own
+    // caller waiting on acquireTransactionLock(), including verifyReorg's own
     // retry loop, halting all block ingestion until a manual restart.
 
     describe('deleteBlockByIndex failure handling', () => {

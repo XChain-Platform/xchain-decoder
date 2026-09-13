@@ -37,7 +37,7 @@ const Database = require('../../src/db');
 
 const MIG_DIR = path.join(__dirname, '..', '..', 'src', 'sql', 'migrations');
 
-const modeOf = Database.prototype._migrationMode.bind({});
+const modeOf = Database.prototype.migrationMode.bind({});
 const readMigration = (file) => fs.readFileSync(path.join(MIG_DIR, file), 'utf8');
 const allMigrations = () => fs.readdirSync(MIG_DIR).filter(f => f.endsWith('.sql')).sort();
 
@@ -66,7 +66,7 @@ describe('Database.migrationDeclaresDeployPrecondition @regression @tier1', func
     });
 
     it('ignores the token once the SQL body has started, so prose or a data literal cannot arm it', function () {
-        // Same prologue anchoring as _migrationMode: a comment AFTER the first statement
+        // Same prologue anchoring as migrationMode: a comment AFTER the first statement
         // is body text. Without this, a migration that merely discusses the convention
         // would be read as declaring itself a precondition and block every deploy.
         const raw = 'ALTER TABLE t;\n-- xchain:migration mode=manual deploy-precondition=required\n';
@@ -145,11 +145,11 @@ describe('Database.STARTUP_ASSERTED_MIGRATIONS @regression @tier1', function () 
 
     describe('startupAssertedMigrationFile()', function () {
         it('resolves each registered assertion to its migration filename', function () {
-            assert.strictEqual(Database.startupAssertedMigrationFile('_assertDispenserExpirationIsBigintUnsigned'),
+            assert.strictEqual(Database.startupAssertedMigrationFile('assertDispenserExpirationIsBigintUnsigned'),
                 '2026-06-13-dispensers-expiration-bigint.sql');
-            assert.strictEqual(Database.startupAssertedMigrationFile('_assertPubkeyColumnIsUncompressedWide'),
+            assert.strictEqual(Database.startupAssertedMigrationFile('assertPubkeyColumnIsUncompressedWide'),
                 '2026-07-24-pubkeys-widen-uncompressed.sql');
-            assert.strictEqual(Database.startupAssertedMigrationFile('_assertActionDataIsUtf8mb4'),
+            assert.strictEqual(Database.startupAssertedMigrationFile('assertActionDataIsUtf8mb4'),
                 '2026-08-10-action-data-utf8mb4.sql');
         });
         it('throws on an unregistered assertion rather than yielding undefined', function () {
@@ -176,10 +176,10 @@ describe('startup assertion error text names the registered file @regression @ti
         };
     }
 
-    it('_assertDispenserExpirationIsBigintUnsigned names the exact migration file', async function () {
+    it('assertDispenserExpirationIsBigintUnsigned names the exact migration file', async function () {
         let message = null;
         try {
-            await Database.prototype._assertDispenserExpirationIsBigintUnsigned.call(
+            await Database.prototype.assertDispenserExpirationIsBigintUnsigned.call(
                 ctxReturning([{ dataType: 'datetime', columnType: 'datetime' }]));
         } catch (err) {
             message = err.message;
@@ -189,10 +189,10 @@ describe('startup assertion error text names the registered file @regression @ti
             'the halt message must name the migration; got: ' + message);
     });
 
-    it('_assertPubkeyColumnIsUncompressedWide names the exact migration file', async function () {
+    it('assertPubkeyColumnIsUncompressedWide names the exact migration file', async function () {
         let message = null;
         try {
-            await Database.prototype._assertPubkeyColumnIsUncompressedWide.call(ctxReturning([{ len: 66 }]));
+            await Database.prototype.assertPubkeyColumnIsUncompressedWide.call(ctxReturning([{ len: 66 }]));
         } catch (err) {
             message = err.message;
         }
@@ -201,10 +201,10 @@ describe('startup assertion error text names the registered file @regression @ti
             'the halt message must name the migration; got: ' + message);
     });
 
-    it('_assertActionDataIsUtf8mb4 names the exact migration file', async function () {
+    it('assertActionDataIsUtf8mb4 names the exact migration file', async function () {
         let message = null;
         try {
-            await Database.prototype._assertActionDataIsUtf8mb4.call(
+            await Database.prototype.assertActionDataIsUtf8mb4.call(
                 ctxReturning([{ tbl: 'transactions', cs: 'utf8mb3' }]));
         } catch (err) {
             message = err.message;
@@ -285,7 +285,7 @@ describe('Database.MIGRATION_PRECONDITIONS: action-data utf8mb4 predicate @regre
 // The 2026-06-15 rebuild DROPs mempool_transactions and recreates it at utf8mb3
 // without raw_data / first_seen. It is mode=manual, so on a database built from the
 // current src/sql it sits pending behind two later migrations that are already
-// recorded: running it reverts their work, and _assertActionDataIsUtf8mb4 then blocks
+// recorded: running it reverts their work, and assertActionDataIsUtf8mb4 then blocks
 // every startup with no re-runnable remedy.
 describe('Database.MIGRATION_PRECONDITIONS: mempool raw-strings rebuild predicate @regression', function () {
 

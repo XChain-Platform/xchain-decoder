@@ -58,7 +58,7 @@ function resolveQueryTimeout(raw, defaultMs = DEFAULT_QUERY_TIMEOUT_MS) {
 // ('it\'s fine'); DROP TABLE balances;` then re-opens at the literal's real closing
 // quote and swallows the `;` and the DROP into one chunk whose first keyword is
 // INSERT - invisible to the ^-anchored destructive checks in
-// _destructiveAutoStatement, which would score the file auto-eligible.
+// destructiveAutoStatement, which would score the file auto-eligible.
 //
 // Backtick spans are excluded: a backslash inside an identifier quote is a literal
 // character there, so consuming the next char would desync in the other direction.
@@ -136,7 +136,7 @@ class Database {
 
     // Seam over the driver: mariadb's createConnection export is
     // non-configurable, so tests stub this method instead of the module.
-    _createConnection(connectionParams){
+    createConnection(connectionParams){
         return mariadb.createConnection(connectionParams);
     }
 
@@ -155,7 +155,7 @@ class Database {
         const maxAttempts = 15;
         while(true){
             try {
-                let db     = await this._createConnection(connectionParams);
+                let db     = await this.createConnection(connectionParams);
                 let result = await db.query("SELECT * FROM information_schema.schemata WHERE schema_name = ?",[this.dbName]);
                 await db.end();
                 if(result.length > 0)
@@ -188,7 +188,7 @@ class Database {
         const maxAttempts = 15;
         while(!databaseCreated){
             try {
-                let db     = await this._createConnection(connectionParams);
+                let db     = await this.createConnection(connectionParams);
                 let result = await db.query("CREATE DATABASE IF NOT EXISTS `" + this.dbName + "`");
                 await db.end();
                 databaseCreated = true;
@@ -315,14 +315,14 @@ class Database {
     // (no migrations dir, empty dir, lock contention). A throwing body is already failing
     // loudly, so the assertions are skipped there.
     async runMigrations(opts = {}){
-        const result = await this._runMigrationsInner(opts);
-        await this._assertDispenserExpirationIsBigintUnsigned();
-        await this._assertPubkeyColumnIsUncompressedWide();
-        await this._assertActionDataIsUtf8mb4();
+        const result = await this.runMigrationsInner(opts);
+        await this.assertDispenserExpirationIsBigintUnsigned();
+        await this.assertPubkeyColumnIsUncompressedWide();
+        await this.assertActionDataIsUtf8mb4();
         return result;
     }
 
-    async _runMigrationsInner(opts = {}){
+    async runMigrationsInner(opts = {}){
         const includeManual = !!opts.includeManual;
         const only          = (opts.only == null) ? null
             : new Set([].concat(opts.only).map(s => String(s).trim()).filter(Boolean));
@@ -360,7 +360,7 @@ class Database {
                 return result;
             }
             try {
-                await this._ensureMigrationsLedger(conn);
+                await this.ensureMigrationsLedger(conn);
                 const appliedRows   = await conn.query('SELECT name, checksum FROM schema_migrations');
                 const appliedByName = new Map(appliedRows.map(r => [r.name, r.checksum]));
 
@@ -437,7 +437,7 @@ class Database {
                         continue;
                     }
 
-                    const mode = this._migrationMode(raw);
+                    const mode = this.migrationMode(raw);
 
                     // Precondition gate: a migration listed in MIGRATION_PRECONDITIONS is
                     // applicable only to a schema in a particular shape, and running it on
@@ -454,7 +454,7 @@ class Database {
                     // It runs BEFORE the mode gate deliberately, so an unattended startup
                     // baselines a pending manual migration and the hazard is gone before an
                     // operator ever reaches for `npm run migrate`.
-                    const preconditionSkip = await this._migrationPreconditionSkip(file, conn);
+                    const preconditionSkip = await this.migrationPreconditionSkip(file, conn);
                     if(preconditionSkip){
                         await conn.query(
                             'INSERT INTO schema_migrations (name, checksum, mode, applied_at) VALUES (?, ?, ?, NOW())',
@@ -504,7 +504,7 @@ class Database {
                     // actionable error instead of executing it against every validator's DB.
                     // Mirrors xchain-indexer/src/db.js.
                     if(mode === 'auto'){
-                        const offender = this._destructiveAutoStatement(statements);
+                        const offender = this.destructiveAutoStatement(statements);
                         if(offender){
                             throw new Error('runMigrations: ' + file + ' is tagged mode=auto but contains destructive DDL: "' +
                                 offender.slice(0, 160) + (offender.length > 160 ? '...' : '') + '". ' +
@@ -542,7 +542,7 @@ class Database {
     // human reason string when the migration does NOT apply to this database (the caller
     // baselines it), or null when it should run. Files with no entry always run.
     // Runs on the caller's migration connection so it stays inside the migration lock.
-    async _migrationPreconditionSkip(file, conn){
+    async migrationPreconditionSkip(file, conn){
         const pre = Database.MIGRATION_PRECONDITIONS[file];
         if(!pre) return null;
         const rows = await conn.query(pre.sql, [this.dbName]);
@@ -564,7 +564,7 @@ class Database {
     // yet (fresh install before verifyTables; skip), while a row with a NULL DATA_TYPE means
     // the table exists WITHOUT the column, which is real drift (a half-applied
     // 2026-06-13 expiration migration, dropped-but-not-renamed) and fails closed.
-    async _assertDispenserExpirationIsBigintUnsigned(){
+    async assertDispenserExpirationIsBigintUnsigned(){
         let conn;
         try {
             conn = await this.getConnection();
@@ -601,7 +601,7 @@ class Database {
                     'dispensers.expiration has type ' + columnType.toUpperCase() + ' but BIGINT UNSIGNED is required ' +
                     '(FROM_UNIXTIME/DATETIME silently NULLs any expiration past 2038, which the decoder then never expires). ' +
                     'Run the pending migration: node src/migrate.js --file ' +
-                    Database.startupAssertedMigrationFile('_assertDispenserExpirationIsBigintUnsigned')
+                    Database.startupAssertedMigrationFile('assertDispenserExpirationIsBigintUnsigned')
                 );
             }
             if(dataType !== 'bigint'){
@@ -637,7 +637,7 @@ class Database {
     // rollout can leave a fleet half-migrated with no operator signal. Fail closed
     // here, exactly as the dispensers.expiration contract does. Skips silently when
     // the column is absent (table not created yet).
-    async _assertPubkeyColumnIsUncompressedWide(){
+    async assertPubkeyColumnIsUncompressedWide(){
         const UNCOMPRESSED_PUBKEY_HEX_LENGTH = 130;
         let conn;
         try {
@@ -656,7 +656,7 @@ class Database {
                     'pubkeys.pubkey holds ' + len + ' chars but VARCHAR(' + UNCOMPRESSED_PUBKEY_HEX_LENGTH + ') is required ' +
                     'for uncompressed keys; narrower silently NULLs or truncates the source_pubkey seam field. ' +
                     'Run the pending migration: node src/migrate.js --file ' +
-                    Database.startupAssertedMigrationFile('_assertPubkeyColumnIsUncompressedWide')
+                    Database.startupAssertedMigrationFile('assertPubkeyColumnIsUncompressedWide')
                 );
             }
         } finally {
@@ -676,7 +676,7 @@ class Database {
     // alterTableForDrift never changes an existing column's type, so nothing heals this
     // automatically. Fail closed here, exactly as the pubkeys.pubkey contract does. Skips
     // silently when a column is absent (table not created yet).
-    async _assertActionDataIsUtf8mb4(){
+    async assertActionDataIsUtf8mb4(){
         let conn;
         try {
             conn = await this.getConnection();
@@ -696,7 +696,7 @@ class Database {
                         'ACTION (e.g. an emoji MEMO) is rejected with errno 1366 and the fee-paid transaction ' +
                         'is quarantined with no ACTION row, diverging this node from a migrated one. ' +
                         'Run the pending migration: node src/migrate.js --file ' +
-                        Database.startupAssertedMigrationFile('_assertActionDataIsUtf8mb4') +
+                        Database.startupAssertedMigrationFile('assertActionDataIsUtf8mb4') +
                         '. If that migration is ALREADY recorded in schema_migrations, the runner will not re-run it: a later ' +
                         'rebuild re-created the table at utf8mb3, so convert the column directly with the decoder stopped - ' +
                         'ALTER TABLE ' + String(row.tbl) + ' MODIFY data MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;'
@@ -712,7 +712,7 @@ class Database {
 
     // Read a migration file's `-- xchain:migration mode=auto|manual` header tag.
     // Defaults to 'manual' when absent (conservative: unknown DDL never auto-runs).
-    _migrationMode(raw){
+    migrationMode(raw){
         // The mode tag is a leading-prologue directive: it may only sit in the run of
         // blank and `--`-comment lines BEFORE the first SQL statement. Scanning the whole
         // file would let a `mode=auto` token buried in body prose or a data literal arm
@@ -755,7 +755,7 @@ class Database {
     // data lost), ADD ..., plain CREATE TABLE / CREATE TABLE IF NOT EXISTS (additive;
     // but CREATE OR REPLACE TABLE IS flagged - it is an atomic DROP+CREATE), and
     // MODIFY that widens/nullables a column.
-    _destructiveAutoStatement(statements){
+    destructiveAutoStatement(statements){
         // Drops that remove metadata only; anything else after DROP inside an
         // ALTER (COLUMN, PARTITION, or a bare column identifier) loses data.
         const SAFE_ALTER_DROP = new Set(['INDEX', 'KEY', 'FOREIGN', 'CONSTRAINT', 'CHECK', 'DEFAULT', 'PRIMARY']);
@@ -847,7 +847,7 @@ class Database {
             // WHERE id = 0;` in 2026-06-10-mirror-id-autoincrement-repair.sql), which
             // touches only the sentinel id=0 row; carve exactly that shape out and
             // flag every other UPDATE.
-            if(/^UPDATE\b/i.test(stmt) && !this._isIdRepairUpdate(stmt)) return raw;
+            if(/^UPDATE\b/i.test(stmt) && !this.isIdRepairUpdate(stmt)) return raw;
             if(/^ALTER\s+TABLE\b/i.test(stmt)){
                 // Partition and tablespace clauses move or discard row data while carrying
                 // none of the keywords the checks below look for: TRUNCATE PARTITION empties
@@ -907,7 +907,7 @@ class Database {
     // commas, so a "no inner parens / no commas" rule would wrongly reject it and
     // hard-fail startup; the balanced scan is required.
     // Kept byte-for-byte in sync with the xchain-indexer classifier.
-    _isIdRepairUpdate(stmt){
+    isIdRepairUpdate(stmt){
         const head = /^UPDATE\s+(?:`[^`]+`|[A-Za-z0-9_$.]+)\s+SET\s+id\s*=\s*\(/i.exec(stmt);
         if(!head) return false;
         let i = head[0].length - 1;              // index of the opening '('
@@ -933,7 +933,7 @@ class Database {
 
     // Create the migration ledger if absent. Infrastructure, not a domain table, so
     // verifyTables() doesn't manage it.
-    async _ensureMigrationsLedger(conn){
+    async ensureMigrationsLedger(conn){
         await conn.query(
             'CREATE TABLE IF NOT EXISTS schema_migrations (' +
             "name VARCHAR(255) NOT NULL PRIMARY KEY, " +
@@ -953,7 +953,7 @@ class Database {
     //
     // `#` counts because MariaDB/MySQL honour it to end-of-line exactly like
     // `--`. Missing it made a `# note` line ahead of a destructive statement
-    // invisible to the ^-anchored checks in _destructiveAutoStatement: the
+    // invisible to the ^-anchored checks in destructiveAutoStatement: the
     // chunk began with `#`, matched no keyword, scored the file auto-eligible,
     // and the server ran the DROP unattended at startup. A `;` inside a `#`
     // comment also tore the statement in two for both the classifier and the
@@ -964,7 +964,7 @@ class Database {
     // that line (the server does not treat either as a comment start there), and
     // an apostrophe in block-comment prose would open a bogus quote span. The
     // verbatim copy also keeps `/*!...*/` executable-comment payloads intact for
-    // _destructiveAutoStatement to flag.
+    // destructiveAutoStatement to flag.
     stripSqlLineComments(sql){
         let out = '';
         let quote = null;
@@ -1001,7 +1001,7 @@ class Database {
     // sits outside a quoted string. A naive `.split(';')` tears a statement whose
     // string literal contains a semicolon (e.g. `SET data = 'a;b'`) into invalid
     // fragments, so no migration or seed carrying a semicolon in quoted data can
-    // ship, and _destructiveAutoStatement ends up classifying fragments rather than
+    // ship, and destructiveAutoStatement ends up classifying fragments rather than
     // real statements. `--` and `#` line comments are stripped first (same rule as
     // the callers used); the quote model matches stripSqlLineComments exactly
     // (single/double-quote and backtick spans, doubled-quote and backslash escapes).
@@ -1339,7 +1339,7 @@ class Database {
         }
     }
 
-    async _acquireTransactionLock(){
+    async acquireTransactionLock(){
         if (!this._transactionLock) {
             this._transactionLock = true
             return
@@ -1347,7 +1347,7 @@ class Database {
         await new Promise(resolve => this._transactionLockQueue.push(resolve))
     }
 
-    _releaseTransactionLock(){
+    releaseTransactionLock(){
         if (this._transactionLockQueue.length > 0) {
             let next = this._transactionLockQueue.shift()
             next()
@@ -1357,7 +1357,7 @@ class Database {
     }
 
     async beginTransaction(){
-        await this._acquireTransactionLock()
+        await this.acquireTransactionLock()
 
         if (this.transactionConnection != null){
             await this.endTransaction()
@@ -1369,7 +1369,7 @@ class Database {
         } catch(err){
             await this.transactionConnection.release()
             this.transactionConnection = null
-            this._releaseTransactionLock()
+            this.releaseTransactionLock()
             throw err
         }
     }
@@ -1381,7 +1381,7 @@ class Database {
             await this.transactionConnection.release()
             this.transactionConnection = null
         }
-        this._releaseTransactionLock()
+        this.releaseTransactionLock()
     }
 
     async commitTransaction(){
@@ -1390,7 +1390,7 @@ class Database {
                 await this.transactionConnection.commit()
                 await this.transactionConnection.release()
                 this.transactionConnection = null
-                this._releaseTransactionLock()
+                this.releaseTransactionLock()
                 return true
             } catch (e){
                 console.error("There was an error trying to commit a transaction: " + e.code)
@@ -2072,7 +2072,7 @@ class Database {
                 if (this.transactionConnection){
                     // Roll back + free the transaction lock, matching every sibling
                     // insert. releaseConnection() alone leaves the transaction open on
-                    // the pooled connection AND never calls _releaseTransactionLock(),
+                    // the pooled connection AND never calls releaseTransactionLock(),
                     // so the next beginTransaction() would wait on the lock forever.
                     await this.endTransaction()
                 }
@@ -3120,7 +3120,7 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
 };
 
 // Applicability preconditions the runner evaluates against the LIVE schema before it
-// applies a migration (see _migrationPreconditionSkip). Each entry is a parameterised
+// applies a migration (see migrationPreconditionSkip). Each entry is a parameterised
 // information_schema query taking the database name, plus a predicate returning a reason
 // string when the migration does not apply to this database and null when it does.
 //
@@ -3143,7 +3143,7 @@ Database.MIGRATION_PRECONDITIONS = {
     //
     // Applicable only while the column is still a date/time type. A column that is absent
     // (a crash between the DROP and the rename) is deliberately NOT baselined: that state
-    // needs an operator, and _assertDispenserExpirationIsBigintUnsigned fails closed on it.
+    // needs an operator, and assertDispenserExpirationIsBigintUnsigned fails closed on it.
     '2026-06-13-dispensers-expiration-bigint.sql': {
         sql: "SELECT DATA_TYPE AS dataType FROM information_schema.columns " +
              "WHERE table_schema = ? AND table_name = 'dispensers' AND column_name = 'expiration'",
@@ -3162,7 +3162,7 @@ Database.MIGRATION_PRECONDITIONS = {
     // mode=manual, so it stays PENDING on a database created from the current
     // src/sql/pubkeys.sql (already VARCHAR(130) or wider), and a fresh install has no
     // narrow column to widen. Baseline only while the live column is already 130
-    // characters or more, the same threshold _assertPubkeyColumnIsUncompressedWide
+    // characters or more, the same threshold assertPubkeyColumnIsUncompressedWide
     // enforces at startup.
     //
     // Absent table/column, or an unreadable/NULL length, is deliberately NOT
@@ -3187,7 +3187,7 @@ Database.MIGRATION_PRECONDITIONS = {
     // on a database created from the current src/sql (already utf8mb4), and a fresh
     // install has no utf8mb3 column to convert. Baseline only while BOTH columns
     // already carry the utf8mb4 charset, the same query and per-column condition
-    // _assertActionDataIsUtf8mb4 enforces at startup.
+    // assertActionDataIsUtf8mb4 enforces at startup.
     //
     // A half-converted pair (one column already utf8mb4, the other not) is
     // deliberately NOT baselined: the file still has real work to do on the lagging
@@ -3220,7 +3220,7 @@ Database.MIGRATION_PRECONDITIONS = {
     // current src/sql, while the later files that own those three properties
     // (2026-08-10-action-data-utf8mb4.sql, 2026-08-22-mempool-first-seen.sql) are
     // already recorded and are therefore skipped. The documented blanket
-    // `npm run migrate` then runs this rebuild, _assertActionDataIsUtf8mb4 blocks every
+    // `npm run migrate` then runs this rebuild, assertActionDataIsUtf8mb4 blocks every
     // subsequent startup, and the remedy that assertion prints cannot help: the
     // conversion file is already in the ledger and the runner will not re-run it.
     //
@@ -3300,8 +3300,8 @@ Database.DEPLOY_PRECONDITION_TAG = 'deploy-precondition=required';
 // WHY THIS LIST EXISTS
 // --------------------
 // A v0.10.0 fleet deploy put five of nine decoders into Restarting(1) crash-loops.
-// The three startup assertions above (_assertDispenserExpirationIsBigintUnsigned,
-// _assertPubkeyColumnIsUncompressedWide, _assertActionDataIsUtf8mb4) each require a
+// The three startup assertions above (assertDispenserExpirationIsBigintUnsigned,
+// assertPubkeyColumnIsUncompressedWide, assertActionDataIsUtf8mb4) each require a
 // mode=manual migration, and none of the three migration files carried a header the
 // deploy tool could read, so nothing checked the precondition at deploy time and the
 // crash-loop itself was the only thing that surfaced the requirement.
@@ -3318,17 +3318,17 @@ Database.DEPLOY_PRECONDITION_TAG = 'deploy-precondition=required';
 Database.STARTUP_ASSERTED_MIGRATIONS = [
     {
         file:      '2026-06-13-dispensers-expiration-bigint.sql',
-        assertion: '_assertDispenserExpirationIsBigintUnsigned',
+        assertion: 'assertDispenserExpirationIsBigintUnsigned',
         symptom:   'Fatal decoder error: dispensers.expiration has type DATETIME but BIGINT UNSIGNED is required'
     },
     {
         file:      '2026-07-24-pubkeys-widen-uncompressed.sql',
-        assertion: '_assertPubkeyColumnIsUncompressedWide',
+        assertion: 'assertPubkeyColumnIsUncompressedWide',
         symptom:   'Fatal decoder error: pubkeys.pubkey holds 66 chars but VARCHAR(130) is required'
     },
     {
         file:      '2026-08-10-action-data-utf8mb4.sql',
-        assertion: '_assertActionDataIsUtf8mb4',
+        assertion: 'assertActionDataIsUtf8mb4',
         symptom:   'Fatal decoder error: transactions.data uses charset utf8mb3 but utf8mb4 is required'
     },
 ];
@@ -3344,7 +3344,7 @@ Database.startupAssertedMigrationFile = function(assertion){
 };
 
 // Does this migration file's header declare itself a deploy precondition?
-// Prologue-anchored exactly like _migrationMode (the scan stops at the first
+// Prologue-anchored exactly like migrationMode (the scan stops at the first
 // non-blank, non-comment line), so a token buried in body prose or a data literal
 // cannot arm it. Pure string logic, unit-tested directly.
 //
