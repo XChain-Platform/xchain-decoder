@@ -1,0 +1,17 @@
+{
+  "what": "how long this repo's per-step unit suite takes, measured rather than assumed",
+  "why": "a structure pass runs this suite after every structural step, so a suite past about five minutes stops being a per-step check and has to move to the push gate instead. Nobody had measured it.",
+  "node": "v22.22.3",
+  "measuredAt": "the structure pass baseline, before the first edit",
+  "scripts": {
+    "test:unit": {
+      "command": "npm run test:unit",
+      "files": 84,
+      "titles": 1622,
+      "passing": 1611,
+      "pending": 11,
+      "wallSeconds": 21.4,
+      "verdict": "stays fast enough for a per-step check: well under the five-minute line"
+    }
+  }
+}
