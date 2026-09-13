@@ -259,7 +259,7 @@ function expandAliasName(actionName, aliases){
 //      is REQUIRED to sit at or after the indexer's BATCH_ISSUANCE_LIMITS instant on every
 //      armed network - the LEDGER tier of batchSubCommandOutputCaptureActivation.test.js,
 //      which predates this change and exists for the settlement ledger. So at every block
-//      time these rules are evaluated, that flag is already on. batchLimitsVendoring.test.js
+//      time these rules are evaluated, that flag is already on. batch_limits_vendoring.test.js
 //      completes the argument by pinning the other two halves of the indexer's own gate
 //      (its block-index thresholds are 0, and its registered semver is at or below the
 //      indexer's compiled CONSENSUS_VERSION), so "the time has passed" really does mean
@@ -294,7 +294,7 @@ function isNumeric(value){
 // what puts TICK at params[1] for BTNS-style legacy commands. Getting this wrong reads the
 // wrong field as the TICK, which for ISSUE means calling a child top-level (suppression that
 // the indexer would not do: the money-bearing direction), so it is pinned against the real
-// sibling helper over a vector table in batchLimitsVendoring.test.js.
+// sibling helper over a vector table in batch_limits_vendoring.test.js.
 function isLegacyActionFormat(params){
     const version = params[0]
     if (String(version).length > 2) return true

@@ -33,7 +33,7 @@ export default {
     // require('mariadb') to a mock. Stryker workers are fresh Node.js forks that
     // do NOT inherit the parent's module state; this require entry re-installs
     // the patch in each worker before any source file is loaded.
-    require: ['test/unit/setup.js'],
+    require: ['test/unit/support/setup.js'],
     spec: ['test/unit/**/*.test.js'],
     // ActionManifestConformance reads src/XChainDecoder.js as TEXT and greps it
     // for a `VALID_ACTION_NAMES` Set literal. Stryker runs against an
@@ -41,7 +41,7 @@ export default {
     // way the regex expects, so the test fails on every mutation run including
     // the dry run and takes the whole run down with it. It is a real guard on
     // the real tree (npm test runs it); it just cannot participate here.
-    ignore: ['test/unit/ActionManifestConformance.test.js'],
+    ignore: ['test/unit/action_manifest_conformance.test.js'],
     config: 'test/mutation/.mocharc.mutation.yml',
     'no-package': true,
   },

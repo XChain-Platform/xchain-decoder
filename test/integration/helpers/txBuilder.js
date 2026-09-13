@@ -26,7 +26,7 @@ const ecc = require('tiny-secp256k1')
 const { BIP32Factory } = require('bip32')
 const bip39 = require('bip39')
 const { ECPairFactory } = require('ecpair')
-const nodeHelper = require('../../nodeHelper')
+const nodeHelper = require('../../helpers/node_helper')
 const { waitUntil } = require('../../helpers/waitUntil')
 const bufferutils = require('bitcoinjs-lib/src/bufferutils')
 

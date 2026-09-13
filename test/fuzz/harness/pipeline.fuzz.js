@@ -24,13 +24,13 @@ const bitcoin = require('bitcoinjs-lib')
 const ecc = require('tiny-secp256k1')
 const XChainDecoder = require('../../../src/XChainDecoder')
 const XChainBlockDecoder = require('../../../src/XChainBlockDecoder')
-const { flipBits } = require('../mutators/bitFlip')
-const { mutateRandom } = require('../mutators/byteManipulate')
+const { flipBits } = require('../support/mutators/bit_flip')
+const { mutateRandom } = require('../support/mutators/byte_manipulate')
 const {
     PREV_HASH, buildOpReturnTx, randomActionString, randomDispenserString, encrypt
-} = require('../mutators/structureAware')
-const { checkParseTransactionResult, withTimeout } = require('../invariants')
-const FuzzReporter = require('../reporter')
+} = require('../support/mutators/structure_aware')
+const { checkParseTransactionResult, withTimeout } = require('../support/invariants')
+const FuzzReporter = require('../support/reporter')
 
 bitcoin.initEccLib(ecc)
 

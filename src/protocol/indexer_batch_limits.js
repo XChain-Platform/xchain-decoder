@@ -16,8 +16,8 @@
  *
  * GENERATED FILE - DO NOT EDIT BY HAND.
  *
- *   regenerate: node test/tools/sync-batch-limits.js
- *   drift gate: test/unit/batchLimitsVendoring.test.js (re-derives and compares on every
+ *   regenerate: node bin/sync-batch-limits.js
+ *   drift gate: test/unit/batch_limits_vendoring.test.js (re-derives and compares on every
  *               unit run; skips only when the sibling checkout is absent, and
  *               XCHAIN_REQUIRE_SIBLINGS=1 turns that skip into a failure)
  *

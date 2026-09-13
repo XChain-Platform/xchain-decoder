@@ -76,7 +76,7 @@ jobs:
   # inside `npm run ci`. They get their own job on a runner that has docker, so a
   # slow or flaky venue cannot hold up the fast tier's signal. The map of which
   # tier is gated where lives in test/tier-manifest.json and is enforced by
-  # test/unit/tierManifest.test.js.
+  # test/unit/tier_manifest.test.js.
   docker-suites:
     runs-on: ubuntu-latest
     timeout-minutes: 30

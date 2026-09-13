@@ -25,7 +25,7 @@
 
 // Install the mariadb stub before loading XChainDecoder so that the
 // ESM-only mariadb package does not cause a require() failure.
-require('./setup')
+require('./support/setup')
 
 const assert  = require('assert')
 const sinon   = require('sinon')
