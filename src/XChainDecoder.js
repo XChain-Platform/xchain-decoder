@@ -3340,7 +3340,7 @@ class XChainDecoder {
                                     // action_index that would disambiguate is not in the decoder's id
                                     // space, so the row keyed on the operating address wins, then the
                                     // most recent. The residual gap is enumerated in
-                                    // xchain-indexer/src/dispenserDivergenceMetrics.js.
+                                    // xchain-indexer/src/dispenser_divergence_metrics.js.
                                     let commandVersion = decodedDataSplit[1]
                                     let dispenserFormat = parseInt(commandVersion, 10)
 
