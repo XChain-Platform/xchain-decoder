@@ -1,0 +1,75 @@
+DEAD-CODE SWEEP: xchain-decoder
+Taken at the structure pass baseline, before any file moved.
+
+WHY THIS FILE IS COMMITTED RATHER THAN READ AND THROWN AWAY. A deletion is the
+one step of a structure pass that cannot be undone by reading the diff, and the
+reachability walk alone cannot justify one: it sees literal requires inside this
+repo and nothing else. So the walk produces CANDIDATES, a platform-wide text
+sweep turns each candidate into a verdict, and the verdict is committed beside
+whatever the sweep did or did not delete. A later session that wonders why a
+file with no caller is still here reads this instead of guessing.
+
+TOOL
+    node bin/reachability.js --siblings <the tree this checkout sits in>
+
+    Four reaches, each answering a different question:
+      runtime   the require closure of what the service starts (api.js,
+                migrate.js, clear-reorg-halt.js)
+      tooling   the closure of bin/, scripts/ and tools/
+      test      the closure of test/
+      siblings  any other repo naming the path, in any of the spellings the
+                reference map understands (literal text, path.join, a root
+                variable, a shell argument, a computed require)
+
+RESULT
+    src/*.js tracked:                    30
+    runtime entry points:                src/api.js, src/clear-reorg-halt.js, src/migrate.js
+    tooling entry points:                0
+    test entry points:                   160
+    declared dynamic edges:              0
+    reachable from runtime:              29
+    NOT reachable from runtime:          1
+    test-only:                           0
+    unreferenced across the platform:    0
+
+    Candidates: src/bufferutils.js
+
+FALSIFICATION, and it is what saved the file
+    Every candidate is swept with `command grep -r` across every checkout in the
+    surrounding tree, tooling directories included, never through an editor
+    search: those honour ignore files and come back falsely empty, which is how
+    an earlier pass in another repo deleted a live directory and stranded a
+    sibling's pushes for a day.
+
+    command grep -rn --binary-files=without-match \
+        --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=coverage \
+        --exclude-dir=dist --exclude-dir=.nyc_output \
+        -e 'bufferutils' <every checkout and tooling directory in the tree>
+
+    549 hits across nine trees.
+
+VERDICT: src/bufferutils.js is LIVE. Nothing is deleted by this sweep.
+
+    The holder is a build step, not a require, which is exactly the shape a
+    static walk cannot see:
+
+        Dockerfile:16
+        COPY ./src/bufferutils.js  <image>/node_modules/bitcoinjs-lib/src/bufferutils.js
+
+    Stock bitcoinjs-lib reads a 64-bit output value through a Number-based
+    reader that throws above 2^53-1, a ceiling Dogecoin mainnet exceeds in a
+    single output, and the first such output wedges block decode permanently.
+    This file is the BigInt-safe replacement, copied over the dependency at
+    image build time. It cannot be required from this repo (its own
+    `require('./types')` only resolves once the file sits inside the
+    dependency's src/), which is why no caller appears anywhere in the tree and
+    why src/applyBufferutilsPatch.js exists beside it to do the same repair
+    in-process for every non-Docker run. The two must change together.
+
+    Deleting it would have left every container running the stock reader with
+    nothing failing here, and the break would have surfaced as a permanently
+    wedged mainnet decode attributed to a coin, not to this commit.
+
+NOTE FOR WHOEVER READS THE SWEEP OUTPUT NEXT: 314 of the 549 hits are inside one
+sibling's gitignored local clones of this repo and of the tracker. They are not
+tracked anywhere, they reach no commit, and they are not evidence of a holder.
