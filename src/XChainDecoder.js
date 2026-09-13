@@ -173,6 +173,9 @@ const OP_RETURN_PUSH_OVERHEAD = require('./protocol/constants.js').OP_RETURN_PUS
 // xchain-documentation/protocol/constants.js.
 const ENVELOPE_MAX_PAYLOAD = require('./protocol/constants.js').ENVELOPE_MAX_PAYLOAD
 const ENVELOPE_RECOGNITION_ACTIVATION = require('./protocol/constants.js').ENVELOPE_RECOGNITION_ACTIVATION
+// §3.8's second height: when a RECOGNIZED but payload-free carrier starts counting as a
+// mixed carrier. Separate from the gate above, which is already armed on mainnet.
+const ENVELOPE_CARRIER_RECOGNITION_ACTIVATION = require('./protocol/constants.js').ENVELOPE_CARRIER_RECOGNITION_ACTIVATION
 // BIP342 tapscript leaf version; also the control block's first byte masked of
 // its output-key parity bit.
 const TAPROOT_LEAF_VERSION = 0xc0
@@ -928,6 +931,25 @@ class XChainDecoder {
             && blockHeight >= activationHeight
     }
 
+    // Local height at which a recognized-but-payload-free carrier starts counting as a
+    // mixed carrier under §3.8, or null when that rule is never active here (DOGE, an
+    // unpinned mainnet, or an unknown key). Same null-safe shape as the sibling above,
+    // so a mis-set env can only leave the shipped behavior in place, never arm early.
+    envelopeCarrierRecognitionHeight(){
+        const coinMap = ENVELOPE_CARRIER_RECOGNITION_ACTIVATION[this.coinTick]
+        const height = coinMap ? coinMap[this.consensusNetwork] : null
+        return (typeof height === 'number') ? height : null
+    }
+
+    // Whether §3.8 counts a payload-free recognized carrier at `blockHeight`. A missing
+    // height resolves to INACTIVE, so replay below the gate matches shipped behavior.
+    envelopeCarrierRecognitionActiveAt(blockHeight){
+        const activationHeight = this.envelopeCarrierRecognitionHeight()
+        return activationHeight !== null
+            && typeof blockHeight === 'number'
+            && blockHeight >= activationHeight
+    }
+
     // Pattern-match one input's witness stack against the envelope grammar
     // (envelope spec §3.2). Pure and RPC-free by contract (§3.8: recognition is
     // free pattern-matching; the commit fetch happens once, later, at parse).
@@ -1392,6 +1414,13 @@ class XChainDecoder {
         // first input's previous tx. Native-coin fee outputs are placed there (not on the reveal), so we
         // capture the funding txid to look them up before returning. Null for non-P2SH transactions.
         let p2shFundingTxId = null
+        // Whether any NON-envelope carrier was RECOGNIZED on this transaction, tracked
+        // independently of how many payload bytes it contributed. §3.8's mixed-carrier
+        // refusal is about carriers, not bytes: an OP_RETURN deobfuscating to exactly the
+        // XCHN magic is a carrier that contributes nothing, and inferring presence from
+        // dataBuffer.length alone made it invisible. Read only inside the envelope
+        // arbitration, behind its own activation height.
+        let otherCarrierRecognized = false
 
         //Ignore coin base transactions
         if ((firstInputTxId != "0000000000000000000000000000000000000000000000000000000000000000") && standardInput){
@@ -1475,6 +1504,11 @@ class XChainDecoder {
 
                         if (dataWithoutObfuscation != null){
                             if (dataWithoutObfuscation.subarray(0, MAGIC_WORD.length).equals(MAGIC_WORD_BUFFER)){
+                                // An XCHN OP_RETURN is a carrier the moment the magic matches,
+                                // whatever it goes on to contribute. Marked here so §3.8 below
+                                // sees the marker-only shape (magic and nothing after it), which
+                                // adds zero bytes to dataBuffer.
+                                otherCarrierRecognized = true
                                 // P2SH chunk carrier: the OP_RETURN only flags the encoding,
                                 // the payload chunks live in the inputs' redeem scripts.
                                 if (dataWithoutObfuscation.subarray(MAGIC_WORD.length).equals(P2SH_BUFFER)){
@@ -1589,6 +1623,11 @@ class XChainDecoder {
                         
                         if (dataWithoutObfuscation != null){
                             if (dataWithoutObfuscation.subarray(0, MAGIC_WORD.length).equals(MAGIC_WORD_BUFFER)){
+                                // Same rule as the OP_RETURN branch: the magic match IS the
+                                // carrier. A MULTISIGN slot always yields ~60 bytes, so this one
+                                // is already covered by byte count; marked anyway so the two
+                                // branches cannot drift apart.
+                                otherCarrierRecognized = true
                                 nextDataBuffer = Buffer.concat([nextDataBuffer,dataWithoutObfuscation.subarray(MAGIC_WORD.length)])
                             }
                         }
@@ -1615,7 +1654,15 @@ class XChainDecoder {
             // payment outputs stay recorded, exactly like any other no-action
             // money-bearing tx.
             if (envelopeActive && envelopeInputs.length > 0){
+                // §3.8 refuses an envelope mixed with any other CARRIER. The first two
+                // disjuncts infer a carrier from its side effects (payload bytes, a chunk
+                // marker), which misses a carrier that contributes neither: an OP_RETURN
+                // deobfuscating to exactly XCHN and nothing after it. The third disjunct
+                // reads recognition directly, behind its own activation height so replay
+                // below it stays byte-identical to what the fleet indexed live.
+                const carrierRecognitionActive = this.envelopeCarrierRecognitionActiveAt(blockHeight)
                 const otherCarrierPresent = (dataBuffer.length > 0) || (p2shFundingTxId != null)
+                    || (carrierRecognitionActive && otherCarrierRecognized)
                 if (envelopeInputs.length >= 2 || otherCarrierPresent || envelopeInputs[0].index !== 0){
                     this.parseErrors++
                     console.error(`Tx ${nextTxId}: envelope rejected deterministically (` +
@@ -1745,9 +1792,18 @@ class XChainDecoder {
             }
 
             //Extract and store public key from the first input if source was found
+            //
+            // The opportunistic write below only fires for a source index_addresses
+            // already holds, and the MEMPOOL lane depends on exactly that: it must never
+            // allocate a replicated lookup id from non-deterministic mempool arrival
+            // order (see insertMempoolTransaction). So a first-ever source's key is
+            // carried out as sourcePubkey instead, and the confirmed-block path writes it
+            // in db.insertTransaction once createAddress has allocated the id.
+            let sourcePubkey = null
             if (source){
                 let pubkey = this.extractPubkeyFromInput(transaction.ins[0])
                 if (pubkey){
+                    sourcePubkey = pubkey
                     let addressId = await db.getAddressId(source)
                     if (addressId && !(await db.hasPubkey(addressId))){
                         await db.insertPubkey(addressId, pubkey)
@@ -1784,6 +1840,10 @@ class XChainDecoder {
                 compiledDataLength: compiledDataLength,
                 rawData: rawData,
                 source:source,
+                // The key this transaction exposed on chain, or null. Carried so the
+                // confirmed-block insert can record it for a source that had no
+                // index_addresses row when the opportunistic write above ran.
+                sourcePubkey: sourcePubkey,
                 destination:null,
                 dispenseOutputs:dispenseOutputs,
                 paymentOutputs:paymentOutputs,
@@ -3024,6 +3084,7 @@ class XChainDecoder {
                                 hash: nextTransactionHash,
                                 block_index: nextBlockHeight,
                                 source: parseResult["source"],
+                                source_pubkey: parseResult["sourcePubkey"],
                                 destination: parseResult["destination"],
                                 amount: parseResult["amount"],
                                 fee: 0,

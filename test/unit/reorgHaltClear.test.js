@@ -52,7 +52,7 @@ describe('Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides', fun
         const { db } = dbAnswering(() => [cleared(9)])
         assert.strictEqual(await db.isReorgHalted(), false)
         const m = await db.getReorgHaltMarker()
-        assert.deepStrictEqual(m, { halted: false, at: null, reason: null, cleared_at: '2026-09-08T10:00:00Z', cleared_reason: 'zero dispensers' })
+        assert.deepStrictEqual(m, { halted: false, id: null, at: null, reason: null, cleared_at: '2026-09-08T10:00:00Z', cleared_reason: 'zero dispensers' })
     })
 
     it('no row at all is not halted', async function () {
@@ -114,6 +114,40 @@ describe('Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides', fun
         assert.deepStrictEqual(await db.clearReorgHalt({ reason: 'long enough reason' }), { cleared: false, alreadyClear: false })
     })
 
+    // The decoder keeps parsing while the operator command runs. A verifyReorg abort
+    // inside that window writes a NEWER REORG_HALT, and a clear that only tested
+    // liveness would supersede it carrying checks measured before it existed.
+    it('clearReorgHalt refuses when the live halt is not the one the checks were taken against', async function () {
+        const { db, query } = dbAnswering(() => [halt(12)])
+        const res = await db.clearReorgHalt({ reason: 'checks taken against halt 7', checks: { dispensers: 0 }, expectedHaltId: 7 })
+        assert.deepStrictEqual(res, { cleared: false, alreadyClear: false, superseded: true, liveHaltId: 12 })
+        assert.ok(!query.getCalls().some(c => /INSERT/.test(String(c.args[0]))), 'nothing written')
+    })
+
+    it('clearReorgHalt clears when the pinned halt is still the live one', async function () {
+        let state = [halt(7)]
+        const inserted = []
+        const { db } = dbAnswering((sql, params) => {
+            if (/INSERT INTO events/.test(sql)) { inserted.push(params); state = [cleared(8)]; return { affectedRows: 1 } }
+            return state
+        })
+        const res = await db.clearReorgHalt({ reason: 'checks taken against halt 7', checks: { dispensers: 0 }, expectedHaltId: 7 })
+        assert.deepStrictEqual(res, { cleared: true, alreadyClear: false })
+        assert.strictEqual(JSON.parse(inserted[0][2]).cleared_halt_id, 7)
+    })
+
+    it('clearReorgHalt refuses a pinned clear when the live halt id is unreadable (fail-closed)', async function () {
+        const { db, query } = dbAnswering(() => [{ id: null, time: 't', code: 'REORG_HALT', data: '{not json' }])
+        const res = await db.clearReorgHalt({ reason: 'checks taken against halt 7', expectedHaltId: 7 })
+        assert.deepStrictEqual(res, { cleared: false, alreadyClear: false, superseded: true, liveHaltId: null })
+        assert.ok(!query.getCalls().some(c => /INSERT/.test(String(c.args[0]))), 'nothing written')
+    })
+
+    it('getReorgHaltMarker surfaces the live halt id the clear pins to', async function () {
+        const { db } = dbAnswering(() => [halt(7)])
+        assert.strictEqual((await db.getReorgHaltMarker()).id, 7)
+    })
+
     it('a later halt after a clear is live again', async function () {
         const { db } = dbAnswering(() => [halt(12)])
         assert.strictEqual(await db.isReorgHalted(), true)
@@ -121,11 +155,11 @@ describe('Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides', fun
 })
 
 describe('clear-reorg-halt CLI', function () {
-    function fakeDb({ halted = true, deletesAboveTip = 0, dispensers = 0, dispenserTxs = false, clearResult = { cleared: true, alreadyClear: false } } = {}) {
+    function fakeDb({ halted = true, haltId = 7, deletesAboveTip = 0, dispensers = 0, dispenserTxs = false, clearResult = { cleared: true, alreadyClear: false } } = {}) {
         const calls = { clear: [] }
         const db = {
-            getReorgHaltMarker:        async () => (halted ? { halted: true, at: '2026-09-07T06:29:07Z', reason: 'safe-depth', cleared_at: null, cleared_reason: null }
-                                                          : { halted: false, at: null, reason: null, cleared_at: '2026-09-08T10:00:00Z', cleared_reason: 'earlier clear' }),
+            getReorgHaltMarker:        async () => (halted ? { halted: true, id: haltId, at: '2026-09-07T06:29:07Z', reason: 'safe-depth', cleared_at: null, cleared_reason: null }
+                                                          : { halted: false, id: null, at: null, reason: null, cleared_at: '2026-09-08T10:00:00Z', cleared_reason: 'earlier clear' }),
             countReorgDeletesAboveTip: async () => deletesAboveTip,
             countDispensers:           async () => dispensers,
             hasDispenserTransactions:  async () => dispenserTxs,
@@ -197,5 +231,18 @@ describe('clear-reorg-halt CLI', function () {
     it('reports failure when the clear row does not land', async function () {
         const { db } = fakeDb({ clearResult: { cleared: false, alreadyClear: false } })
         assert.strictEqual(await run({ db, argv: ['--reason', REASON], ...quiet }), EXIT.FAILED)
+    })
+
+    it('pins the halt its checks were measured against', async function () {
+        const { db, calls } = fakeDb({ haltId: 41 })
+        assert.strictEqual(await run({ db, argv: ['--reason', REASON], ...quiet }), EXIT.OK)
+        assert.strictEqual(calls.clear[0].expectedHaltId, 41)
+    })
+
+    it('refuses when the decoder halted again while the checks ran, and says to re-run', async function () {
+        const { db } = fakeDb({ clearResult: { cleared: false, alreadyClear: false, superseded: true, liveHaltId: 44 } })
+        const errors = []
+        assert.strictEqual(await run({ db, argv: ['--reason', REASON], log: () => {}, error: (l) => errors.push(l) }), EXIT.HALT_SUPERSEDED)
+        assert.ok(errors.some(l => /halted again/.test(l) && /events id 44/.test(l) && /run this again/.test(l)))
     })
 })

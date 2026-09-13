@@ -87,12 +87,19 @@ async function closeDatabases(handles, log){
  * @param {number}   [opts.timeoutMs] hard-exit budget (default SHUTDOWN_TIMEOUT_MS / 100000)
  * @param {function} [opts.exit]     process-exit seam (tests pass their own)
  * @param {object}   [opts.log]      console-shaped logger
+ * @param {function} [opts.setTimer]   timer-arm seam, (fn, ms) => handle (default setTimeout)
+ * @param {function} [opts.clearTimer] timer-disarm seam, (handle) => void (default clearTimeout)
  * @returns {function(string): void} handler to register on SIGTERM / SIGINT
  */
-function createShutdown({ drain, timeoutMs, exit, log } = {}){
+function createShutdown({ drain, timeoutMs, exit, log, setTimer, clearTimer } = {}){
     const onExit  = exit || ((code) => process.exit(code));
     const logger  = log || console;
     const budget  = resolveTimeoutMs(timeoutMs);
+    // Arm/disarm through seams so a test can assert the timer was cleared. The
+    // `finished` guard alone hides a missing clear: the stale callback returns
+    // early and the exit count still looks right while the handle leaks.
+    const armTimer    = setTimer   || ((fn, ms) => setTimeout(fn, ms));
+    const disarmTimer = clearTimer || ((handle) => clearTimeout(handle));
     let signalled = false;
 
     return function shutdown(signal){
@@ -106,7 +113,7 @@ function createShutdown({ drain, timeoutMs, exit, log } = {}){
         logger.log('Received ' + (signal || 'signal') + ', draining (hard exit in ' + budget + 'ms)...');
 
         let finished = false;
-        const timer = setTimeout(() => {
+        const timer = armTimer(() => {
             if(finished) return;
             finished = true;
             // Non-zero: the drain did NOT complete, so work was cut off exactly as a
@@ -119,14 +126,14 @@ function createShutdown({ drain, timeoutMs, exit, log } = {}){
             () => {
                 if(finished) return;
                 finished = true;
-                clearTimeout(timer);
+                disarmTimer(timer);
                 logger.log('Shutdown drain complete; exiting.');
                 onExit(0);
             },
             (err) => {
                 if(finished) return;
                 finished = true;
-                clearTimeout(timer);
+                disarmTimer(timer);
                 logger.error('Shutdown drain failed:', err);
                 onExit(1);
             }

@@ -101,6 +101,37 @@ describe('XChainDecoder#parseTransaction()', () => {
         assert.strictEqual(result, null)
     })
 
+    // A source that index_addresses has never seen gets no id until
+    // db.insertTransaction allocates one, so the opportunistic write inside
+    // parseTransaction cannot fire. The key must still leave the parser, or the block
+    // that exposed it records source_pubkey NULL forever.
+    it('carries a first-ever source pubkey out of the parser even though no address id exists yet', async () => {
+        const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
+        decoder.getSourceFromOutput = sinon.stub().resolves('bcrt1qneverseen')
+        decoder.extractPubkeyFromInput = sinon.stub().returns('02aabb')
+        decoder.db.getAddressId = sinon.stub().resolves(null)
+        decoder.db.hasPubkey    = sinon.stub().resolves(false)
+        decoder.db.insertPubkey = sinon.stub().resolves(true)
+
+        const result = await decoder.parseTransaction(tx, undefined, decoder.db)
+
+        assert.ok(result)
+        assert.strictEqual(result.sourcePubkey, '02aabb')
+        assert.ok(decoder.db.insertPubkey.notCalled, 'the parser must not allocate a lookup id to write it here')
+    })
+
+    it('leaves sourcePubkey null when the input exposes no key', async () => {
+        const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
+        decoder.getSourceFromOutput = sinon.stub().resolves('bcrt1qneverseen')
+        decoder.extractPubkeyFromInput = sinon.stub().returns(null)
+        decoder.db.getAddressId = sinon.stub().resolves(null)
+
+        const result = await decoder.parseTransaction(tx, undefined, decoder.db)
+
+        assert.ok(result)
+        assert.strictEqual(result.sourcePubkey, null)
+    })
+
     it('should return null when standard_input is false', async () => {
         const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
         tx.ins[0]['standard_input'] = false

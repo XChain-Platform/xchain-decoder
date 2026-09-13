@@ -644,6 +644,47 @@ describe('Taproot envelope recognition', function () {
             assert.strictEqual(post.data.length, 0)
         })
 
+        // A carrier that contributes ZERO payload bytes. The OP_RETURN deobfuscates to
+        // exactly the XCHN magic with nothing after it, so the magic check passes and the
+        // subarray(4) concat adds nothing: arbitration that infers carrier presence from
+        // dataBuffer.length cannot see it, and the envelope is accepted as an action
+        // although §3.8 says an envelope mixed with any other carrier is not one.
+        function buildMarkerOnlyOpReturnTx(){
+            const tx = buildRevealTx(commitTx, GOLDEN_SCRIPT)
+            const cipher = obfuscate(Buffer.from('XCHN'), commitTx.getId())
+            tx.addOutput(bitcoin.script.compile([OP.OP_RETURN, cipher]), 0)
+            return tx
+        }
+
+        it('[ADVERSARIAL] envelope + marker-only XCHN OP_RETURN: no action once carrier recognition is active', async function () {
+            const tx = buildMarkerOnlyOpReturnTx()
+            const before = decoder.parseErrors
+            const result = await decoder.parseTransaction(tx, new Set(), null, POST_FLAG)
+            assert.ok(result)
+            assert.strictEqual(result.data.length, 0)
+            assert.strictEqual(result.envelope, false)
+            assert.strictEqual(decoder.parseErrors, before + 1)
+            assert.strictEqual(rpc.callCount, 0, 'deterministic rejection never fetches the commit')
+        })
+
+        it('[REPLAY] the same marker-only tx below the carrier-recognition height parses EXACTLY as shipped: the envelope action', async function () {
+            sinon.stub(decoder, 'envelopeCarrierRecognitionHeight').returns(null)
+            const tx = buildMarkerOnlyOpReturnTx()
+            const result = await decoder.parseTransaction(tx, new Set(), null, POST_FLAG)
+            assert.strictEqual(result.envelope, true, 'shipped behavior accepts it; that is what the new height gates')
+            assert.ok(result.data.length > 0)
+        })
+
+        it('[REPLAY] the carrier-recognition boundary is exact: height H-1 replays shipped, height H rejects', async function () {
+            sinon.stub(decoder, 'envelopeCarrierRecognitionHeight').returns(POST_FLAG + 10)
+            const tx = buildMarkerOnlyOpReturnTx()
+            const pre = await decoder.parseTransaction(tx, new Set(), null, POST_FLAG + 9)
+            assert.strictEqual(pre.envelope, true)
+            const post = await decoder.parseTransaction(tx, new Set(), null, POST_FLAG + 10)
+            assert.strictEqual(post.envelope, false)
+            assert.strictEqual(post.data.length, 0)
+        })
+
         it('[ADVERSARIAL] envelope + MULTISIGN outputs: no action post-flag, the multisig action pre-flag', async function () {
             const tx = buildRevealTx(commitTx, GOLDEN_SCRIPT)
             // Genuine obfuscated MULTISIGN chunk keyed on ins[0]'s prevout txid

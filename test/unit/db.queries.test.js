@@ -711,6 +711,49 @@ describe('Database#insertTransaction()', () => {
         const params = conn.query.firstCall.args[1];
         assert.strictEqual(params[8], null); // raw_data
     });
+
+    // parseTransaction's opportunistic pubkey write only fires for a source
+    // index_addresses already holds, and createAddress here is what allocates the row
+    // for a first-ever source. Without this write that address's exposed key is lost
+    // for the block that exposed it, and the indexer's source_pubkey join reads NULL.
+    it('records the exposed pubkey for a source whose address id it just allocated', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        sinon.stub(db, 'createAddress').callsFake(async (a) => (a === 'src' ? 77 : 5));
+        const insertPubkey = sinon.stub(db, 'insertPubkey').resolves(true);
+        const { pool } = withConn(sinon.stub().resolves([]));
+        injectPool(db, pool);
+        await db.insertTransaction({
+            index: 0, hash: 'h', block_index: 1, source: 'src', source_pubkey: '02aa',
+            destination: 'dst', amount: 0, fee: 0, data: 'SEND|0|x'
+        });
+        assert.ok(insertPubkey.calledOnceWithExactly(77, '02aa'), 'the key must be stored against the freshly allocated source id');
+    });
+
+    it('writes no pubkey when the transaction exposed none, or the source is the empty-address sentinel', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        sinon.stub(db, 'createAddress').resolves(1); // reserved sentinel row
+        const insertPubkey = sinon.stub(db, 'insertPubkey').resolves(true);
+        const { pool } = withConn(sinon.stub().resolves([]));
+        injectPool(db, pool);
+        await db.insertTransaction({ index: 0, hash: 'h', block_index: 1, source: '', source_pubkey: '02aa', destination: 'd', amount: 0, fee: 0, data: null });
+        await db.insertTransaction({ index: 1, hash: 'i', block_index: 1, source: 's', destination: 'd', amount: 0, fee: 0, data: null });
+        assert.ok(insertPubkey.notCalled, 'no pubkey write for the sentinel id or an absent key');
+    });
+
+    // A pubkey hiccup must never turn a fee-paid transaction into a quarantined row.
+    it('still inserts the transaction when the pubkey write reports failure', async () => {
+        const db = makeDb();
+        sinon.stub(db, 'createTransaction').resolves(1);
+        sinon.stub(db, 'createAddress').resolves(9);
+        sinon.stub(db, 'insertPubkey').resolves(false);
+        const { pool, conn } = withConn(sinon.stub().resolves([]));
+        injectPool(db, pool);
+        const r = await db.insertTransaction({ index: 0, hash: 'h', block_index: 1, source: 's', source_pubkey: '02aa', destination: 'd', amount: 0, fee: 0, data: null });
+        assert.strictEqual(r, true);
+        assert.ok(conn.query.calledOnce, 'the transaction INSERT still ran');
+    });
 });
 
 describe('Database#insertMempoolTransaction()', () => {
@@ -1075,6 +1118,59 @@ describe('Database#purgeExpiredDispensers()', () => {
         assert.strictEqual(await db.purgeExpiredDispensers(-5), true);
         assert.strictEqual(await db.purgeExpiredDispensers(undefined), true);
         assert.ok(conn.query.notCalled, 'must not issue a DELETE when nothing is reorg-safe yet');
+    });
+});
+
+
+// hasDispenserTransactions backs clear-reorg-halt's only guard against a database
+// whose money-bearing dispenser rows were already hard-purged. A dispenser opened
+// inside a BATCH is stored as `BATCH|0|DISPENSER|0|...`, so a top-level-only prefix
+// probe answers "clean" on a database that held dispenser state.
+describe('Database#hasDispenserTransactions()', () => {
+    afterEach(() => sinon.restore());
+
+    it('probes BOTH the top-level and the batch-carried shape', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        assert.strictEqual(await db.hasDispenserTransactions(), false);
+        const sql = String(conn.query.firstCall.args[0]);
+        assert.match(sql, /LIKE\s+'DISPENSER\|%'/i, 'must still match a top-level DISPENSER');
+        assert.match(sql, /LIKE\s+'%\|DISPENSER\|%'/i, 'must also match a BATCH-carried DISPENSER');
+        assert.match(sql, /LIMIT 1/i);
+    });
+
+    // The fake applies LIKE semantics to sample rows, so the predicate is EXECUTED
+    // rather than asserted: a top-level-only probe leaves the BATCH row unmatched and
+    // this case goes red.
+    function likeConn(rows) {
+        return sinon.stub().callsFake(async (sql) => {
+            const patterns = [...String(sql).matchAll(/LIKE\s+'([^']*)'/gi)].map(m => m[1]);
+            const toRe = (p) => new RegExp('^' + p.split('%').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
+            return rows.filter(r => patterns.some(p => toRe(p).test(r))).slice(0, 1).map(() => ({ 1: 1 }));
+        });
+    }
+
+    it('sees a dispenser opened inside a BATCH', async () => {
+        const db = makeDb();
+        const { pool } = withConn(likeConn(['SEND|0|a', 'BATCH|0|DISPENSER|0|xyz']));
+        injectPool(db, pool);
+        assert.strictEqual(await db.hasDispenserTransactions(), true);
+    });
+
+    it('sees a top-level dispenser', async () => {
+        const db = makeDb();
+        const { pool } = withConn(likeConn(['DISPENSER|0|xyz']));
+        injectPool(db, pool);
+        assert.strictEqual(await db.hasDispenserTransactions(), true);
+    });
+
+    it('stays false on a database that never decoded a DISPENSER', async () => {
+        const db = makeDb();
+        const { pool } = withConn(likeConn(['SEND|0|a', 'BATCH|0|SEND|0|b', 'ISSUANCE|0|c']));
+        injectPool(db, pool);
+        assert.strictEqual(await db.hasDispenserTransactions(), false);
     });
 });
 

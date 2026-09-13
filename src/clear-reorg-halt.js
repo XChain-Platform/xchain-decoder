@@ -48,7 +48,10 @@ const EXIT = {
     FAILED: 1,
     USAGE: 2,
     NOT_RESYNCED: 3,
-    DISPENSER_STATE: 4
+    DISPENSER_STATE: 4,
+    // The decoder halted again while the checks above were running, so the live halt
+    // is not the one they were measured against. Refuse and re-run, never clear.
+    HALT_SUPERSEDED: 5
 }
 
 const USAGE = 'usage: node src/clear-reorg-halt.js --reason "<why this database is known good>" [--force] [--dry-run]'
@@ -128,10 +131,21 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
         return EXIT.OK
     }
 
-    const result = await db.clearReorgHalt({ reason: args.reason.trim(), checks: checks, forced: !dispenserClean })
+    // Pin the halt the two checks above were measured against. The decoder keeps
+    // parsing while this command runs, so a verifyReorg abort can write a NEWER
+    // REORG_HALT inside that window; clearing without the pin would supersede a halt
+    // nobody audited and record checks taken before it existed.
+    const result = await db.clearReorgHalt({ reason: args.reason.trim(), checks: checks, forced: !dispenserClean, expectedHaltId: marker.id })
     if (result.alreadyClear){
         log('clear-reorg-halt: the marker was cleared by someone else while this ran. Nothing to do.')
         return EXIT.OK
+    }
+    if (result.superseded){
+        error('clear-reorg-halt: REFUSED. The decoder halted again while these checks ran, so the live halt'
+            + (result.liveHaltId != null ? ' (events id ' + result.liveHaltId + ')' : '')
+            + ' is not the one they were measured against. Nothing was cleared. Wait for the decoder to settle, then run this again '
+            + 'so the checks are taken against the halt being cleared.')
+        return EXIT.HALT_SUPERSEDED
     }
     if (!result.cleared){
         error('clear-reorg-halt: FAILED. The REORG_HALT_CLEARED row could not be written or read back; the halt is still live.')

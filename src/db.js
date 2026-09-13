@@ -695,7 +695,10 @@ class Database {
                         'ACTION (e.g. an emoji MEMO) is rejected with errno 1366 and the fee-paid transaction ' +
                         'is quarantined with no ACTION row, diverging this node from a migrated one. ' +
                         'Run the pending migration: node src/migrate.js --file ' +
-                        Database.startupAssertedMigrationFile('_assertActionDataIsUtf8mb4')
+                        Database.startupAssertedMigrationFile('_assertActionDataIsUtf8mb4') +
+                        '. If that migration is ALREADY recorded in schema_migrations, the runner will not re-run it: a later ' +
+                        'rebuild re-created the table at utf8mb3, so convert the column directly with the decoder stopped - ' +
+                        'ALTER TABLE ' + String(row.tbl) + ' MODIFY data MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;'
                     );
                 }
             }
@@ -1716,6 +1719,19 @@ class Database {
             let sourceId = await this.createAddress(tx.source)
             let destinationId = await this.createAddress(tx.destination)
 
+            // Record the key this transaction exposed for a source that had no
+            // index_addresses row when parseTransaction ran: createAddress has just
+            // allocated it, and nothing else writes the pubkey later, so without this the
+            // first-ever action from an address leaves source_pubkey permanently NULL
+            // across the decoder->indexer seam. Inside the block's open transaction, so
+            // it commits or rolls back with the block. Sentinel id 1 (empty address) is
+            // never a real source. insertPubkey is INSERT IGNORE against a PRIMARY KEY
+            // and swallows its own errors, so a pubkey hiccup can never turn a good
+            // transaction into a quarantined poison row.
+            if (tx.source_pubkey && sourceId != null && sourceId !== 1){
+                await this.insertPubkey(sourceId, tx.source_pubkey)
+            }
+
             await connection.query(query, [
                 tx.index,
                 txHashId,
@@ -2565,6 +2581,23 @@ class Database {
     // the oracle-address resolution and the hard purge keep their timing, so the divergence
     // stays in the over-capture direction the advisory contract above calls safe. Rationale and
     // the reason the MARK must not move instead: src/dispenserCancelGrace.js.
+    //
+    // THE FLOOR IS MEASURED AGAINST THE MARK BLOCK, NOT THE EXPIRATION. The indexer runs a
+    // block's transactions BEFORE its expiration pass (xchain-indexer XChainIndexer.js, the
+    // processTransaction loop ahead of util.processExpirations), and its cancel handler tests
+    // only that the dispenser status is 'open' (actions/dispenser.js). So a cancel landing in
+    // the first block whose header time passes expiration E is ACCEPTED, and the indexer then
+    // settles fills until that cancel's block time plus DISPENSER_CLOSE_DELAY. Anchoring
+    // retention on E alone ends capture at E + grace and loses the buyer's coin in the window
+    // between the two. The block that stamps expired_block_index is exactly the last block in
+    // which a cancel can be accepted, so its header time plus the same grace covers every
+    // settleable fill by construction, with no slack constant. The join reads that header time
+    // from this decoder's own blocks table rather than duplicating it on the dispenser row, so
+    // the reorg clear at deleteBlockByIndex and the this-block restore in
+    // extendOpenDispenserExpirationBySource keep the pair consistent by clearing one column.
+    // The `expiration >= ?` disjunct stays: the mark time is always greater than the
+    // expiration, so it is redundant for a row this decoder stamped, and it is what carries a
+    // row whose mark block has no readable time.
     async getAllOpenDispenserAddresses(graceFloor){
         let db    = await this.getConnection();
         // Strict number test, not Number(): `Number(null)` is 0, which would arm a floor of
@@ -2579,7 +2612,9 @@ class Database {
             ? `SELECT ia.address AS address
             FROM dispensers op
             LEFT JOIN index_addresses ia ON ia.id = op.address_id
+            LEFT JOIN blocks eb ON eb.block_index = op.expired_block_index
             WHERE op.expired_block_index IS NULL
+               OR eb.block_time >= ?
                OR op.expiration >= ?`
             : `SELECT ia.address AS address
             FROM dispensers op
@@ -2587,7 +2622,7 @@ class Database {
             WHERE op.expired_block_index IS NULL`
         let addresses = new Set()
         try {
-            let rows = graceActive ? await db.query(query, [floor]) : await db.query(query);
+            let rows = graceActive ? await db.query(query, [floor, floor]) : await db.query(query);
             for (let row of rows){
                 if (row["address"] != null)
                     addresses.add(row["address"])
@@ -2754,8 +2789,16 @@ class Database {
     // prove nothing was purged; a database with no DISPENSER transaction at all does.
     // LIMIT 1 stops at the first hit; a database with none scans the table once,
     // which is acceptable for a one-off operator command.
+    //
+    // BOTH arms are load-bearing. A dispenser opened inside a BATCH is stored as
+    // `BATCH|0|DISPENSER|0|...`, which a top-level `DISPENSER|%` prefix test cannot
+    // see, and the decoder does register those (the batch sub-command capture gate is
+    // in force on every network). Over-matching is deliberate and fail-safe: this
+    // probe backs a REFUSAL, so a false positive costs the operator one replica
+    // comparison plus an explicit --force, while a false negative silently certifies
+    // a cleanliness that was never established. Do not narrow it again.
     async hasDispenserTransactions(){
-        const query = `SELECT 1 FROM transactions WHERE data LIKE 'DISPENSER|%' LIMIT 1;`
+        const query = `SELECT 1 FROM transactions WHERE data LIKE 'DISPENSER|%' OR data LIKE '%|DISPENSER|%' LIMIT 1;`
         let connection = await this.getConnection()
         const ownLease = (this.transactionConnection == null)
         try {
@@ -2773,11 +2816,22 @@ class Database {
     // REORG_HALT_CLEARED row carrying the reason, the check results and the halt it
     // supersedes, then confirms by read-back exactly as markReorgHalted does.
     // Returns { cleared, alreadyClear }. Never deletes the halt row.
-    async clearReorgHalt({ reason, checks = {}, forced = false } = {}){
+    //
+    // `expectedHaltId` pins the identity the caller's preconditions were measured
+    // against. The decoder keeps running while the operator command does, so a
+    // verifyReorg abort can raise a NEW halt inside that window; clearing on liveness
+    // alone would write a clear that supersedes a halt nobody audited, carrying checks
+    // taken before it existed. A mismatch refuses with { superseded: true } and the
+    // live id, so the operator re-runs the checks. An unreadable live id refuses too:
+    // "we could not tell" must never clear, the same fail-closed rule
+    // readReorgHaltState states.
+    async clearReorgHalt({ reason, checks = {}, forced = false, expectedHaltId = null } = {}){
         if (typeof reason !== 'string' || reason.trim().length < 8)
             throw new Error('clearReorgHalt: a reason of at least 8 characters is required; it is recorded with the clear')
         const state = await this.readReorgHaltState()
         if (!state.halted) return { cleared: false, alreadyClear: true }
+        if (expectedHaltId != null && (state.id == null || String(state.id) !== String(expectedHaltId)))
+            return { cleared: false, alreadyClear: false, superseded: true, liveHaltId: (state.id != null ? state.id : null) }
         const written = await this.insertEvent('REORG_HALT_CLEARED', {
             reason: reason.trim(),
             at: new Date().toISOString(),
@@ -2869,6 +2923,11 @@ class Database {
     // JSON written by a different revision), which must never turn a real halt into a
     // reported non-halt.
     //
+    // `id` is the events row id of the live halt (null when not halted, or when the
+    // id could not be read). It is the identity clear-reorg-halt pins its
+    // preconditions to, so a halt raised while that command runs cannot be cleared by
+    // checks that never ran against it.
+    //
     // Honours an operator clear: after clearReorgHalt the marker reads as not
     // halted and carries `cleared_at` / `cleared_reason` instead, so the health
     // surface can show that a halt WAS here and who cleared it.
@@ -2876,6 +2935,7 @@ class Database {
         const state = await this.readReorgHaltState()
         return {
             halted:         state.halted,
+            id:             state.id,
             at:             state.at,
             reason:         state.reason,
             cleared_at:     state.cleared_at,
@@ -3146,6 +3206,45 @@ Database.MIGRATION_PRECONDITIONS = {
                 if(cs !== 'utf8mb4') return null;
             }
             return 'transactions.data and mempool_transactions.data are already utf8mb4, so there is no utf8mb3 column left to convert.';
+        }
+    },
+
+    // FK-id -> raw-string rebuild of mempool_transactions (tx_hash_id -> tx_hash, and
+    // the two address ids likewise). It DROPs the table and recreates six columns at
+    // `DEFAULT CHARSET=utf8`, which is a pure loss against the current
+    // src/sql/mempool_transactions.sql: `data` goes back to utf8mb3 and the `raw_data`
+    // and `first_seen` columns disappear.
+    //
+    // It is mode=manual, so it stays PENDING forever on a database built from the
+    // current src/sql, while the later files that own those three properties
+    // (2026-08-10-action-data-utf8mb4.sql, 2026-08-22-mempool-first-seen.sql) are
+    // already recorded and are therefore skipped. The documented blanket
+    // `npm run migrate` then runs this rebuild, _assertActionDataIsUtf8mb4 blocks every
+    // subsequent startup, and the remedy that assertion prints cannot help: the
+    // conversion file is already in the ledger and the runner will not re-run it.
+    //
+    // Applicable only while the pre-migration shape is live, which is exactly
+    // `tx_hash_id` still present. `tx_hash` present with no `tx_hash_id` is the
+    // post-migration shape and has nothing left to convert. Neither column visible, an
+    // unreadable name, or BOTH present (a crash mid-rebuild, or drift) is deliberately
+    // NOT baselined: an absent or ambiguous answer needs an operator, and leaving the
+    // file pending is the recoverable direction.
+    '2026-06-15-mempool-raw-strings.sql': {
+        sql: "SELECT column_name AS col FROM information_schema.columns " +
+             "WHERE table_schema = ? AND table_name = 'mempool_transactions' AND column_name IN ('tx_hash', 'tx_hash_id')",
+        skipWhen: (rows) => {
+            if(!rows.length) return null;
+            const cols = new Set();
+            for(const row of rows){
+                // An unreadable name makes the whole answer ambiguous; never baseline on it.
+                if(row.col == null) return null;
+                cols.add(String(row.col).toLowerCase());
+            }
+            if(cols.has('tx_hash_id')) return null;
+            if(!cols.has('tx_hash')) return null;
+            return 'mempool_transactions already holds raw string columns (tx_hash present, no tx_hash_id), so this rebuild ' +
+                   'has nothing to convert and would drop the table, reverting data to utf8mb3 and destroying the raw_data ' +
+                   'and first_seen columns that later, already-recorded migrations own.';
         }
     },
 };

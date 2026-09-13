@@ -281,3 +281,45 @@ describe('Database.MIGRATION_PRECONDITIONS: action-data utf8mb4 predicate @regre
         ]), null);
     });
 });
+
+// The 2026-06-15 rebuild DROPs mempool_transactions and recreates it at utf8mb3
+// without raw_data / first_seen. It is mode=manual, so on a database built from the
+// current src/sql it sits pending behind two later migrations that are already
+// recorded: running it reverts their work, and _assertActionDataIsUtf8mb4 then blocks
+// every startup with no re-runnable remedy.
+describe('Database.MIGRATION_PRECONDITIONS: mempool raw-strings rebuild predicate @regression', function () {
+
+    const skipWhen = Database.MIGRATION_PRECONDITIONS['2026-06-15-mempool-raw-strings.sql'].skipWhen;
+
+    it('baselines at the post-migration shape (tx_hash, no tx_hash_id)', function () {
+        const reason = skipWhen([{ col: 'tx_hash' }]);
+        assert.ok(reason, 'expected a baseline reason string');
+        assert.match(reason, /already holds raw string columns/);
+    });
+
+    it('does NOT baseline at the pre-migration shape (tx_hash_id still present)', function () {
+        assert.strictEqual(skipWhen([{ col: 'tx_hash_id' }]), null);
+    });
+
+    it('does NOT baseline when the table or columns are absent', function () {
+        assert.strictEqual(skipWhen([]), null);
+    });
+
+    it('does NOT baseline an ambiguous shape (both columns present)', function () {
+        assert.strictEqual(skipWhen([{ col: 'tx_hash' }, { col: 'tx_hash_id' }]), null);
+    });
+
+    it('does NOT baseline when a column name is unreadable (NULL)', function () {
+        assert.strictEqual(skipWhen([{ col: null }]), null);
+        assert.strictEqual(skipWhen([{ col: 'tx_hash' }, { col: null }]), null);
+    });
+
+    it('reads the two column names out of information_schema for this database', function () {
+        const sql = Database.MIGRATION_PRECONDITIONS['2026-06-15-mempool-raw-strings.sql'].sql;
+        assert.match(sql, /information_schema\.columns/i);
+        assert.match(sql, /table_name\s*=\s*'mempool_transactions'/i);
+        assert.match(sql, /'tx_hash'/);
+        assert.match(sql, /'tx_hash_id'/);
+        assert.match(sql, /table_schema\s*=\s*\?/i, 'must be parameterised on the database name');
+    });
+});

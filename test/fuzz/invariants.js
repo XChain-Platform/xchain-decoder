@@ -17,6 +17,18 @@
 
 const assert = require('assert')
 
+// Pinned binding: the decoder's actual v0 DISPENSER field offsets and minimum
+// split length. Reading these from oracleFeeOutput.js (rather than restating
+// them as literals here) is the whole point of this invariant - a stale local
+// copy had drifted from the real gate (was hardcoded 14, decoder is
+// actually 10) and went undetected. See xchain-decoder/src/oracleFeeOutput.js.
+const {
+    V0_GIVE_COIN_INDEX,
+    V0_GET_COIN_INDEX,
+    V0_GET_ADDRESS_INDEX,
+    V0_REQUIRED_FIELD_COUNT
+} = require('../../src/oracleFeeOutput')
+
 /**
  * Verify parseTransaction result satisfies all invariants.
  * Returns an object { ok, violations } where violations is an array of strings.
@@ -135,9 +147,10 @@ function checkDispenserParse(decodedData) {
 
     const parts = decodedData.split('|')
 
-    // The decoder requires length >= 14 (through ORACLE_ADDRESS at index 13) and
-    // version == 0. EXPIRATION (index 14) is optional and defaulted when omitted.
-    if (parts.length < 14) {
+    // The decoder requires length >= V0_REQUIRED_FIELD_COUNT (through GET_AMOUNT)
+    // and version == 0. Everything from GET_ADDRESS on, including EXPIRATION, is
+    // optional and defaulted when omitted.
+    if (parts.length < V0_REQUIRED_FIELD_COUNT) {
         // Decoder should skip this (no violation)
         return { ok: true, violations: [] }
     }
@@ -148,11 +161,11 @@ function checkDispenserParse(decodedData) {
     }
 
     // If we get here, the decoder would process it; check field access safety.
-    // Required fields: GIVE_COIN[2], GET_COIN[7], GET_ADDRESS[10]. EXPIRATION[14]
-    // is optional (defaulted), so its absence is not a violation.
-    if (parts[2] === undefined) violations.push('giveCoin (parts[2]) is undefined')
-    if (parts[7] === undefined) violations.push('getCoin (parts[7]) is undefined')
-    if (parts[10] === undefined) violations.push('getAddress (parts[10]) is undefined')
+    // Required fields: GIVE_COIN, GET_COIN, GET_ADDRESS. EXPIRATION is optional
+    // (defaulted), so its absence is not a violation.
+    if (parts[V0_GIVE_COIN_INDEX] === undefined) violations.push(`giveCoin (parts[${V0_GIVE_COIN_INDEX}]) is undefined`)
+    if (parts[V0_GET_COIN_INDEX] === undefined) violations.push(`getCoin (parts[${V0_GET_COIN_INDEX}]) is undefined`)
+    if (parts[V0_GET_ADDRESS_INDEX] === undefined) violations.push(`getAddress (parts[${V0_GET_ADDRESS_INDEX}]) is undefined`)
 
     return { ok: violations.length === 0, violations }
 }

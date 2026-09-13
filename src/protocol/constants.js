@@ -607,6 +607,36 @@ const ENVELOPE_RECOGNITION_ACTIVATION = {
     DOGE: { mainnet: null, testnet: null, regtest: null },
 };
 
+// ENVELOPE_CARRIER_RECOGNITION_ACTIVATION (Taproot-envelope spec §3.8): the LOCAL block
+// height at/above which the decoder counts a RECOGNIZED but payload-free carrier as a
+// mixed carrier. Below it, arbitration infers carrier presence from accumulated payload
+// bytes, so an OP_RETURN that deobfuscates to exactly the XCHN magic and nothing else
+// contributes zero bytes and the envelope is still accepted as an action - while §3.8
+// says an envelope mixed with any other carrier is not an action. That is a divergence
+// against any implementation written from the published rule.
+//
+// Its own height, separate from ENVELOPE_RECOGNITION_ACTIVATION, because that gate is
+// already ARMED on BTC and LTC mainnet: §3.8 arbitration has been live consensus since
+// 2026-08-02, so changing what it refuses is a second recognition change and every
+// decoder must flip at the same height or the fleet forks. Below the height the decoder
+// behaves EXACTLY as shipped, so replay of indexed history is byte-identical.
+//
+// The mainnet entries are deliberately UNPINNED (null = never active). Pinning them
+// against a measured tip, with the redeploy train's margin, is an operator decision and
+// a deploy-train act, not a code edit made in passing. testnet/regtest are genesis-active,
+// matching the sibling gate above: recognition itself has been genesis-active there, so
+// the refusal rule the spec states applies to those chains from genesis too.
+//
+// DEPLOY DEADLINE (once pinned): EVERY decoder on that chain+network MUST be running the
+// pinned height before it, or the fleet forks on the first envelope carrying a
+// marker-only XCHN OP_RETURN. Verify the fleet by reading the armed map out of each
+// RUNNING container rather than out of this file.
+const ENVELOPE_CARRIER_RECOGNITION_ACTIVATION = {
+    BTC:  { mainnet: null, testnet: 0, regtest: 0 },
+    LTC:  { mainnet: null, testnet: 0, regtest: 0 },
+    DOGE: { mainnet: null, testnet: null, regtest: null },
+};
+
 // VALID_FIAT_CODES: the accepted FIAT_CODE allow-list for PRICE actions. The indexer's
 // config['FIATS'] keys (xchain-indexer/src/config.js) are the on-chain arbiter; this list
 // mirrors them in the indexer's insertion order. The SDK validator (VALID_FIAT_CODES) must
@@ -678,6 +708,7 @@ module.exports = {
     BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
     ENVELOPE_MAX_PAYLOAD,
     ENVELOPE_RECOGNITION_ACTIVATION,
+    ENVELOPE_CARRIER_RECOGNITION_ACTIVATION,
     VALID_FIAT_CODES,
     GAS_TICK,
     PRICE_MAX,

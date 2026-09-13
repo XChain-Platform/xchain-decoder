@@ -27,10 +27,17 @@
  * transaction_outputs, the buyer's native coin reaches the seller with no DISPENSE record and
  * no inventory release.
  *
- * A blanket grace window closes it by construction. A valid cancel always PRECEDES the
- * dispenser's own expiration, so `expiration + grace` always covers `cancel_time + close
- * delay`, with no cancel parsing, no BATCH sub-command gate dependency, and no cancel-target
- * resolution (the guess the advisory contract in db.js retired).
+ * A blanket grace window closes it by construction, anchored on the SOFT-EXPIRE MARK rather
+ * than on the raw expiration. A valid cancel does NOT have to precede the dispenser's own
+ * expiration: the indexer runs a block's transactions before its expiration pass and its
+ * cancel handler tests only that the status is 'open', so a cancel landing in the first block
+ * whose header time passes expiration E is accepted, and the fill window then runs to that
+ * block's time plus the close delay, which is past `E + grace`. The block that stamps the mark
+ * is exactly the last block in which a cancel can be accepted, so `mark_time + grace` covers
+ * `cancel_time + close delay` for every settleable fill, with no cancel parsing, no BATCH
+ * sub-command gate dependency, and no cancel-target resolution (the guess the advisory
+ * contract in db.js retired). getAllOpenDispenserAddresses reads that mark time by joining
+ * this decoder's own blocks table on expired_block_index.
  *
  * WHAT THE GRACE MOVES, AND WHAT IT MUST NOT. The widening applies to the CAPTURE SET only:
  * getAllOpenDispenserAddresses admits a row whose expiration is no older than the floor this
@@ -56,8 +63,9 @@ const { DISPENSER_CANCEL_GRACE_ACTIVATION } = require('./protocol/constants.js')
 //
 // Pinned to the indexer's DISPENSER_CLOSE_DELAY (xchain-indexer/src/config.js). The invariant
 // is GRACE >= CLOSE_DELAY: the indexer stops matching a cancelled dispenser at cancel time
-// plus its close delay, and the cancel precedes the expiration, so a grace of at least the
-// close delay covers every block in which the indexer can still settle a fill. Equal, not
+// plus its close delay, and the cancel lands no later than the block that stamps the
+// soft-expire mark, so a grace of at least the close delay, measured from that mark, covers
+// every block in which the indexer can still settle a fill. Equal, not
 // larger, because every extra second is capture the indexer discards. dispenserCancelGrace
 // tests read the indexer's value directly, so retuning it there fails this suite until this
 // constant follows.

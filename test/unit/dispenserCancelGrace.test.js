@@ -76,22 +76,33 @@ class DispenserModel {
     async getOpenDispenserOracleAddressesBySource(){ return [] }
     async purgeExpiredDispensers(){ return true }
     // Mirrors deleteOpenDispensers: stamp open rows whose expiration < minExpiration.
+    //
+    // expiredBlockTime stands in for the `LEFT JOIN blocks eb ON eb.block_index =
+    // op.expired_block_index` the production query uses to read the mark block's header time.
+    // The two agree by construction: the block loop hands that same header time in as
+    // minExpiration, and it is the value it writes to blocks.block_time for that height.
     async deleteOpenDispensers(blockIndex, minExpiration){
         for (const r of this.rows)
-            if (r.expiredBlockIndex === null && r.expiration < Number(minExpiration))
+            if (r.expiredBlockIndex === null && r.expiration < Number(minExpiration)){
                 r.expiredBlockIndex = blockIndex
+                r.expiredBlockTime  = Number(minExpiration)
+            }
         return true
     }
     // Mirrors getAllOpenDispenserAddresses:
-    //   WHERE expired_block_index IS NULL                       (no floor)
-    //   WHERE expired_block_index IS NULL OR expiration >= ?    (floor bound)
+    //   WHERE expired_block_index IS NULL                                    (no floor)
+    //   WHERE expired_block_index IS NULL
+    //      OR eb.block_time >= ?
+    //      OR expiration >= ?                                                (floor bound)
     async getAllOpenDispenserAddresses(graceFloor){
         // Same strict number test as db.js: `Number(null)` is 0, which would silently arm a
         // 1970 floor below the gate.
         const floor = graceFloor
         const graceActive = (typeof floor === 'number') && Number.isFinite(floor)
         const set = new Set(this.rows
-            .filter(r => r.expiredBlockIndex === null || (graceActive && r.expiration >= floor))
+            .filter(r => r.expiredBlockIndex === null
+                      || (graceActive && Number.isFinite(r.expiredBlockTime) && r.expiredBlockTime >= floor)
+                      || (graceActive && r.expiration >= floor))
             .map(r => r.address))
         this.captureLoads.push({ floor: graceActive ? floor : null, set })
         return set
@@ -184,7 +195,7 @@ function runTwoBlocks(consensusNetwork, expireAt, payAt, model){
 // the decoder mirrors no cancel, so the row carries only its own expiration.
 function fundedCancelledDispenser(){
     const model = new DispenserModel()
-    model.rows.push({ address: ADDR, expiration: EXPIRATION, expiredBlockIndex: null })
+    model.rows.push({ address: ADDR, expiration: EXPIRATION, expiredBlockIndex: null, expiredBlockTime: null })
     return model
 }
 
@@ -261,14 +272,17 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
     })
 
     it('closes capture once the indexer can no longer settle a fill', async () => {
-        // The grace is a window, not an amnesty: past expiration + grace the address leaves the
+        // The grace is a window, not an amnesty: past mark + grace the address leaves the
         // capture set, and by then the indexer stopped matching the dispenser long ago.
-        const payAt = EXPIRATION + DISPENSER_CANCEL_GRACE_SECONDS + 1
+        // The window is measured from the SOFT-EXPIRE MARK block, which is the last block a
+        // cancel can be accepted in, so the probe steps one second past mark + grace.
+        const markAt = EXPIRATION + 1
+        const payAt  = markAt + DISPENSER_CANCEL_GRACE_SECONDS + 1
         assert.ok(!indexerStillSettlesFill(payAt),
             'the probe block must be one the indexer has already closed')
 
         const model = fundedCancelledDispenser()
-        await runTwoBlocks('regtest', EXPIRATION + 1, payAt, model)
+        await runTwoBlocks('regtest', markAt, payAt, model)
 
         assert.ok(!model.captureLoads[1].set.has(ADDR),
             'past the grace window the dispenser leaves the capture set')
@@ -278,9 +292,10 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
         // The invariant, not a lucky point. Walk the payment block from the expiration out past
         // the grace and assert the implication in both directions at each step.
         let insideWindowBlocks = 0
+        const markAt = EXPIRATION + 1
         for (let payAt = EXPIRATION + 1; payAt <= EXPIRATION + 4500; payAt += 300){
             const model = fundedCancelledDispenser()
-            await runTwoBlocks('regtest', EXPIRATION + 1, payAt, model)
+            await runTwoBlocks('regtest', markAt, payAt, model)
             const captured = model.captureLoads[model.captureLoads.length - 1].set.has(ADDR)
 
             if (indexerStillSettlesFill(payAt)){
@@ -292,13 +307,60 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
             // Outside the indexer's window capture is merely allowed to continue to the end of
             // the grace: over-capture is the direction the advisory contract calls safe, and
             // the indexer drops the surplus.
-            if (payAt > EXPIRATION + DISPENSER_CANCEL_GRACE_SECONDS)
+            if (payAt > markAt + DISPENSER_CANCEL_GRACE_SECONDS)
                 assert.ok(!captured, `block time ${payAt}: capture must end with the grace window`)
         }
         // Guard against a vacuous sweep: an arithmetic slip that made the window empty would
         // otherwise pass every assertion above.
         assert.ok(insideWindowBlocks >= 8,
             `the sweep must cross at least 8 blocks inside the indexer fill window, saw ${insideWindowBlocks}`)
+    })
+
+    // THE BOUNDARY-BLOCK CANCEL. The cases above cancel BEFORE the expiration, which is the
+    // only shape a floor anchored on `expiration` can cover. The indexer accepts a cancel in
+    // the first block PAST the expiration too: it runs a block's transactions before its
+    // expiration pass, and its cancel handler tests only that the status is 'open'. The fill
+    // window then runs to that block's time plus the close delay, which is strictly later than
+    // expiration + grace, and every block in between is one the decoder drops.
+    //
+    // SENSITIVITY: the first case below FAILS against a capture floor anchored on
+    // `op.expiration`, which is exactly the predicate this case exists to move. The second
+    // case is its bound, so a floor that simply never closes fails too.
+    describe('a cancel accepted in the block that soft-expires the dispenser', function () {
+        // The mark block: its header time passes the expiration, so the decoder stamps the row
+        // here and the indexer accepts a cancel here in the same block.
+        const MARK_AT       = EXPIRATION + 60
+        const INDEXER_CLOSE = MARK_AT + INDEXER_CLOSE_DELAY
+
+        it('keeps capturing while the indexer settles fills past expiration + grace', async () => {
+            const payAt = EXPIRATION + DISPENSER_CANCEL_GRACE_SECONDS + 1
+            assert.ok(payAt > EXPIRATION + DISPENSER_CANCEL_GRACE_SECONDS,
+                'the probe must sit past the window an expiration-anchored floor allows')
+            assert.ok(payAt < INDEXER_CLOSE,
+                'the probe must be a block the indexer would still settle a fill in')
+
+            const model = fundedCancelledDispenser()
+            await runTwoBlocks('regtest', MARK_AT, payAt, model)
+
+            assert.strictEqual(model.rows[0].expiredBlockIndex, 0,
+                'block 0 must have soft-expired the dispenser, or this test proves nothing')
+            assert.strictEqual(model.rows[0].expiredBlockTime, MARK_AT,
+                'the production soft-expire must stamp the mark block header time')
+            const payLoad = model.captureLoads[1]
+            assert.strictEqual(payLoad.floor, payAt - DISPENSER_CANCEL_GRACE_SECONDS)
+            assert.ok(payLoad.set.has(ADDR),
+                'a payment the indexer would still settle must be captured by the decoder')
+        })
+
+        it('stops capturing once the indexer has closed the boundary-cancelled dispenser', async () => {
+            const payAt = INDEXER_CLOSE + 1
+            const model = fundedCancelledDispenser()
+            await runTwoBlocks('regtest', MARK_AT, payAt, model)
+
+            assert.strictEqual(model.rows[0].expiredBlockTime, MARK_AT)
+            assert.ok(!model.captureLoads[1].set.has(ADDR),
+                'past the indexer close the dispenser leaves the capture set')
+        })
     })
 })
 
@@ -334,9 +396,13 @@ describe('Database#getAllOpenDispenserAddresses() grace floor', function () {
         const floor = cancelGraceFloor('regtest', EXPIRATION + 1800)
         await db.getAllOpenDispenserAddresses(floor)
         const [sql, params] = q.firstCall.args
-        assert.ok(/expired_block_index IS NULL\s*\n\s*OR op\.expiration >= \?/.test(sql),
-            'the above-gate query must admit rows whose expiration is no older than the floor')
-        assert.deepStrictEqual(params, [EXPIRATION + 1800 - DISPENSER_CANCEL_GRACE_SECONDS])
+        assert.ok(/LEFT JOIN blocks eb ON eb\.block_index = op\.expired_block_index/.test(sql),
+            'the above-gate query must join the mark block so its header time is readable')
+        assert.ok(/expired_block_index IS NULL\s*\n\s*OR eb\.block_time >= \?\s*\n\s*OR op\.expiration >= \?/.test(sql),
+            'the above-gate query must admit rows whose mark time, or expiration, is no older than the floor')
+        const expectedFloor = EXPIRATION + 1800 - DISPENSER_CANCEL_GRACE_SECONDS
+        assert.deepStrictEqual(params, [expectedFloor, expectedFloor],
+            'the floor binds once per disjunct, in the order the clauses appear')
     })
 
     it('treats a null or non-finite floor as no grace at all', async () => {
