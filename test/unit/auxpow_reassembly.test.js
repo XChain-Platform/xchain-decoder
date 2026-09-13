@@ -16,11 +16,11 @@
 // AuxPoW bytes at all.
 
 const assert = require('assert')
-const BlockchainConnector = require('../../src/blockchain_connector')
-const { encodeVarintHex } = require('../../src/blockchain_connector')
+const BlockchainConnector = require('../../src/chain/blockchain_connector')
+const { encodeVarintHex } = require('../../src/chain/blockchain_connector')
 const XChainDecoder = require('../../src/XChainDecoder')
 const { AUXPOW_REASSEMBLE_AFTER } = require('../../src/XChainDecoder')
-const XChainBlockDecoder = require('../../src/XChainBlockDecoder')
+const XChainBlockDecoder = require('../../src/chain/XChainBlockDecoder')
 
 // Minimal legacy tx (1 coinbase-style input, 1 empty-script output).
 const TX_HEX =

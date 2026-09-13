@@ -22,17 +22,17 @@ describe('Smoke: Module Loading', () => {
     })
 
     it('should load BlockchainConnector', () => {
-        const BlockchainConnector = require('../../src/blockchain_connector')
+        const BlockchainConnector = require('../../src/chain/blockchain_connector')
         assert.strictEqual(typeof BlockchainConnector, 'function')
     })
 
     it('should load CryptoNetworks', () => {
-        const CryptoNetworks = require('../../src/crypto_networks')
+        const CryptoNetworks = require('../../src/chain/crypto_networks')
         assert.strictEqual(typeof CryptoNetworks, 'function')
     })
 
     it('should load XChainBlockDecoder', () => {
-        const XChainBlockDecoder = require('../../src/XChainBlockDecoder')
+        const XChainBlockDecoder = require('../../src/chain/XChainBlockDecoder')
         assert.strictEqual(typeof XChainBlockDecoder, 'function')
     })
 
@@ -57,7 +57,7 @@ describe('Smoke: Module Loading', () => {
     })
 
     it('should construct a BlockchainConnector instance', () => {
-        const BlockchainConnector = require('../../src/blockchain_connector')
+        const BlockchainConnector = require('../../src/chain/blockchain_connector')
         const connector = new BlockchainConnector('127.0.0.1', 18443, 'rpc', 'rpc')
         assert.ok(connector)
         assert.strictEqual(typeof connector.getBlockchainInfo, 'function')
@@ -66,7 +66,7 @@ describe('Smoke: Module Loading', () => {
     })
 
     it('should construct an XChainBlockDecoder instance', () => {
-        const XChainBlockDecoder = require('../../src/XChainBlockDecoder')
+        const XChainBlockDecoder = require('../../src/chain/XChainBlockDecoder')
         const decoder = new XChainBlockDecoder('bitcoin-regtest')
         assert.ok(decoder)
         assert.strictEqual(decoder.coin, 'bitcoin')

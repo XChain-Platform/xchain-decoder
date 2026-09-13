@@ -19,7 +19,7 @@
 
 const assert = require('assert')
 const crypto = require('crypto')
-const XChainBlockDecoder = require('../../../src/XChainBlockDecoder')
+const XChainBlockDecoder = require('../../../src/chain/XChainBlockDecoder')
 const { flipBits } = require('../support/mutators/bit_flip')
 const { mutateRandom, truncate, extend } = require('../support/mutators/byte_manipulate')
 const { buildFuzzedLitecoinBlockHex } = require('../support/mutators/structure_aware')

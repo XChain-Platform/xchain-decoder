@@ -827,7 +827,7 @@ describe('Taproot envelope recognition', function () {
         describe('parity with the encoder validator', function () {
             const ENCODER = process.env.XCHAIN_ENCODER_DIR ||
                 path.join(__dirname, '..', '..', '..', 'xchain-encoder')
-            const VALIDATOR = path.join(ENCODER, 'src', 'validator.js')
+            const VALIDATOR = path.join(ENCODER, 'src', 'common', 'validator.js')
             before(function () { if (!fs.existsSync(VALIDATOR)) { if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-encoder sibling not found at ' + VALIDATOR + ' but XCHAIN_REQUIRE_SIBLINGS=1'); this.skip(); } })
 
             it('ENVELOPE_MAX_PAYLOAD stays equal across the two services', function () {

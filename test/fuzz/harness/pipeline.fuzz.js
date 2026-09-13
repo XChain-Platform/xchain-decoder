@@ -23,7 +23,7 @@ const sinon = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
 const ecc = require('tiny-secp256k1')
 const XChainDecoder = require('../../../src/XChainDecoder')
-const XChainBlockDecoder = require('../../../src/XChainBlockDecoder')
+const XChainBlockDecoder = require('../../../src/chain/XChainBlockDecoder')
 const { flipBits } = require('../support/mutators/bit_flip')
 const { mutateRandom } = require('../support/mutators/byte_manipulate')
 const {

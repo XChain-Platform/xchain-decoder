@@ -19,7 +19,7 @@
  */
 const assert = require('assert')
 const sinon = require('sinon')
-const BlockchainConnector = require('../../src/blockchain_connector')
+const BlockchainConnector = require('../../src/chain/blockchain_connector')
 const { wait } = require('./support/helpers')
 
 describe('CE-02: RPC Timeout Storm', function () {

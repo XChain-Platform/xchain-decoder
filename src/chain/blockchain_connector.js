@@ -19,9 +19,9 @@
  ********************************************************************/
 
 const axios = require('axios');
-const config = require('./config');
+const config = require('../config');
 const { format: formatLogLine } = require('node:util');
-const { getLogger } = require('./observability');
+const { getLogger } = require('../observability');
 const logger = getLogger();
 
 // Read an integer env var, falling back on anything that is not a clean integer.

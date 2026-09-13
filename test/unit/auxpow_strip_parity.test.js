@@ -9,12 +9,12 @@
 // contact legal@dankest.llc.
 
 // The AuxPoW strip primitives are duplicated between
-// xchain-decoder/src/BlockchainConnector.js and the xchain-utxo-tracker twin, and
-// both carry "Keep in sync with ..." comments that nothing used to enforce: the two
-// files drifted apart (one repo rewrapped its errors, the other factored its strip
-// logic into stripAuxPowFromBlockHex) while the sync comments still claimed
-// otherwise. This guard asserts byte identity of the shared function BODIES, the
-// parts that must agree because a divergence silently changes which bytes each
+// xchain-decoder/src/chain/blockchain_connector.js and the xchain-utxo-tracker twin.
+// Both carry "Keep in sync with ..." comments, but nothing enforces that
+// automatically: one repo can wrap its errors differently, or factor the strip
+// logic into a differently named helper, while the comments still claim parity.
+// This guard asserts byte identity of the shared function BODIES, the parts
+// that must agree because a divergence silently changes which bytes each
 // service hashes and decodes.
 //
 // Deliberately NOT asserted: whole-function identity of getBlockWithoutAuxPow or
@@ -37,9 +37,9 @@ const path   = require('path')
 const {
     stripAuxPowFromBlockHex,
     skipAuxPow,
-} = require('../../src/blockchain_connector')
+} = require('../../src/chain/blockchain_connector')
 
-const LOCAL_FILE = path.join(__dirname, '../../src/blockchain_connector.js')
+const LOCAL_FILE = path.join(__dirname, '../../src/chain/blockchain_connector.js')
 const TRACKER_DIR = process.env.XCHAIN_UTXO_TRACKER_DIR ||
     path.join(__dirname, '..', '..', '..', 'xchain-utxo-tracker')
 const TWIN_FILE = path.join(TRACKER_DIR, 'src', 'blockchain_connector.js')
@@ -105,7 +105,7 @@ describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function ()
                     `decoder copy of ${name} lacks its Keep-in-sync comment`)
                 assert.ok(
                     twinSource.includes(
-                        'Keep in sync with xchain-decoder/src/BlockchainConnector.js ' + name),
+                        'Keep in sync with xchain-decoder/src/chain/blockchain_connector.js ' + name),
                     `utxo-tracker copy of ${name} lacks its Keep-in-sync comment`)
             }
         })
@@ -177,7 +177,7 @@ describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function ()
     // so a "make the copies identical" refactor cannot quietly drop the tag that
     // fetchBlockHex escalates on.
     describe('getBlockWithoutAuxPow error framing (deliberate divergence)', function () {
-        const BlockchainConnector = require('../../src/blockchain_connector')
+        const BlockchainConnector = require('../../src/chain/blockchain_connector')
 
         function makeConnector(overrides) {
             const connector = new BlockchainConnector('127.0.0.1', 0, 'user', 'pass')

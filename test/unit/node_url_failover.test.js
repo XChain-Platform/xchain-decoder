@@ -18,7 +18,7 @@
 const assert = require('assert')
 const sinon = require('sinon')
 const axios = require('axios')
-const BlockchainConnector = require('../../src/blockchain_connector')
+const BlockchainConnector = require('../../src/chain/blockchain_connector')
 
 function connectionError(code) {
     const err = new Error(code)

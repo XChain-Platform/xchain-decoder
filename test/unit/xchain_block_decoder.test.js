@@ -11,7 +11,7 @@
 const assert = require('assert')
 const crypto = require('crypto')
 const { Transaction } = require('bitcoinjs-lib')
-const XChainBlockDecoder = require('../../src/XChainBlockDecoder')
+const XChainBlockDecoder = require('../../src/chain/XChainBlockDecoder')
 
 // 80-byte block header: version=2, prevHash=0xaa*32, merkleRoot=0xbb*32, timestamp=1700000000, bits, nonce
 const HEADER_HEX = '02000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb00f15365ffff001d39300000'

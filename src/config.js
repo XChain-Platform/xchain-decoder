@@ -38,7 +38,7 @@
  * boot-time values and only a test that changes one mid-run would notice.
  * So the exported object is accessors over the block below, not a copy of it.
  *
- * The three process entry points (api.js, migrate.js, clear_reorg_halt.js)
+ * The three process entry points (api.js, migrate.js, clear-reorg-halt.js)
  * read the environment directly and are exempt: they validate and report on
  * their configuration before anything else is loaded, which is the one job
  * that cannot go through a module that has already resolved it.

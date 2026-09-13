@@ -20,9 +20,9 @@ export default {
   // Excludes db.js (requires real MariaDB) and api.js (requires running server).
   mutate: [
     'src/XChainDecoder.js',
-    'src/XChainBlockDecoder.js',
-    'src/blockchain_connector.js',
-    'src/crypto_networks.js',
+    'src/chain/XChainBlockDecoder.js',
+    'src/chain/blockchain_connector.js',
+    'src/chain/crypto_networks.js',
     'src/util.js',
   ],
 

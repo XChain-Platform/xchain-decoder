@@ -15,7 +15,7 @@
 
 const assert = require('assert')
 const bufferutils = require('../../src/apply_bufferutils_patch')
-const XChainBlockDecoder = require('../../src/XChainBlockDecoder')
+const XChainBlockDecoder = require('../../src/chain/XChainBlockDecoder')
 const { bigIntBufferutilsActive } = require('../../src/XChainDecoder')
 
 // Minimal legacy tx: 1 coinbase-style input, 1 output carrying 2^53 sat

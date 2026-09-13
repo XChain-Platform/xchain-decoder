@@ -23,7 +23,7 @@
 const assert    = require('assert')
 const bitcoin   = require('bitcoinjs-lib')
 const crypto    = require('crypto')
-const XChainBlockDecoder = require('../../src/XChainBlockDecoder')
+const XChainBlockDecoder = require('../../src/chain/XChainBlockDecoder')
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 // Build an 80-byte standard block header buffer

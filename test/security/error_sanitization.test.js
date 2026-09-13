@@ -77,7 +77,7 @@ describe('Security: Error Log Sanitization', () => {
         let connectorSource
 
         before(() => {
-            connectorSource = fs.readFileSync(require.resolve('../../src/blockchain_connector.js'), 'utf-8')
+            connectorSource = fs.readFileSync(require.resolve('../../src/chain/blockchain_connector.js'), 'utf-8')
         })
 
         it('should not log full error objects in getBlockHeader', () => {
@@ -108,7 +108,7 @@ describe('Security: Error Log Sanitization', () => {
         it('[REGRESSION P0] does not leak the RPC password when an axios call fails', async () => {
             const util = require('util')
             const axios = require('axios')
-            const BlockchainConnector = require('../../src/blockchain_connector.js')
+            const BlockchainConnector = require('../../src/chain/blockchain_connector.js')
             const FAKE_RPC_PASSWORD = 'FAKEPASS_must_never_be_logged_9c3f'
 
             const err = new Error('Request failed with status code 401')
@@ -160,7 +160,7 @@ describe('Security: Error Log Sanitization', () => {
         it('[REGRESSION P0] does not leak the RPC password through the unwrapped getBlockWithoutAuxPow path', async () => {
             const util = require('util')
             const axios = require('axios')
-            const BlockchainConnector = require('../../src/blockchain_connector.js')
+            const BlockchainConnector = require('../../src/chain/blockchain_connector.js')
             const FAKE_RPC_PASSWORD = 'FAKEPASS_must_never_be_logged_7b1a'
 
             const err = new Error('Request failed with status code 401')

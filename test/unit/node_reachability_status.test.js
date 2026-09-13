@@ -36,7 +36,7 @@ const http   = require('http')
 const path   = require('path')
 const express = require('express')
 
-const BlockchainConnector = require('../../src/blockchain_connector')
+const BlockchainConnector = require('../../src/chain/blockchain_connector')
 const { nodeReachabilityFrom } = BlockchainConnector
 const XChainDecoder = require('../../src/XChainDecoder')
 const { registerLiveRoute, nodeReachabilityFields } = require('../../src/api')
@@ -169,7 +169,7 @@ describe('the connector records both instants at its single POST choke point', f
     it('every RPC method reaches the recording site through rpcPost', function () {
         // Source-level: instrumenting per method is how the next added method silently
         // escapes the surface. Nothing in this class may POST around the choke point.
-        const SRC = fs.readFileSync(path.join(__dirname, '../../src/blockchain_connector.js'), 'utf8')
+        const SRC = fs.readFileSync(path.join(__dirname, '../../src/chain/blockchain_connector.js'), 'utf8')
         const posts = SRC.match(/axios\.post\(/g) || []
         assert.strictEqual(posts.length, 1, 'axios.post must appear only inside rpcPost')
     })

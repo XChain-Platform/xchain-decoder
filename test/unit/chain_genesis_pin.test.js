@@ -33,7 +33,7 @@ const fs     = require('fs');
 const path   = require('path');
 
 const { chainGenesisMismatch, chainGenesisUnpinned } = require('../../src/protocol/chain_identity.js');
-const CryptoNetworks = require('../../src/crypto_networks.js');
+const CryptoNetworks = require('../../src/chain/crypto_networks.js');
 const coins          = require('../../src/coins');
 const XChainDecoder  = require('../../src/XChainDecoder.js');
 
