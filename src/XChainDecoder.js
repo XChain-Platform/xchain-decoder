@@ -25,14 +25,14 @@ const bitcoin = require('bitcoinjs-lib')
 const { createHash } = require('crypto')
 const Database = require('./db.js')
 const ecc = require('tiny-secp256k1')
-const BlockchainConnector = require('./BlockchainConnector')
-const CryptoNetworks = require('./CryptoNetworks')
+const BlockchainConnector = require('./blockchain_connector')
+const CryptoNetworks = require('./crypto_networks')
 const XChainBlockDecoder = require('./XChainBlockDecoder')
-const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress, V0_GIVE_COIN_INDEX, V0_GET_COIN_INDEX, V0_GET_ADDRESS_INDEX, V0_REQUIRED_FIELD_COUNT, ORACLE_ADDRESS_INDEX, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('./oracleFeeOutput')
-const { isDispenserExpiryRealignActive } = require('./dispenserExpiryRealign')
-const { cancelGraceFloor } = require('./dispenserCancelGrace')
-const { captureCommands, collapseDispenserRegistrations, isBatchSubCommandCaptureActive } = require('./batchSubCommandCapture')
-const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./chainIdentity')
+const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate, isCompactedOracleAddress, V0_GIVE_COIN_INDEX, V0_GET_COIN_INDEX, V0_GET_ADDRESS_INDEX, V0_REQUIRED_FIELD_COUNT, ORACLE_ADDRESS_INDEX, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('./protocol/oracle_fee_output')
+const { isDispenserExpiryRealignActive } = require('./protocol/dispenser_expiry_realign')
+const { cancelGraceFloor } = require('./protocol/dispenser_cancel_grace')
+const { captureCommands, collapseDispenserRegistrations, isBatchSubCommandCaptureActive } = require('./protocol/batch_sub_command_capture')
+const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesisUnpinned } = require('./protocol/chain_identity')
 // REORG_HALT rides getLogger() rather than this.logError, because a patched
 // console line carries no structured fields and coin/network/reason/depth are
 // the whole content of the event. getLogger() resolves lazily, so requiring it
@@ -214,12 +214,12 @@ const VALID_ACTION_NAMES = new Set([
     'XBRIDGE'
 ])
 
-// Short-form ACTION-name aliases; see ./actionAliases.js for the table and why it
-// sits in its own module (batchSubCommandCapture.js expands the same aliases on a
+// Short-form ACTION-name aliases; see ./protocol/action_aliases.js for the table and why it
+// sits in its own module (batch_sub_command_capture.js expands the same aliases on a
 // BATCH's SUB-COMMAND names and is required BY this file, so a shared literal here
 // would be a require cycle). Re-exported below under this name, which is how the
 // ActionManifestConformance guard binds it to the canonical manifest.
-const ACTION_ALIASES = require('./actionAliases.js')
+const ACTION_ALIASES = require('./protocol/action_aliases.js')
 
 // Canonicalize the ACTION name in a raw payload buffer, expanding a short-form
 // alias to its canonical form. Single source for the tokenize+lookup logic
@@ -2340,7 +2340,7 @@ class XChainDecoder {
         }
 
         // Only Dogecoin can carry a single output > 2^53-1 sat (~90.07M DOGE); BTC/LTC caps
-        // are lower. The patch is applied in-process (src/applyBufferutilsPatch.js, required
+        // are lower. The patch is applied in-process (src/apply_bufferutils_patch.js, required
         // by XChainBlockDecoder), so this can only fire if that module regresses or a stray
         // bitcoinjs-lib copy shadows the patched one; keep the backstop so any such
         // regression is loud at startup rather than a mid-operation fleet halt.
@@ -2355,7 +2355,7 @@ class XChainDecoder {
         if (this.xchainBlockDecoder && this.xchainBlockDecoder.coin === 'dogecoin' && !bigIntBufferutilsActive()){
             util.throwError(new Error('CRITICAL: bitcoinjs-lib bufferutils BigInt-safe 64-bit reader is NOT active on a ' +
                 'Dogecoin decoder. A DOGE output > 2^53-1 sat (~90.07M DOGE) will throw during block decode ' +
-                'and wedge this decoder permanently. src/applyBufferutilsPatch.js should have applied it ' +
+                'and wedge this decoder permanently. src/apply_bufferutils_patch.js should have applied it ' +
                 'in-process; investigate before running on mainnet.'))
         }
 

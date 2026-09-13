@@ -46,15 +46,15 @@
 
 'use strict';
 
-const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION } = require('./protocol/constants.js')
-const ACTION_ALIASES = require('./actionAliases.js')
+const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION } = require('./constants.js')
+const ACTION_ALIASES = require('./action_aliases.js')
 const { COMMAND_LIMIT,
         ACTION_LIMITS,
         GATED_ACTION_LIMITS,
         CHILD_ISSUE_KEY,
         WEIGHT_BUDGET,
         COMMAND_WEIGHTS,
-        COST_WEIGHTING_ACTIVATION } = require('./protocol/indexerBatchLimits.js')
+        COST_WEIGHTING_ACTIVATION } = require('./indexer_batch_limits.js')
 
 // The BATCH FORMAT versions the indexer registers (xchain-indexer/src/actions/batch.js
 // `this.formats`, which today holds only 0 = 'VERSION|COMMAND'). A BATCH whose FORMAT is

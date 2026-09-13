@@ -37,9 +37,9 @@ const path   = require('path')
 const {
     stripAuxPowFromBlockHex,
     skipAuxPow,
-} = require('../../src/BlockchainConnector')
+} = require('../../src/blockchain_connector')
 
-const LOCAL_FILE = path.join(__dirname, '..', '..', 'src', 'BlockchainConnector.js')
+const LOCAL_FILE = path.join(__dirname, '../../src/blockchain_connector.js')
 const TRACKER_DIR = process.env.XCHAIN_UTXO_TRACKER_DIR ||
     path.join(__dirname, '..', '..', '..', 'xchain-utxo-tracker')
 const TWIN_FILE = path.join(TRACKER_DIR, 'src', 'BlockchainConnector.js')
@@ -177,7 +177,7 @@ describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function ()
     // so a "make the copies identical" refactor cannot quietly drop the tag that
     // fetchBlockHex escalates on.
     describe('getBlockWithoutAuxPow error framing (deliberate divergence)', function () {
-        const BlockchainConnector = require('../../src/BlockchainConnector')
+        const BlockchainConnector = require('../../src/blockchain_connector')
 
         function makeConnector(overrides) {
             const connector = new BlockchainConnector('127.0.0.1', 0, 'user', 'pass')

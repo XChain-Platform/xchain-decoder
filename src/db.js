@@ -23,6 +23,7 @@ const fs      = require('fs');
 const util    = require('./util')
 const { getLogger } = require('./observability')
 const config = require('./config');
+const crypto = require('crypto');
 
 const SATOSHIS_DECIMALS = 8
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/
@@ -322,7 +323,6 @@ class Database {
     }
 
     async _runMigrationsInner(opts = {}){
-        const crypto        = require('crypto');
         const includeManual = !!opts.includeManual;
         const only          = (opts.only == null) ? null
             : new Set([].concat(opts.only).map(s => String(s).trim()).filter(Boolean));
@@ -2581,7 +2581,7 @@ class Database {
     // grace period. It widens THIS query and nothing else: the expiry mark, the extend mirror,
     // the oracle-address resolution and the hard purge keep their timing, so the divergence
     // stays in the over-capture direction the advisory contract above calls safe. Rationale and
-    // the reason the MARK must not move instead: src/dispenserCancelGrace.js.
+    // the reason the MARK must not move instead: src/protocol/dispenser_cancel_grace.js.
     //
     // THE FLOOR IS MEASURED AGAINST THE MARK BLOCK, NOT THE EXPIRATION. The indexer runs a
     // block's transactions BEFORE its expiration pass (xchain-indexer XChainIndexer.js, the
@@ -2724,7 +2724,7 @@ class Database {
     // store); a full resync from a known-good snapshot rebuilds the schema and so
     // clears it, matching the recovery the abort message already demands.
     //
-    // An operator can CLEAR a halt through clearReorgHalt (src/clear-reorg-halt.js,
+    // An operator can CLEAR a halt through clearReorgHalt (src/clear_reorg_halt.js,
     // `xchain-node clear-reorg-halt`): that writes a REORG_HALT_CLEARED row carrying
     // the reason and the checks that passed, and the NEWEST of the two codes decides.
     // The halt row is never deleted, so the audit trail survives, and a later halt

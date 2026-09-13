@@ -1,3 +1,4 @@
+const Database = require('./db.js');
 /*********************************************************************
  *
  * Copyright © 2025-2026 Dankest, LLC
@@ -158,7 +159,6 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
 
 async function main(){
     require('dotenv').config()
-    const Database = require('./db.js')
     const host = process.env.DECODER_DB_HOST
     const port = process.env.DECODER_DB_PORT
     const name = process.env.DECODER_DB_NAME

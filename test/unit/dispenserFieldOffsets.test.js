@@ -50,9 +50,9 @@ const path   = require('path');
 
 const { V0_GIVE_COIN_INDEX, V0_GET_COIN_INDEX, V0_GET_ADDRESS_INDEX, V0_REQUIRED_FIELD_COUNT,
         ORACLE_ADDRESS_INDEX, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX, oracleAddressFromCreate } =
-    require('../../src/oracleFeeOutput.js');
+    require('../../src/protocol/oracle_fee_output.js');
 
-// Offsets the decode path in src/XChainDecoder.js and src/oracleFeeOutput.js was written
+// Offsets the decode path in src/XChainDecoder.js and src/protocol/oracle_fee_output.js was written
 // against. Decoder offset = indexer format position + 1: the decoder splits with the ACTION
 // token ('DISPENSER') at 0, the indexer's format string starts at VERSION.
 // REQUIRED_FIELD_COUNT is a COUNT, not a position: the required run ends at GET_AMOUNT

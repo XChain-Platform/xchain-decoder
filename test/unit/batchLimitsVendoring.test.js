@@ -12,7 +12,7 @@
 
 // CROSS-REPO CONFORMANCE for the whole-batch rejection mirror.
 //
-// src/protocol/indexerBatchLimits.js is a VENDORED copy of the caps that decide whether the
+// src/protocol/indexer_batch_limits.js is a VENDORED copy of the caps that decide whether the
 // indexer rejects a BATCH as one record. Two hand-maintained copies of one consensus table
 // can never re-converge once they diverge, so the vendored file is GENERATED from the sibling
 // (test/tools/sync-batch-limits.js) and re-derived here on every unit run.
@@ -39,7 +39,7 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const VENDORED_MODULE = require('../../src/protocol/indexerBatchLimits.js');
+const VENDORED_MODULE = require('../../src/protocol/indexer_batch_limits.js');
 const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
         hasProvablyRejectedBatch,
         captureCommands,
@@ -48,8 +48,8 @@ const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
         subCommandLimitKey,
         subCommandTick,
         isBatchCostWeightingActive,
-        CHILD_ISSUE_KEY } = require('../../src/batchSubCommandCapture.js');
-const ACTION_ALIASES = require('../../src/actionAliases.js');
+        CHILD_ISSUE_KEY } = require('../../src/protocol/batch_sub_command_capture.js');
+const ACTION_ALIASES = require('../../src/protocol/action_aliases.js');
 const sync = require('../tools/sync-batch-limits.js');
 
 const CORPUS = require('../fixtures/regtestBatchCorpus.json');
@@ -194,7 +194,7 @@ describe('BATCH limit vendoring and cross-repo conformance', function () {
             const rendered = sync.renderModule(sync.deriveFromSibling());
             const current  = fs.readFileSync(sync.VENDORED, 'utf8');
             assert.strictEqual(current, rendered,
-                'src/protocol/indexerBatchLimits.js is stale; run ' +
+                'src/protocol/indexer_batch_limits.js is stale; run ' +
                 '`node test/tools/sync-batch-limits.js`. A cap tighter here than in the ' +
                 'indexer suppresses capture for a batch the chain really runs.');
         });
@@ -619,7 +619,7 @@ describe('BATCH limit vendoring and cross-repo conformance', function () {
 
         it('mirrors util.isLegacyActionFormat, which decides where the TICK sits', function () {
             if (!siblingOrSkip(this, sync.INDEXER_BATCH)) return;
-            const { isLegacyActionFormat } = require('../../src/batchSubCommandCapture.js');
+            const { isLegacyActionFormat } = require('../../src/protocol/batch_sub_command_capture.js');
             const util = realBatch().util;
             for (const params of [['0'], [0], [''], ['1'], ['99'], ['100'], ['abc'],
                                   ['JDOG.1'], [undefined], [null], ['0.5'], [' 0'], ['-1']])

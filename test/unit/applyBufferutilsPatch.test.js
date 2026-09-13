@@ -14,7 +14,7 @@
 // permanently on any non-Docker run.
 
 const assert = require('assert')
-const bufferutils = require('../../src/applyBufferutilsPatch')
+const bufferutils = require('../../src/apply_bufferutils_patch')
 const XChainBlockDecoder = require('../../src/XChainBlockDecoder')
 const { bigIntBufferutilsActive } = require('../../src/XChainDecoder')
 

@@ -21,8 +21,8 @@ export default {
   mutate: [
     'src/XChainDecoder.js',
     'src/XChainBlockDecoder.js',
-    'src/BlockchainConnector.js',
-    'src/CryptoNetworks.js',
+    'src/blockchain_connector.js',
+    'src/crypto_networks.js',
     'src/util.js',
   ],
 

@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const BlockchainConnector = require('../../src/BlockchainConnector')
+const BlockchainConnector = require('../../src/blockchain_connector')
 
 describe('Security: BlockchainConnector', () => {
 

@@ -21,13 +21,13 @@ const assert = require('assert')
 // split length. Reading these from oracleFeeOutput.js (rather than restating
 // them as literals here) is the whole point of this invariant - a stale local
 // copy had drifted from the real gate (was hardcoded 14, decoder is
-// actually 10) and went undetected. See xchain-decoder/src/oracleFeeOutput.js.
+// actually 10) and went undetected. See the oracle fee-output module.
 const {
     V0_GIVE_COIN_INDEX,
     V0_GET_COIN_INDEX,
     V0_GET_ADDRESS_INDEX,
     V0_REQUIRED_FIELD_COUNT
-} = require('../../src/oracleFeeOutput')
+} = require('../../src/protocol/oracle_fee_output')
 
 /**
  * Verify parseTransaction result satisfies all invariants.

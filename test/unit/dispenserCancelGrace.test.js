@@ -37,7 +37,7 @@ const XChainDecoder = require('../../src/XChainDecoder')
 const Database      = require('../../src/db.js')
 const { DISPENSER_CANCEL_GRACE_ACTIVATION,
         DISPENSER_CANCEL_GRACE_SECONDS,
-        cancelGraceFloor } = require('../../src/dispenserCancelGrace')
+        cancelGraceFloor } = require('../../src/protocol/dispenser_cancel_grace')
 
 const PREV_WIRE = Buffer.from(
     '00112233445566778899aabbccddeeff0123456789abcdeffedcba9876543210',

@@ -53,11 +53,11 @@ const fs     = require('fs')
 const path   = require('path')
 
 const XChainDecoder = require('../../src/XChainDecoder')
-const ACTION_ALIASES = require('../../src/actionAliases.js')
+const ACTION_ALIASES = require('../../src/protocol/action_aliases.js')
 const { captureCommands,
         subCommandActionName,
         hasProvablyRejectedSubCommand,
-        expandSubCommandAlias } = require('../../src/batchSubCommandCapture.js')
+        expandSubCommandAlias } = require('../../src/protocol/batch_sub_command_capture.js')
 
 const INDEXER_ROOT = process.env.XCHAIN_INDEXER_DIR ||
     path.join(__dirname, '..', '..', '..', 'xchain-indexer')

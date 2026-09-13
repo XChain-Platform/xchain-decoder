@@ -41,7 +41,7 @@
 
 const assert = require('assert')
 const XChainDecoder = require('../../src/XChainDecoder')
-const { DISPENSER_EXPIRY_REALIGN_ACTIVATION } = require('../../src/dispenserExpiryRealign')
+const { DISPENSER_EXPIRY_REALIGN_ACTIVATION } = require('../../src/protocol/dispenser_expiry_realign')
 
 const PREV_WIRE = Buffer.from(
     '00112233445566778899aabbccddeeff0123456789abcdeffedcba9876543210',

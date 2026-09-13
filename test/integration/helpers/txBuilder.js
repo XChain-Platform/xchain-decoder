@@ -83,7 +83,7 @@ function buildXchnPayload(actionString, txid, rawData) {
  * addInput time, and caches the result for signing and for the amount arithmetic
  * inside extractTransaction. These fixtures load the decoder into the same
  * process, and the decoder patches bitcoinjs-lib's 64-bit reader to return BigInt
- * so Dogecoin outputs above 2^53 survive (src/applyBufferutilsPatch.js). PSBT's
+ * so Dogecoin outputs above 2^53 survive (src/apply_bufferutils_patch.js). PSBT's
  * own amount arithmetic starts from a Number, so a cached BigInt output value
  * makes extractTransaction throw "Cannot mix BigInt and other types" on every
  * legacy input. Parsing the previous transaction with the stock reader keeps the

@@ -29,7 +29,7 @@
 const assert = require('assert')
 const XChainDecoder = require('../../src/XChainDecoder')
 const { isOracleFeeCaptureActive, isOracleFeeSetCaptureActive, oracleAddressFromCreate,
-        isCompactedOracleAddress } = require('../../src/oracleFeeOutput')
+        isCompactedOracleAddress } = require('../../src/protocol/oracle_fee_output')
 const { ORACLE_FEE_OUTPUT_ACTIVATION, ORACLE_FEE_SET_CAPTURE_ACTIVATION } =
     require('../../src/protocol/constants.js')
 

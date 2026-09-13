@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const CryptoNetworks = require('../../src/CryptoNetworks')
+const CryptoNetworks = require('../../src/crypto_networks')
 
 const ALL_NETWORKS = [
     'bitcoin-mainnet', 'bitcoin-testnet', 'bitcoin-regtest',

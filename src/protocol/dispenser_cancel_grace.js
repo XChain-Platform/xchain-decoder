@@ -57,7 +57,7 @@
 
 'use strict';
 
-const { DISPENSER_CANCEL_GRACE_ACTIVATION } = require('./protocol/constants.js')
+const { DISPENSER_CANCEL_GRACE_ACTIVATION } = require('./constants.js')
 
 // Seconds a soft-expired dispenser stays an eligible payment destination at/above the gate.
 //

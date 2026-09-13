@@ -19,7 +19,7 @@
  *   node test/tools/sync-batch-limits.js          # rewrite the vendored module
  *   node test/tools/sync-batch-limits.js --check   # exit 1 if it has drifted
  *
- * WHY A GENERATOR AND NOT A HAND COPY. src/protocol/indexerBatchLimits.js decides which
+ * WHY A GENERATOR AND NOT A HAND COPY. src/protocol/indexer_batch_limits.js decides which
  * BATCHes the decoder refuses to capture for, and it must agree with
  * xchain-indexer/src/actions/batch.js exactly: a cap that exists here and not there
  * SUPPRESSES capture for a batch the indexer dispatches, which is the money-bearing
@@ -67,7 +67,7 @@ const INDEXER_ROOT = process.env.XCHAIN_INDEXER_DIR ||
 const INDEXER_BATCH   = path.join(INDEXER_ROOT, 'src', 'actions', 'batch.js');
 const INDEXER_CHANGES = path.join(INDEXER_ROOT, 'src', 'protocol_changes.js');
 
-const VENDORED = path.join(__dirname, '..', '..', 'src', 'protocol', 'indexerBatchLimits.js');
+const VENDORED = path.join(__dirname, '../../src/protocol/indexer_batch_limits.js');
 
 // Minimal stand-in for the `action` object xchain-indexer/src/actions.js hands the Batch
 // constructor. The constructor only STORES these, so identity is all that is required; any
@@ -252,11 +252,11 @@ function main(){
     const rendered = renderModule(deriveFromSibling());
     const current  = fs.existsSync(VENDORED) ? fs.readFileSync(VENDORED, 'utf8') : null;
     if (current === rendered){
-        console.log('src/protocol/indexerBatchLimits.js is in sync with ' + INDEXER_BATCH);
+        console.log('src/protocol/indexer_batch_limits.js is in sync with ' + INDEXER_BATCH);
         return;
     }
     if (check){
-        console.error('DRIFT: src/protocol/indexerBatchLimits.js does not match ' + INDEXER_BATCH);
+        console.error('DRIFT: src/protocol/indexer_batch_limits.js does not match ' + INDEXER_BATCH);
         console.error('run: node test/tools/sync-batch-limits.js');
         process.exit(1);
     }

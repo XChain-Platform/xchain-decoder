@@ -48,7 +48,7 @@ const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
         BATCH_SUB_COMMAND_FORMATS,
         isBatchSubCommandCaptureActive,
         batchSubCommands,
-        captureCommands } = require('../../src/batchSubCommandCapture.js');
+        captureCommands } = require('../../src/protocol/batch_sub_command_capture.js');
 
 const DOCS_CONSTANTS = process.env.XCHAIN_DOCS_DIR
     ? path.join(process.env.XCHAIN_DOCS_DIR, 'protocol', 'constants.js')

@@ -40,10 +40,10 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { createShutdown, createDecoderDrain } = require('./shutdown');
 const XChainDecoder  = require('./XChainDecoder');
-const { resolveFeeDestination } = require('./feeDestination');
+const { resolveFeeDestination } = require('./protocol/fee_destination');
 const jsonRouter = require('express-json-rpc-router')
 const { installObservability, getLogger } = require('./observability');   // default-off /metrics + structured log shim
-const { registerDecoderMetrics } = require('./decoderMetrics'); // decoder feed-freshness gauges
+const { registerDecoderMetrics } = require('./decoder_metrics'); // decoder feed-freshness gauges
 
 // Records a health probe that threw, so the route's answer is not the only thing
 // an operator has. The failure this closes is specific: when checkReorgHalt()
@@ -111,7 +111,7 @@ const DB_PASSWORD =  process.env.DECODER_DB_PASS
 const DECODER_API_PORT = parseInt(process.env.DECODER_API_PORT, 10)
 const AUX_POW = process.env.AUX_POW === 'true' || process.env.AUX_POW === '1'
 // Native-coin protocol fee destination for this coin+network: registry-pinned default with a
-// non-mainnet-only env override (see src/feeDestination.js). When resolved, the decoder persists
+// non-mainnet-only env override (see src/protocol/fee_destination.js). When resolved, the decoder persists
 // outputs paying it to transaction_outputs so the indexer can validate native-coin fee payments.
 const FEE_DESTINATION = resolveFeeDestination(NETWORK, process.env.FEE_DESTINATION || null)
 

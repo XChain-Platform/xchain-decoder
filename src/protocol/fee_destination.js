@@ -31,7 +31,7 @@
  *
  ********************************************************************/
 
-const { getCoinConfigByFullName } = require('./coins')
+const { getCoinConfigByFullName } = require('../coins')
 
 function resolveFeeDestination(networkName, envOverride) {
     const m = /^([a-z]+)-(mainnet|testnet|regtest)$/.exec(networkName || '')

@@ -16,8 +16,8 @@
 // AuxPoW bytes at all.
 
 const assert = require('assert')
-const BlockchainConnector = require('../../src/BlockchainConnector')
-const { encodeVarintHex } = require('../../src/BlockchainConnector')
+const BlockchainConnector = require('../../src/blockchain_connector')
+const { encodeVarintHex } = require('../../src/blockchain_connector')
 const XChainDecoder = require('../../src/XChainDecoder')
 const { AUXPOW_REASSEMBLE_AFTER } = require('../../src/XChainDecoder')
 const XChainBlockDecoder = require('../../src/XChainBlockDecoder')

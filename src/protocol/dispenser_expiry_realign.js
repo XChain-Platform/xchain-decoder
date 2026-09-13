@@ -39,7 +39,7 @@
 
 'use strict';
 
-const { DISPENSER_EXPIRY_REALIGN_ACTIVATION } = require('./protocol/constants.js')
+const { DISPENSER_EXPIRY_REALIGN_ACTIVATION } = require('./constants.js')
 
 // Is the END-OF-BLOCK dispenser soft-expire in force for a block at `blockTime` on this
 // network?

@@ -26,7 +26,7 @@
 const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
-const { chainTierMismatch, chainFieldMissing, CHAIN_TO_NETWORK } = require('../../src/chainIdentity.js');
+const { chainTierMismatch, chainFieldMissing, CHAIN_TO_NETWORK } = require('../../src/protocol/chain_identity.js');
 
 describe('endpoint chain-tier identity gate @regression', function () {
 
@@ -92,7 +92,7 @@ describe('endpoint chain-tier identity gate @regression', function () {
         const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder.js'), 'utf8');
 
         it('XChainDecoder requires the module', function () {
-            assert.ok(/require\('\.\/chainIdentity'\)/.test(SRC));
+            assert.ok(/require\('\.\/protocol\/chain_identity'\)/.test(SRC));
         });
 
         it('the refresh gate calls chainTierMismatch against the configured network', function () {
@@ -140,8 +140,8 @@ describe('endpoint chain-tier identity gate @regression', function () {
     });
 
     describe('the coin-identity half is documented as NOT closed here', function () {
-        it('chainIdentity.js records that chain does not distinguish coins', function () {
-            const doc = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'chainIdentity.js'), 'utf8');
+        it('chain_identity.js records that chain does not distinguish coins', function () {
+            const doc = fs.readFileSync(path.join(__dirname, '../../src/protocol/chain_identity.js'), 'utf8');
             assert.ok(/never the coin/.test(doc),
                 'the module must state that a BTC-mainnet and a DOGE-mainnet node both report chain="main", ' +
                 'so nobody reads this gate as cross-coin protection');
@@ -155,7 +155,7 @@ describe('endpoint chain-tier identity gate @regression', function () {
             assert.strictEqual(CHAIN_TO_NETWORK.testnet4, 'testnet');
             assert.strictEqual(chainTierMismatch('testnet', 'testnet4'), null,
                 'a testnet4 node still passes a testnet-configured decoder; only a block-0 pin can refuse it');
-            const doc = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'chainIdentity.js'), 'utf8');
+            const doc = fs.readFileSync(path.join(__dirname, '../../src/protocol/chain_identity.js'), 'utf8');
             assert.ok(/DIFFERENT chains with different genesis blocks/.test(doc),
                 'the module must record that the tier gate does not separate testnet3 from testnet4');
         });

@@ -37,7 +37,7 @@ const fs     = require('fs');
 const path   = require('path');
 
 const { DISPENSER_EXPIRY_REALIGN_ACTIVATION,
-        isDispenserExpiryRealignActive } = require('../../src/dispenserExpiryRealign.js');
+        isDispenserExpiryRealignActive } = require('../../src/protocol/dispenser_expiry_realign.js');
 
 const DOCS_CONSTANTS = process.env.XCHAIN_DOCS_DIR
     ? path.join(process.env.XCHAIN_DOCS_DIR, 'protocol', 'constants.js')

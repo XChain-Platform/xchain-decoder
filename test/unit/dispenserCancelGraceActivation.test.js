@@ -40,7 +40,7 @@ const path   = require('path');
 const { DISPENSER_CANCEL_GRACE_ACTIVATION,
         DISPENSER_CANCEL_GRACE_SECONDS,
         isDispenserCancelGraceActive,
-        cancelGraceFloor } = require('../../src/dispenserCancelGrace.js');
+        cancelGraceFloor } = require('../../src/protocol/dispenser_cancel_grace.js');
 const XChainDecoder = require('../../src/XChainDecoder.js');
 
 const DOCS_CONSTANTS = process.env.XCHAIN_DOCS_DIR
@@ -193,7 +193,7 @@ describe('DISPENSER_CANCEL_GRACE_SECONDS cross-repo invariants', function () {
             DISPENSER_CANCEL_GRACE_SECONDS >= closeDelay,
             `DISPENSER_CANCEL_GRACE_SECONDS (${DISPENSER_CANCEL_GRACE_SECONDS}) must be >= the ` +
             `indexer DISPENSER_CLOSE_DELAY (${closeDelay}); the indexer was retuned without ` +
-            'following it in src/dispenserCancelGrace.js'
+            'following it in src/protocol/dispenser_cancel_grace.js'
         );
     });
 

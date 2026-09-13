@@ -30,7 +30,7 @@
 
 'use strict';
 
-const { ORACLE_FEE_OUTPUT_ACTIVATION, ORACLE_FEE_SET_CAPTURE_ACTIVATION } = require('./protocol/constants.js')
+const { ORACLE_FEE_OUTPUT_ACTIVATION, ORACLE_FEE_SET_CAPTURE_ACTIVATION } = require('./constants.js')
 
 // Field positions in the DISPENSER v0 wire format (must stay in sync with the
 // indexer, xchain-indexer/src/actions/dispenser.js this.formats[0]):

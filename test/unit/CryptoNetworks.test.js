@@ -10,7 +10,7 @@
 
 const assert = require('assert')
 const bitcoin = require('bitcoinjs-lib')
-const CryptoNetworks = require('../../src/CryptoNetworks')
+const CryptoNetworks = require('../../src/crypto_networks')
 
 describe('CryptoNetworks', () => {
 
@@ -57,7 +57,7 @@ describe('CryptoNetworks', () => {
         it('should return Dogecoin regtest config using Bitcoin-testnet prefixes (dogecoind v1.14 regtest)', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('dogecoin-regtest')
             // dogecoind v1.14.x in regtest mode uses Bitcoin-testnet prefixes,
-            // NOT Dogecoin-testnet prefixes (0x71). See src/CryptoNetworks.js comment
+            // NOT Dogecoin-testnet prefixes (0x71). See src/crypto_networks.js comment
             // and commit c70c864 for the verified rationale.
             assert.strictEqual(net.pubKeyHash, 0x6f)
             assert.strictEqual(net.scriptHash, 0xc4)

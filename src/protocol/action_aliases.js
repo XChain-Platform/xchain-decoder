@@ -21,7 +21,7 @@
  * capture module is required BY XChainDecoder.js, so reaching back for the
  * table would be a require cycle. XChainDecoder.js re-exports this object
  * under its historical name, so every existing reader
- * (`require('./XChainDecoder').ACTION_ALIASES`, which is how the cross-repo
+ * (`require('../XChainDecoder').ACTION_ALIASES`, which is how the cross-repo
  * ActionManifestConformance guard binds it to
  * xchain-documentation/protocol/action-manifest.json) is unaffected.
  *

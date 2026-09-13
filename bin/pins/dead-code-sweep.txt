@@ -63,7 +63,7 @@ VERDICT: src/bufferutils.js is LIVE. Nothing is deleted by this sweep.
     image build time. It cannot be required from this repo (its own
     `require('./types')` only resolves once the file sits inside the
     dependency's src/), which is why no caller appears anywhere in the tree and
-    why src/applyBufferutilsPatch.js exists beside it to do the same repair
+    why src/apply_bufferutils_patch.js exists beside it to do the same repair
     in-process for every non-Docker run. The two must change together.
 
     Deleting it would have left every container running the stock reader with

@@ -22,12 +22,12 @@ describe('Smoke: Module Loading', () => {
     })
 
     it('should load BlockchainConnector', () => {
-        const BlockchainConnector = require('../../src/BlockchainConnector')
+        const BlockchainConnector = require('../../src/blockchain_connector')
         assert.strictEqual(typeof BlockchainConnector, 'function')
     })
 
     it('should load CryptoNetworks', () => {
-        const CryptoNetworks = require('../../src/CryptoNetworks')
+        const CryptoNetworks = require('../../src/crypto_networks')
         assert.strictEqual(typeof CryptoNetworks, 'function')
     })
 
@@ -57,7 +57,7 @@ describe('Smoke: Module Loading', () => {
     })
 
     it('should construct a BlockchainConnector instance', () => {
-        const BlockchainConnector = require('../../src/BlockchainConnector')
+        const BlockchainConnector = require('../../src/blockchain_connector')
         const connector = new BlockchainConnector('127.0.0.1', 18443, 'rpc', 'rpc')
         assert.ok(connector)
         assert.strictEqual(typeof connector.getBlockchainInfo, 'function')

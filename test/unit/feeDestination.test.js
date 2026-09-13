@@ -10,7 +10,7 @@
 
 const assert = require('assert')
 const XChainDecoder = require('../../src/XChainDecoder')
-const { resolveFeeDestination } = require('../../src/feeDestination')
+const { resolveFeeDestination } = require('../../src/protocol/fee_destination')
 const { getCoinConfig } = require('../../src/coins')
 
 // Unit test for the constructor's fee-destination normalization (the gate the storage path uses
