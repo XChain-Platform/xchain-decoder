@@ -16,7 +16,7 @@
  * shallower than that window, a legal in-window reorg can no longer restore
  * it (deleteBlockByIndex matches zero rows) and the dispenser is permanently
  * lost on the reorged node. The deepest window is read from the canonical
- * xchain-utxo-tracker/src/undo-blocks.js when that sibling repo is checked
+ * xchain-utxo-tracker/src/chain/undo_blocks.js when that sibling repo is checked
  * out (conformance read, skip-if-absent per the ConsensusPrimitiveConformance
  * convention), with a hand-copied floor kept as the always-on baseline.
  * It also pins the tracker's own MAX_SAFE_UNDO_BLOCKS equal to this constant,
@@ -31,7 +31,7 @@ const path = require('path');
 const XChainDecoder = require('../../src/XChainDecoder.js');
 
 // Baseline floor (always asserted, even without the sibling checkout).
-// Mirrors xchain-utxo-tracker/src/undo-blocks.js DEFAULT_UNDO_BLOCKS.
+// Mirrors xchain-utxo-tracker/src/chain/undo_blocks.js DEFAULT_UNDO_BLOCKS.
 const DEEPEST_UNDO_WINDOW = 120; // LTC and DOGE (BTC 12 / LTC 120 / DOGE 120)
 
 // Headroom above the deepest window so a small undo-window re-tune can never
@@ -53,10 +53,10 @@ describe('DISPENSER_EXPIRE_SAFE_DEPTH', function () {
     // xchain-utxo-tracker fails this suite until the purge depth is re-bumped.
     // Skips when the sibling repo is not checked out (matching the existing
     // ActionManifestConformance / ConsensusPrimitiveConformance convention).
-    describe('conformance to canonical undo-blocks.js', function () {
+    describe('conformance to canonical undo_blocks.js', function () {
         const TRACKER = process.env.XCHAIN_UTXO_TRACKER_DIR ||
             path.join(__dirname, '..', '..', '..', 'xchain-utxo-tracker');
-        const UNDO = path.join(TRACKER, 'src', 'undo_blocks.js');
+        const UNDO = path.join(TRACKER, 'src', 'chain', 'undo_blocks.js');
         before(function () { if (!fs.existsSync(UNDO)) { if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-utxo-tracker sibling not found at ' + UNDO + ' but XCHAIN_REQUIRE_SIBLINGS=1'); this.skip(); } });
 
         it('SAFE_DEPTH exceeds every canonical per-chain undo window by the margin', function () {
@@ -75,7 +75,7 @@ describe('DISPENSER_EXPIRE_SAFE_DEPTH', function () {
             const deepest = Math.max(...Object.values(DEFAULT_UNDO_BLOCKS));
             assert.strictEqual(
                 DEEPEST_UNDO_WINDOW, deepest,
-                'update DEEPEST_UNDO_WINDOW in this test to match undo-blocks.js'
+                'update DEEPEST_UNDO_WINDOW in this test to match undo_blocks.js'
             );
         });
 

@@ -123,7 +123,7 @@ function rpcResult(response, label) {
 
 // Decode a Bitcoin-style varint from `buf` at `offset`.
 // Returns { value, bytes } where `bytes` is the number of bytes consumed.
-// Keep in sync with xchain-utxo-tracker/src/BlockchainConnector.js readVarint.
+// Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector.js readVarint.
 function readVarint(buf, offset) {
     const first = buf[offset]
     if (first < 0xFD) return { value: first, bytes: 1 }
@@ -136,7 +136,7 @@ function readVarint(buf, offset) {
 }
 
 // Encode a Bitcoin-style varint as lowercase hex (inverse of readVarint).
-// Keep in sync with xchain-utxo-tracker/src/BlockchainConnector.js encodeVarintHex.
+// Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector.js encodeVarintHex.
 function encodeVarintHex(value) {
     if (value < 0xFD) {
         return value.toString(16).padStart(2, '0')
@@ -165,7 +165,7 @@ function encodeVarintHex(value) {
 //                chain merge-mining branch (same layout) |
 //                parent block header (80 B)
 // Throws if the buffer is too short or structurally invalid.
-// Keep in sync with xchain-utxo-tracker/src/BlockchainConnector.js skipAuxPow.
+// Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector.js skipAuxPow.
 function skipAuxPow(buf, start) {
     let offset = start
 
@@ -247,7 +247,7 @@ function skipAuxPow(buf, start) {
 // header/block length delta), and Dogecoin Core 1.14 whose getblockheader always
 // returns exactly 160 chars, requiring the AuxPoW size to be parsed structurally from
 // the block hex (skipAuxPow). Non-AuxPoW blocks pass through unchanged.
-// Keep in sync with xchain-utxo-tracker/src/BlockchainConnector.js stripAuxPowFromBlockHex.
+// Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector.js stripAuxPowFromBlockHex.
 // test/unit/auxpowStripParity.test.js asserts byte identity of the two function bodies,
 // so a strip correction cannot land in one repo alone.
 function stripAuxPowFromBlockHex(headerHex, blockHex) {

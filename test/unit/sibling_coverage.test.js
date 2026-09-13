@@ -71,7 +71,7 @@ const SIBLINGS = [
       guards: 'the FIX_OUTPUT_FANOUT registration in the indexer protocol-change table, and the '
             + 'DISPENSER v0/v2 wire field offsets derived from the indexer Dispenser formats' },
     { repo: 'xchain-utxo-tracker', envs: ['XCHAIN_UTXO_TRACKER_DIR'],
-      marker: path.join('src', 'blockchain_connector.js'),
+      marker: path.join('src', 'chain', 'blockchain_connector.js'),
       guards: 'AuxPoW strip parity and the dispenser safe-depth twin' },
 ];
 

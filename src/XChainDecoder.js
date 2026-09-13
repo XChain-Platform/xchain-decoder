@@ -165,7 +165,7 @@ const MAX_ACTION_DATA_LENGTH = require('./protocol/constants.js').MAX_ACTION_DAT
 // little-endian length), i.e. the overhead for any payload above 255 bytes.
 // Vendored single source of truth: ./protocol/constants.js (byte-identical to
 // xchain-documentation/protocol/constants.js); the encoder's copy is
-// xchain-encoder/src/validator.js. Bound to the canonical NAME rather than inlined
+// xchain-encoder/src/common/validator.js. Bound to the canonical NAME rather than inlined
 // as a literal so a cross-service drift check can key on the symbol.
 const OP_RETURN_PUSH_OVERHEAD = require('./protocol/constants.js').OP_RETURN_PUSH_OVERHEAD
 
@@ -194,7 +194,7 @@ const TAPROOT_ANNEX_MARKER = 0x50
 // <=255, or OP_PUSHDATA2 (+3) beyond that. Single source for measuring both
 // push[0] (data) and push[1] (rawData) in parseTransaction; this formula is
 // the protocol-arbiter side of the encoder's identical compiledPushSize
-// (xchain-encoder/src/validator.js), and the compiledPushSizeConformance test
+// (xchain-encoder/src/common/validator.js), and the compiledPushSizeConformance test
 // pins both against bitcoin.script.compile byte-for-byte across the 75/255
 // prefix boundaries. Do not fork this logic inline. Only the OP_PUSHDATA2
 // branch names a constant: the +1/+2 branches are different opcodes that
@@ -1786,7 +1786,7 @@ class XChainDecoder {
                         // blanked and rawData/getSource are still left untouched. Whether
                         // this wire shape should be accepted end-to-end is a cross-service
                         // flag-day decision that also governs
-                        // xchain-encoder/src/validator.js, and must not change here alone.
+                        // xchain-encoder/src/common/validator.js, and must not change here alone.
                         if (decompiledData[0] === 0 && (decompiledData.length > 1 || dataBuffer.length > 1)){
                             this.parseErrors++
                             const droppedPushBytes = decompiledData

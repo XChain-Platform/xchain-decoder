@@ -42,7 +42,7 @@ const {
 const LOCAL_FILE = path.join(__dirname, '../../src/chain/blockchain_connector.js')
 const TRACKER_DIR = process.env.XCHAIN_UTXO_TRACKER_DIR ||
     path.join(__dirname, '..', '..', '..', 'xchain-utxo-tracker')
-const TWIN_FILE = path.join(TRACKER_DIR, 'src', 'blockchain_connector.js')
+const TWIN_FILE = path.join(TRACKER_DIR, 'src', 'chain', 'blockchain_connector.js')
 const TWIN_PRESENT = fs.existsSync(TWIN_FILE)
 const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
 
@@ -101,7 +101,7 @@ describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function ()
             for (const name of SHARED_FUNCTIONS) {
                 assert.ok(
                     localSource.includes(
-                        'Keep in sync with xchain-utxo-tracker/src/BlockchainConnector.js ' + name),
+                        'Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector.js ' + name),
                     `decoder copy of ${name} lacks its Keep-in-sync comment`)
                 assert.ok(
                     twinSource.includes(
