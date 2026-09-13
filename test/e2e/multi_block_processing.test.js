@@ -34,6 +34,9 @@ const {
 describe('E2E: Multi-Block Processing', function () {
     this.timeout(0)
 
+    // ---------------------------------------------------------------
+    // C1: Sequential block processing
+    // ---------------------------------------------------------------
     describe('sequential block processing', () => {
 
         it('C1.1: should process 10 sequential blocks with distinct ACTIONs', async () => {
@@ -48,8 +51,10 @@ describe('E2E: Multi-Block Processing', function () {
                 blockIndices.push(blockIndex)
             }
 
+            // Wait for decoder to process the last block
             await txBuilder.waitForDecoder(blockIndices[blockIndices.length - 1])
 
+            // Verify all 10 transactions exist with correct data
             for (let i = 0; i < 10; i++) {
                 const tx = await txBuilder.waitForTransaction(txHashes[i])
                 assert.ok(tx.data.startsWith(`SEND|0|SEQ${i}|`), `Transaction ${i} data mismatch`)
@@ -67,6 +72,7 @@ describe('E2E: Multi-Block Processing', function () {
         it('C1.2: blocks table should have no gaps across sequential blocks', async () => {
             const startBlock = await global.db.getLastBlockIndex()
 
+            // Mine 5 blocks with transactions
             const heights = []
             for (let i = 0; i < 5; i++) {
                 const funded = await txBuilder.createFundedLegacyAddress()
@@ -77,10 +83,12 @@ describe('E2E: Multi-Block Processing', function () {
 
             await txBuilder.waitForDecoder(heights[heights.length - 1])
 
+            // Verify each block exists in the blocks table
             for (const h of heights) {
                 await assertBlockExists(global.db, h)
             }
 
+            // Verify no gaps between startBlock and the last height
             for (let h = startBlock + 1; h <= heights[heights.length - 1]; h++) {
                 const block = await global.db.getBlockByIndex(h)
                 assert.ok(block, `Block ${h} should exist (no gaps)`)
@@ -99,6 +107,7 @@ describe('E2E: Multi-Block Processing', function () {
             const { txHash: hash2, blockIndex: bi2 } = await txBuilder.broadcastOpReturn(funded2, action2)
             await txBuilder.waitForDecoder(bi2)
 
+            // Each block should contain only its own transaction
             const rows1 = await getDecoderBlockData(global.db, bi1)
             const found1 = rows1.find(r => r.tx_hash === hash1)
             assert.ok(found1, 'Block 1 should contain tx 1')
@@ -112,11 +121,16 @@ describe('E2E: Multi-Block Processing', function () {
         })
     })
 
+    // ---------------------------------------------------------------
+    // C2: Bulk catch-up after decoder restart
+    // ---------------------------------------------------------------
     describe('bulk catch-up processing', () => {
 
         it('C2.1: decoder should catch up after being stopped and restarted', async () => {
+            // Record state before stop
             const preStopBlock = await global.db.getLastBlockIndex()
 
+            // Stop the decoder
             await txBuilder.stopDecoder()
 
             // Mine XCHN transactions while the decoder is down, so catch-up has real work to do
@@ -128,34 +142,45 @@ describe('E2E: Multi-Block Processing', function () {
                 txHashes.push(txHash)
             }
 
+            // Also mine some plain (non-XCHN) blocks
             await txBuilder.mineBlocks(3)
 
             const info = await global.nodeClientTest.getBlockchainInfo()
             const chainTip = info.blocks
 
+            // Decoder should still be at pre-stop position
             const midBlock = await global.db.getLastBlockIndex()
             assert.ok(midBlock <= preStopBlock + 5, 'Decoder should not have advanced while stopped')
 
+            // Restart decoder
             await txBuilder.startDecoder()
+            // Wait for catch-up
             await txBuilder.waitForDecoder(chainTip, 60000)
 
+            // Verify all XCHN transactions were decoded
             for (let i = 0; i < txHashes.length; i++) {
                 const tx = await global.db.getTransaction(txHashes[i])
                 assert.ok(tx, `Catch-up tx ${i} (${txHashes[i]}) should be in DB`)
                 assert.ok(tx.data.startsWith(`SEND|0|CATCHUP${i}|`))
             }
 
+            // Verify blocks table is complete up to chain tip
             const lastBlock = await global.db.getLastBlockIndex()
             assert.strictEqual(lastBlock, chainTip, 'Decoder should have caught up to chain tip')
         })
     })
 
+    // ---------------------------------------------------------------
+    // C3: Mempool processing
+    // ---------------------------------------------------------------
     describe('mempool processing', () => {
 
         it('C3.1: should detect XCHN transaction in mempool', async () => {
+            // Ensure decoder is synced
             const info = await global.nodeClientTest.getBlockchainInfo()
             await txBuilder.waitForDecoder(info.blocks)
 
+            // Broadcast without mining
             const funded = await txBuilder.createFundedLegacyAddress()
             const action = 'SEND|0|MEMPOOL|99|' + global.mainTestAddress + '|unconfirmed'
             const { txHash } = await txBuilder.broadcastOpReturnNoMine(funded, action)
@@ -187,27 +212,36 @@ describe('E2E: Multi-Block Processing', function () {
         })
 
         it('C3.2: mempool tx should be confirmed after mining', async () => {
+            // Broadcast without mining
             const funded = await txBuilder.createFundedLegacyAddress()
             const action = 'SEND|0|MEMCONF|50|' + global.mainTestAddress + '|confirm me'
             const { txHash } = await txBuilder.broadcastOpReturnNoMine(funded, action)
 
+            // Wait for mempool detection
             await txBuilder.waitForMempoolTransaction(txHash)
 
+            // Now mine a block to confirm it
             await global.nodeClientTest.generateToAddress(1, global.mainTestAddress)
             const info = await global.nodeClientTest.getBlockchainInfo()
             await txBuilder.waitForDecoder(info.blocks)
 
+            // Should now be in the confirmed transactions table
             const tx = await txBuilder.waitForTransaction(txHash)
             assert.strictEqual(tx.data, action)
         })
     })
 
+    // ---------------------------------------------------------------
+    // C4: Chain reorganization
+    // ---------------------------------------------------------------
     describe('chain reorganization', () => {
 
         it('C4.1: should detect and handle a chain reorg', async () => {
+            // Record initial reorg event count
             const initialReorgEvents = await getReorgEvents(global.db)
             const initialReorgCount = initialReorgEvents.length
 
+            // Create an XCHN transaction in a block
             const funded = await txBuilder.createFundedLegacyAddress()
             const action = 'SEND|0|REORG|100|' + global.mainTestAddress + '|will be orphaned'
             const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
@@ -215,7 +249,9 @@ describe('E2E: Multi-Block Processing', function () {
             const tx = await txBuilder.waitForTransaction(txHash)
             assert.strictEqual(tx.data, action)
 
+            // Get the block hash at this height
             const blockHash = await txBuilder.getBlockHash(blockIndex)
+            // Invalidate this block (simulates a reorg)
             await txBuilder.invalidateBlock(blockHash)
 
             // At least 2 replacement blocks are needed for the decoder to detect the hash mismatch
@@ -233,6 +269,8 @@ describe('E2E: Multi-Block Processing', function () {
                 'A REORG event should have been recorded'
             )
 
+            // After the previous reorg test, verify no gaps in blocks table
+            // Verify the decoder continued processing on the new chain
             const lastBlock = await global.db.getLastBlockIndex()
             assert.ok(lastBlock >= info.blocks, 'Decoder should be at or past the new chain tip')
         })
@@ -243,6 +281,7 @@ describe('E2E: Multi-Block Processing', function () {
             const lastBlock = await global.db.getLastBlockIndex()
             const info = await global.nodeClientTest.getBlockchainInfo()
 
+            // Spot-check the last few blocks exist and have valid hashes
             for (let h = Math.max(lastBlock - 3, 1); h <= lastBlock; h++) {
                 const block = await global.db.getBlockByIndex(h)
                 assert.ok(block, `Block ${h} should exist after reorg`)

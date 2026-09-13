@@ -31,6 +31,7 @@ module.exports = {
         const results = {}
 
         for (const size of PAYLOAD_SIZES) {
+            // Pre-generate transactions with this payload size
             const txData = []
             for (let i = 0; i < iterations; i++) {
                 const entry = generator.generateXChainOpReturnTx({
@@ -41,6 +42,7 @@ module.exports = {
                 decoder.connector.transactions.set(entry.fundingTxId, entry.fundingTxHex)
             }
 
+            // Warm up
             for (let i = 0; i < Math.min(10, txData.length); i++) {
                 const tx = bitcoin.Transaction.fromHex(txData[i].txHex)
                 await decoder.parseTransaction(tx)

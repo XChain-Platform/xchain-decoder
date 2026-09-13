@@ -32,15 +32,18 @@ module.exports = {
 
         // OP_RETURN transactions
         {
+            // Pre-generate transaction data
             const txData = []
             for (let i = 0; i < iterations; i++) {
                 const entry = generator.generateXChainOpReturnTx({
                     action: 'SEND|0|XCHAIN|100|destaddr|memo'
                 })
                 txData.push(entry)
+                // Register funding tx in the mock connector
                 decoder.connector.transactions.set(entry.fundingTxId, entry.fundingTxHex)
             }
 
+            // Warm up
             for (let i = 0; i < 10; i++) {
                 const tx = bitcoin.Transaction.fromHex(txData[i].txHex)
                 await decoder.parseTransaction(tx)

@@ -21,6 +21,29 @@
 // flag-day (a *_ACTIVATION entry in src/protocol/constants.js), not a quiet edit.
 // This suite is the tripwire that makes such an edit fail loudly first.
 
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+//
+// Item 2740: the alias-at-ceiling cell. The size gate and alias canonicalization
+// are each well covered, but no test combined them: every size-boundary case uses
+// the non-expanding SEND, and every alias case is a tiny payload (the only
+// multi-byte alias pinned, TRANSFER -> SEND, actually SHRINKS). So the direction
+// that matters was structurally untested.
+//
+// MAX_ACTION_DATA_LENGTH bounds the COMPILED on-chain push, measured before
+// canonicalizeActionPayload runs, so an expanding alias legitimately produces a
+// stored record longer than the numeric cap. These cases pin that as the measured
+// contract rather than an accident: if someone later moves the gate to measure the
+// canonical buffer, they change what the protocol arbiter ACCEPTS, and that needs a
+// flag-day (a *_ACTIVATION entry in src/protocol/constants.js), not a quiet edit.
+// This suite is the tripwire that makes such an edit fail loudly first.
 'use strict'
 
 const assert = require('assert')

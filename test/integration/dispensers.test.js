@@ -18,6 +18,28 @@
  * a row is created in `transaction_outputs`.
  */
 
+/*********************************************************************
+*
+* Copyright © 2025–2026 Dankest, LLC
+* Based on XChain Platform by Dankest, LLC – https://dankest.llc
+*
+* SPDX-License-Identifier: AGPL-3.0-or-later
+*
+* This file is part of XChain Platform. Licensed under the GNU Affero
+* General Public License v3.0 or later; see LICENSE.md. A commercial
+* license (without AGPL source-disclosure terms) is available -
+* contact legal@dankest.llc.
+*
+**********************************************************************
+* Integration tests: DISPENSER multi-table writes and edge cases.
+*
+* Covers plan scenarios C3 (dispenser edge cases) and parts of B1
+* (transaction_outputs via indexer contract query).
+*
+* DISPENSER actions create rows in both `transactions` and `dispensers`
+* tables. When a subsequent transaction pays to a dispenser address,
+* a row is created in `transaction_outputs`.
+*/
 const assert = require('assert')
 const txBuilder = require('./helpers/txBuilder')
 const { assertTransaction, getDecoderBlockData, getDispensersForAddress } = require('./helpers/assertions')

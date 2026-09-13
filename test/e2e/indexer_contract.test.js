@@ -31,6 +31,9 @@ const {
 describe('E2E: Indexer Contract', function () {
     this.timeout(0)
 
+    // ---------------------------------------------------------------
+    // E1: getDecoderBlockData() contract fields
+    // ---------------------------------------------------------------
     describe('getDecoderBlockData() field contract', () => {
 
         it('E1.1: should return all required fields with correct types for OP_RETURN tx', async () => {
@@ -163,6 +166,7 @@ describe('E2E: Indexer Contract', function () {
             await txBuilder.waitForDecoder(dispBlock)
             await txBuilder.waitForTransaction(dispHash)
 
+            // Verify dispenser exists
             const dispensers = await getDispensersForAddress(global.db, dispenserFunded.address)
             assert.ok(dispensers.length > 0, 'Dispenser should exist')
 
@@ -174,6 +178,10 @@ describe('E2E: Indexer Contract', function () {
             await txBuilder.waitForDecoder(payBlock)
 
             // Use an XCHN-encoded payment to actually exercise dispenser output tracking.
+            // The payment tx may or may not appear in getDecoderBlockData
+            // depending on whether it had XCHN data. The dispenser output tracking
+            // requires the tx to be an XCHN tx that also pays to a dispenser address.
+            // Let's use an XCHN-encoded payment instead:
             const payer = await txBuilder.createFundedLegacyAddress()
             const payAction = 'SEND|0|CDISP_R|50|' + dispenserFunded.address + '|pay'
             const { txHash: xchnPayHash, blockIndex: xchnPayBlock } = await txBuilder.broadcastOpReturn(payer, payAction)
@@ -187,6 +195,9 @@ describe('E2E: Indexer Contract', function () {
         })
     })
 
+    // ---------------------------------------------------------------
+    // E2: Block table contract
+    // ---------------------------------------------------------------
     describe('blocks table contract', () => {
 
         it('E2.1: should track the last block index accurately', async () => {
@@ -221,6 +232,9 @@ describe('E2E: Indexer Contract', function () {
         })
     })
 
+    // ---------------------------------------------------------------
+    // E3: Normalization table integrity
+    // ---------------------------------------------------------------
     describe('normalization table integrity', () => {
 
         it('E3.1: all source_ids should resolve in index_addresses', async () => {
@@ -245,6 +259,7 @@ describe('E2E: Indexer Contract', function () {
             await txBuilder.waitForDecoder(bi2)
             await txBuilder.waitForTransaction(h2)
 
+            // Both transactions should exist with valid sources
             const tx1 = await global.db.getTransaction(h1)
             const tx2 = await global.db.getTransaction(h2)
             assert.ok(tx1.source.length > 0)
@@ -272,6 +287,7 @@ describe('E2E: Indexer Contract', function () {
         it('E3.4: tx_index should be unique and sequential', async () => {
             const connection = await global.db.pool.getConnection()
             try {
+                // Check for duplicate tx_index values
                 const dupes = await connection.query(`
                     SELECT tx_index, COUNT(*) as cnt
                     FROM transactions

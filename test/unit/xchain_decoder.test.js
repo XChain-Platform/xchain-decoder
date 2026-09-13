@@ -25,6 +25,7 @@ const XChainDecoder = require('../../src/XChainDecoder')
 
 bitcoin.initEccLib(ecc)
 
+// ─── helpers ────────────────────────────────────────────────────────────────
 function createDecoder(feeDestination) {
     const decoder = new XChainDecoder(
         'bitcoin-regtest', 'h', 3306, 'db', 'u', 'p',
@@ -50,6 +51,7 @@ function createDecoder(feeDestination) {
 // Build a tx whose first input's hash is PREV_HASH (same convention used in parseTransaction.test.js)
 const PREV_HASH = Buffer.from('aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011', 'hex')
 
+// ─── isSynced / getSyncStatus / stop ────────────────────────────────────────
 describe('XChainDecoder status methods', () => {
     let decoder
 
@@ -104,6 +106,11 @@ describe('XChainDecoder status methods', () => {
 // fault at one height retries forever with the process alive and the DB
 // reachable. /status cannot see that; isStalled() is what /live adds.
 
+// ─── isStalled (the liveness signal /live reports) ───────────────────────────
+//
+// The block loop never skips a block on a fetch/parse fault, so a deterministic
+// fault at one height retries forever with the process alive and the DB
+// reachable. /status cannot see that; isStalled() is what /live adds.
 describe('XChainDecoder#isStalled()', () => {
     let decoder
     const STALL_MS = 900000   // must track STALL_ALERT_MS in XChainDecoder.js
@@ -189,6 +196,14 @@ describe('XChainDecoder#isStalled()', () => {
 // forever while nothing parsed. Only an iteration counter independent of the
 // chain closes that.
 
+// ─── isPollSilent (the dead-loop signal isStalled structurally cannot give) ───
+//
+// Every isStalled() gate above is a statement about CHAIN PROGRESS, so a decoder
+// that is caught up is never stalled by construction, and one on a stale tip is
+// deliberately never stalled (). A parse loop that dies while caught up
+// therefore leaves running+db true and stalled false, and /live answered 200
+// forever while nothing parsed. Only an iteration counter independent of the
+// chain closes that.
 describe('XChainDecoder#isPollSilent()', () => {
     let decoder
     const SILENT_MS = 2 * 900000   // must track POLL_SILENT_MS in XChainDecoder.js
@@ -235,6 +250,7 @@ describe('XChainDecoder#isPollSilent()', () => {
     })
 })
 
+// ─── millisecondsToTimeString ────────────────────────────────────────────────
 describe('XChainDecoder#millisecondsToTimeString()', () => {
     let decoder
 
@@ -288,6 +304,7 @@ describe('XChainDecoder#millisecondsToTimeString()', () => {
     })
 })
 
+// ─── extractPubkeyFromInput ──────────────────────────────────────────────────
 describe('XChainDecoder#extractPubkeyFromInput()', () => {
     let decoder
 
@@ -363,6 +380,7 @@ describe('XChainDecoder#extractPubkeyFromInput()', () => {
     })
 })
 
+// ─── findFundingFeeOutputs ───────────────────────────────────────────────────
 describe('XChainDecoder#findFundingFeeOutputs()', () => {
     const FEE_ADDR = 'mzBc4XEFSdzCDcTxAgf6EZXgsZWpztRhef'  // regtest-style, not real
 
@@ -415,6 +433,7 @@ describe('XChainDecoder#findFundingFeeOutputs()', () => {
     })
 })
 
+// ─── verifyReorg edge cases ──────────────────────────────────────────────────
 describe('XChainDecoder#verifyReorg() edge cases', () => {
     // Helper: minimal decoder with stubbed db + connector
     function makeReorgDecoder() {
@@ -432,6 +451,9 @@ describe('XChainDecoder#verifyReorg() edge cases', () => {
         decoder.db = {
             getLastBlockIndex: sinon.stub().resolves(-1),
             getBlockByIndex: sinon.stub().resolves(null),
+            // Since M-12 the REORG marker is written inside deleteBlockByIndex, atomically with the
+            // delete. verifyReorg must NOT write a separate end-of-run event (that once-at-end write
+            // was the non-crash-durable path this fix removed).
             insertEvent: sinon.stub().resolves(true)
         }
         decoder.connector = { getBlockHash: sinon.stub().resolves('hash') }
@@ -538,6 +560,7 @@ describe('XChainDecoder#verifyReorg() edge cases', () => {
     })
 })
 
+// ─── DOGE auxPow forcing ────────────────────────────────────────────────────
 describe('XChainDecoder auxPow chain-identity forcing', () => {
     function makeDecoder(network, auxPow) {
         return new XChainDecoder(
@@ -562,6 +585,7 @@ describe('XChainDecoder auxPow chain-identity forcing', () => {
     })
 })
 
+// ─── MAX_ACTION_DATA_LENGTH export ──────────────────────────────────────────
 describe('XChainDecoder.MAX_ACTION_DATA_LENGTH', () => {
     it('should be exported as a numeric constant', () => {
         assert.strictEqual(typeof XChainDecoder.MAX_ACTION_DATA_LENGTH, 'number')

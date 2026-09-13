@@ -121,6 +121,7 @@ describe('BlockchainConnector', () => {
             const callData = axiosStub.firstCall.args[1]
             assert.deepStrictEqual(callData.params, [199])
             assert.strictEqual(typeof callData.params[0], 'number')
+            // The whole body must round-trip through JSON without throwing.
             assert.doesNotThrow(() => JSON.stringify(callData))
         })
 
@@ -175,6 +176,7 @@ describe('BlockchainConnector', () => {
             const timeoutError = new Error('timeout')
             timeoutError.code = 'ECONNABORTED'
 
+            // Fail 2 times, succeed on 3rd
             axiosStub.onCall(0).rejects(timeoutError)
             axiosStub.onCall(1).rejects(timeoutError)
             axiosStub.onCall(2).resolves({ data: { result: 'headerdata' } })
@@ -322,6 +324,7 @@ describe('BlockchainConnector', () => {
 
             const result = await connector.getBlockWithoutAuxPow('hash')
 
+            // Result should be first 160 chars + body (without the 40 AuxPoW chars)
             assert.strictEqual(result.length, 160 + blockBody.length)
             assert.strictEqual(result.substring(0, 160), fullBlockHex.substring(0, 160))
         })
@@ -394,11 +397,14 @@ describe('BlockchainConnector', () => {
 
             const stripped = await connector.getBlockWithoutAuxPow('doge-mainnet-block-hash')
 
+            // After stripping, the AuxPoW section between the header and the tx varint is gone
+            // Strip should remove exactly AUX_POW_HEX.length chars at offset 160
             const expectedStripped = BASE_HEADER_HEX + N_TX_VARINT + COINBASE_TX_HEX
             assert.strictEqual(stripped, expectedStripped, 'stripped hex must equal base header + transactions')
 
             // The critical assertion: the stripped result must parse via bitcoinjs-lib
             // Block.fromBuffer, validating that the AuxPoW seam produces a conformant block.
+            // Verify the result parses as a valid block
             const bitcoin = require('bitcoinjs-lib')
             const block = bitcoin.Block.fromBuffer(Buffer.from(stripped, 'hex'))
             assert.ok(block, 'Block.fromBuffer must succeed on stripped result')
@@ -454,6 +460,7 @@ describe('BlockchainConnector', () => {
     })
 })
 
+// ─── getRawTransactions concurrency bound ───────────────────────────────────
 describe('BlockchainConnector#getRawTransactions (bounded concurrency)', () => {
     let connector
 

@@ -22,6 +22,9 @@
 //       parse layer), and
 //   (b) splitting on '|', looking up the first token in the alias map, and
 //       rejoining produces the canonical DB form byte-for-byte.
+//
+// Run with:
+//   npx mocha --no-config --require ./test/unit/support/setup.js test/unit/roundtrip.test.js
 
 // Install the mariadb stub before loading XChainDecoder so that the
 // ESM-only mariadb package does not cause a require() failure.
@@ -37,6 +40,9 @@ const { canonicalizeActionPayload, ACTION_ALIASES } = require('../../src/XChainD
 
 bitcoin.initEccLib(ecc)
 
+// ---------------------------------------------------------------------------
+// Helpers (same approach as test/unit/parseTransaction.test.js)
+// ---------------------------------------------------------------------------
 // The decoder derives AES key/IV from the reversed hex of the first input's
 // prevout hash. All test txs share one hash for simplicity.
 const PREV_HASH = Buffer.from(
@@ -100,11 +106,10 @@ function createDecoder() {
     return decoder
 }
 
-// This helper used to re-declare its own ACTION_ALIASES table and its own
-// split/join canonicalization, a third divergent implementation of the same
-// logic forked across the decoder's two gate sites. It now exercises the real
-// shared helper (XChainDecoder.js canonicalizeActionPayload) so these tests
-// pin the production canonicalization rather than a copy of it.
+// Exercises the real shared helper (XChainDecoder.js canonicalizeActionPayload)
+// rather than a local alias table and split/join of its own. A copy here would
+// be a third implementation of logic the decoder's two gate sites already
+// share, and the tests would pin the copy instead of production.
 function canonicalize(rawString) {
     return canonicalizeActionPayload(Buffer.from(rawString, 'utf8')).buffer.toString('utf8')
 }
@@ -176,8 +181,8 @@ describe('ACTION-name alias round-trip', () => {
 
     // canonicalizeActionPayload is the single shared implementation behind
     // both the confirmed-block and mempool decode gates. These pin its
-    // byte-level contract directly, including the case the two forked
-    // implementations previously only "agreed" on by accident: invalid UTF-8
+    // byte-level contract directly, including the case two separate
+    // implementations would only agree on by accident: invalid UTF-8
     // after the first pipe never occurs in an encoder-producible payload, but
     // the decoder must still handle it consistently because it decodes
     // arbitrary on-chain bytes.

@@ -115,6 +115,7 @@ describe('Security: ACTION Data Validation', () => {
             const result = await decoder.parseTransaction(tx)
 
             assert.ok(result)
+            // Data should be present in result (parseTransaction doesn't validate ACTION names)
             assert.ok(result.data.length > 0)
         })
     })
@@ -243,6 +244,7 @@ describe('Security: ACTION Data Validation', () => {
             const tx = new bitcoin.Transaction()
             tx.version = 2
             tx.addInput(PREV_HASH, 1)
+            // scriptSig with only 1 push (not the 3 expected)
             tx.ins[0].script = bitcoin.script.compile([Buffer.alloc(33, 0x02)])
 
             const p2shPlain = Buffer.from('XCHNp2sh')

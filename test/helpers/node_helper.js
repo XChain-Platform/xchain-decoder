@@ -31,6 +31,7 @@ function nodeConfig(){
 }
 
 function rpcUrl(){
+	// Realizar la solicitud JSON-RPC al nodo
 	const cfg = nodeConfig()
 	return 'http://' + cfg.host + ':' + cfg.port
 }
@@ -86,6 +87,7 @@ module.exports = {
 				},
 			})
 
+			// Verificar si la solicitud fue exitosa y devolver el hex de la transacción
 			if (response.data.result) {
 				return response.data.result;
 			} else {
@@ -108,6 +110,7 @@ module.exports = {
 				id: 1,
 			}
 
+			// Realizar la solicitud JSON-RPC al nodo
 			const cfg = nodeConfig()
 			const response = await axios.post(rpcUrl(), data, {
 				auth: {
@@ -116,6 +119,7 @@ module.exports = {
 				},
 			})
 
+			// Verificar si la solicitud fue exitosa y devolver el hex de la transacción
 			if (response.data.result) {
 				return response.data.result;
 			} else {

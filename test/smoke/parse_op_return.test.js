@@ -20,13 +20,13 @@ const OP_RETURN_TX_HEX = '0200000001aabbccdd11223344eeff556677889900112233445566
 // address from. Output 0 is junk, to prove the index is honoured.
 const PREVOUT_TX_HEX = '020000000111111111111111111111111111111111111111111111111111111111111111110000000000ffffffff020000000000000000076a0548656c6c6f0065cd1d000000001976a914bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb88ac00000000'
 
-// A failed prevout lookup used to be swallowed into `source = null`; now
-// `getSourceFromOutput` tags it `rpcLookupFailure` and rethrows so the block
-// loop retries, because swallowing the failure let one instance skip or
-// mis-source a transaction that every healthy instance accepts. This
-// fixture predates that fix and stubbed the lookup to reject, so it must
-// resolve a real prevout to exercise what the tests actually claim: an
-// OP_RETURN transaction decoded end to end, source address included.
+// The prevout lookup has to succeed. A failed lookup is tagged
+// `rpcLookupFailure` and rethrown by `getSourceFromOutput` so the block loop
+// retries the block, because treating it as `source = null` would let one
+// instance skip or mis-source a transaction every healthy instance accepts.
+// So this fixture resolves a real prevout, which is what lets the tests
+// exercise what they claim: an OP_RETURN transaction decoded end to end,
+// source address included.
 function createDecoder() {
     const decoder = new XChainDecoder(
         'bitcoin-regtest', null, null, null, null, null,

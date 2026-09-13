@@ -22,6 +22,9 @@ function makeDb(name = 'test_db') {
 }
 
 
+// ============================================================================
+// Constructor validation
+// ============================================================================
 describe('Database constructor', () => {
     it('should construct successfully with a valid alphanumeric name', () => {
         const db = makeDb('xchain_btc_mainnet')
@@ -115,6 +118,9 @@ describe('Database constructor', () => {
     })
 })
 
+// ============================================================================
+// bigIntSatoshiToDecimalsString
+// ============================================================================
 describe('Database#bigIntSatoshiToDecimalsString()', () => {
     let db
 
@@ -174,6 +180,9 @@ describe('Database#bigIntSatoshiToDecimalsString()', () => {
     })
 })
 
+// ============================================================================
+// stripSqlLineComments
+// ============================================================================
 describe('Database#stripSqlLineComments()', () => {
     let db
 
@@ -273,6 +282,9 @@ describe('Database#stripSqlLineComments()', () => {
     })
 })
 
+// ============================================================================
+// parseExpectedColumns
+// ============================================================================
 describe('Database#parseExpectedColumns()', () => {
     let db
 
@@ -281,6 +293,10 @@ describe('Database#parseExpectedColumns()', () => {
     })
 
     it('should parse a simple CREATE TABLE with two columns', () => {
+        // A surrogate AUTO_INCREMENT column whose PK is a different column (e.g.
+        // pubkeys.id, PK is address_id). AUTO_INCREMENT implies NOT NULL; if this
+        // read as nullable, alterTableForDrift would emit a bare `MODIFY <type> NULL`
+        // that silently strips AUTO_INCREMENT (the 2026-06-10 mirror-cursor incident).
         const sql = `
             CREATE TABLE blocks (
                 block_index BIGINT UNSIGNED NOT NULL,
@@ -456,6 +472,9 @@ describe('Database#parseExpectedColumns()', () => {
 
 // Transaction lock mechanics (acquireTransactionLock / releaseTransactionLock)
 
+// ============================================================================
+// Transaction lock mechanics (_acquireTransactionLock / _releaseTransactionLock)
+// ============================================================================
 describe('Database transaction lock queue', () => {
     let db
 
@@ -503,6 +522,9 @@ describe('Database transaction lock queue', () => {
     })
 })
 
+// ============================================================================
+// parseExpectedIndexes
+// ============================================================================
 describe('Database#parseExpectedIndexes()', () => {
     let db
 
@@ -551,6 +573,9 @@ describe('Database#parseExpectedIndexes()', () => {
     })
 })
 
+// ============================================================================
+// reconcileTableIndexes
+// ============================================================================
 describe('Database#reconcileTableIndexes()', () => {
     const fs   = require('fs')
     const os   = require('os')

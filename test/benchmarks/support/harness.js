@@ -25,6 +25,31 @@
  *   node test/benchmarks/support/harness.js --quick            # reduced iterations
  */
 
+/*********************************************************************
+*
+* Copyright © 2025–2026 Dankest, LLC
+* Based on XChain Platform by Dankest, LLC – https://dankest.llc
+*
+* SPDX-License-Identifier: AGPL-3.0-or-later
+*
+* This file is part of XChain Platform. Licensed under the GNU Affero
+* General Public License v3.0 or later; see LICENSE.md. A commercial
+* license (without AGPL source-disclosure terms) is available -
+* contact legal@dankest.llc.
+*
+**********************************************************************
+/**
+* XChain Decoder Performance Benchmark Harness
+*
+* Usage:
+*   node test/benchmarks/harness.js                    # run all scenarios
+*   node test/benchmarks/harness.js --scenario NAME    # run one scenario
+*   node test/benchmarks/harness.js --list             # list available scenarios
+*   node test/benchmarks/harness.js --compare          # compare against baseline
+*   node test/benchmarks/harness.js --save-baseline    # save results as new baseline
+*   node test/benchmarks/harness.js --json             # output raw JSON
+*   node test/benchmarks/harness.js --quick            # reduced iterations
+*/
 // Must load setup BEFORE any decoder source to mock mariadb
 require('./setup')
 
@@ -109,10 +134,12 @@ function createDecoder() {
     const mockConnector = new MockBlockchainConnector()
     const mockDb = new MockDatabase()
 
+    // Create decoder with bitcoin-regtest config
     const decoder = new XChainDecoder(
         'bitcoin-regtest', '', 0, 'bench', '', '', '', 0, '', '', false
     )
 
+    // Replace internals with mocks
     decoder.connector = mockConnector
     decoder.db = mockDb
 
@@ -201,6 +228,7 @@ async function runScenario(scenarioName, decoder, generator, config) {
     const scenario = require(`./scenarios/${scenarioName}.bench.js`)
     const metrics = new MetricsCollector()
 
+    // Apply quick mode reductions
     const scenarioConfig = { ...config }
     if (config.quick) {
         scenarioConfig.iterations = Math.max(100, Math.floor((scenarioConfig.iterations || 5000) / 10))
@@ -239,10 +267,12 @@ async function main() {
     const originalError = console.error
     let suppressLogs = !config.verbose && !config.json
 
+    // Determine which scenarios to run
     const scenariosToRun = config.scenario
         ? [config.scenario]
         : SCENARIO_FILES
 
+    // Validate scenario names
     for (const name of scenariosToRun) {
         if (!SCENARIO_FILES.includes(name)) {
             console.error(`Unknown scenario: ${name}`)
@@ -251,6 +281,7 @@ async function main() {
         }
     }
 
+    // Load baseline if comparing
     let baseline = null
     if (config.compare) {
         try {
@@ -260,6 +291,7 @@ async function main() {
         }
     }
 
+    // Get git commit hash
     let commitHash = 'unknown'
     try {
         const { execSync } = require('child_process')
@@ -290,6 +322,7 @@ async function main() {
         const decoder = createDecoder()
         const generator = new DataGenerator()
 
+        // Suppress logs during benchmark
         if (suppressLogs) {
             console.log = () => {}
             console.error = () => {}
@@ -299,6 +332,7 @@ async function main() {
             const result = await runScenario(name, decoder, generator, config)
             allResults.scenarios[name] = result
 
+            // Restore logs for output
             console.log = originalLog
             console.error = originalError
 
@@ -314,11 +348,13 @@ async function main() {
         }
     }
 
+    // JSON output
     if (config.json) {
         console.log = originalLog
         console.log(JSON.stringify(allResults, null, 2))
     }
 
+    // Save baseline
     if (config.saveBaseline) {
         console.log = originalLog
         fs.writeFileSync(BASELINE_PATH, JSON.stringify(allResults, null, 2))

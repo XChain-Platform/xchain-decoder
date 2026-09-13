@@ -37,6 +37,9 @@ describeOrSkip('Smoke: Database Initialization', () => {
         delete require.cache[realMariadbPath]
         mariadb = require(realMariadbPath)
 
+        // We need to load Database fresh so it picks up real mariadb
+        // But since unit/setup.js may have intercepted the require,
+        // we construct the DB object manually with real mariadb
         Database = require('../../src/db')
         db = new Database(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS)
 

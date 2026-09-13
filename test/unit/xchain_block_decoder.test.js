@@ -43,10 +43,10 @@ describe('XChainBlockDecoder', () => {
             assert.strictEqual(new XChainBlockDecoder('dogecoin-testnet').wireFormat, 'auxpow')
         })
 
-        // An unknown coin used to fall through silently to the strict bitcoinjs
-        // default parser and wedge/misparse at its first AuxPoW/MWEB block; the
-        // decoder now refuses at construction so onboarding a new chain must
-        // consciously declare its wire shape.
+        // An unknown coin is refused at construction. Falling through to the
+        // strict bitcoinjs default parser would wedge or misparse at the first
+        // AuxPoW or MWEB block, so onboarding a new chain has to declare its
+        // wire shape on purpose.
         it('throws for a coin with no declared wire-format contract', () => {
             assert.throws(() => new XChainBlockDecoder('some-extra-dashed-name'),
                 /no block\/tx wire-format contract declared for coin "some"/)
@@ -157,6 +157,7 @@ describe('XChainBlockDecoder', () => {
     describe('#transactionFromHex()', () => {
         it('should parse a standard bitcoin transaction', () => {
             const btcDecoder = new XChainBlockDecoder('bitcoin-regtest')
+            // Use the synthetic OP_RETURN test tx
             const txHex = '0200000001aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011010000006b4830303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303021020202020202020202020202020202020202020202020202020202020202020202ffffffff020000000000000000166a145ed141846fd6cbef65cb28316aff11ba07152fcf00e1f505000000001976a914aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88ac00000000'
             const tx = btcDecoder.transactionFromHex(txHex)
 
@@ -225,6 +226,7 @@ describe('XChainBlockDecoder', () => {
             const ltcDecoder = new XChainBlockDecoder('litecoin-mainnet')
             const btcDecoder = new XChainBlockDecoder('bitcoin-regtest')
 
+            // Header-only blocks should parse the same regardless of coin
             const ltcBlock = ltcDecoder.blockFromHex(HEADER_HEX)
             const btcBlock = btcDecoder.blockFromHex(HEADER_HEX)
 
@@ -233,6 +235,8 @@ describe('XChainBlockDecoder', () => {
         })
 
         it('should handle litecoin blocks where last tx has no HogEx flag', () => {
+            // A block where the last transaction does NOT have the HogEx marker+flag
+            // should parse normally without error
             const ltcDecoder = new XChainBlockDecoder('litecoin-regtest')
             // Header-only is safe: no transactions means no HogEx check
             const block = ltcDecoder.blockFromHex(HEADER_HEX)
