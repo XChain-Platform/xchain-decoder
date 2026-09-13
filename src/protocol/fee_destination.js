@@ -32,6 +32,8 @@
  ********************************************************************/
 
 const { getCoinConfigByFullName } = require('../coins')
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 function resolveFeeDestination(networkName, envOverride) {
     const m = /^([a-z]+)-(mainnet|testnet|regtest)$/.exec(networkName || '')
@@ -52,7 +54,7 @@ function resolveFeeDestination(networkName, envOverride) {
         // pinned === null) the override still resolves so those paths keep working.
         if (m && m[2] !== 'regtest' && pinned) {
             if (envOverride !== pinned)
-                console.log('WARNING: FEE_DESTINATION env is set but IGNORED on ' + m[2] + '; using the consensus-pinned registry address.')
+                logger.info('WARNING: FEE_DESTINATION env is set but IGNORED on ' + m[2] + '; using the consensus-pinned registry address.')
             return pinned
         }
         return envOverride

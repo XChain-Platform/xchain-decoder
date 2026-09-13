@@ -1,4 +1,3 @@
-const Database = require('./db.js');
 /*********************************************************************
  *
  * Copyright © 2025-2026 Dankest, LLC
@@ -43,6 +42,9 @@ const Database = require('./db.js');
  ********************************************************************/
 
 'use strict'
+
+const dotenv = require('dotenv');
+const Database = require('./db.js');
 
 const EXIT = {
     OK: 0,
@@ -158,7 +160,9 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
 }
 
 async function main(){
-    require('dotenv').config()
+    // Loaded at the top like every other module; the CALL stays here, because
+    // the environment must be read at run time and not at require time.
+    dotenv.config()
     const host = process.env.DECODER_DB_HOST
     const port = process.env.DECODER_DB_PORT
     const name = process.env.DECODER_DB_NAME

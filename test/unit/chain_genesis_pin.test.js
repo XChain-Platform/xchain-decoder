@@ -228,7 +228,7 @@ describe('block-0 chain-identity pin @regression', function () {
         const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder.js'), 'utf8');
 
         it('start() asserts the pin immediately after verifyConsensusPin', function () {
-            const pinIdx     = SRC.indexOf("require('./coins').verifyConsensusPin(this.consensusNetwork)");
+            const pinIdx     = SRC.indexOf("coins.verifyConsensusPin(this.consensusNetwork)");
             const genesisIdx = SRC.indexOf('await this.verifyChainGenesis()', pinIdx);
             const dbIdx      = SRC.indexOf('this.db = new Database(', pinIdx);
             assert.ok(pinIdx > 0 && genesisIdx > pinIdx, 'the genesis assertion must follow verifyConsensusPin');

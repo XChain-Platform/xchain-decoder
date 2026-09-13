@@ -19,6 +19,7 @@
  ********************************************************************/
 
 const util = require('./util')
+const coins = require('./coins')
 const crypto = require('crypto');
 const bs58check = require('bs58check')
 const bitcoin = require('bitcoinjs-lib')
@@ -38,6 +39,8 @@ const { chainTierMismatch, chainFieldMissing, chainGenesisMismatch, chainGenesis
 // the whole content of the event. getLogger() resolves lazily, so requiring it
 // here is safe before patchConsole()/installObservability() has run.
 const { getLogger } = require('./observability')
+const { format: formatLogLine } = require('node:util');
+const logger = getLogger();
 const strictTextDecoder = new TextDecoder('utf-8', { fatal: true })
 const lenientTextDecoder = new TextDecoder('utf-8')
 
@@ -311,12 +314,12 @@ class XChainDecoder {
 
         // Coin/network-prefixed loggers so cadence/reorg/stall lines are self-describing
         // even when a log pipeline strips container labels. Reads the fields at call time.
-        this.log = (...args) => console.log('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args)
+        this.log = (...args) => logger.info(formatLogLine('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args))
         // Warn exists so a notable-but-not-failed event (a reorg starting) can reach a
         // warn-and-above alerting rule without being dressed up as an error. console.log
         // writes to stdout, which those rules do not read.
-        this.logWarn = (...args) => console.warn('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args)
-        this.logError = (...args) => console.error('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args)
+        this.logWarn = (...args) => logger.warn(formatLogLine('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args))
+        this.logError = (...args) => logger.error(formatLogLine('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args))
 
         // Native-coin protocol fee destination address for this coin+network. When set (not the
         // unset placeholder), the decoder also persists any output paying it to transaction_outputs
@@ -477,7 +480,7 @@ class XChainDecoder {
         let endTime = Date.now()
         let msTime = (endTime - this.debugTime[timeName])
                     
-        console.log("Time('"+timeName+"'): "+(msTime)+"ms")
+        logger.info("Time('"+timeName+"'): "+(msTime)+"ms")
     }
     
     millisecondsToTimeString(ms){
@@ -679,17 +682,17 @@ class XChainDecoder {
                 // leaves behind, so clearing on absence would erase the one signal.
                 if (this.reorgHalted) this.reorgHaltMarkerPersisted = true
                 if (this.reorgHalted && !wasHalted){
-                    console.error('XChainDecoder: LATENT REORG_HALT MARKER PRESENT - this decoder carries a durable ' +
+                    logger.error('XChainDecoder: LATENT REORG_HALT MARKER PRESENT - this decoder carries a durable ' +
                         'REORG_HALT row from an aborted rollback. It will keep parsing forward and look healthy, but ' +
                         'the NEXT reorg will refuse to roll back and stop the decoder. This database is NOT a valid ' +
                         'bootstrap source. REQUIRED OPERATOR ACTION: full resync from a known-good snapshot.' +
                         (this.reorgHaltReason ? ' Marker detail: ' + this.reorgHaltReason : ''))
                 } else if (!this.reorgHalted && wasHalted){
-                    console.warn('XChainDecoder: REORG_HALT marker is gone; halt cleared.')
+                    logger.warn('XChainDecoder: REORG_HALT marker is gone; halt cleared.')
                 }
                 return this.getReorgHaltStatus()
             } catch (e){
-                console.warn('XChainDecoder: REORG_HALT probe failed (non-fatal), keeping last known state (' +
+                logger.warn('XChainDecoder: REORG_HALT probe failed (non-fatal), keeping last known state (' +
                     this.reorgHalted + '): ' + (e && e.message))
                 return this.getReorgHaltStatus()
             } finally {
@@ -792,7 +795,7 @@ class XChainDecoder {
             }
         } catch (err){
             this.rpcErrors++
-            console.error(`getSourceFromOutput: failed to fetch tx ${txId} (output ${outputIndex}): `, err)
+            logger.error(formatLogLine(`getSourceFromOutput: failed to fetch tx ${txId} (output ${outputIndex}): `, err))
             err.rpcLookupFailure = true
             throw err
         }
@@ -852,7 +855,7 @@ class XChainDecoder {
                     }
                 } catch (err){
                     this.rpcErrors++
-                    console.error(`getSourceFromOutput: failed to fetch commit-funding tx ${prevTxHash}: `, err)
+                    logger.error(formatLogLine(`getSourceFromOutput: failed to fetch commit-funding tx ${prevTxHash}: `, err))
                     err.rpcLookupFailure = true
                     throw err
                 }
@@ -1040,7 +1043,7 @@ class XChainDecoder {
             }
         } catch (err){
             this.rpcErrors++
-            console.error(`getEnvelopeSourceFromCommit: failed to fetch commit-funding tx ${prevTxHash}: `, err)
+            logger.error(formatLogLine(`getEnvelopeSourceFromCommit: failed to fetch commit-funding tx ${prevTxHash}: `, err))
             err.rpcLookupFailure = true
             throw err
         }
@@ -1073,7 +1076,7 @@ class XChainDecoder {
             }
         } catch (err){
             this.rpcErrors++
-            console.error(`fetchEnvelopeCommitTransaction: failed to fetch commit tx ${commitTxId}: `, err)
+            logger.error(formatLogLine(`fetchEnvelopeCommitTransaction: failed to fetch commit tx ${commitTxId}: `, err))
             err.rpcLookupFailure = true
             throw err
         }
@@ -1108,7 +1111,7 @@ class XChainDecoder {
                 }
             } catch (err){
                 this.rpcErrors++
-                console.error(`findFundingFeeOutputs: failed to fetch funding tx ${fundingTxId}:`, err.message)
+                logger.error(formatLogLine(`findFundingFeeOutputs: failed to fetch funding tx ${fundingTxId}:`, err.message))
                 err.rpcLookupFailure = true
                 throw err
             }
@@ -1237,7 +1240,7 @@ class XChainDecoder {
                 // (addressRefFields.js `noCompact`), so this is a third-party composer or
                 // a historical replay.
                 this.parseErrors++
-                console.error(`Oracle-fee output NOT captured for tx ${transactionHash}: compacted ORACLE_ADDRESS reference '${fields[ORACLE_ADDRESS_INDEX]}' cannot be resolved by the decoder, so the indexer will reject this dispenser create`)
+                logger.error(`Oracle-fee output NOT captured for tx ${transactionHash}: compacted ORACLE_ADDRESS reference '${fields[ORACLE_ADDRESS_INDEX]}' cannot be resolved by the decoder, so the indexer will reject this dispenser create`)
                 return []
             }
             let createOracleAddress = oracleAddressFromCreate(fields)
@@ -1352,7 +1355,7 @@ class XChainDecoder {
 
         if (parseResult["compiledDataLength"] > payloadCeiling){
             this.parseErrors++
-            console.error(rejectPrefix + `ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${payloadCeiling})`)
+            logger.error(rejectPrefix + `ACTION data exceeds maximum length (${parseResult["compiledDataLength"]} > ${payloadCeiling})`)
             return { skip: !hasOutputs, data: "", rawData: null }
         }
 
@@ -1371,12 +1374,12 @@ class XChainDecoder {
         } catch (e) {
             this.parseErrors++
             decodedData = lenientTextDecoder.decode(canonical.buffer)
-            console.error(utf8Prefix + 'ACTION data contains invalid UTF-8, decoded with replacement characters', e)
+            logger.error(formatLogLine(utf8Prefix + 'ACTION data contains invalid UTF-8, decoded with replacement characters', e))
         }
 
         if (!canonical.isKnown){
             this.parseErrors++
-            console.error(rejectPrefix + `unknown ACTION name '${canonical.rawActionName.substring(0, 32)}'`)
+            logger.error(rejectPrefix + `unknown ACTION name '${canonical.rawActionName.substring(0, 32)}'`)
             return { skip: !hasOutputs, data: "", rawData: null }
         }
 
@@ -1455,7 +1458,7 @@ class XChainDecoder {
                 // tx (output counts are bounded far below the base), so if it ever fires the base
                 // has been mis-sized and the funding/real vout domains are no longer disjoint.
                 if (txOutputIndex >= FUNDING_VOUT_BASE){
-                    console.error(`FATAL invariant violation: real output index ${txOutputIndex} in tx ${nextTxId} reaches FUNDING_VOUT_BASE (${FUNDING_VOUT_BASE}); funding fee outputs can no longer be stored collision-free`)
+                    logger.error(`FATAL invariant violation: real output index ${txOutputIndex} in tx ${nextTxId} reaches FUNDING_VOUT_BASE (${FUNDING_VOUT_BASE}); funding fee outputs can no longer be stored collision-free`)
                 }
                 let nextOutput = transaction.outs[txOutputIndex]
                 let decompiledScript = bitcoin.script.decompile(nextOutput.script)
@@ -1524,7 +1527,7 @@ class XChainDecoder {
                                             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
                                         } catch (e) {
                                             this.parseErrors++
-                                            console.error(`P2SH data extraction failed for input ${txInputIndex} of tx ${nextTxId}:`, e)
+                                            logger.error(formatLogLine(`P2SH data extraction failed for input ${txInputIndex} of tx ${nextTxId}:`, e))
                                             // Do NOT drop this input's chunk and keep concatenating: a missing
                                             // interior chunk leaves nextDataBuffer holding a silently truncated
                                             // ACTION payload that can still decompile to a corrupted push, with no
@@ -1576,7 +1579,7 @@ class XChainDecoder {
                                             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
                                         } catch (e) {
                                             this.parseErrors++
-                                            console.error(`P2WSH data extraction failed for input ${txInputIndex} of tx ${nextTxId}:`, e)
+                                            logger.error(formatLogLine(`P2WSH data extraction failed for input ${txInputIndex} of tx ${nextTxId}:`, e))
                                             // Do NOT drop this input's chunk and keep concatenating: a missing
                                             // interior chunk leaves nextDataBuffer holding a silently truncated
                                             // ACTION payload that can still decompile to a corrupted push, with no
@@ -1665,7 +1668,7 @@ class XChainDecoder {
                     || (carrierRecognitionActive && otherCarrierRecognized)
                 if (envelopeInputs.length >= 2 || otherCarrierPresent || envelopeInputs[0].index !== 0){
                     this.parseErrors++
-                    console.error(`Tx ${nextTxId}: envelope rejected deterministically (` +
+                    logger.error(`Tx ${nextTxId}: envelope rejected deterministically (` +
                         `${envelopeInputs.length} envelope input(s) at [${envelopeInputs.map(e => e.index).join(',')}]` +
                         `${otherCarrierPresent ? ', mixed with another carrier' : ''}); no action`)
                     dataBuffer = Buffer.allocUnsafe(0)
@@ -1734,7 +1737,7 @@ class XChainDecoder {
                             const droppedPushBytes = decompiledData
                                 .slice(1)
                                 .reduce((total, push) => total + (Buffer.isBuffer(push) ? push.length : 0), 0)
-                            console.error(`Tx ${nextTxId}: empty leading push (OP_0) in a ${dataBuffer.length}-byte ` +
+                            logger.error(`Tx ${nextTxId}: empty leading push (OP_0) in a ${dataBuffer.length}-byte ` +
                                 `payload carrying ${decompiledData.length - 1} further element(s) totalling ` +
                                 `${droppedPushBytes} data byte(s); payload blanked and the trailing push(es), ` +
                                 `including any rawData, are NOT read (acceptance unchanged)`)
@@ -1885,7 +1888,7 @@ class XChainDecoder {
                 + "safe-depth window (DISPENSER_EXPIRE_SAFE_DEPTH=" + DISPENSER_EXPIRE_SAFE_DEPTH + "), which "
                 + "would permanently lose money-bearing dispenser state. Recovery: perform a full resync "
                 + "from a known-good snapshot."
-            console.error(msg)
+            logger.error(msg)
             throw new Error(msg)
         }
 
@@ -1916,7 +1919,7 @@ class XChainDecoder {
                     break
                 } catch (err){
                     seedErr = err
-                    console.error(`reorg: could not read the prior rollback depth (attempt ${attempt}/3)`, err)
+                    logger.error(formatLogLine(`reorg: could not read the prior rollback depth (attempt ${attempt}/3)`, err))
                     if (attempt < 3) await this.sleep(3000)
                 }
             }
@@ -1924,7 +1927,7 @@ class XChainDecoder {
                 const msg = 'verifyReorg: the prior rollback depth could not be read, so the dispenser '
                     + 'safe-depth ceiling cannot be enforced across a restart. Refusing to delete any block: '
                     + (seedErr.message || String(seedErr))
-                console.error(msg)
+                logger.error(msg)
                 throw new Error(msg)
             }
         }
@@ -2017,7 +2020,7 @@ class XChainDecoder {
                 // over-deep rollback, and the gate counts zero markers and publishes
                 // this database as known-good. Nothing durable records it, so this line
                 // is the only evidence and it has to name the required action.
-                console.error('verifyReorg: the durable REORG_HALT marker could NOT be persisted after '
+                logger.error('verifyReorg: the durable REORG_HALT marker could NOT be persisted after '
                     + attempts + ' attempt(s)'
                     + (lastError ? ' (' + (lastError.message || String(lastError)) + ')' : '')
                     + '. This database is NOT a valid bootstrap source: a restart will re-enter verifyReorg '
@@ -2052,7 +2055,7 @@ class XChainDecoder {
                     + lastBlockIndex + " and below have already been hard-purged, so continuing would "
                     + "silently lose money-bearing dispenser state. Aborting. Recovery: perform a full "
                     + "resync from a known-good snapshot."
-                console.error(msg)
+                logger.error(msg)
                 await haltReorg(msg)
                 throw new Error(msg)
             }
@@ -2075,7 +2078,7 @@ class XChainDecoder {
                 // not finish until it has actually reconciled. Deliberately NOT a
                 // REORG_HALT: that marker blocks every later reorg until an operator
                 // clears it, which is the wrong response to a transient read fault.
-                console.error('reorg: failed to read the last stored block; retrying the walk...', err)
+                logger.error(formatLogLine('reorg: failed to read the last stored block; retrying the walk...', err))
                 await this.sleep(3000)
                 continue
             }
@@ -2138,7 +2141,7 @@ class XChainDecoder {
                     retryCount = 0
                     blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["block_hash"]})
                 } catch (err){
-                    console.error(`reorg: failed to delete above-tip block ${lastBlockIndex} (${lastBlock.block_hash}): `, err)
+                    logger.error(formatLogLine(`reorg: failed to delete above-tip block ${lastBlockIndex} (${lastBlock.block_hash}): `, err))
                     if (++retryCount >= 10){ await haltReorg('verifyReorg: deleteBlockByIndex failed after 10 attempts (above-tip branch)'); throw new Error('verifyReorg: deleteBlockByIndex failed after 10 attempts, aborting') }
                     await this.sleep(3000)
                 }
@@ -2149,7 +2152,7 @@ class XChainDecoder {
             try {
                 blockHashFromNode = await this.connector.getBlockHash(lastBlockIndex)
             } catch (err){
-                console.error("There was a problem trying to get a block hash from the node. Trying again...", err)
+                logger.error(formatLogLine("There was a problem trying to get a block hash from the node. Trying again...", err))
                 // The node's tip may have regressed below lastBlockIndex mid-walk (node
                 // restart onto a shorter chain, or a second reorg). Against the frozen
                 // call-time nodeTip that makes getBlockHash(lastBlockIndex) throw "Block
@@ -2204,7 +2207,7 @@ class XChainDecoder {
                     retryCount = 0
                     blocksDeleted.push({"block_index":lastBlockIndex, "block_hash":lastBlock["block_hash"]})
                 } catch (err){
-                    console.error(`reorg: failed to delete block ${lastBlockIndex} (${lastBlock.block_hash}): `, err)
+                    logger.error(formatLogLine(`reorg: failed to delete block ${lastBlockIndex} (${lastBlock.block_hash}): `, err))
                     if (++retryCount >= 10){ await haltReorg('verifyReorg: deleteBlockByIndex failed after 10 attempts (hash-compare branch)'); throw new Error('verifyReorg: deleteBlockByIndex failed after 10 attempts, aborting') }
                     await this.sleep(3000); continue
                 }
@@ -2243,7 +2246,7 @@ class XChainDecoder {
             return this.connector.getBlock(blockHash)
         }
         if (this._auxPowParseErrorCount >= AUXPOW_REASSEMBLE_AFTER) {
-            console.error('AuxPoW header strip at height ' + blockHeight + ' failed ' + this._auxPowParseErrorCount +
+            logger.error('AuxPoW header strip at height ' + blockHeight + ' failed ' + this._auxPowParseErrorCount +
                 ' consecutive times; falling back to per-tx block reassembly (malformed-AuxPoW recovery).')
             return this.connector.getBlockReassembled(blockHash)
         }
@@ -2292,7 +2295,7 @@ class XChainDecoder {
         // throws and halts startup, so a partial/stale deploy cannot parse
         // on-chain bytes with divergent network params (fail-closed, deliberately
         // not wrapped in try/catch).
-        require('./coins').verifyConsensusPin(this.consensusNetwork)
+        coins.verifyConsensusPin(this.consensusNetwork)
 
         // Refuse an endpoint that is provably a DIFFERENT CHAIN before the DB is touched
         // or a single block is read. The tier gate in the block loop can only prove
@@ -2398,15 +2401,15 @@ class XChainDecoder {
             ? await this.connector.probeTxIndex()
             : null
         if (txIndexOk === false) {
-            console.error('WARNING: node does not appear to have txindex=1 (getrawtransaction on a ' +
+            logger.error('WARNING: node does not appear to have txindex=1 (getrawtransaction on a ' +
                 'confirmed tx returned nothing). The malformed-AuxPoW block recovery path ' +
                 '(getBlockReassembled) requires txindex; without it a malformed-AuxPoW ' +
                 'block will wedge this decoder permanently. Restart the node with txindex=1.')
         } else if (txIndexOk === null) {
-            console.log('txindex probe inconclusive (empty chain or probe RPC failed); continuing.')
+            logger.info('txindex probe inconclusive (empty chain or probe RPC failed); continuing.')
         }
 
-        console.log("Parsing...")
+        logger.info("Parsing...")
         
         let lastProcessedBlockIndex = this.lastProcessedBlockIndex = await this.db.getLastBlockIndex()
         let lastProcessedTxIndex = await this.db.getLastTxIndex()
@@ -2495,7 +2498,7 @@ class XChainDecoder {
 
             if (this.stopFlag){
                 if (this.mempoolInterval != null){
-                    console.log("Mempool updates stopped!")
+                    logger.info("Mempool updates stopped!")
                     clearInterval(this.mempoolInterval)
                     this.mempoolInterval = null
                 }   
@@ -2530,7 +2533,7 @@ class XChainDecoder {
                     if (!lastBlockchainInfo
                         || typeof lastBlockchainInfo["blocks"] !== 'number'
                         || typeof lastBlockchainInfo["verificationprogress"] !== 'number'){
-                        console.log("Malformed getblockchaininfo response (missing or non-numeric 'blocks'/'verificationprogress'). Trying again...")
+                        logger.info("Malformed getblockchaininfo response (missing or non-numeric 'blocks'/'verificationprogress'). Trying again...")
                         lastBlockchainInfo = null
                         await this.sleep(3000)
                         continue
@@ -2599,7 +2602,7 @@ class XChainDecoder {
 
                     if (lastBlockchainInfo["verificationprogress"] < MIN_VERIFICATION_PROGRESS_TO_PARSE){
                         if (!nodeSyncedProblem){
-                            console.log("The node is not synced. Waiting for it to synchronize...")
+                            logger.info("The node is not synced. Waiting for it to synchronize...")
                         }
                         
                         lastBlockchainInfo = null
@@ -2614,8 +2617,8 @@ class XChainDecoder {
                     lastBlockchainInfoRefreshAt = Date.now()
                     this.blockchainInfoLastRefreshAt = lastBlockchainInfoRefreshAt
                 } catch (e){
-                    console.log(e)
-                    console.log("Error trying to get network info from the node. Trying again...", e)
+                    logger.info(e)
+                    logger.info(formatLogLine("Error trying to get network info from the node. Trying again...", e))
                     await this.sleep(3000)
                     continue
                 }
@@ -2633,7 +2636,7 @@ class XChainDecoder {
                     if (lastProcessedBlockIndex == this.startBlockIndex - 1){
                         // Benign: we have processed nothing yet and the node simply
                         // hasn't reached our configured start height. Wait, don't reorg.
-                        console.log("Last block from the node ("+this.blockchainInfoLastBlock+") is still behind the starting block ("+this.startBlockIndex+")")
+                        logger.info("Last block from the node ("+this.blockchainInfoLastBlock+") is still behind the starting block ("+this.startBlockIndex+")")
                         await this.sleep(5000)
                         continue
                     }
@@ -2721,10 +2724,10 @@ class XChainDecoder {
             if (lastProcessedBlockIndex == this.blockchainInfoLastBlock){
                 this.synced = true
                 if (this.mempoolInterval == null){
-                    console.log("Mempool parsing started!")
-                    this.updateMempool().catch(err => console.error('[updateMempool] unhandled error:', err))
+                    logger.info("Mempool parsing started!")
+                    this.updateMempool().catch(err => logger.error(formatLogLine('[updateMempool] unhandled error:', err)))
                     this.mempoolInterval = setInterval(() => {
-                        this.updateMempool().catch(err => console.error('[updateMempool] unhandled error:', err))
+                        this.updateMempool().catch(err => logger.error(formatLogLine('[updateMempool] unhandled error:', err)))
                     }, MEMPOOL_INTERVAL)
                 }
 
@@ -2744,7 +2747,7 @@ class XChainDecoder {
                         const storedBlock = await this.db.getBlockByIndex(lastProcessedBlockIndex)
                         needsReconcile = !!(storedBlock && nodeHash && storedBlock.block_hash !== nodeHash)
                     } catch (e){
-                        console.error('Error during equal-height tip-hash detection reads, skipping:', e)
+                        logger.error(formatLogLine('Error during equal-height tip-hash detection reads, skipping:', e))
                     }
                     if (needsReconcile){
                         // Run the reconcile OUTSIDE the try so a fail-closed verifyReorg abort
@@ -2769,7 +2772,7 @@ class XChainDecoder {
                 if ((this.blockchainInfoLastBlock - lastProcessedBlockIndex) > SYNCED_THRESHOLD){
                     this.synced = false
                     if (this.mempoolInterval != null){
-                        console.log("Mempool updates stopped!")
+                        logger.info("Mempool updates stopped!")
                         clearInterval(this.mempoolInterval)
                         this.mempoolInterval = null
                     }   
@@ -2818,7 +2821,7 @@ class XChainDecoder {
                     if (this._fetchErrorCount === 5) {
                         this.parseErrors++
                     }
-                    console.error('Error fetching block at height ' + nextBlockHeight + ' (attempt ' + this._fetchErrorCount + '):', e)
+                    logger.error(formatLogLine('Error fetching block at height ' + nextBlockHeight + ' (attempt ' + this._fetchErrorCount + '):', e))
                     await this.sleep(3000)
                     continue
                 }
@@ -2836,7 +2839,7 @@ class XChainDecoder {
                     previousBlockHash = util.uint8ArrayToHex(Buffer.from(block.prevHash).reverse())
                 } catch (e){
                     this.parseErrors++
-                    console.error(`Failed to decode block ${nextBlockHeight} (${nextBlockHash}), retrying:`, e)
+                    logger.error(formatLogLine(`Failed to decode block ${nextBlockHeight} (${nextBlockHash}), retrying:`, e))
                     await this.db.endTransaction()
                     lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
                     lastProcessedTxIndex = await this.db.getLastTxIndex()
@@ -2857,7 +2860,7 @@ class XChainDecoder {
                         // must not escape start(), which would permanently stop the parse
                         // loop (api.js only logs the rejection). Same log prefix as the
                         // missing-row branch below so the retry regression coverage matches.
-                        console.error(`Could not load previous block ${nextBlockHeight - 1} for reorg check, retrying...`, err)
+                        logger.error(formatLogLine(`Could not load previous block ${nextBlockHeight - 1} for reorg check, retrying...`, err))
                         await this.sleep(3000)
                         continue
                     }
@@ -2868,7 +2871,7 @@ class XChainDecoder {
                     // Treat it as transient and retry this height, matching the block-fetch
                     // error path above.
                     if (!previousBlock){
-                        console.error(`Could not load previous block ${nextBlockHeight - 1} for reorg check, retrying...`)
+                        logger.error(`Could not load previous block ${nextBlockHeight - 1} for reorg check, retrying...`)
                         await this.sleep(3000)
                         continue
                     }
@@ -2910,7 +2913,7 @@ class XChainDecoder {
                     }
                 ))){
                     // insertBlock's error path already rolled the block transaction back.
-                    console.log("Error trying to insert a Block to the database")
+                    logger.info("Error trying to insert a Block to the database")
                     await resetAfterRollback()
                     continue main_parsing
                 }
@@ -2941,7 +2944,7 @@ class XChainDecoder {
                 //rollback was meant to discard), so retry the block instead.
                 if (!expireDispensersAtBlockEnd &&
                     (await this.db.deleteOpenDispensers(nextBlockHeight, block.timestamp)) !== true){
-                    console.error(`deleteOpenDispensers failed at block ${nextBlockHeight}; block rolled back, retrying`)
+                    logger.error(`deleteOpenDispensers failed at block ${nextBlockHeight}; block rolled back, retrying`)
                     await resetAfterRollback()
                     continue main_parsing
                 }
@@ -2969,7 +2972,7 @@ class XChainDecoder {
                 let openDispenserAddresses = await this.db.getAllOpenDispenserAddresses(
                     cancelGraceFloor(this.consensusNetwork, block.timestamp))
                 if (openDispenserAddresses == null){
-                    console.error(`Could not load open dispenser addresses for block ${nextBlockHeight}; retrying block`)
+                    logger.error(`Could not load open dispenser addresses for block ${nextBlockHeight}; retrying block`)
                     await this.db.endTransaction()
                     await resetAfterRollback()
                     continue main_parsing
@@ -3019,7 +3022,7 @@ class XChainDecoder {
                             // (instance-dependent block contents). Retry the block
                             // indefinitely instead; rpc_errors/health make the stall
                             // visible while the node recovers.
-                            console.error(`RPC lookup failed in block ${nextBlockHeight} (tx position ${txIndex}), retrying block:`, e)
+                            logger.error(formatLogLine(`RPC lookup failed in block ${nextBlockHeight} (tx position ${txIndex}), retrying block:`, e))
                             await this.db.endTransaction()
                             await resetAfterRollback()
                             continue main_parsing
@@ -3034,7 +3037,7 @@ class XChainDecoder {
                         if (txParseRetryCount <= TX_PARSE_MAX_RETRIES){
                             // Could be transient (DB hiccup inside parseTransaction):
                             // roll the block back and re-parse it from scratch.
-                            console.error(`parseTransaction failed in block ${nextBlockHeight} (tx position ${txIndex}, attempt ${txParseRetryCount}/${TX_PARSE_MAX_RETRIES}), retrying block:`, e)
+                            logger.error(formatLogLine(`parseTransaction failed in block ${nextBlockHeight} (tx position ${txIndex}, attempt ${txParseRetryCount}/${TX_PARSE_MAX_RETRIES}), retrying block:`, e))
                             await this.db.endTransaction()
                             await resetAfterRollback()
                             continue main_parsing
@@ -3044,7 +3047,7 @@ class XChainDecoder {
                         // as a poison transaction and quarantine it (skip + audit event) so
                         // one undecodable tx cannot wedge the pipeline at this height forever.
                         this.parseErrors++
-                        console.error(`Quarantining undecodable tx in block ${nextBlockHeight} (tx position ${txIndex}, hash ${nextTransactionHash}) after ${TX_PARSE_MAX_RETRIES} block retries:`, e)
+                        logger.error(formatLogLine(`Quarantining undecodable tx in block ${nextBlockHeight} (tx position ${txIndex}, hash ${nextTransactionHash}) after ${TX_PARSE_MAX_RETRIES} block retries:`, e))
                         let eventResult = await this.db.insertEvent("PARSE_ERROR", {
                             block_index: nextBlockHeight,
                             tx_position: txIndex,
@@ -3107,9 +3110,9 @@ class XChainDecoder {
                                 insertQuarantineCount++
                                 if (insertQuarantineCount > TX_PARSE_MAX_RETRIES){
                                     insertQuarantine.add(nextBlockHeight + ':' + txIndex)
-                                    console.error(`Quarantining tx with deterministic INSERT failure in block ${nextBlockHeight} (tx position ${txIndex}, hash ${nextTransactionHash}) after ${TX_PARSE_MAX_RETRIES} block retries`)
+                                    logger.error(`Quarantining tx with deterministic INSERT failure in block ${nextBlockHeight} (tx position ${txIndex}, hash ${nextTransactionHash}) after ${TX_PARSE_MAX_RETRIES} block retries`)
                                 } else {
-                                    console.error(`insertTransaction deterministic failure in block ${nextBlockHeight} (tx position ${txIndex}, attempt ${insertQuarantineCount}/${TX_PARSE_MAX_RETRIES}), retrying block`)
+                                    logger.error(`insertTransaction deterministic failure in block ${nextBlockHeight} (tx position ${txIndex}, attempt ${insertQuarantineCount}/${TX_PARSE_MAX_RETRIES}), retrying block`)
                                 }
                                 await resetAfterRollback()
                                 continue main_parsing
@@ -3130,12 +3133,12 @@ class XChainDecoder {
                                         nextOutput
                                     )
                                     if (insertResult === false){
-                                        console.error(`insertTransactionOutput (dispense) failed at block ${nextBlockHeight}; block rolled back, retrying`)
+                                        logger.error(`insertTransactionOutput (dispense) failed at block ${nextBlockHeight}; block rolled back, retrying`)
                                         await resetAfterRollback()
                                         continue main_parsing
                                     }
                                     if (insertResult === this.db.DUPLICATED_TRANSACTION){
-                                        console.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${lastProcessedTxIndex}, vout=${nextOutput.vout}); possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
+                                        logger.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${lastProcessedTxIndex}, vout=${nextOutput.vout}); possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
                                     }
                                 }
 
@@ -3170,7 +3173,7 @@ class XChainDecoder {
                                     // Deterministic DB fault while resolving a refill's oracle
                                     // address. Capturing nothing here would drop an output a
                                     // healthy node captures, so retry the block instead.
-                                    console.error(`resolveOracleFeeAddresses failed at block ${nextBlockHeight}; block rolled back, retrying`)
+                                    logger.error(`resolveOracleFeeAddresses failed at block ${nextBlockHeight}; block rolled back, retrying`)
                                     await resetAfterRollback()
                                     continue main_parsing
                                 }
@@ -3198,12 +3201,12 @@ class XChainDecoder {
                                             nextOutput
                                         )
                                         if (insertResult === false){
-                                            console.error(`insertTransactionOutput (payment) failed at block ${nextBlockHeight}; block rolled back, retrying`)
+                                            logger.error(`insertTransactionOutput (payment) failed at block ${nextBlockHeight}; block rolled back, retrying`)
                                             await resetAfterRollback()
                                             continue main_parsing
                                         }
                                         if (insertResult === this.db.DUPLICATED_TRANSACTION){
-                                            console.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${lastProcessedTxIndex}, vout=${nextOutput.vout}); possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
+                                            logger.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${lastProcessedTxIndex}, vout=${nextOutput.vout}); possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
                                         }
                                     }
                                 }
@@ -3391,7 +3394,7 @@ class XChainDecoder {
                                         // loop on the same deterministic tx forever.
                                         if (!Number.isSafeInteger(expiration) || expiration < 0) {
                                             this.parseErrors++
-                                            console.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[V0_EXPIRATION_INDEX]}'`)
+                                            logger.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[V0_EXPIRATION_INDEX]}'`)
                                         } else if (this.dispenserOpensForThisChain(giveCoin, getCoin)){
                                             if (getAddress && getAddress.length > 0 && getAddress.charAt(0) === "^"){
                                                 // Fail loud on a compacted `^<id>` GET_ADDRESS. This is a
@@ -3409,7 +3412,7 @@ class XChainDecoder {
                                                 // otherwise valid, this delegated dispenser is simply not
                                                 // registered.
                                                 this.parseErrors++
-                                                console.error(`Skipping dispenser in tx ${nextTransactionHash} (txIndex ${lastProcessedTxIndex}): unresolved compacted GET_ADDRESS reference '${getAddress}' - the decoder cannot resolve ^<id> address references, so this delegated dispenser was NOT registered`)
+                                                logger.error(`Skipping dispenser in tx ${nextTransactionHash} (txIndex ${lastProcessedTxIndex}): unresolved compacted GET_ADDRESS reference '${getAddress}' - the decoder cannot resolve ^<id> address references, so this delegated dispenser was NOT registered`)
                                             } else {
                                                 // The dispenser operates on GET_ADDRESS when a delegated
                                                 // address is given, otherwise on the tx SOURCE (indexer
@@ -3560,7 +3563,7 @@ class XChainDecoder {
                             }
                         } else {
                             if ((parseResult["data"].length > 0) && (parseResult["source"] == null)){
-                                console.error(`Skipping tx ${nextTransactionHash}: XChain data found but source address could not be resolved`)
+                                logger.error(`Skipping tx ${nextTransactionHash}: XChain data found but source address could not be resolved`)
                             }
                         }
                     }
@@ -3583,7 +3586,7 @@ class XChainDecoder {
                 // Below the gate this is a no-op; the block-start call already ran.
                 if (expireDispensersAtBlockEnd &&
                     (await this.db.deleteOpenDispensers(nextBlockHeight, block.timestamp)) !== true){
-                    console.error(`deleteOpenDispensers failed at end of block ${nextBlockHeight}; block rolled back, retrying`)
+                    logger.error(`deleteOpenDispensers failed at end of block ${nextBlockHeight}; block rolled back, retrying`)
                     await resetAfterRollback()
                     continue main_parsing
                 }
@@ -3603,7 +3606,7 @@ class XChainDecoder {
                         // window and leave a hole in the decoded chain. Reset to the last
                         // durably committed block and retry, mirroring the block-decode
                         // recovery path above.
-                        console.error(`Commit failed at block ${nextBlockHeight}; resetting to last committed block and retrying`)
+                        logger.error(`Commit failed at block ${nextBlockHeight}; resetting to last committed block and retrying`)
                         lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
                         lastProcessedTxIndex = await this.db.getLastTxIndex()
                         blocksQuantity = 0
@@ -3647,7 +3650,7 @@ class XChainDecoder {
                     if (msLeft > 0){
                         let msPerBlockFormatted = this.millisecondsToTimeString(msPerBlock)
                         let msLeftFormatted = this.millisecondsToTimeString(msLeft)
-                        console.log("Last block time ("+msPerBlockFormatted+"). ETA: "+msLeftFormatted)
+                        logger.info("Last block time ("+msPerBlockFormatted+"). ETA: "+msLeftFormatted)
                     }
                     
                     blocksQuantity = -1
@@ -3705,8 +3708,8 @@ class XChainDecoder {
                 this.nodeMempoolUpdatedAt = Date.now()
 
             } catch (error) {
-                console.log(error)
-                console.log("There were problems getting the mempool, trying again later.", error)
+                logger.info(error)
+                logger.info(formatLogLine("There were problems getting the mempool, trying again later.", error))
                 this.mempoolBusy = false
                 return
             }
@@ -3733,8 +3736,8 @@ class XChainDecoder {
                     nextTxsHex = await this.connector.getRawTransactions(nextRawMempoolChunk)
 
                 } catch (err) {
-                    console.error(`mempool: failed to fetch raw transactions for batch starting at index ${i}: `, err)
-                    console.error("Skipping batch and continuing...", err)
+                    logger.error(formatLogLine(`mempool: failed to fetch raw transactions for batch starting at index ${i}: `, err))
+                    logger.error(formatLogLine("Skipping batch and continuing...", err))
                     i = i + MEMPOOL_BATCH_SIZE
                     await this.sleep(1000)
                     continue
@@ -3752,7 +3755,7 @@ class XChainDecoder {
                         nextTx = this.xchainBlockDecoder.transactionFromHex(nextTxHex)
                     } catch (err) {
                         this.parseErrors++
-                        console.error(`Mempool: failed to parse tx hex (batch index ${nextTxHexIndex}): `, err)
+                        logger.error(formatLogLine(`Mempool: failed to parse tx hex (batch index ${nextTxHexIndex}): `, err))
                         continue
                     }
 
@@ -3780,7 +3783,7 @@ class XChainDecoder {
                         // mempool update cycle. Skip just the tx; it is retried on the
                         // next cycle anyway since it never reaches the database.
                         this.parseErrors++
-                        console.error(`Mempool: parseTransaction failed for tx ${nextTransactionHash}, skipping:`, err)
+                        logger.error(formatLogLine(`Mempool: parseTransaction failed for tx ${nextTransactionHash}, skipping:`, err))
                         continue
                     }
 
@@ -3828,7 +3831,7 @@ class XChainDecoder {
 
             // nodeMempoolCount, not rawMempool.length: the db diff empties and refills
             // rawMempool in place, so by here its length is the new-arrival count.
-            console.log("Mempool updated!"
+            logger.info("Mempool updated!"
                 + " Transactions (" + nodeMempoolCount + " in mempool, " + newArrivalsCount + " new, " + validTransactionsCount + " valid, " + deletedTransactionsCount + " less) [" + timeString + "]")
             } finally {
                 // Always clear the busy flag, even if a DB or parse operation above threw.
@@ -3837,39 +3840,47 @@ class XChainDecoder {
                 this.mempoolBusy = false
             }
         } else {
-            console.log("Mempool is still busy")
+            logger.info("Mempool is still busy")
         }
     }
     
 }
 
+// The class IS the export, and everything below hangs off it. Attached with one
+// Object.assign rather than a run of `module.exports.X =` lines: `module.exports`
+// already IS the class here, so the two spellings are the same assignment, and
+// one of them leaves the file with a single export shape. No call site changes,
+// because `require('./XChainDecoder').X` still reads the same property.
+Object.assign(XChainDecoder, {
+    // Exported for the cross-service regression suite, which asserts this equals the
+    // encoder's compiled-push guard and the canonical protocol constant.
+    MAX_ACTION_DATA_LENGTH,
+    // Exported for the compiled-push-size conformance test, which pins this formula
+    // against bitcoin.script.compile and the encoder's identical helper.
+    compiledPushSize,
+    // Exported so the same conformance test can pin the OP_PUSHDATA2 overhead by NAME
+    // against the canonical protocol constant.
+    OP_RETURN_PUSH_OVERHEAD,
+    // Exported so a regression test can pin it >= the deepest per-chain reorg window.
+    DISPENSER_EXPIRE_SAFE_DEPTH,
+    nodeStillCatchingUp,
+    // Exported so the funding-fee-output collision regression test can assert attributed
+    // funding outputs are stored at vout + FUNDING_VOUT_BASE (never colliding with real vouts).
+    FUNDING_VOUT_BASE,
+    // Exported for the DOGE large-output bufferutils-patch self-check regression test.
+    bigIntBufferutilsActive,
+    // Exported for the malformed-AuxPoW fallback regression test.
+    AUXPOW_REASSEMBLE_AFTER,
+    // Exported for the alias-canonicalization tests and so the
+    // ActionManifestConformance test can pin VALID_ACTION_NAMES/ACTION_ALIASES.
+    canonicalizeActionPayload,
+    VALID_ACTION_NAMES,
+    ACTION_ALIASES,
+    // Taproot envelope: the per-encoding payload ceiling and the per-chain
+    // recognition-height map, exported for the cross-service conformance suites
+    // (encoder/docs copies must stay byte-equal).
+    ENVELOPE_MAX_PAYLOAD,
+    ENVELOPE_RECOGNITION_ACTIVATION,
+});
+
 module.exports = XChainDecoder
-// Exported for the cross-service regression suite, which asserts this equals the
-// encoder's compiled-push guard and the canonical protocol constant.
-module.exports.MAX_ACTION_DATA_LENGTH = MAX_ACTION_DATA_LENGTH
-// Exported for the compiled-push-size conformance test, which pins this formula
-// against bitcoin.script.compile and the encoder's identical helper.
-module.exports.compiledPushSize = compiledPushSize
-// Exported so the same conformance test can pin the OP_PUSHDATA2 overhead by NAME
-// against the canonical protocol constant.
-module.exports.OP_RETURN_PUSH_OVERHEAD = OP_RETURN_PUSH_OVERHEAD
-// Exported so a regression test can pin it >= the deepest per-chain reorg window.
-module.exports.DISPENSER_EXPIRE_SAFE_DEPTH = DISPENSER_EXPIRE_SAFE_DEPTH
-module.exports.nodeStillCatchingUp = nodeStillCatchingUp
-// Exported so the funding-fee-output collision regression test can assert attributed
-// funding outputs are stored at vout + FUNDING_VOUT_BASE (never colliding with real vouts).
-module.exports.FUNDING_VOUT_BASE = FUNDING_VOUT_BASE
-// Exported for the DOGE large-output bufferutils-patch self-check regression test.
-module.exports.bigIntBufferutilsActive = bigIntBufferutilsActive
-// Exported for the malformed-AuxPoW fallback regression test.
-module.exports.AUXPOW_REASSEMBLE_AFTER = AUXPOW_REASSEMBLE_AFTER
-// Exported for the alias-canonicalization tests and so the
-// ActionManifestConformance test can pin VALID_ACTION_NAMES/ACTION_ALIASES.
-module.exports.canonicalizeActionPayload = canonicalizeActionPayload
-module.exports.VALID_ACTION_NAMES = VALID_ACTION_NAMES
-module.exports.ACTION_ALIASES = ACTION_ALIASES
-// Taproot envelope: the per-encoding payload ceiling and the per-chain
-// recognition-height map, exported for the cross-service conformance suites
-// (encoder/docs copies must stay byte-equal).
-module.exports.ENVELOPE_MAX_PAYLOAD = ENVELOPE_MAX_PAYLOAD
-module.exports.ENVELOPE_RECOGNITION_ACTIVATION = ENVELOPE_RECOGNITION_ACTIVATION

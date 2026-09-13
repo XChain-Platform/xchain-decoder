@@ -20,6 +20,9 @@
 
 const axios = require('axios');
 const config = require('./config');
+const { format: formatLogLine } = require('node:util');
+const { getLogger } = require('./observability');
+const logger = getLogger();
 
 // Read an integer env var, falling back on anything that is not a clean integer.
 // `??` only substitutes for null/undefined, so a present-but-empty value (a bare
@@ -32,12 +35,12 @@ const config = require('./config');
 function envInt(raw, fallback, name, min = 1) {
     const s = (raw === undefined || raw === null) ? '' : String(raw).trim()
     if (s === '') {
-        if (raw !== undefined && raw !== null) console.warn(`[config] ${name} is set but empty; using ${fallback}`)
+        if (raw !== undefined && raw !== null) logger.warn(`[config] ${name} is set but empty; using ${fallback}`)
         return fallback
     }
     const n = /^-?\d+$/.test(s) ? Number(s) : NaN
     if (!Number.isInteger(n) || n < min) {
-        console.warn(`[config] ${name}="${s}" is not an integer >= ${min}; using ${fallback}`)
+        logger.warn(`[config] ${name}="${s}" is not an integer >= ${min}; using ${fallback}`)
         return fallback
     }
     return n
@@ -47,7 +50,7 @@ axios.defaults.timeout = envInt(process.env.NODE_RPC_TIMEOUT, 30000, 'NODE_RPC_T
 
 // Sanitize an axios error before it is logged or re-thrown. Every RPC call passes
 // `auth: { username: rpcUser, password: rpcPassword }`, and axios attaches the request
-// config to the thrown error, so `console.error(msg, error)` serializes NODE_USER /
+// config to the thrown error, so `logger.error(formatLogLine(msg, error))` serializes NODE_USER /
 // NODE_PASSWORD into the decoder logs (util.inspect walks error.config.auth). Scrub the
 // credential-bearing fields IN PLACE so neither this logger nor any upstream handler that
 // re-logs the re-thrown error can leak them, and return a compact, credential-free string
@@ -399,7 +402,7 @@ class BlockchainConnector {
             const failing = this.url
             this.activeEndpointIndex = (this.activeEndpointIndex + 1) % this.endpoints.length
             this.connectionFailures = 0
-            console.warn(`RPC endpoint ${failing} unreachable (${code} x${this.failoverThreshold}); failing over to ${this.url}`)
+            logger.warn(`RPC endpoint ${failing} unreachable (${code} x${this.failoverThreshold}); failing over to ${this.url}`)
         }
     }
 
@@ -454,12 +457,12 @@ class BlockchainConnector {
             } catch (error) {
                 if (error.code === 'ECONNABORTED') {
                     tries = tries - 1
-                    console.log(`Getting timeout trying to get ${label}, trying again...`)
+                    logger.info(`Getting timeout trying to get ${label}, trying again...`)
                     lastErrorSummary = sanitizeRpcError(error)
                     await this.backoffOnTimeout()
                 } else {
                     this.rpcErrors++
-                    console.error(`Error getting ${label}:`, sanitizeRpcError(error));
+                    logger.error(formatLogLine(`Error getting ${label}:`, sanitizeRpcError(error)));
                     throw error;
                 }
             }
@@ -665,9 +668,9 @@ class BlockchainConnector {
                         // node's own error object if it sent one rather than swallowing it.
                         const rpcError = response.data?.error
                         if (rpcError) {
-                            console.error(`getRawTransaction: node error for txid ${txid}: code ${rpcError.code} ${rpcError.message}`)
+                            logger.error(`getRawTransaction: node error for txid ${txid}: code ${rpcError.code} ${rpcError.message}`)
                         } else {
-                            console.log(`getRawTransaction: no result for txid ${txid} (evicted/confirmed?)`)
+                            logger.info(`getRawTransaction: no result for txid ${txid} (evicted/confirmed?)`)
                         }
                         resolve(null);
                         return
@@ -680,12 +683,12 @@ class BlockchainConnector {
                     // retries and rejecting the whole Promise.all batch. Read the code before any
                     // sanitize call, since sanitizeRpcError scrubs error.response in place.
                     if (error.response?.data?.error?.code === -5) {
-                        console.log(`getRawTransaction: tx not found (RPC -5) for txid ${txid} (evicted/confirmed?)`)
+                        logger.info(`getRawTransaction: tx not found (RPC -5) for txid ${txid} (evicted/confirmed?)`)
                         resolve(null)
                         return
                     }
                     if (error.code === 'ECONNABORTED') {
-                        console.log("Getting timeout trying to get raw transaction, trying again...")
+                        logger.info("Getting timeout trying to get raw transaction, trying again...")
                     }
                     // Work queue depth exceeded: back off longer before retrying.
                     // Bitcoin/Litecoin Core signal this with HTTP 500 + a JSON body
@@ -709,7 +712,7 @@ class BlockchainConnector {
                     // contract by logging the sanitized cause on each attempt instead
                     // of silently burning all retries.
                     if (!isTimeout && !isQueueFull) {
-                        console.error(`getRawTransaction: attempt ${tries}/${maxTries} for txid ${txid} failed: HTTP ${httpStatus !== undefined ? httpStatus : 'n/a'} rpcCode ${rpcCode !== undefined ? rpcCode : 'n/a'}: ${lastErrorSummary}`)
+                        logger.error(`getRawTransaction: attempt ${tries}/${maxTries} for txid ${txid} failed: HTTP ${httpStatus !== undefined ? httpStatus : 'n/a'} rpcCode ${rpcCode !== undefined ? rpcCode : 'n/a'}: ${lastErrorSummary}`)
                     }
                     await this.sleep(isQueueFull ? 5000 : 500)
                 }
@@ -775,13 +778,20 @@ class BlockchainConnector {
     }
 }
 
+// The class IS the export and the helpers hang off it, attached in one place so
+// the file has a single export shape. `module.exports` already IS the class
+// here, so this is the same assignment the run of property lines made, and
+// `require('./blockchain_connector').skipAuxPow` still reads the same property.
+Object.assign(BlockchainConnector, {
+    // Exported for the malformed-AuxPoW reassembly regression test.
+    encodeVarintHex,
+    // Exported for the cross-repo strip-parity test.
+    stripAuxPowFromBlockHex,
+    skipAuxPow,
+    // Exported for the env-parsing regression test.
+    envInt,
+    // Exported so the reachability reducer can be tested without a connector or a node.
+    nodeReachabilityFrom,
+});
+
 module.exports = BlockchainConnector
-// Exported for the malformed-AuxPoW reassembly regression test.
-module.exports.encodeVarintHex = encodeVarintHex
-// Exported for the cross-repo strip-parity test.
-module.exports.stripAuxPowFromBlockHex = stripAuxPowFromBlockHex
-module.exports.skipAuxPow = skipAuxPow
-// Exported for the env-parsing regression test.
-module.exports.envInt = envInt
-// Exported so the reachability reducer can be tested without a connector or a node.
-module.exports.nodeReachabilityFrom = nodeReachabilityFrom

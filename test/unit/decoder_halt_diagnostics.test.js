@@ -141,29 +141,27 @@ describe('REORG_HALT: a halt the marker cannot record still leaves a record', fu
     // returned false, markReorgHalted handed that straight back, haltReorg discarded
     // it, and the one structured record said marker_persisted=true regardless.
     it('reports marker_persisted=false when the durable write is refused, and still aborts', async function () {
-        const errors = []
-        const realError = console.error
-        console.error = (...a) => { errors.push(a.map(String).join(' ')) }
         let attempts = 0
-        try {
-            const decoder = haltingDecoder({ markReorgHalted: async () => { attempts++; return false } })
-            await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/,
-                'a marker failure must never mask or replace the abort')
+        const decoder = haltingDecoder({ markReorgHalted: async () => { attempts++; return false } })
+        await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/,
+            'a marker failure must never mask or replace the abort')
 
-            const outcome = linesFor('REORG_HALT_MARKER')
-            assert.strictEqual(outcome.length, 1)
-            assert.ok(outcome[0].includes('marker_persisted=false'),
-                'a refused write must never report as persisted: ' + outcome[0])
-            assert.strictEqual(attempts, 2, 'a refused write is retried once on a fresh connection')
-            assert.ok(outcome[0].includes('attempts=2'), outcome[0])
-            assert.strictEqual(decoder.getReorgHaltStatus().marker_persisted, false)
-            assert.strictEqual(decoder.getReorgHaltStatus().halted, true)
-        } finally {
-            console.error = realError
-        }
-        const critical = errors.filter((l) => l.includes('could NOT be persisted'))
+        const outcome = linesFor('REORG_HALT_MARKER')
+        assert.strictEqual(outcome.length, 1)
+        assert.ok(outcome[0].includes('marker_persisted=false'),
+            'a refused write must never report as persisted: ' + outcome[0])
+        assert.strictEqual(attempts, 2, 'a refused write is retried once on a fresh connection')
+        assert.ok(outcome[0].includes('attempts=2'), outcome[0])
+        assert.strictEqual(decoder.getReorgHaltStatus().marker_persisted, false)
+        assert.strictEqual(decoder.getReorgHaltStatus().halted, true)
+
+        // Read the operator line off the SINK, not off console.error. The halt
+        // path now goes through the one logger like everything else, so the
+        // shipper this suite already installs is where the line lands; a
+        // console capture would see nothing and report the line as missing.
+        const critical = sink.lines.filter((l) => l.includes('could NOT be persisted'))
         assert.strictEqual(critical.length, 1,
-            'the only live evidence of an unrecorded halt must be logged: ' + JSON.stringify(errors))
+            'the only live evidence of an unrecorded halt must be logged: ' + JSON.stringify(sink.lines))
         assert.ok(/full resync/i.test(critical[0]),
             'the line must name the required operator action: ' + critical[0])
         assert.ok(/not a valid bootstrap source/i.test(critical[0]), critical[0])

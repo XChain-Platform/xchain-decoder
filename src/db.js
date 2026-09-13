@@ -24,6 +24,8 @@ const util    = require('./util')
 const { getLogger } = require('./observability')
 const config = require('./config');
 const crypto = require('crypto');
+const { format: formatLogLine } = require('node:util');
+const logger = getLogger();
 
 const SATOSHIS_DECIMALS = 8
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/
@@ -165,7 +167,7 @@ class Database {
                 attempts++;
                 if(attempts >= maxAttempts)
                     throw new Error('Failed to verify database ' + this.dbName + ' after ' + maxAttempts + ' attempts: ' + (e.code || e.message));
-                console.error('Error checking if database ' + this.dbName + ' exists (attempt ' + attempts + '/' + maxAttempts + '):', e)
+                logger.error(formatLogLine('Error checking if database ' + this.dbName + ' exists (attempt ' + attempts + '/' + maxAttempts + '):', e))
                 await util.sleep(5000);
             }
         }
@@ -180,7 +182,7 @@ class Database {
             port:     this.port
         };
         let databaseCreated = false;
-        console.log("Creating " + this.dbName + " database!");
+        logger.info("Creating " + this.dbName + " database!");
         // Bounded retry (~75s of patience): see verifyDatabase above. A persistent auth or
         // config failure throws so the process exits and the container can be restarted,
         // rather than looping and re-logging the same error forever.
@@ -196,7 +198,7 @@ class Database {
                 attempts++;
                 if(attempts >= maxAttempts)
                     throw new Error('Failed to create database ' + this.dbName + ' after ' + maxAttempts + ' attempts: ' + (e.code || e.message));
-                console.error('Error creating database ' + this.dbName + ' (attempt ' + attempts + '/' + maxAttempts + '):', e)
+                logger.error(formatLogLine('Error creating database ' + this.dbName + ' (attempt ' + attempts + '/' + maxAttempts + '):', e))
                 await util.sleep(5000);
             }
         }
@@ -222,14 +224,14 @@ class Database {
                 }
             }
         } catch(e){
-            console.log('Error listing tables in ' + this.dbName + ': ' + (e && e.sqlMessage ? e.sqlMessage : e));
+            logger.info('Error listing tables in ' + this.dbName + ': ' + (e && e.sqlMessage ? e.sqlMessage : e));
             util.throwError('Error while listing tables in ' + this.dbName);
             try { await db.release(); } catch(_){}
             return false;
         }
         // One summary line instead of a per-table pair; error paths below still
         // name the table, so a failure stays attributable.
-        console.log('Verifying database and tables...');
+        logger.info('Verifying database and tables...');
         let checked = 0;
         let created = 0;
         try {
@@ -260,7 +262,7 @@ class Database {
                             created++;
                         }
                     } catch(e){
-                        console.log('Error verifying table ' + table + ': ' + e.code);
+                        logger.info('Error verifying table ' + table + ': ' + e.code);
                         util.throwError('Error while trying to verify ' + table + ' table exists!');
                         return false;
                     }
@@ -282,7 +284,7 @@ class Database {
             // deleteAndCompareTxsNotInList, which has a consequence on a LATER query.
             try { await db.release(); } catch(_){}
         }
-        console.log('Database and tables verified (' + checked + ' tables, ' + created + ' created).');
+        logger.info('Database and tables verified (' + checked + ' tables, ' + created + ' created).');
         return true;
     }
 
@@ -352,7 +354,7 @@ class Database {
         try {
             const got = await conn.query('SELECT GET_LOCK(?, 30) AS l', [lockName]);
             if(!got || !got[0] || String(got[0].l) !== '1'){
-                console.warn('runMigrations: could not acquire lock ' + lockName + ' (another process is migrating). Skipping this run.');
+                logger.warn('runMigrations: could not acquire lock ' + lockName + ' (another process is migrating). Skipping this run.');
                 // Flag the skip so callers do NOT read the empty applied/pending shape as a
                 // completed run. The operator CLI must not print "done" and exit 0 when nothing
                 // was even examined; the schema may still be un-migrated.
@@ -403,7 +405,7 @@ class Database {
                             const fromList = rebase ? [].concat(rebase.from) : [];
                             if(rebase && fromList.includes(appliedByName.get(file)) && checksum === rebase.to){
                                 await conn.query('UPDATE schema_migrations SET checksum = ? WHERE name = ?', [checksum, file]);
-                                console.log('runMigrations: rebaselined checksum for ' + file + ' (reviewed retag, executable SQL unchanged).');
+                                logger.info('runMigrations: rebaselined checksum for ' + file + ' (reviewed retag, executable SQL unchanged).');
                                 continue;
                             }
                             // Migrations are immutable once applied. A changed checksum means
@@ -432,7 +434,7 @@ class Database {
                                     : ' Review manually (set MIGRATION_STRICT_CHECKSUM=0 / omit to downgrade to a non-fatal log).';
                                 throw new Error(msg + hint);
                             }
-                            console.error(msg + ' Continuing on the diverged schema - review manually.');
+                            logger.error(msg + ' Continuing on the diverged schema - review manually.');
                         }
                         continue;
                     }
@@ -461,12 +463,12 @@ class Database {
                             [file, checksum, mode]
                         );
                         result.baselined.push(file);
-                        console.log('runMigrations: BASELINED ' + file + ' (recorded as applied, no statement run): ' + preconditionSkip);
+                        logger.info('runMigrations: BASELINED ' + file + ' (recorded as applied, no statement run): ' + preconditionSkip);
                         continue;
                     }
 
                     if(mode !== 'auto' && !includeManual){
-                        console.log('runMigrations: PENDING (gated, mode=' + mode + '): ' + file + '; apply with `node src/migrate.js`.');
+                        logger.info('runMigrations: PENDING (gated, mode=' + mode + '): ' + file + '; apply with `node src/migrate.js`.');
                         result.pending.push(file);
                         continue;
                     }
@@ -492,7 +494,7 @@ class Database {
                             // path and opt-in strict mode fail closed, passive startup logs and
                             // proceeds so a backdated commit cannot black-start the fleet.
                             if(includeManual || config.MIGRATION_STRICT_CHECKSUM === '1') throw new Error(msg);
-                            console.error(msg + ' Applying it anyway at this position - review manually.');
+                            logger.error(msg + ' Applying it anyway at this position - review manually.');
                         }
                     }
 
@@ -511,11 +513,11 @@ class Database {
                                 'Re-tag the file `-- xchain:migration mode=manual` and apply it deliberately via `node src/migrate.js`.');
                         }
                     }
-                    console.log('runMigrations: applying ' + file + ' (mode=' + mode + ', ' + statements.length + ' statement(s))...');
+                    logger.info('runMigrations: applying ' + file + ' (mode=' + mode + ', ' + statements.length + ' statement(s))...');
                     try {
                         for(const stmt of statements){ await conn.query(stmt); }
                     } catch(err){
-                        console.error('runMigrations: FAILED applying ' + file + ': ' + (err && err.message));
+                        logger.error('runMigrations: FAILED applying ' + file + ': ' + (err && err.message));
                         throw err;   // schema is in an unknown state; block startup
                     }
                     await conn.query(
@@ -523,7 +525,7 @@ class Database {
                         [file, checksum, mode]
                     );
                     result.applied.push(file);
-                    console.log('runMigrations: applied ' + file);
+                    logger.info('runMigrations: applied ' + file);
                 }
             } finally {
                 try { await conn.query('SELECT RELEASE_LOCK(?)', [lockName]); } catch(_){}
@@ -532,8 +534,8 @@ class Database {
             try { await conn.release(); } catch(_){}
         }
 
-        if(result.applied.length) console.log('runMigrations: ' + result.applied.length + ' migration(s) applied to ' + this.dbName + '.');
-        if(result.pending.length) console.log('runMigrations: ' + result.pending.length + ' manual migration(s) pending for ' + this.dbName + '; run `node src/migrate.js` to apply.');
+        if(result.applied.length) logger.info('runMigrations: ' + result.applied.length + ' migration(s) applied to ' + this.dbName + '.');
+        if(result.pending.length) logger.info('runMigrations: ' + result.pending.length + ' manual migration(s) pending for ' + this.dbName + '; run `node src/migrate.js` to apply.');
 
         return result;
     }
@@ -1103,7 +1105,7 @@ class Database {
             // That silently disables ALL column-drift reconciliation for this table.
             // Make it loud so a malformed source file can't hide. (Non-fatal: the
             // parse-coverage unit test is the hard guardrail.)
-            console.warn('Schema drift check SKIPPED for `' + table + '`: could not parse columns from ' + file + ': expected a `CREATE TABLE ... ) ENGINE ...` definition. Additive column/nullability drift will NOT auto-reconcile for this table until the SQL source is fixed.');
+            logger.warn('Schema drift check SKIPPED for `' + table + '`: could not parse columns from ' + file + ': expected a `CREATE TABLE ... ) ENGINE ...` definition. Additive column/nullability drift will NOT auto-reconcile for this table until the SQL source is fixed.');
             return;
         }
         const live = await db.query(
@@ -1115,10 +1117,10 @@ class Database {
             const cur = liveByName.get(exp.name.toLowerCase());
             if(!cur){
                 if(exp.notNull && !exp.hasDefault){
-                    console.log('Schema drift on ' + table + '.' + exp.name + ': column missing live, source is NOT NULL with no DEFAULT; cannot backfill existing rows safely. Skipping; add manually.');
+                    logger.info('Schema drift on ' + table + '.' + exp.name + ': column missing live, source is NOT NULL with no DEFAULT; cannot backfill existing rows safely. Skipping; add manually.');
                     continue;
                 }
-                console.log('Schema drift on ' + table + '.' + exp.name + ': column missing live. Adding column from SQL source.');
+                logger.info('Schema drift on ' + table + '.' + exp.name + ': column missing live. Adding column from SQL source.');
                 await db.query('ALTER TABLE `' + table + '` ADD COLUMN ' + exp.definition);
                 continue;
             }
@@ -1131,10 +1133,10 @@ class Database {
                 const isPk      = String(cur.COLUMN_KEY || '').toUpperCase() === 'PRI';
                 const isAutoInc = /auto_increment/i.test(String(cur.EXTRA || ''));
                 if(isPk || isAutoInc){
-                    console.log('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL - SKIPPING relax (' + (isPk ? 'PRIMARY KEY' : 'AUTO_INCREMENT') + ' column; a bare MODIFY would strip attributes).');
+                    logger.info('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL - SKIPPING relax (' + (isPk ? 'PRIMARY KEY' : 'AUTO_INCREMENT') + ' column; a bare MODIFY would strip attributes).');
                     continue;
                 }
-                console.log('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL. Relaxing constraint.');
+                logger.info('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL. Relaxing constraint.');
                 await db.query('ALTER TABLE `' + table + '` MODIFY `' + exp.name + '` ' + cur.COLUMN_TYPE + ' NULL');
             }
         }
@@ -1196,29 +1198,29 @@ class Database {
                 const colList = idx.columns.map(c => '`' + c + '`').join(', ');
 
                 if(!idx.unique){
-                    console.log('Schema drift on ' + table + ': missing index ' + idx.name + ' (' + key + '). Adding.');
+                    logger.info('Schema drift on ' + table + ': missing index ' + idx.name + ' (' + key + '). Adding.');
                     await db.query('ALTER TABLE `' + table + '` ADD INDEX `' + idx.name + '` (' + colList + ')');
                     continue;
                 }
                 try {
-                    console.log('Schema drift on ' + table + ': missing UNIQUE index ' + idx.name + ' (' + key + '). Adding.');
+                    logger.info('Schema drift on ' + table + ': missing UNIQUE index ' + idx.name + ' (' + key + '). Adding.');
                     await db.query('ALTER TABLE `' + table + '` ADD UNIQUE INDEX `' + idx.name + '` (' + colList + ')');
                 } catch(e){
                     const dup = e && (Number(e.errno) === 1062 || /duplicate entry/i.test(e.message || ''));
-                    if(!dup){ console.log('  could not add UNIQUE index ' + idx.name + ' on ' + table + ': ' + (e && e.message)); continue; }
-                    console.log('  ' + table + '.' + idx.name + ': duplicate rows block the UNIQUE index; deduping (keep newest id per ' + key + ') then retrying.');
+                    if(!dup){ logger.info('  could not add UNIQUE index ' + idx.name + ' on ' + table + ': ' + (e && e.message)); continue; }
+                    logger.info('  ' + table + '.' + idx.name + ': duplicate rows block the UNIQUE index; deduping (keep newest id per ' + key + ') then retrying.');
                     if(!(await this.dedupeForUniqueIndex(db, table, idx.columns))) continue;
                     try {
                         await db.query('ALTER TABLE `' + table + '` ADD UNIQUE INDEX `' + idx.name + '` (' + colList + ')');
-                        console.log('  added ' + idx.name + ' after dedupe.');
+                        logger.info('  added ' + idx.name + ' after dedupe.');
                     } catch(e2){
-                        console.log('  ' + table + '.' + idx.name + ' still failing after dedupe; leaving as-is: ' + (e2 && e2.message));
+                        logger.info('  ' + table + '.' + idx.name + ' still failing after dedupe; leaving as-is: ' + (e2 && e2.message));
                     }
                 }
             }
         } catch(e){
             // Never abort startup over index reconciliation.
-            console.warn('reconcileTableIndexes(' + file + ') failed (non-fatal): ' + (e && e.message));
+            logger.warn('reconcileTableIndexes(' + file + ') failed (non-fatal): ' + (e && e.message));
         }
     }
 
@@ -1235,12 +1237,12 @@ class Database {
             "SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema = ? AND table_name = ? AND COLUMN_NAME = 'id'",
             [this.dbName, table])).length > 0;
         if(!hasId){
-            console.log('  cannot dedupe ' + table + ' (no `id` column to pick a surviving row); skipping unique-index add.');
+            logger.info('  cannot dedupe ' + table + ' (no `id` column to pick a surviving row); skipping unique-index add.');
             return false;
         }
         const on  = columns.map(c => 't1.`' + c + '` = t2.`' + c + '`').join(' AND ');
         const res = await db.query('DELETE t1 FROM `' + table + '` t1 JOIN `' + table + '` t2 ON ' + on + ' AND t1.id < t2.id');
-        console.log('  deduped ' + table + ': removed ' + (res && res.affectedRows != null ? res.affectedRows : '?') + ' stale duplicate row(s).');
+        logger.info('  deduped ' + table + ': removed ' + (res && res.affectedRows != null ? res.affectedRows : '?') + ' stale duplicate row(s).');
         return true;
     }
 
@@ -1307,7 +1309,7 @@ class Database {
                 let delay      = Math.min(baseDelay * Math.pow(2, attempts - 1), maxDelay);
                 let jitter     = Math.floor(Math.random() * delay * 0.3);
                 let totalDelay = delay + jitter;
-                console.error('MariaDB connection attempt ' + attempts + '/' + maxAttempts + ' failed. Retrying in ' + totalDelay + 'ms...', e)
+                logger.error(formatLogLine('MariaDB connection attempt ' + attempts + '/' + maxAttempts + ' failed. Retrying in ' + totalDelay + 'ms...', e))
                 connection = null;
                 await util.sleep(totalDelay);
             }
@@ -1376,7 +1378,7 @@ class Database {
 
     async endTransaction(){
         if (this.transactionConnection != null){
-            console.log("rolling back")
+            logger.info("rolling back")
             await this.transactionConnection.rollback()
             await this.transactionConnection.release()
             this.transactionConnection = null
@@ -1393,7 +1395,7 @@ class Database {
                 this.releaseTransactionLock()
                 return true
             } catch (e){
-                console.error("There was an error trying to commit a transaction: " + e.code)
+                logger.error("There was an error trying to commit a transaction: " + e.code)
                 await this.endTransaction()
             }
         }
@@ -1502,7 +1504,7 @@ class Database {
             // lock still held and the connection still open, deadlocking every
             // later caller that waits on the lock. Roll back and release the
             // lock before propagating so the reorg retry path can recover.
-            console.error('Error deleting block by index:', err);
+            logger.error(formatLogLine('Error deleting block by index:', err));
             if (this.transactionConnection){
                 await this.endTransaction()
             }
@@ -1539,7 +1541,7 @@ class Database {
                 return -1
             } catch (err) {
                 lastErr = err
-                console.error(`Error selecting max block height (attempt ${attempt}/${MAX_ATTEMPTS}):`, err);
+                logger.error(formatLogLine(`Error selecting max block height (attempt ${attempt}/${MAX_ATTEMPTS}):`, err));
             } finally {
                 if (this.transactionConnection == null){
                     await connection.release()
@@ -1570,7 +1572,7 @@ class Database {
                 return -1
             } catch (err) {
                 lastErr = err
-                console.error(`Error selecting max tx index (attempt ${attempt}/${MAX_ATTEMPTS}):`, err);
+                logger.error(formatLogLine(`Error selecting max tx index (attempt ${attempt}/${MAX_ATTEMPTS}):`, err));
             } finally {
                 if (this.transactionConnection == null){
                     await connection.release()
@@ -1609,7 +1611,7 @@ class Database {
                 }
             } catch (err) {
                 lastErr = err
-                console.error(`Error selecting block by index ${blockIndex} (attempt ${attempt}/${MAX_ATTEMPTS}):`, err);
+                logger.error(formatLogLine(`Error selecting block by index ${blockIndex} (attempt ${attempt}/${MAX_ATTEMPTS}):`, err));
             } finally {
                 if (this.transactionConnection == null){
                     await connection.release()
@@ -1651,7 +1653,7 @@ class Database {
             
             return true
         } catch (err) {
-            console.error('Error inserting block:', err);
+            logger.error(formatLogLine('Error inserting block:', err));
             if (this.transactionConnection){
                 await this.endTransaction()
             }
@@ -1687,7 +1689,7 @@ class Database {
                 return null
             }
         } catch (err) {
-            console.error('Error selecting a transaction from the db:', err);
+            logger.error(formatLogLine('Error selecting a transaction from the db:', err));
             return false;
         } finally {
             if (this.transactionConnection == null){
@@ -1750,7 +1752,7 @@ class Database {
             if (err.errno == 1062){
                 return this.DUPLICATED_TRANSACTION
             } else {
-                console.error('Error inserting transaction:', err);
+                logger.error(formatLogLine('Error inserting transaction:', err));
                 if (this.transactionConnection){
                     await this.endTransaction()
                 }
@@ -1810,7 +1812,7 @@ class Database {
             if (err.errno == 1062) {
                 return this.DUPLICATED_TRANSACTION
             } else {
-                console.error('Error inserting mempool transaction:', err);
+                logger.error(formatLogLine('Error inserting mempool transaction:', err));
                 if (this.transactionConnection) {
                     await this.endTransaction()
                 }
@@ -1885,7 +1887,7 @@ class Database {
 
     //This is only used in tests
     async dropDatabase(){
-        console.log("Droping database")
+        logger.info("Droping database")
         
         const dropBlockTable = "DROP TABLE IF EXISTS blocks"
         const dropTransactionTable = "DROP TABLE IF EXISTS transactions"
@@ -1923,7 +1925,7 @@ class Database {
             if(rows.length > 0)
                 id = rows[0].id;
         } catch (err) {
-            console.error('Error looking up hash record id in index_transactions table:', err);
+            logger.error(formatLogLine('Error looking up hash record id in index_transactions table:', err));
         } finally {
             if (this.transactionConnection == null){
                 await db.release()
@@ -1949,7 +1951,7 @@ class Database {
             try {
                 await db.query(query, [hash]);
             } catch (err) {
-                console.error('Error trying to create hash record in index_transactions table:', err);
+                logger.error(formatLogLine('Error trying to create hash record in index_transactions table:', err));
             } finally {
                 if (this.transactionConnection == null){
                     await db.release()
@@ -1969,7 +1971,7 @@ class Database {
             if(rows.length > 0)
                 id = rows[0].id;
         } catch (err) {
-            console.error('Error looking up address record id in index_addresses table:', err);
+            logger.error(formatLogLine('Error looking up address record id in index_addresses table:', err));
         } finally {
             if (this.transactionConnection == null){
                 await db.release()
@@ -1992,7 +1994,7 @@ class Database {
             try {
                 await db.query(query, [address]);
             } catch (err) {
-                console.error('Error trying to create address record in index_addresses table:', err);
+                logger.error(formatLogLine('Error trying to create address record in index_addresses table:', err));
             } finally {
                 if (this.transactionConnection == null){
                     await db.release()
@@ -2009,7 +2011,7 @@ class Database {
             let rows = await db.query("SELECT 1 FROM pubkeys WHERE address_id=? LIMIT 1", [addressId])
             return rows.length > 0
         } catch (err) {
-            console.error('Error checking pubkey existence:', err)
+            logger.error(formatLogLine('Error checking pubkey existence:', err))
             return false
         } finally {
             if (this.transactionConnection == null){
@@ -2024,7 +2026,7 @@ class Database {
             await db.query("INSERT IGNORE INTO pubkeys (address_id, pubkey) VALUES (?, ?)", [addressId, pubkey])
             return true
         } catch (err) {
-            console.error('Error inserting pubkey:', err)
+            logger.error(formatLogLine('Error inserting pubkey:', err))
             return false
         } finally {
             if (this.transactionConnection == null){
@@ -2068,7 +2070,7 @@ class Database {
             if (err.errno == 1062){
                 return this.DUPLICATED_TRANSACTION
             } else {
-                console.error('Error inserting event:', err);
+                logger.error(formatLogLine('Error inserting event:', err));
                 if (this.transactionConnection){
                     // Roll back + free the transaction lock, matching every sibling
                     // insert. releaseConnection() alone leaves the transaction open on
@@ -2169,7 +2171,7 @@ class Database {
 
             return { transactionsDeleted }
         } catch (err) {
-            console.error('Error diffing mempool_transactions:', err);
+            logger.error(formatLogLine('Error diffing mempool_transactions:', err));
             return { transactionsDeleted: 0 }
         } finally {
             // Drop the temp table so a pooled connection never leaks it into an
@@ -2248,7 +2250,7 @@ class Database {
             if (err.errno == 1062){
                 return this.DUPLICATED_TRANSACTION
             } else {
-                console.error('Error inserting transaction:', err);
+                logger.error(formatLogLine('Error inserting transaction:', err));
                 if (this.transactionConnection){
                     await this.endTransaction()
                 }
@@ -2359,7 +2361,7 @@ class Database {
             await connection.query(query, [newExpiration, blockIndex, sourceAddress, sourceAddress, blockIndex])
             return true
         } catch (err) {
-            console.error('Error extending dispenser expiration:', err);
+            logger.error(formatLogLine('Error extending dispenser expiration:', err));
             if (this.transactionConnection){
                 await this.endTransaction()
             }
@@ -2422,7 +2424,7 @@ class Database {
                 return rows[0].oracle_address
             return null
         } catch (err) {
-            console.error('Error reading dispenser oracle address:', err);
+            logger.error(formatLogLine('Error reading dispenser oracle address:', err));
             if (this.transactionConnection){
                 await this.endTransaction()
             }
@@ -2481,7 +2483,7 @@ class Database {
             }
             return addresses
         } catch (err) {
-            console.error('Error reading dispenser oracle addresses:', err);
+            logger.error(formatLogLine('Error reading dispenser oracle addresses:', err));
             if (this.transactionConnection){
                 await this.endTransaction()
             }
@@ -2525,7 +2527,7 @@ class Database {
             if (err.errno == 1062){
                 return this.DUPLICATED_TRANSACTION
             } else {
-                console.error('Error inserting dispense output:', err);
+                logger.error(formatLogLine('Error inserting dispense output:', err));
                 if (this.transactionConnection){
                     await this.endTransaction()
                 }
@@ -2551,7 +2553,7 @@ class Database {
             if(rows.length > 0)
                 return rows[0]["dispensers_count"] > 0
         } catch (err) {
-            console.error('Error looking up address record id in index_addresses table:', err);
+            logger.error(formatLogLine('Error looking up address record id in index_addresses table:', err));
         } finally {
             if (this.transactionConnection == null){
                 await db.release()
@@ -2629,7 +2631,7 @@ class Database {
                     addresses.add(row["address"])
             }
         } catch (err) {
-            console.error('Error loading open dispenser addresses:', err);
+            logger.error(formatLogLine('Error loading open dispenser addresses:', err));
             return null;
         } finally {
             if (this.transactionConnection == null){
@@ -2670,7 +2672,7 @@ class Database {
             if (err.errno == 1062){
                 return this.DUPLICATED_TRANSACTION
             } else {
-                console.error('Error soft-expiring dispensers:', err);
+                logger.error(formatLogLine('Error soft-expiring dispensers:', err));
                 if (this.transactionConnection){
                     await this.endTransaction()
                 }
@@ -2702,7 +2704,7 @@ class Database {
             await connection.query(query, [safeHeight])
             return true
         } catch (err) {
-            console.error('Error purging expired dispensers:', err);
+            logger.error(formatLogLine('Error purging expired dispensers:', err));
             if (this.transactionConnection){
                 await this.endTransaction()
             }
