@@ -11,7 +11,7 @@ COPY ./src /XChainDecoder/src
 # readUInt64 throws "RangeError: value out of range" for output values above
 # ~9.007e15 (2^53), which Dogecoin mainnet exceeds (>~90.07M DOGE in one output).
 # Mirrors xchain-utxo-tracker's identical patch. Belt-and-braces: the same patch
-# is also applied in-process at require time (src/applyBufferutilsPatch.js), so
+# is also applied in-process at require time (src/apply_bufferutils_patch.js), so
 # non-Docker runs and node_modules refreshes are covered even without this COPY.
 COPY ./src/bufferutils.js /XChainDecoder/node_modules/bitcoinjs-lib/src/bufferutils.js
 # No .env is baked in: configuration reaches the container as environment
