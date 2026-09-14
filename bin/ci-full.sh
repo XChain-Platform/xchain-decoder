@@ -107,6 +107,13 @@ run_tier "drift: coin consensus-pin conformance" node -e '
   console.log("consensus pin conformance OK (testnet, regtest)");
 '
 
+# --- identity pin (this gate only; no ci.yml job runs it) ------------------
+# bin/pins/identity.json holds the sha256 of the vendored coin files and the
+# two twin fixtures. Nothing else reads it, so this tier re-hashes the tree
+# against it and fails on any moved, missing or unreadable file instead of
+# letting the pin go stale.
+run_tier "identity pin (vendored coins, twin fixtures)" node bin/pin-identity.js --check
+
 # --- job: docker-suites ----------------------------------------------------
 # Both tiers own their venue lifecycle inside their npm script (compose up
 # --wait, mocha, down -v on any exit), so this transcribes the two run-steps
