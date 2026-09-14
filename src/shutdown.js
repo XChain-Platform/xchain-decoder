@@ -34,6 +34,8 @@
  *
  ********************************************************************/
 
+const config = require('./config');
+
 // Hard-exit budget for the whole drain. xchain-node stops a decoder with a
 // 120 s budget (and stamps it on the container as --stop-timeout), so the
 // default sits under that: an overrun that ends in our own logged exit is
@@ -45,7 +47,7 @@ const DEFAULT_SHUTDOWN_TIMEOUT_MS = 100000;
 
 function resolveTimeoutMs(timeoutMs, env){
     if(Number.isFinite(timeoutMs) && timeoutMs > 0) return timeoutMs;
-    const raw = parseInt((env || process.env).SHUTDOWN_TIMEOUT_MS, 10);
+    const raw = parseInt((env || config).SHUTDOWN_TIMEOUT_MS, 10);
     return (Number.isFinite(raw) && raw > 0) ? raw : DEFAULT_SHUTDOWN_TIMEOUT_MS;
 }
 

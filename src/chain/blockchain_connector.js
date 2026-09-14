@@ -46,7 +46,7 @@ function envInt(raw, fallback, name, min = 1) {
     return n
 }
 
-axios.defaults.timeout = envInt(process.env.NODE_RPC_TIMEOUT, 30000, 'NODE_RPC_TIMEOUT')
+axios.defaults.timeout = envInt(config.NODE_RPC_TIMEOUT, 30000, 'NODE_RPC_TIMEOUT')
 
 // Sanitize an axios error before it is logged or re-thrown. Every RPC call passes
 // `auth: { username: rpcUser, password: rpcPassword }`, and axios attaches the request

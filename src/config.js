@@ -21,13 +21,13 @@
  * name with different fallbacks disagree with each other silently. One home
  * makes the whole surface one file long.
  *
- * WHAT LIVES HERE, AND WHAT DOES NOT. A name whose value is used as it comes
- * out of the environment belongs here. A name whose read site coerces it (a
- * parsed integer with a floor, a string compared against a list) does NOT
- * move here on its own, because the coerced TYPE is a decision about the
- * setting rather than a mechanical relocation, and moving the read without
- * the decision would hand callers a string where they expected a number.
- * Those stay at their read site until somebody makes that call deliberately.
+ * WHAT LIVES HERE, AND WHAT DOES NOT. Every name lives here, as the raw
+ * string the environment holds (or undefined). Coercion does NOT: a read site
+ * that parses a number, applies a floor or derives a fallback from another
+ * setting keeps that code where it is and only takes the raw value from here.
+ * The coerced TYPE is a decision about the setting, so moving it would be a
+ * change of behaviour; moving only the read is not, because a raw value read
+ * here is byte-for-byte the value the site used to read itself.
  *
  * EVERY VALUE IS READ LIVE, ON EACH ACCESS, and that is deliberate rather
  * than lazy. Several of these knobs are documented and tested as retunable
@@ -58,11 +58,16 @@ function currentEnvironment() {
     return {
     // codemod:env-entries
         DB_QUERY_TIMEOUT: process.env.DB_QUERY_TIMEOUT,
+    DECODER_POLL_SILENT_MS: process.env.DECODER_POLL_SILENT_MS,
     DECODER_RPC_CONCURRENCY: process.env.DECODER_RPC_CONCURRENCY,
+    DECODER_STALL_ALERT_MS: process.env.DECODER_STALL_ALERT_MS,
+    DECODER_STALL_FETCH_ATTEMPTS: process.env.DECODER_STALL_FETCH_ATTEMPTS,
     MIGRATION_STRICT_CHECKSUM: process.env.MIGRATION_STRICT_CHECKSUM,
     NODE_FAILOVER_THRESHOLD: process.env.NODE_FAILOVER_THRESHOLD,
+    NODE_RPC_TIMEOUT: process.env.NODE_RPC_TIMEOUT,
     NODE_URL_FALLBACK: process.env.NODE_URL_FALLBACK ?? '',
         RPC_TIMEOUT_RETRY_DELAY_MS: process.env.RPC_TIMEOUT_RETRY_DELAY_MS,
+    SHUTDOWN_TIMEOUT_MS: process.env.SHUTDOWN_TIMEOUT_MS,
     };
 }
 

@@ -19,6 +19,7 @@
  ********************************************************************/
 
 const util = require('./util')
+const config = require('./config')
 const coins = require('./coins')
 const crypto = require('crypto');
 const bs58check = require('bs58check')
@@ -63,7 +64,7 @@ const REORG_HALT_PROBE_INTERVAL_MS = 60000
 // clear the slowest legitimate single-block commit and a deep reorg rollback on the
 // slowest host, because the consumer of the signal restarts the container. Override per
 // host with DECODER_STALL_ALERT_MS.
-const STALL_ALERT_MS = Number(process.env.DECODER_STALL_ALERT_MS) || 900000
+const STALL_ALERT_MS = Number(config.DECODER_STALL_ALERT_MS) || 900000
 // How long the parse loop may go without completing an ITERATION before /live calls the
 // decoder dead. Distinct from STALL_ALERT_MS, which measures chain PROGRESS: a caught-up
 // decoder makes no progress for hours and is perfectly healthy, so only iteration count
@@ -72,12 +73,12 @@ const STALL_ALERT_MS = Number(process.env.DECODER_STALL_ALERT_MS) || 900000
 // through the loop, including the outage path (catch -> sleep(3000) -> continue) and the
 // slowest single-block commit, returns to the loop top far inside it. Override per host
 // with DECODER_POLL_SILENT_MS.
-const POLL_SILENT_MS = Number(process.env.DECODER_POLL_SILENT_MS) || (2 * STALL_ALERT_MS)
+const POLL_SILENT_MS = Number(config.DECODER_POLL_SILENT_MS) || (2 * STALL_ALERT_MS)
 // Consecutive failed fetch attempts at ONE height (3s apart) that count as wedged on
 // their own. _fetchErrorCount resets to 0 on any successful fetch and on a height
 // change, so unlike the elapsed-time window it cannot be tripped by slow-but-working
 // block processing. 20 attempts is ~1 minute of retrying the same height.
-const STALL_FETCH_ATTEMPTS = Number(process.env.DECODER_STALL_FETCH_ATTEMPTS) || 20
+const STALL_FETCH_ATTEMPTS = Number(config.DECODER_STALL_FETCH_ATTEMPTS) || 20
 const MEMPOOL_BATCH_SIZE = 1000
 
 const MAGIC_WORD = "XCHN"
