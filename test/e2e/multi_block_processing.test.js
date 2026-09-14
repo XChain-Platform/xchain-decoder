@@ -31,12 +31,12 @@ const {
     getMempoolTransaction
 } = require('./helpers/assertions')
 
+// ---------------------------------------------------------------
+// C1: Sequential block processing
+// ---------------------------------------------------------------
 describe('E2E: Multi-Block Processing', function () {
     this.timeout(0)
 
-    // ---------------------------------------------------------------
-    // C1: Sequential block processing
-    // ---------------------------------------------------------------
     describe('sequential block processing', () => {
 
         it('C1.1: should process 10 sequential blocks with distinct ACTIONs', async () => {
@@ -68,6 +68,13 @@ describe('E2E: Multi-Block Processing', function () {
                 )
             }
         })
+    })
+})
+
+describe('E2E: Multi-Block Processing', function () {
+    this.timeout(0)
+
+    describe('sequential block processing', () => {
 
         it('C1.2: blocks table should have no gaps across sequential blocks', async () => {
             const startBlock = await global.db.getLastBlockIndex()
@@ -120,10 +127,14 @@ describe('E2E: Multi-Block Processing', function () {
             assert.strictEqual(found2.data, action2)
         })
     })
+})
 
-    // ---------------------------------------------------------------
-    // C2: Bulk catch-up after decoder restart
-    // ---------------------------------------------------------------
+// ---------------------------------------------------------------
+// C2: Bulk catch-up after decoder restart
+// ---------------------------------------------------------------
+describe('E2E: Multi-Block Processing', function () {
+    this.timeout(0)
+
     describe('bulk catch-up processing', () => {
 
         it('C2.1: decoder should catch up after being stopped and restarted', async () => {
@@ -169,10 +180,14 @@ describe('E2E: Multi-Block Processing', function () {
             assert.strictEqual(lastBlock, chainTip, 'Decoder should have caught up to chain tip')
         })
     })
+})
 
-    // ---------------------------------------------------------------
-    // C3: Mempool processing
-    // ---------------------------------------------------------------
+// ---------------------------------------------------------------
+// C3: Mempool processing
+// ---------------------------------------------------------------
+describe('E2E: Multi-Block Processing', function () {
+    this.timeout(0)
+
     describe('mempool processing', () => {
 
         it('C3.1: should detect XCHN transaction in mempool', async () => {
@@ -210,6 +225,13 @@ describe('E2E: Multi-Block Processing', function () {
                 await conn.release()
             }
         })
+    })
+})
+
+describe('E2E: Multi-Block Processing', function () {
+    this.timeout(0)
+
+    describe('mempool processing', () => {
 
         it('C3.2: mempool tx should be confirmed after mining', async () => {
             // Broadcast without mining
@@ -230,10 +252,14 @@ describe('E2E: Multi-Block Processing', function () {
             assert.strictEqual(tx.data, action)
         })
     })
+})
 
-    // ---------------------------------------------------------------
-    // C4: Chain reorganization
-    // ---------------------------------------------------------------
+// ---------------------------------------------------------------
+// C4: Chain reorganization
+// ---------------------------------------------------------------
+describe('E2E: Multi-Block Processing', function () {
+    this.timeout(0)
+
     describe('chain reorganization', () => {
 
         it('C4.1: should detect and handle a chain reorg', async () => {
@@ -274,6 +300,13 @@ describe('E2E: Multi-Block Processing', function () {
             const lastBlock = await global.db.getLastBlockIndex()
             assert.ok(lastBlock >= info.blocks, 'Decoder should be at or past the new chain tip')
         })
+    })
+})
+
+describe('E2E: Multi-Block Processing', function () {
+    this.timeout(0)
+
+    describe('chain reorganization', () => {
 
         it('C4.2: blocks table should be consistent after reorg', async () => {
             // Depends on the reorg triggered by the previous test; spot-checks that
