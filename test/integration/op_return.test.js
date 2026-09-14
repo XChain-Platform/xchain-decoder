@@ -76,6 +76,12 @@ describe('OP_RETURN Integration', () => {
             assert.strictEqual(tx.data, action)
             assert.strictEqual(tx.source, funded.address)
         })
+    })
+})
+
+describe('OP_RETURN Integration', () => {
+
+    describe('ACTION string decoding', () => {
 
         it('should decode an ISSUE action with all fields', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
@@ -129,6 +135,9 @@ describe('OP_RETURN Integration', () => {
             assert.strictEqual(tx.data, action)
         })
     })
+})
+
+describe('OP_RETURN Integration', () => {
 
     describe('rawData (second script push)', () => {
 
@@ -145,6 +154,9 @@ describe('OP_RETURN Integration', () => {
             // the data field should contain the primary action string
         })
     })
+})
+
+describe('OP_RETURN Integration', () => {
 
     describe('data verified via indexer contract query', () => {
 
