@@ -27,12 +27,12 @@ const {
     getDecoderBlockData
 } = require('./helpers/assertions')
 
+// ---------------------------------------------------------------
+// D1: Non-XCHN transaction rejection
+// ---------------------------------------------------------------
 describe('E2E: Error Handling', function () {
     this.timeout(0)
 
-    // ---------------------------------------------------------------
-    // D1: Non-XCHN transaction rejection
-    // ---------------------------------------------------------------
     describe('non-XCHN transaction rejection', () => {
 
         it('D1.1:should not store a plain BTC transfer (no OP_RETURN)', async () => {
@@ -86,9 +86,14 @@ describe('E2E: Error Handling', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // D2: Corrupted XCHN payloads
-    // ---------------------------------------------------------------
+})
+
+// ---------------------------------------------------------------
+// D2: Corrupted XCHN payloads
+// ---------------------------------------------------------------
+describe('E2E: Error Handling', function () {
+    this.timeout(0)
+
     describe('corrupted XCHN payloads', () => {
 
         it('D2.1:truncated payload should not crash decoder', async () => {
@@ -138,9 +143,14 @@ describe('E2E: Error Handling', function () {
         })
     })
 
-    // ---------------------------------------------------------------
-    // D3: Decoder stability after mixed valid/invalid blocks
-    // ---------------------------------------------------------------
+})
+
+// ---------------------------------------------------------------
+// D3: Decoder stability after mixed valid/invalid blocks
+// ---------------------------------------------------------------
+describe('E2E: Error Handling', function () {
+    this.timeout(0)
+
     describe('decoder stability', () => {
 
         it('D3.1:should process valid tx after a block with only invalid data', async () => {
@@ -185,6 +195,13 @@ describe('E2E: Error Handling', function () {
             assert.strictEqual(validTx.data, action)
             await assertNoTransaction(global.db, invalidHash2)
         })
+    })
+})
+
+describe('E2E: Error Handling', function () {
+    this.timeout(0)
+
+    describe('decoder stability', () => {
 
         it('D3.3:should handle empty blocks gracefully', async () => {
             // Mine blocks with no user transactions (just coinbase)
