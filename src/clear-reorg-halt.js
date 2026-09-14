@@ -43,6 +43,8 @@
 
 'use strict'
 
+const Database = require('./db.js')
+
 const EXIT = {
     OK: 0,
     FAILED: 1,
@@ -158,7 +160,6 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
 
 async function main(){
     require('dotenv').config()
-    const Database = require('./db.js')
     const host = process.env.DECODER_DB_HOST
     const port = process.env.DECODER_DB_PORT
     const name = process.env.DECODER_DB_NAME
