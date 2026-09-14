@@ -67,10 +67,48 @@ function buildTestBlock(transactions) {
     return block.toHex(false)
 }
 
-describe('Fuzz: Full Pipeline', function () {
-    this.timeout(300000)
-    let reporter
+function buildMixedTransactions(txid) {
+    const transactions = []
 
+    // OP_RETURN tx
+    transactions.push(buildOpReturnTx(randomActionString()))
+
+    // Multisig-like tx (manually built)
+    const msTx = new bitcoin.Transaction()
+    msTx.version = 2
+    msTx.addInput(PREV_HASH, 2)
+    msTx.ins[0].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
+    const pubkey1 = Buffer.concat([Buffer.from([0x02]), crypto.randomBytes(32)])
+    const pubkey2 = Buffer.concat([Buffer.from([0x02]), crypto.randomBytes(32)])
+    const pubkey3 = Buffer.concat([Buffer.from([0x03]), crypto.randomBytes(32)])
+    try {
+        msTx.addOutput(bitcoin.script.compile([
+            bitcoin.opcodes.OP_1, pubkey1, pubkey2, pubkey3,
+            bitcoin.opcodes.OP_3, bitcoin.opcodes.OP_CHECKMULTISIG
+        ]), 1000)
+        msTx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
+        transactions.push(msTx)
+    } catch (e) {
+        // Skip if compile fails
+    }
+
+    // P2SH marker tx
+    const p2shTx = new bitcoin.Transaction()
+    p2shTx.version = 2
+    p2shTx.addInput(PREV_HASH, 3)
+    const redeemScript = bitcoin.script.compile([Buffer.from('fuzz data'), bitcoin.opcodes.OP_DROP, bitcoin.opcodes.OP_TRUE])
+    p2shTx.ins[0].script = bitcoin.script.compile([crypto.randomBytes(72), crypto.randomBytes(33), redeemScript])
+    const marker = encrypt(Buffer.from('XCHNp2sh'), txid)
+    p2shTx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, marker]), 0)
+    p2shTx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
+    transactions.push(p2shTx)
+
+    return transactions
+}
+
+let reporter
+
+function addReporterHooks() {
     before(() => {
         reporter = new FuzzReporter('pipeline')
     })
@@ -86,8 +124,13 @@ describe('Fuzz: Full Pipeline', function () {
         assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
         assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
     })
+}
 
-    // --- Pipeline: random ACTION txs through block parsing ---
+// --- Pipeline: random ACTION txs through block parsing ---
+describe('Fuzz: Full Pipeline', function () {
+    this.timeout(300000)
+    addReporterHooks()
+
     describe('block → parseTransaction pipeline with random ACTIONs', () => {
         it(`should handle ${ITERATIONS} blocks with random ACTION txs`, async () => {
             const blockDecoder = new XChainBlockDecoder('bitcoin-regtest')
@@ -138,8 +181,13 @@ describe('Fuzz: Full Pipeline', function () {
             }
         })
     })
+})
 
-    // --- Pipeline: mutated block hex ---
+// --- Pipeline: mutated block hex ---
+describe('Fuzz: Full Pipeline', function () {
+    this.timeout(300000)
+    addReporterHooks()
+
     describe('mutated block hex through pipeline', () => {
         it(`should handle ${ITERATIONS} mutated block hex strings`, async () => {
             const blockDecoder = new XChainBlockDecoder('bitcoin-regtest')
@@ -189,8 +237,13 @@ describe('Fuzz: Full Pipeline', function () {
             }
         })
     })
+})
 
-    // --- Pipeline: mixed encoding types in one block ---
+// --- Pipeline: mixed encoding types in one block ---
+describe('Fuzz: Full Pipeline', function () {
+    this.timeout(300000)
+    addReporterHooks()
+
     describe('mixed encoding types in single block', () => {
         it(`should handle ${Math.min(ITERATIONS, 500)} blocks with mixed encoding`, async () => {
             const blockDecoder = new XChainBlockDecoder('bitcoin-regtest')
@@ -198,41 +251,7 @@ describe('Fuzz: Full Pipeline', function () {
             for (let i = 0; i < Math.min(ITERATIONS, 500); i++) {
                 const decoder = createDecoder()
                 const txid = Buffer.from(PREV_HASH).reverse().toString('hex')
-
-                const transactions = []
-
-                // OP_RETURN tx
-                transactions.push(buildOpReturnTx(randomActionString()))
-
-                // Multisig-like tx (manually built)
-                const msTx = new bitcoin.Transaction()
-                msTx.version = 2
-                msTx.addInput(PREV_HASH, 2)
-                msTx.ins[0].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
-                const pubkey1 = Buffer.concat([Buffer.from([0x02]), crypto.randomBytes(32)])
-                const pubkey2 = Buffer.concat([Buffer.from([0x02]), crypto.randomBytes(32)])
-                const pubkey3 = Buffer.concat([Buffer.from([0x03]), crypto.randomBytes(32)])
-                try {
-                    msTx.addOutput(bitcoin.script.compile([
-                        bitcoin.opcodes.OP_1, pubkey1, pubkey2, pubkey3,
-                        bitcoin.opcodes.OP_3, bitcoin.opcodes.OP_CHECKMULTISIG
-                    ]), 1000)
-                    msTx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
-                    transactions.push(msTx)
-                } catch (e) {
-                    // Skip if compile fails
-                }
-
-                // P2SH marker tx
-                const p2shTx = new bitcoin.Transaction()
-                p2shTx.version = 2
-                p2shTx.addInput(PREV_HASH, 3)
-                const redeemScript = bitcoin.script.compile([Buffer.from('fuzz data'), bitcoin.opcodes.OP_DROP, bitcoin.opcodes.OP_TRUE])
-                p2shTx.ins[0].script = bitcoin.script.compile([crypto.randomBytes(72), crypto.randomBytes(33), redeemScript])
-                const marker = encrypt(Buffer.from('XCHNp2sh'), txid)
-                p2shTx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, marker]), 0)
-                p2shTx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
-                transactions.push(p2shTx)
+                const transactions = buildMixedTransactions(txid)
 
                 try {
                     const blockHex = buildTestBlock(transactions)
@@ -265,8 +284,13 @@ describe('Fuzz: Full Pipeline', function () {
             }
         })
     })
+})
 
-    // --- Pipeline: parseRawTransaction with bit-flipped real tx hex ---
+// --- Pipeline: parseRawTransaction with bit-flipped real tx hex ---
+describe('Fuzz: Full Pipeline', function () {
+    this.timeout(300000)
+    addReporterHooks()
+
     describe('parseRawTransaction with bit-flipped real txs', () => {
         // Real tx hex seeds from the test suite
         const SEED_TXHEX = [
