@@ -43,6 +43,7 @@
 const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
+const handlerSource = require('../../bin/indexer_handler_source.js');
 
 const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
         BATCH_SUB_COMMAND_FORMATS,
@@ -56,9 +57,11 @@ const DOCS_CONSTANTS = process.env.XCHAIN_DOCS_DIR
 const INDEXER_CHANGES = process.env.XCHAIN_INDEXER_DIR
     ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'protocol_changes.js')
     : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'protocol_changes.js');
-const INDEXER_BATCH = process.env.XCHAIN_INDEXER_DIR
-    ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'actions', 'batch.js')
-    : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'actions', 'batch.js');
+const INDEXER_ROOT = process.env.XCHAIN_INDEXER_DIR
+    || path.join(__dirname, '..', '..', '..', 'xchain-indexer');
+// Both spellings: the handler is src/actions/batch.js, or src/actions/batch/ once the
+// indexer split it, and the FORMAT registrations this mirrors can sit in any part of it.
+const INDEXER_BATCH = handlerSource.entry(INDEXER_ROOT, 'batch');
 const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
 // 2026-08-16 00:00:00 UTC, armed on mainnet by the operator on 2026-08-14 (pre-launch) at
@@ -217,7 +220,7 @@ describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
         // Capture must see sub-commands in exactly the FORMATs the indexer dispatches. A
         // format listed here but not there captures for commands nothing executes; one
         // listed there but not here leaves the original defect open for that format.
-        const src = fs.readFileSync(INDEXER_BATCH, 'utf8');
+        const src = handlerSource.source(INDEXER_ROOT, 'batch');
         const registered = [...src.matchAll(/this\.formats\[(\d+)\]\s*=/g)]
             .map(m => parseInt(m[1], 10)).sort((a, b) => a - b);
         assert.ok(registered.length > 0, 'xchain-indexer/src/actions/batch.js must register a FORMAT');

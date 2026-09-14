@@ -62,9 +62,13 @@
 const fs   = require('fs');
 const path = require('path');
 
+const handlerSource = require('./indexer_handler_source.js');
+
 const INDEXER_ROOT = process.env.XCHAIN_INDEXER_DIR ||
     path.join(__dirname, '..', '..', 'xchain-indexer');
-const INDEXER_BATCH   = path.join(INDEXER_ROOT, 'src', 'actions', 'batch.js');
+// Resolved rather than spelled: a split handler is src/actions/batch/ with the entry at
+// index.js and no flat file beside it (see bin/indexer_handler_source.js).
+const INDEXER_BATCH   = handlerSource.entry(INDEXER_ROOT, 'batch');
 const INDEXER_CHANGES = path.join(INDEXER_ROOT, 'src', 'protocol_changes.js');
 
 const VENDORED = path.join(__dirname, '../src/protocol/indexer_batch_limits.js');
@@ -268,6 +272,7 @@ function main(){
 if (require.main === module) main();
 
 module.exports = {
+    INDEXER_ROOT,
     INDEXER_BATCH,
     INDEXER_CHANGES,
     VENDORED,

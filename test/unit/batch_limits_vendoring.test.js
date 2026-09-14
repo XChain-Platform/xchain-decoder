@@ -87,7 +87,10 @@ function siblingOrSkip(ctx, file) {
 function realBatch(opts) {
     opts = opts || {};
     const Batch           = require(sync.INDEXER_BATCH);
-    const Utility         = require(path.join(path.dirname(path.dirname(sync.INDEXER_BATCH)), 'utility.js'));
+    // From the checkout root, not from the handler path: the handler is one directory deeper
+    // once the indexer splits it into src/actions/batch/, and walking up from it lands in
+    // src/actions/ instead of src/.
+    const Utility         = require(path.join(sync.INDEXER_ROOT, 'src', 'utility.js'));
     const ProtocolChanges = require(sync.INDEXER_CHANGES);
 
     const util = new Utility({ config: {}, indexerDb: {}, decoderDb: {}, util: {} });
