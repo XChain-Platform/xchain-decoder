@@ -73,6 +73,9 @@ describe('CE-07: Concurrent Instance Behavior', function () {
 
         assert.ok(result !== false, 'Should handle duplicate gracefully')
     })
+})
+
+describe('CE-07: Concurrent Instance Behavior', function () {
 
     it('insertBlock should rollback on non-duplicate errors', async function () {
         const db = new Database('localhost', 3306, 'test_chaos_db', 'root', '')
@@ -124,6 +127,9 @@ describe('CE-07: Concurrent Instance Behavior', function () {
 
         assert.ok(result !== false, 'Should handle duplicate dispenser gracefully')
     })
+})
+
+describe('CE-07: Concurrent Instance Behavior', function () {
 
     it('two database instances should have independent transaction locks', async function () {
         const db1 = new Database('localhost', 3306, 'test_chaos_db', 'root', '')
@@ -176,6 +182,9 @@ describe('CE-07: Concurrent Instance Behavior', function () {
         assert.ok(!has(/INSERT INTO events/i), 'Plain delete should not write a REORG event')
         assert.ok(mockConn.commit.called, 'Should commit transaction')
     })
+})
+
+describe('CE-07: Concurrent Instance Behavior', function () {
 
     it('deleteBlockByIndex writes the REORG marker inside the same transaction', async function () {
         const db = new Database('localhost', 3306, 'test_chaos_db', 'root', '')
