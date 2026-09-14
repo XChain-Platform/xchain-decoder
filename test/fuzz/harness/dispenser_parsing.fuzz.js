@@ -132,10 +132,9 @@ function parseDispenserData(decodedData) {
     return { shouldInsert: false, fields: null }
 }
 
-describe('Fuzz: DISPENSER parsing', function () {
-    this.timeout(120000)
-    let reporter
+let reporter
 
+function addReporterHooks() {
     before(() => {
         reporter = new FuzzReporter('dispenserParsing')
     })
@@ -151,8 +150,13 @@ describe('Fuzz: DISPENSER parsing', function () {
         assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
         assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
     })
+}
 
-    // --- Random DISPENSER strings ---
+// --- Random DISPENSER strings ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
     describe('random DISPENSER strings', () => {
         it(`should handle ${ITERATIONS} random DISPENSER strings`, async () => {
             for (let i = 0; i < ITERATIONS; i++) {
@@ -175,8 +179,13 @@ describe('Fuzz: DISPENSER parsing', function () {
             }
         })
     })
+})
 
-    // --- Hypothesis H5: edge-case pipe counts ---
+// --- Hypothesis H5: edge-case pipe counts ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
     describe('H5: boundary pipe counts', () => {
         const cases = [
             'DISPENSER',
@@ -202,8 +211,13 @@ describe('Fuzz: DISPENSER parsing', function () {
             })
         }
     })
+})
 
-    // --- Malformed version field ---
+// --- Malformed version field ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
     describe('malformed version field', () => {
         const versions = [
             '', '0', '1', '-1', '999', 'abc', 'null', 'undefined', 'NaN',
@@ -225,8 +239,13 @@ describe('Fuzz: DISPENSER parsing', function () {
             })
         }
     })
+})
 
-    // --- Fields containing pipe characters and special chars ---
+// --- Fields containing pipe characters and special chars ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
     describe('fields with special characters', () => {
         it(`should handle ${ITERATIONS} strings with special chars in fields`, async () => {
             for (let i = 0; i < ITERATIONS; i++) {
@@ -258,8 +277,13 @@ describe('Fuzz: DISPENSER parsing', function () {
             }
         })
     })
+})
 
-    // --- Expiration field edge values ---
+// --- Expiration field edge values ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
     describe('expiration field edge values', () => {
         const expirations = [
             '0', '-1', '-999999', String(Number.MAX_SAFE_INTEGER),
@@ -281,8 +305,13 @@ describe('Fuzz: DISPENSER parsing', function () {
             })
         }
     })
+})
 
-    // --- Non-DISPENSER prefixes that are close ---
+// --- Non-DISPENSER prefixes that are close ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
     describe('near-miss DISPENSER prefixes', () => {
         // These do NOT start with 'DISPENSER', so insert should never trigger
         const nonMatching = [
@@ -319,8 +348,13 @@ describe('Fuzz: DISPENSER parsing', function () {
             })
         }
     })
+})
 
-    // --- BATCH with embedded DISPENSER ---
+// --- BATCH with embedded DISPENSER ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
     describe('BATCH-like strings with embedded DISPENSER', () => {
         const batchCases = [
             'DISPENSER|0|A||||||B|||||3600;SEND|0|XCHAIN|1000',
