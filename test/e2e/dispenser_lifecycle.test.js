@@ -29,26 +29,31 @@ const {
     getDecoderBlockData
 } = require('./helpers/assertions')
 
+async function createOpenDispenser() {
+    const funded = await txBuilder.createFundedLegacyAddress()
+    const expiration = Math.floor(Date.now() / 1000) + 86400
+    // A create only opens a dispenser when GIVE_COIN and GET_COIN both name
+    // THIS chain's coin (XChainDecoder.dispenserOpensForThisChain). Field
+    // order is DISPENSER|VERSION|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|
+    // GIVE_OWNERSHIP|GIVE_ESCROW|GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|
+    // FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|
+    // MEMO; these fixtures used a shifted map with token-like coin names, so
+    // no dispenser was ever opened and the whole B tier was asserting
+    // against an empty table.
+    const action = `DISPENSER|0|BTC|GIVE_E2E|1000|||BTC||500|||||${expiration}|||`
+    const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
+    await txBuilder.waitForDecoder(blockIndex)
+    await txBuilder.waitForTransaction(txHash)
+    return { funded, action, txHash }
+}
+
 describe('E2E: DISPENSER Lifecycle', function () {
     this.timeout(0)
 
     describe('full dispenser flow', () => {
 
         it('B1.1: should create dispenser record from DISPENSER|0 action', async () => {
-            const funded = await txBuilder.createFundedLegacyAddress()
-            const expiration = Math.floor(Date.now() / 1000) + 86400
-            // A create only opens a dispenser when GIVE_COIN and GET_COIN both name
-            // THIS chain's coin (XChainDecoder.dispenserOpensForThisChain). Field
-            // order is DISPENSER|VERSION|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|
-            // GIVE_OWNERSHIP|GIVE_ESCROW|GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|
-            // FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|
-            // MEMO; these fixtures used a shifted map with token-like coin names, so
-            // no dispenser was ever opened and the whole B tier was asserting
-            // against an empty table.
-            const action = `DISPENSER|0|BTC|GIVE_E2E|1000|||BTC||500|||||${expiration}|||`
-            const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
-            await txBuilder.waitForDecoder(blockIndex)
-            await txBuilder.waitForTransaction(txHash)
+            const { funded, action, txHash } = await createOpenDispenser()
 
             // Verify transaction stored
             await assertTransaction(global.db, txHash, { data: action, source: funded.address })
@@ -78,6 +83,9 @@ describe('E2E: DISPENSER Lifecycle', function () {
             assert.ok(payRow, 'Payment tx should appear in block data')
             assert.strictEqual(payRow.data, payAction)
         })
+    })
+
+    describe('full dispenser flow', () => {
 
         it('B1.3: dispenser data should appear in indexer contract query', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
@@ -95,6 +103,10 @@ describe('E2E: DISPENSER Lifecycle', function () {
             assert.ok(row.block_time > 0)
         })
     })
+})
+
+describe('E2E: DISPENSER Lifecycle', function () {
+    this.timeout(0)
 
     describe('dispenser expiration', () => {
 
@@ -149,6 +161,10 @@ describe('E2E: DISPENSER Lifecycle', function () {
             await assertDispenserExists(global.db, funded.address)
         })
     })
+})
+
+describe('E2E: DISPENSER Lifecycle', function () {
+    this.timeout(0)
 
     describe('dispenser edge cases', () => {
 
