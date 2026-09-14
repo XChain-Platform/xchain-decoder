@@ -2961,7 +2961,6 @@ class XChainDecoder {
                 }
 
 
-
                 if (blocksQuantity == 0){
                     await this.db.beginTransaction()
                 }

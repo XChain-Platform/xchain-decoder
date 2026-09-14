@@ -28,7 +28,7 @@
  * setting keeps that code where it is and only takes the raw value from here.
  * The coerced TYPE is a decision about the setting, so moving it would be a
  * change of behaviour; moving only the read is not, because a raw value read
- * here is byte-for-byte the value the site used to read itself.
+ * here is byte-for-byte the value the read site would take from process.env itself.
  *
  * EVERY VALUE IS READ LIVE, ON EACH ACCESS, and that is deliberate rather
  * than lazy. Several of these knobs are documented and tested as retunable
