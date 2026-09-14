@@ -22,26 +22,30 @@ const sinon = require('sinon')
 const XChainDecoder = require('../../src/XChainDecoder')
 const { createMockDatabase, createMockConnector, createMinimalBlockHex, captureConsole } = require('./support/helpers')
 
+let decoder
+let mockDb
+let mockConnector
+
+function createDecoder() {
+    decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
+    mockDb = createMockDatabase()
+    mockConnector = createMockConnector()
+    decoder.db = mockDb
+    decoder.connector = mockConnector
+    // Drop the retry backoff without naming a duration. setImmediate still
+    // yields the macrotask the poll loops need, so nothing in this suite is
+    // timed against a fixed sleep a loaded CI machine can overrun.
+    decoder.sleep = () => new Promise(r => setImmediate(r))
+}
+
+function stopDecoder() {
+    decoder.stop()
+}
+
 describe('CE-04: Mid-Transaction Database Failure', function () {
-    let decoder
-    let mockDb
-    let mockConnector
+    beforeEach(createDecoder)
 
-    beforeEach(function () {
-        decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
-        mockDb = createMockDatabase()
-        mockConnector = createMockConnector()
-        decoder.db = mockDb
-        decoder.connector = mockConnector
-        // Drop the retry backoff without naming a duration. setImmediate still
-        // yields the macrotask the poll loops need, so nothing in this suite is
-        // timed against a fixed sleep a loaded CI machine can overrun.
-        decoder.sleep = () => new Promise(r => setImmediate(r))
-    })
-
-    afterEach(function () {
-        decoder.stop()
-    })
+    afterEach(stopDecoder)
 
     it('should retry when insertBlock fails', async function () {
         let insertBlockCalls = 0
@@ -68,6 +72,12 @@ describe('CE-04: Mid-Transaction Database Failure', function () {
         assert.ok(insertBlockCalls >= 2, `Should have retried insertBlock, got ${insertBlockCalls} calls`)
         assert.ok(mockDb.beginTransaction.callCount >= 2, 'Should have started new transactions for retries')
     })
+})
+
+describe('CE-04: Mid-Transaction Database Failure', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('should retry when insertTransaction fails', async function () {
         let insertTxCalls = 0
@@ -103,6 +113,12 @@ describe('CE-04: Mid-Transaction Database Failure', function () {
 
         assert.ok(insertTxCalls >= 2, `Should have retried insertTransaction, got ${insertTxCalls} calls`)
     })
+})
+
+describe('CE-04: Mid-Transaction Database Failure', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('should handle commitTransaction failure and continue', async function () {
         let commitCalls = 0
