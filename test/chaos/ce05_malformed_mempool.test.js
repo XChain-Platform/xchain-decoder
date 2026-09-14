@@ -22,29 +22,33 @@ const sinon = require('sinon')
 const XChainDecoder = require('../../src/XChainDecoder')
 const { createMockDatabase, createMockConnector, captureConsole, stripJsComments } = require('./support/helpers')
 
+let decoder
+let mockDb
+let mockConnector
+
+function createDecoder() {
+    decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
+    mockDb = createMockDatabase()
+    mockConnector = createMockConnector()
+    decoder.db = mockDb
+    // Mempool maintenance runs on mempoolDb, never the block db (M-19). Point it at the same
+    // mock so these mempool-failure cases still exercise the DB-error handling they target.
+    decoder.mempoolDb = mockDb
+    decoder.connector = mockConnector
+    // Drop the retry backoff without naming a duration. setImmediate still
+    // yields the macrotask the poll loops need, so nothing in this suite is
+    // timed against a fixed sleep a loaded CI machine can overrun.
+    decoder.sleep = () => new Promise(r => setImmediate(r))
+}
+
+function stopDecoder() {
+    decoder.stop()
+}
+
 describe('CE-05: Malformed Mempool Transaction', function () {
-    let decoder
-    let mockDb
-    let mockConnector
+    beforeEach(createDecoder)
 
-    beforeEach(function () {
-        decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
-        mockDb = createMockDatabase()
-        mockConnector = createMockConnector()
-        decoder.db = mockDb
-        // Mempool maintenance runs on mempoolDb, never the block db (M-19). Point it at the same
-        // mock so these mempool-failure cases still exercise the DB-error handling they target.
-        decoder.mempoolDb = mockDb
-        decoder.connector = mockConnector
-        // Drop the retry backoff without naming a duration. setImmediate still
-        // yields the macrotask the poll loops need, so nothing in this suite is
-        // timed against a fixed sleep a loaded CI machine can overrun.
-        decoder.sleep = () => new Promise(r => setImmediate(r))
-    })
-
-    afterEach(function () {
-        decoder.stop()
-    })
+    afterEach(stopDecoder)
 
     it('should not crash on invalid transaction hex in mempool', async function () {
         mockConnector.getRawMempool.resolves(['tx1', 'tx2', 'tx3'])
@@ -95,6 +99,12 @@ describe('CE-05: Malformed Mempool Transaction', function () {
         const parseErrors = errors.filter(e => e.includes('failed to parse tx hex'))
         assert.ok(parseErrors.length >= 1, 'Should have at least one parse error for the bad tx')
     })
+})
+
+describe('CE-05: Malformed Mempool Transaction', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('should skip mempool update when mempoolBusy is true', async function () {
         decoder.mempoolBusy = true
@@ -139,6 +149,12 @@ describe('CE-05: Malformed Mempool Transaction', function () {
         assert.ok(batchCalls >= 2, 'Should have attempted at least 2 batches despite first failure')
         assert.strictEqual(decoder.mempoolBusy, false, 'mempoolBusy should be reset')
     })
+})
+
+describe('CE-05: Malformed Mempool Transaction', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('should reset mempoolBusy when deleteAndCompareTxsNotInList throws after the sort phase', async function () {
         // First unguarded post-sort await: a transient DB failure (connection drop,
@@ -184,6 +200,12 @@ describe('CE-05: Malformed Mempool Transaction', function () {
 
         assert.strictEqual(decoder.mempoolBusy, false, 'mempoolBusy must be reset when insertMempoolTransaction throws')
     })
+})
+
+describe('CE-05: Malformed Mempool Transaction', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('should resume mempool tracking on the next tick after a post-sort DB throw', async function () {
         // Tick 1: post-sort DB op throws.
@@ -232,6 +254,12 @@ describe('CE-05: Malformed Mempool Transaction', function () {
         assert.ok(cleared,
             'updateMempool should contain a finally block that resets this.mempoolBusy = false')
     })
+})
+
+describe('CE-05: Malformed Mempool Transaction', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('should verify transactionFromHex is wrapped in try/catch in source', function () {
         const fs = require('fs')
