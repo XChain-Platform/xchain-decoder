@@ -25,7 +25,6 @@ const assert = require('assert')
 const {
     V0_GIVE_COIN_INDEX,
     V0_GET_COIN_INDEX,
-    V0_GET_ADDRESS_INDEX,
     V0_REQUIRED_FIELD_COUNT
 } = require('../../../src/protocol/oracle_fee_output')
 
@@ -160,12 +159,11 @@ function checkDispenserParse(decodedData) {
         return { ok: true, violations: [] }
     }
 
-    // If we get here, the decoder would process it; check field access safety.
-    // Required fields: GIVE_COIN, GET_COIN, GET_ADDRESS. EXPIRATION is optional
-    // (defaulted), so its absence is not a violation.
+    // GIVE_COIN and GET_COIN sit inside the length-gated run and are always
+    // present here. GET_ADDRESS is optional and defaults to the tx source when
+    // omitted, so its absence is expected, not a violation.
     if (parts[V0_GIVE_COIN_INDEX] === undefined) violations.push(`giveCoin (parts[${V0_GIVE_COIN_INDEX}]) is undefined`)
     if (parts[V0_GET_COIN_INDEX] === undefined) violations.push(`getCoin (parts[${V0_GET_COIN_INDEX}]) is undefined`)
-    if (parts[V0_GET_ADDRESS_INDEX] === undefined) violations.push(`getAddress (parts[${V0_GET_ADDRESS_INDEX}]) is undefined`)
 
     return { ok: violations.length === 0, violations }
 }

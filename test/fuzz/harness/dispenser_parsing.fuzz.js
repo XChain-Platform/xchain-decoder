@@ -19,12 +19,59 @@
  */
 
 const assert = require('assert')
-const crypto = require('crypto')
 const { checkDispenserParse, withTimeout } = require('../support/invariants')
-const { randomDispenserString } = require('../support/mutators/structure_aware')
+const { V0_REQUIRED_FIELD_COUNT } = require('../../../src/protocol/oracle_fee_output')
 const FuzzReporter = require('../support/reporter')
 
 const ITERATIONS = parseInt(process.env.FUZZ_ITERATIONS) || 5000
+
+// Deterministic PRNG for this harness's own inputs, seeded from FUZZ_SEED (a
+// fixed default keeps a bare run reproducible too), so a failing input can be
+// replayed with `FUZZ_SEED=<n> npx mocha ...`.
+const FUZZ_SEED = parseInt(process.env.FUZZ_SEED, 10) || 424242
+
+function mulberry32(seed) {
+    let a = seed >>> 0
+    return function () {
+        a |= 0; a = (a + 0x6D2B79F5) | 0
+        let t = Math.imul(a ^ (a >>> 15), 1 | a)
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+}
+
+const rng = mulberry32(FUZZ_SEED)
+
+/** Seeded stand-in for crypto.randomInt(maxExclusive): [0, maxExclusive). */
+function randInt(maxExclusive) {
+    return Math.floor(rng() * maxExclusive)
+}
+
+/** Seeded stand-in for crypto.randomBytes(n).toString('hex'). */
+function randHex(n) {
+    let s = ''
+    for (let i = 0; i < n; i++) s += randInt(256).toString(16).padStart(2, '0')
+    return s
+}
+
+// Mirrors mutators/structure_aware.js's randomDispenserString() field-type
+// distribution, on the seeded RNG above so this harness stays reproducible
+// on its own without reseeding the shared mutator other harnesses also use.
+function seededRandomDispenserString() {
+    const fieldCount = randInt(20)
+    const fields = ['DISPENSER']
+    for (let i = 0; i < fieldCount; i++) {
+        const type = randInt(5)
+        switch (type) {
+            case 0: fields.push(''); break
+            case 1: fields.push(String(randInt(1000000))); break
+            case 2: fields.push(randHex(randInt(20) + 1)); break
+            case 3: fields.push(String(-randInt(1000))); break
+            case 4: fields.push('TICK' + randInt(100)); break
+        }
+    }
+    return fields.join('|')
+}
 
 /**
  * Extracted DISPENSER parsing logic from XChainDecoder.start().
@@ -36,9 +83,12 @@ const ITERATIONS = parseInt(process.env.FUZZ_ITERATIONS) || 5000
  *   10 GET_ADDRESS  11 FIAT_CODE  12 FIAT_AMOUNT  13 ORACLE_ADDRESS
  *   14 EXPIRATION  15 ALLOW_LIST  16 BLOCK_LIST  17 MEMO
  *
- * Required fields end at ORACLE_ADDRESS (index 13), so the gate is length >= 14.
- * EXPIRATION (index 14) is OPTIONAL: an omitted or empty value is defaulted (the
- * decoder substitutes getDefaultExpiration), never treated as a skip.
+ * Required fields end at GET_AMOUNT (index 9), so the gate is length >=
+ * V0_REQUIRED_FIELD_COUNT (10). GET_ADDRESS (index 10) and EXPIRATION (index 14)
+ * are both OPTIONAL: an omitted or empty value is defaulted (GET_ADDRESS falls
+ * back to the tx source, EXPIRATION substitutes getDefaultExpiration), never
+ * treated as a skip. This gate reads the same constant production does; see
+ * hasRequiredDispenserCreateFields in XChainDecoder.js for the field map.
  */
 const DEFAULT_EXPIRATION = 999999999
 
@@ -50,7 +100,7 @@ function parseDispenserData(decodedData) {
     const decodedDataSplit = decodedData.split('|')
     const commandVersion = decodedDataSplit[1]
 
-    if (parseInt(commandVersion) === 0 && decodedDataSplit.length >= 14) {
+    if (parseInt(commandVersion) === 0 && decodedDataSplit.length >= V0_REQUIRED_FIELD_COUNT) {
         const giveCoin = decodedDataSplit[2]
         const getCoin = decodedDataSplit[7]
         const getAddress = decodedDataSplit[10]
@@ -93,6 +143,10 @@ describe('Fuzz: DISPENSER parsing', function () {
     after(() => {
         reporter.printSummary()
         const s = reporter.getSummary()
+        if (s.crashes > 0 || s.invariantViolations > 0 || s.timeouts > 0) {
+            // Reproduce with: FUZZ_SEED=<n> npx mocha --no-config test/fuzz/harness/dispenser_parsing.fuzz.js
+            console.log(`FUZZ_SEED=${FUZZ_SEED} (rerun with this value to reproduce the inputs above)`)
+        }
         assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found; see test/fuzz/crashes/dispenserParsing/`)
         assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
         assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
@@ -102,7 +156,7 @@ describe('Fuzz: DISPENSER parsing', function () {
     describe('random DISPENSER strings', () => {
         it(`should handle ${ITERATIONS} random DISPENSER strings`, async () => {
             for (let i = 0; i < ITERATIONS; i++) {
-                const input = randomDispenserString()
+                const input = seededRandomDispenserString()
                 try {
                     const result = await withTimeout(() => parseDispenserData(input), 1000)
                     const check = checkDispenserParse(input)
@@ -183,10 +237,10 @@ describe('Fuzz: DISPENSER parsing', function () {
                 // Build a DISPENSER string with 13+ fields, some containing special chars
                 const fields = ['DISPENSER', '0']
                 for (let j = 0; j < 15; j++) {
-                    if (crypto.randomInt(3) === 0) {
-                        fields.push(specialChars[crypto.randomInt(specialChars.length)])
+                    if (randInt(3) === 0) {
+                        fields.push(specialChars[randInt(specialChars.length)])
                     } else {
-                        fields.push(crypto.randomBytes(crypto.randomInt(10)).toString('hex'))
+                        fields.push(randHex(randInt(10)))
                     }
                 }
                 const input = fields.join('|')
