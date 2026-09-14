@@ -32,10 +32,9 @@ const ITERATIONS = parseInt(process.env.FUZZ_ITERATIONS) || 2000
 const MINIMAL_HEADER = Buffer.alloc(80)
 MINIMAL_HEADER.writeUInt32LE(1, 0) // version
 
-describe('Fuzz: XChainBlockDecoder', function () {
-    this.timeout(120000)
-    let reporter
+let reporter
 
+function addReporterHooks() {
     before(() => {
         reporter = new FuzzReporter('blockDecoder')
     })
@@ -47,8 +46,13 @@ describe('Fuzz: XChainBlockDecoder', function () {
         assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
         assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
     })
+}
 
-    // --- Bitcoin blockFromBuffer with random/mutated buffers ---
+// --- Bitcoin blockFromBuffer with random/mutated buffers ---
+describe('Fuzz: XChainBlockDecoder', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
     describe('bitcoin: blockFromBuffer with random buffers', () => {
         it(`should handle ${ITERATIONS} random buffers`, async () => {
             const decoder = new XChainBlockDecoder('bitcoin-regtest')
@@ -86,8 +90,13 @@ describe('Fuzz: XChainBlockDecoder', function () {
             }
         })
     })
+})
 
-    // --- Litecoin blockFromBuffer: HogEx flag fuzzing ---
+// --- Litecoin blockFromBuffer: HogEx flag fuzzing ---
+describe('Fuzz: XChainBlockDecoder', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
     describe('litecoin: HogEx flag combinations', () => {
         // Hypothesis H6: version != 01/02 but marker/flag match HogEx
         const flagCombos = [
@@ -121,8 +130,13 @@ describe('Fuzz: XChainBlockDecoder', function () {
             })
         }
     })
+})
 
-    // --- Litecoin blockFromBuffer with random buffers ---
+// --- Litecoin blockFromBuffer with random buffers ---
+describe('Fuzz: XChainBlockDecoder', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
     describe('litecoin: random buffers', () => {
         it(`should handle ${ITERATIONS} random buffers`, async () => {
             const decoder = new XChainBlockDecoder('litecoin-regtest')
@@ -171,8 +185,13 @@ describe('Fuzz: XChainBlockDecoder', function () {
             }
         })
     })
+})
 
-    // --- transactionFromHex: completely random hex ---
+// --- transactionFromHex: completely random hex ---
+describe('Fuzz: XChainBlockDecoder', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
     describe('transactionFromHex: random hex', () => {
         it(`should handle ${ITERATIONS} random hex strings`, async () => {
             const decoder = new XChainBlockDecoder('bitcoin-regtest')
@@ -208,8 +227,13 @@ describe('Fuzz: XChainBlockDecoder', function () {
             })
         }
     })
+})
 
-    // --- Boundary: buffers just under/over 80 bytes ---
+// --- Boundary: buffers just under/over 80 bytes ---
+describe('Fuzz: XChainBlockDecoder', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
     describe('boundary: near-80-byte buffers', () => {
         const sizes = [0, 1, 10, 40, 79, 80, 81, 82, 100, 160]
         for (const size of sizes) {
