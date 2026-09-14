@@ -22,12 +22,14 @@ const sinon = require('sinon')
 const BlockchainConnector = require('../../src/chain/blockchain_connector')
 const { wait } = require('./support/helpers')
 
-describe('CE-02: RPC Timeout Storm', function () {
-    let connector
+let connector
 
-    beforeEach(function () {
-        connector = new BlockchainConnector('localhost', 8332, 'rpc', 'rpc')
-    })
+function createConnector() {
+    connector = new BlockchainConnector('localhost', 8332, 'rpc', 'rpc')
+}
+
+describe('CE-02: RPC Timeout Storm', function () {
+    beforeEach(createConnector)
 
     it('getRawTransaction should retry up to 10 times on timeout', async function () {
         let callCount = 0
@@ -71,6 +73,10 @@ describe('CE-02: RPC Timeout Storm', function () {
             stub.restore()
         }
     })
+})
+
+describe('CE-02: RPC Timeout Storm', function () {
+    beforeEach(createConnector)
 
     it('getBlockHeader should retry up to 10 times on ECONNABORTED', async function () {
         let callCount = 0
@@ -127,6 +133,10 @@ describe('CE-02: RPC Timeout Storm', function () {
             stub.restore()
         }
     })
+})
+
+describe('CE-02: RPC Timeout Storm', function () {
+    beforeEach(createConnector)
 
     it('getRawTransactions should fail entire batch if one tx fails', async function () {
         let callCount = 0
