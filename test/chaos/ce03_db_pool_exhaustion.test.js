@@ -21,16 +21,20 @@ const sinon = require('sinon')
 const Database = require('../../src/db.js')
 const util = require('../../src/util')
 
+let db
+
+function createDatabase() {
+    db = new Database('localhost', 3306, 'test_chaos_db', 'root', '')
+}
+
+function restoreSinon() {
+    sinon.restore()
+}
+
 describe('CE-03: Database Connection Pool Exhaustion', function () {
-    let db
+    beforeEach(createDatabase)
 
-    beforeEach(function () {
-        db = new Database('localhost', 3306, 'test_chaos_db', 'root', '')
-    })
-
-    afterEach(function () {
-        sinon.restore()
-    })
+    afterEach(restoreSinon)
 
     // getConnection is bounded by an ATTEMPT count (30) with exponential backoff
     // capped at 15s, not by a wall-clock GET_CONNECTION_TIMEOUT_MS. There is no such
@@ -69,6 +73,12 @@ describe('CE-03: Database Connection Pool Exhaustion', function () {
         }
         assert.ok(delays[delays.length - 1] <= 15000 * 1.3, 'backoff must stay clamped at the 15s cap')
     })
+})
+
+describe('CE-03: Database Connection Pool Exhaustion', function () {
+    beforeEach(createDatabase)
+
+    afterEach(restoreSinon)
 
     it('getConnection should return transactionConnection when available', async function () {
         const fakeConn = { query: sinon.stub(), release: sinon.stub() }
@@ -122,6 +132,12 @@ describe('CE-03: Database Connection Pool Exhaustion', function () {
         assert.ok(mockConn.release.called, 'Should release connection')
         assert.strictEqual(db._transactionLock, false, 'Lock should be released')
     })
+})
+
+describe('CE-03: Database Connection Pool Exhaustion', function () {
+    beforeEach(createDatabase)
+
+    afterEach(restoreSinon)
 
     it('endTransaction should release lock even without active connection', async function () {
         db._transactionLock = true
