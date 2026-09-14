@@ -28,12 +28,12 @@ const {
     getDispensersForAddress
 } = require('./helpers/assertions')
 
+// ---------------------------------------------------------------
+// E1: getDecoderBlockData() contract fields
+// ---------------------------------------------------------------
 describe('E2E: Indexer Contract', function () {
     this.timeout(0)
 
-    // ---------------------------------------------------------------
-    // E1: getDecoderBlockData() contract fields
-    // ---------------------------------------------------------------
     describe('getDecoderBlockData() field contract', () => {
 
         it('E1.1: should return all required fields with correct types for OP_RETURN tx', async () => {
@@ -88,6 +88,13 @@ describe('E2E: Indexer Contract', function () {
             assert.strictEqual(row.output_amount, null)
             assert.strictEqual(row.output_destination, null)
         })
+    })
+})
+
+describe('E2E: Indexer Contract', function () {
+    this.timeout(0)
+
+    describe('getDecoderBlockData() field contract', () => {
 
         it('E1.2: should return correct fields for SegWit source tx', async () => {
             const funded = await txBuilder.createFundedSegwitAddress()
@@ -128,6 +135,13 @@ describe('E2E: Indexer Contract', function () {
                 block_time_gt: 0
             })
         })
+    })
+})
+
+describe('E2E: Indexer Contract', function () {
+    this.timeout(0)
+
+    describe('getDecoderBlockData() field contract', () => {
 
         it('E1.4: should return correct fields for multisig tx', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
@@ -156,6 +170,13 @@ describe('E2E: Indexer Contract', function () {
             const rows = await getDecoderBlockData(global.db, height)
             assert.strictEqual(rows.length, 0, 'Empty block should return no rows')
         })
+    })
+})
+
+describe('E2E: Indexer Contract', function () {
+    this.timeout(0)
+
+    describe('getDecoderBlockData() field contract', () => {
 
         it('E1.6: DISPENSER tx should show dispenser output fields when payment exists', async () => {
             // Create a dispenser
@@ -194,10 +215,14 @@ describe('E2E: Indexer Contract', function () {
             assert.strictEqual(payRow.data, payAction)
         })
     })
+})
 
-    // ---------------------------------------------------------------
-    // E2: Block table contract
-    // ---------------------------------------------------------------
+// ---------------------------------------------------------------
+// E2: Block table contract
+// ---------------------------------------------------------------
+describe('E2E: Indexer Contract', function () {
+    this.timeout(0)
+
     describe('blocks table contract', () => {
 
         it('E2.1: should track the last block index accurately', async () => {
@@ -231,10 +256,14 @@ describe('E2E: Indexer Contract', function () {
             assert.strictEqual(block.block_hash, nodeHash, 'DB block hash should match node')
         })
     })
+})
 
-    // ---------------------------------------------------------------
-    // E3: Normalization table integrity
-    // ---------------------------------------------------------------
+// ---------------------------------------------------------------
+// E3: Normalization table integrity
+// ---------------------------------------------------------------
+describe('E2E: Indexer Contract', function () {
+    this.timeout(0)
+
     describe('normalization table integrity', () => {
 
         it('E3.1: all source_ids should resolve in index_addresses', async () => {
@@ -283,6 +312,13 @@ describe('E2E: Indexer Contract', function () {
                 await connection.release()
             }
         })
+    })
+})
+
+describe('E2E: Indexer Contract', function () {
+    this.timeout(0)
+
+    describe('normalization table integrity', () => {
 
         it('E3.4: tx_index should be unique and sequential', async () => {
             const connection = await global.db.pool.getConnection()
