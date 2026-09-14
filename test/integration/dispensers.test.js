@@ -79,6 +79,9 @@ describe('DISPENSER Integration', () => {
             assert.ok(dispensers.length > 0, 'Dispenser record should exist for source address')
         })
     })
+})
+
+describe('DISPENSER Integration', () => {
 
     describe('DISPENSER edge cases', () => {
 
@@ -108,6 +111,9 @@ describe('DISPENSER Integration', () => {
             assert.strictEqual(dispensers.length, 0, 'No dispenser when both coins empty')
         })
     })
+})
+
+describe('DISPENSER Integration', () => {
 
     describe('dispenser output via indexer contract query', () => {
 
