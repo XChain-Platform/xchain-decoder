@@ -22,22 +22,26 @@ const sinon = require('sinon')
 const XChainDecoder = require('../../src/XChainDecoder')
 const { createMockDatabase, createMockConnector, createMinimalBlockHex, captureConsole } = require('./support/helpers')
 
+let decoder
+let mockDb
+let mockConnector
+
+function createDecoder() {
+    decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
+    mockDb = createMockDatabase()
+    mockConnector = createMockConnector()
+    decoder.db = mockDb
+    decoder.connector = mockConnector
+}
+
+function stopDecoder() {
+    decoder.stop()
+}
+
 describe('CE-06: Chain Reorganization Detection and Recovery', function () {
-    let decoder
-    let mockDb
-    let mockConnector
+    beforeEach(createDecoder)
 
-    beforeEach(function () {
-        decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
-        mockDb = createMockDatabase()
-        mockConnector = createMockConnector()
-        decoder.db = mockDb
-        decoder.connector = mockConnector
-    })
-
-    afterEach(function () {
-        decoder.stop()
-    })
+    afterEach(stopDecoder)
 
     it('verifyReorg should detect and roll back mismatched blocks', async function () {
         // Simulate 3 blocks where the last 2 have wrong hashes
@@ -74,6 +78,12 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         assert.ok(mockDb.deleteBlockByIndex.calledWith(5, 'old_hash_5'), 'Should delete block 5 with its original hash')
         assert.ok(mockDb.deleteBlockByIndex.calledWith(4, 'old_hash_4'), 'Should delete block 4 with its original hash')
     })
+})
+
+describe('CE-06: Chain Reorganization Detection and Recovery', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('verifyReorg should handle getBlockHash failures during reorg', async function () {
         let hashCallCount = 0
@@ -101,6 +111,12 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         const retryLogs = errors.filter(l => l.includes('problem trying to get a block hash'))
         assert.ok(retryLogs.length >= 1, 'Should log retry message at error level')
     })
+})
+
+describe('CE-06: Chain Reorganization Detection and Recovery', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('verifyReorg should stop cleanly when every processed block is invalidated', async function () {
         // Deep reorg: the decoder has processed blocks 0,1,2 and the node has
@@ -144,6 +160,12 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         assert.ok(mockDb.deleteBlockByIndex.calledWith(1, 'old_hash_1'), 'block 1 deleted with its original hash')
         assert.ok(mockDb.deleteBlockByIndex.calledWith(0, 'old_hash_0'), 'block 0 deleted with its original hash')
     })
+})
+
+describe('CE-06: Chain Reorganization Detection and Recovery', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('verifyReorg should not insert event when no reorg found', async function () {
         mockDb.getLastBlockIndex.resolves(5)
@@ -192,6 +214,12 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         assert.ok(decoder.verifyReorg.called, 'Should call verifyReorg')
         assert.ok(mockDb.endTransaction.called, 'Should end transaction before reorg processing')
     })
+})
+
+describe('CE-06: Chain Reorganization Detection and Recovery', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('[REGRESSION P0] verifyReorg deletes blocks above the node tip without an RPC hash query', async function () {
         // F-9(b): the node tip dropped to 5 but the decoder still has 8,7,6 stored.
@@ -229,6 +257,12 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         assert.ok(mockDb.deleteBlockByIndex.calledWith(7, 'orphan_7'), 'block 7 deleted with its original hash')
         assert.ok(mockDb.deleteBlockByIndex.calledWith(6, 'orphan_6'), 'block 6 deleted with its original hash')
     })
+})
+
+describe('CE-06: Chain Reorganization Detection and Recovery', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('[REGRESSION P0] reconciles when the node tip regresses below the decoder height', async function () {
         // F-9(a): node tip is 5 but the decoder has processed up to 10 (a node
@@ -257,6 +291,12 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         assert.ok(logs.some(l => l.includes('Reconciling orphan blocks')), 'should log the node-tip regression reconcile')
         assert.ok(mockDb.endTransaction.called, 'should end any open transaction before reconciling')
     })
+})
+
+describe('CE-06: Chain Reorganization Detection and Recovery', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('[REGRESSION P0] tolerates a null previousBlock in the reorg trigger without crashing', async function () {
         // F-1: getBlockByIndex returns null on a caught DB error; the reorg trigger
