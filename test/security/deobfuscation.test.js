@@ -28,13 +28,14 @@ function encrypt(plaintext, txid) {
 }
 
 const VALID_TXID = 'aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011'
+let decoder
+
+function prepareDecoder() {
+    decoder = createDecoder()
+}
 
 describe('Security: Deobfuscation Robustness', () => {
-    let decoder
-
-    beforeEach(() => {
-        decoder = createDecoder()
-    })
+    beforeEach(prepareDecoder)
 
     // --- AES-128-CTR key/IV derivation ---
 
@@ -65,6 +66,10 @@ describe('Security: Deobfuscation Robustness', () => {
             assert.notStrictEqual(result.toString('utf-8'), 'XCHNtest')
         })
     })
+})
+
+describe('Security: Deobfuscation Robustness', () => {
+    beforeEach(prepareDecoder)
 
     // --- Corrupted ciphertext ---
 
@@ -106,6 +111,10 @@ describe('Security: Deobfuscation Robustness', () => {
             assert.strictEqual(result.length, 100000)
         })
     })
+})
+
+describe('Security: Deobfuscation Robustness', () => {
+    beforeEach(prepareDecoder)
 
     // --- XCHN magic word collision probability ---
 
@@ -127,6 +136,10 @@ describe('Security: Deobfuscation Robustness', () => {
             assert.strictEqual(falsePositives, 0, 'Should not have XCHN false positives in 100 random trials')
         })
     })
+})
+
+describe('Security: Deobfuscation Robustness', () => {
+    beforeEach(prepareDecoder)
 
     // --- Non-buffer inputs ---
 
