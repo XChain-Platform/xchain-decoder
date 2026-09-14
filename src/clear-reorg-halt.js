@@ -43,6 +43,11 @@
 
 'use strict'
 
+// The service .env is loaded first, before db.js, and only when this file runs
+// as the process: a test that requires it for run() and parseArgs() must not
+// have a checkout's .env poured into its process environment.
+if (require.main === module) require('dotenv').config()
+
 const Database = require('./db.js')
 
 const EXIT = {
@@ -159,7 +164,6 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
 }
 
 async function main(){
-    require('dotenv').config()
     const host = process.env.DECODER_DB_HOST
     const port = process.env.DECODER_DB_PORT
     const name = process.env.DECODER_DB_NAME
