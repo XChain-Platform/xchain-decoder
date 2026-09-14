@@ -68,6 +68,12 @@ describe('Indexer Contract Query', () => {
             const plainRow = rows.find(r => r.tx_hash === funded.txid)
             assert.strictEqual(plainRow, undefined, 'Plain transaction should not appear')
         })
+    })
+})
+
+describe('Indexer Contract Query', () => {
+
+    describe('transaction record completeness', () => {
 
         it('should return correct tx_hash as 64-character hex string', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
@@ -83,6 +89,9 @@ describe('Indexer Contract Query', () => {
             assert.ok(/^[0-9a-f]{64}$/.test(row.tx_hash), 'tx_hash must be lowercase hex')
         })
     })
+})
+
+describe('Indexer Contract Query', () => {
 
     describe('normalization tables', () => {
 
@@ -127,6 +136,9 @@ describe('Indexer Contract Query', () => {
             assert.ok(row.block_time <= now + 60, 'block_time should not be in the future')
         })
     })
+})
+
+describe('Indexer Contract Query', () => {
 
     describe('blocks table', () => {
 
