@@ -63,6 +63,9 @@ describe('CE-09: Unhandled Promise Rejection', function () {
         }
         assert.ok(threw, 'decoder.start() should throw when table verification fails')
     })
+})
+
+describe('CE-09: Unhandled Promise Rejection', function () {
 
     it('api.js catch handler should track decoder crash state', async function () {
         // Simulate what api.js does: start decoder with .catch()
