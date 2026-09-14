@@ -72,7 +72,7 @@ function resolveQueryTimeout(raw, defaultMs = DEFAULT_QUERY_TIMEOUT_MS) {
 //
 // Holds only while sql_mode omits NO_BACKSLASH_ESCAPES. Nothing in this tree sets
 // sql_mode and the pool params below set none; if that ever changes, every caller of
-// this helper must be revisited. Kept byte-for-byte in sync with xchain-indexer/src/db.js.
+// this helper must be revisited. Kept byte-for-byte in sync with xchain-indexer/src/db/index.js.
 function opensBackslashEscape(str, i, quote){
     return str[i] === '\\' && quote !== '`' && i + 1 < str.length;
 }
@@ -417,7 +417,7 @@ class Database {
                             // mode fail closed so a diverged schema is caught in CI / by an operator
                             // instead of silently continuing. Default auto-startup stays non-fatal
                             // (console.error, not warn) to avoid a surprise fleet-wide boot failure.
-                            // Mirrors xchain-indexer/src/db.js.
+                            // Mirrors xchain-indexer/src/db/index.js.
                             if(includeManual || config.MIGRATION_STRICT_CHECKSUM === '1'){
                                 // Tailor the remedy to which branch actually fired. The operator path
                                 // (includeManual, `node src/migrate.js`) ALWAYS fails closed by design, so
@@ -483,7 +483,7 @@ class Database {
                     // baselined by THIS run never move it and a resumed partial run is fine.
                     // Auto files only - see Database.backdatedFrontierViolation for why a
                     // deferred mode=manual file cannot be told apart from a backdated one.
-                    // Mirrors xchain-indexer/src/db.js.
+                    // Mirrors xchain-indexer/src/db/index.js.
                     if(mode === 'auto'){
                         const frontier = Database.backdatedFrontierViolation(file, appliedByName.keys());
                         if(frontier){
@@ -504,7 +504,7 @@ class Database {
                     // to lose or rename data must NEVER run unattended at startup (nor slip
                     // through migrate.js under the wrong tag) - block startup with an
                     // actionable error instead of executing it against every validator's DB.
-                    // Mirrors xchain-indexer/src/db.js.
+                    // Mirrors xchain-indexer/src/db/index.js.
                     if(mode === 'auto'){
                         const offender = this.destructiveAutoStatement(statements);
                         if(offender){
@@ -737,7 +737,7 @@ class Database {
     // statement list (already line-comment-stripped and ';'-split), returns the
     // first statement that can lose, truncate, or rename data - or null when the
     // file is safe to auto-run. Pure string logic (no DB), unit-tested directly.
-    // Byte-for-byte the same classifier as xchain-indexer/src/db.js so the two
+    // Byte-for-byte the same classifier as xchain-indexer/src/db/index.js so the two
     // migration runners stay legible as a pair.
     //
     // Flagged as destructive: DROP TABLE/DATABASE/SCHEMA, TRUNCATE, RENAME TABLE,
@@ -1007,7 +1007,7 @@ class Database {
     // real statements. `--` and `#` line comments are stripped first (same rule as
     // the callers used); the quote model matches stripSqlLineComments exactly
     // (single/double-quote and backtick spans, doubled-quote and backslash escapes).
-    // Returns trimmed, non-empty statements. Mirrors xchain-indexer/src/db.js.
+    // Returns trimmed, non-empty statements. Mirrors xchain-indexer/src/db/index.js.
     splitSqlStatements(sql){
         const stripped = this.stripSqlLineComments(sql);
         const statements = [];
@@ -1071,7 +1071,7 @@ class Database {
             // NOT NULL, so a MODIFY ... NULL on one is a silent no-op (PK) or, worse,
             // silently STRIPS the AUTO_INCREMENT attribute - the mirror-cursor
             // corruption the indexer hit live on 2026-06-10. Mirrors
-            // xchain-indexer/src/db.js so both reconcilers infer NOT NULL identically.
+            // xchain-indexer/src/db/index.js so both reconcilers infer NOT NULL identically.
             const nullable   = !/\bNOT\s+NULL\b/i.test(line) && !/\bPRIMARY\s+KEY\b/i.test(line) && !/\bAUTO_INCREMENT\b/i.test(line);
             const notNull    = !nullable;
             const hasDefault = /\bDEFAULT\b/i.test(line);
@@ -2989,7 +2989,7 @@ class Database {
 // bottom, and the 8151979 revision of the unique-index one.
 // Applied fleet-wide through code deploy: both the startup auto-run and
 // `node src/migrate.js` pass through this heal before the mismatch guard, so no
-// direct schema_migrations SQL is ever needed. Mirrors xchain-indexer/src/db.js.
+// direct schema_migrations SQL is ever needed. Mirrors xchain-indexer/src/db/index.js.
 Database.MIGRATION_CHECKSUM_REBASELINES = {
     // Comment-only edits: 3a1c435 rewrote the validator note into the follower
     // ordering note (and dropped an em-dash), ec36bd4 added the license header.
@@ -3252,7 +3252,7 @@ Database.MIGRATION_PRECONDITIONS = {
     },
 };
 
-// Backdating guard for the auto-apply path, mirroring xchain-indexer/src/db.js. Apply
+// Backdating guard for the auto-apply path, mirroring xchain-indexer/src/db/index.js. Apply
 // order is lexical, so a migration added with a date EARLIER than one already applied
 // runs in a different position on a fresh database (in its date slot) than on an aged
 // one (after the frontier), and the two schemas diverge across the fleet. Given a

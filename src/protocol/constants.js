@@ -436,7 +436,7 @@ const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
 // and DOGE, whose heights diverge.
 //
 // WHY IT EXISTS: the indexer keeps a CANCELLED dispenser fillable past its own expiration.
-// It excludes `cancelling` rows from its expiration pass (xchain-indexer/src/db.js
+// It excludes `cancelling` rows from its expiration pass (xchain-indexer/src/db/index_tables.js
 // getExpiredItems, `s2.status='open'`), keeps them matchable through
 // `status IN ('open','cancelling')` in findMatchingDispensers, and closes only at the
 // cancel's block time plus DISPENSER_CLOSE_DELAY (3600s). The decoder mirrors no cancel at

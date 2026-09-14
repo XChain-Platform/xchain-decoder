@@ -15,7 +15,7 @@
  * XChain Decoder - dispenser cancellation grace window on payment capture
  *
  * The indexer keeps a CANCELLED dispenser fillable past its own expiration. Its expiration
- * pass skips `cancelling` rows (xchain-indexer/src/db.js getExpiredItems, `s2.status='open'`),
+ * pass skips `cancelling` rows (xchain-indexer/src/db/index_tables.js getExpiredItems, `s2.status='open'`),
  * findMatchingDispensers still matches `status IN ('open','cancelling')`, and DISPENSER_CLOSE
  * fires only at the cancel's block time plus DISPENSER_CLOSE_DELAY (3600s). The decoder
  * mirrors no cancel at all, deliberately, so it soft-expires that dispenser at its raw
