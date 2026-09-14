@@ -27,7 +27,7 @@
  *   - the two vendored trees are ignored. src/coins/ is refreshed from the hub
  *     and src/observability/ from the same place; this repo holds copies it may
  *     not edit, so grading them would report violations nobody here can fix.
- *   - src/clear-reorg-halt.js joins the entry-point list. It is a third `node
+ *   - src/clear_reorg_halt.js joins the entry-point list. It is a third `node
  *     src/...` npm script alongside the api and the migrator, and its output IS
  *     its product, so the one-logger rule does not reach it.
  */
@@ -77,7 +77,7 @@ const src = {
 };
 
 const configAndEntry = {
-    files: ['src/config.js', 'src/api.js', 'src/migrate.js', 'src/index.js', 'src/clear-reorg-halt.js', 'bin/**/*.js'],
+    files: ['src/config.js', 'src/api.js', 'src/migrate.js', 'src/index.js', 'src/clear_reorg_halt.js', 'bin/**/*.js'],
     rules: {
         'no-console': 'off',
         'no-restricted-syntax': ['error',

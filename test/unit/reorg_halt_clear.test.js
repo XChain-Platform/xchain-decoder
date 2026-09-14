@@ -24,7 +24,7 @@
 const assert = require('assert')
 const sinon  = require('sinon')
 const Database = require('../../src/db.js')
-const { run, parseArgs, EXIT } = require('../../src/clear-reorg-halt.js')
+const { run, parseArgs, EXIT } = require('../../src/clear_reorg_halt.js')
 
 function dbAnswering(handler) {
     const db = new Database('127.0.0.1', 3306, 'xchain_btc_mainnet', 'u', 'p')

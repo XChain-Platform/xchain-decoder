@@ -2726,7 +2726,7 @@ class Database {
     // store); a full resync from a known-good snapshot rebuilds the schema and so
     // clears it, matching the recovery the abort message already demands.
     //
-    // An operator can CLEAR a halt through clearReorgHalt (src/clear-reorg-halt.js,
+    // An operator can CLEAR a halt through clearReorgHalt (src/clear_reorg_halt.js,
     // `xchain-node clear-reorg-halt`): that writes a REORG_HALT_CLEARED row carrying
     // the reason and the checks that passed, and the NEWEST of the two codes decides.
     // The halt row is never deleted, so the audit trail survives, and a later halt

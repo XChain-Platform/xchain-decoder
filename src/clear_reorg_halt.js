@@ -14,7 +14,7 @@
  *
  * XChain Decoder - audited clear of a durable REORG_HALT marker
  *
- *   node src/clear-reorg-halt.js --reason "<why this database is known good>" [--force] [--dry-run]
+ *   node src/clear_reorg_halt.js --reason "<why this database is known good>" [--force] [--dry-run]
  *   (under xchain-node: `xchain-node clear-reorg-halt <chain> <network> --reason "..."`)
  *
  * verifyReorg writes the REORG_HALT marker when a rollback crossed the dispenser
@@ -61,7 +61,7 @@ const EXIT = {
     HALT_SUPERSEDED: 5
 }
 
-const USAGE = 'usage: node src/clear-reorg-halt.js --reason "<why this database is known good>" [--force] [--dry-run]'
+const USAGE = 'usage: node src/clear_reorg_halt.js --reason "<why this database is known good>" [--force] [--dry-run]'
 
 function parseArgs(argv){
     const out = { reason: null, force: false, dryRun: false, help: false, bad: null }

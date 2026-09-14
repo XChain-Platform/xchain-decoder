@@ -26,7 +26,7 @@
   "scripts": {
     "api": "node ./src/api.js",
     "migrate": "node ./src/migrate.js",
-    "clear-reorg-halt": "node ./src/clear-reorg-halt.js",
+    "clear-reorg-halt": "node ./src/clear_reorg_halt.js",
     "lint": "eslint .",
     "test": "mocha --timeout 5000 --require ./test/unit/support/setup.js 'test/unit/**/*.test.js' --exit",
     "coverage": "c8 --reporter=text --reporter=html --include 'src/**/*.js' mocha --timeout 5000 --require ./test/unit/support/setup.js 'test/unit/**/*.test.js' --exit",

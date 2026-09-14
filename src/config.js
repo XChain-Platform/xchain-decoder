@@ -21,8 +21,9 @@
  * name with different fallbacks disagree with each other silently. One home
  * makes the whole surface one file long.
  *
- * WHAT LIVES HERE, AND WHAT DOES NOT. Every name lives here, as the raw
- * string the environment holds (or undefined). Coercion does NOT: a read site
+ * WHAT LIVES HERE, AND WHAT DOES NOT. Every name a module outside the entry
+ * points reads lives here, as the raw string the environment holds (or
+ * undefined). Coercion does NOT: a read site
  * that parses a number, applies a floor or derives a fallback from another
  * setting keeps that code where it is and only takes the raw value from here.
  * The coerced TYPE is a decision about the setting, so moving it would be a
@@ -38,7 +39,7 @@
  * boot-time values and only a test that changes one mid-run would notice.
  * So the exported object is accessors over the block below, not a copy of it.
  *
- * The three process entry points (api.js, migrate.js, clear-reorg-halt.js)
+ * The three process entry points (api.js, migrate.js, clear_reorg_halt.js)
  * read the environment directly and are exempt: they validate and report on
  * their configuration before anything else is loaded, which is the one job
  * that cannot go through a module that has already resolved it.
