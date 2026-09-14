@@ -21,26 +21,30 @@ const sinon = require('sinon')
 const XChainDecoder = require('../../src/XChainDecoder')
 const { createMockDatabase, createMockConnector, captureConsole } = require('./support/helpers')
 
+let decoder
+let mockDb
+let mockConnector
+
+function createDecoder() {
+    decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
+    mockDb = createMockDatabase()
+    mockConnector = createMockConnector()
+    decoder.db = mockDb
+    decoder.connector = mockConnector
+    // Drop the retry backoff without naming a duration. setImmediate still
+    // yields the macrotask the poll loops need, so nothing in this suite is
+    // timed against a fixed sleep a loaded CI machine can overrun.
+    decoder.sleep = () => new Promise(r => setImmediate(r))
+}
+
+function stopDecoder() {
+    decoder.stop()
+}
+
 describe('CE-01: Node Unavailability and Recovery', function () {
-    let decoder
-    let mockDb
-    let mockConnector
+    beforeEach(createDecoder)
 
-    beforeEach(function () {
-        decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
-        mockDb = createMockDatabase()
-        mockConnector = createMockConnector()
-        decoder.db = mockDb
-        decoder.connector = mockConnector
-        // Drop the retry backoff without naming a duration. setImmediate still
-        // yields the macrotask the poll loops need, so nothing in this suite is
-        // timed against a fixed sleep a loaded CI machine can overrun.
-        decoder.sleep = () => new Promise(r => setImmediate(r))
-    })
-
-    afterEach(function () {
-        decoder.stop()
-    })
+    afterEach(stopDecoder)
 
     it('should retry getBlockchainInfo on connection failure and recover', async function () {
         let callCount = 0
@@ -84,6 +88,12 @@ describe('CE-01: Node Unavailability and Recovery', function () {
 
         assert.strictEqual(callCount, maxCalls, `Decoder should have retried ${maxCalls} times`)
     })
+})
+
+describe('CE-01: Node Unavailability and Recovery', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('should handle getBlockHash failure and retry in main parsing loop', async function () {
         let blockHashCalls = 0
@@ -118,6 +128,12 @@ describe('CE-01: Node Unavailability and Recovery', function () {
         assert.ok(retryLogs.some(l => l.includes('(attempt 2)')),
             'Consecutive failures at the same height should increment the attempt counter')
     })
+})
+
+describe('CE-01: Node Unavailability and Recovery', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('should handle getBlock failure after getBlockHash succeeds', async function () {
         let getBlockCalls = 0
