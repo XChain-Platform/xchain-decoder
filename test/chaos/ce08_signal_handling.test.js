@@ -23,26 +23,30 @@ const XChainDecoder = require('../../src/XChainDecoder')
 const { createMockDatabase, createMockConnector, captureConsole } = require('./support/helpers')
 const { waitUntil } = require('../helpers/waitUntil')
 
+let decoder
+let mockDb
+let mockConnector
+
+function createDecoder() {
+    decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
+    mockDb = createMockDatabase()
+    mockConnector = createMockConnector()
+    decoder.db = mockDb
+    decoder.connector = mockConnector
+    // Drop the retry backoff without naming a duration. setImmediate still
+    // yields the macrotask the poll loops need, so nothing in this suite is
+    // timed against a fixed sleep a loaded CI machine can overrun.
+    decoder.sleep = () => new Promise(r => setImmediate(r))
+}
+
+function stopDecoder() {
+    decoder.stop()
+}
+
 describe('CE-08: Signal Handling and Graceful Shutdown', function () {
-    let decoder
-    let mockDb
-    let mockConnector
+    beforeEach(createDecoder)
 
-    beforeEach(function () {
-        decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
-        mockDb = createMockDatabase()
-        mockConnector = createMockConnector()
-        decoder.db = mockDb
-        decoder.connector = mockConnector
-        // Drop the retry backoff without naming a duration. setImmediate still
-        // yields the macrotask the poll loops need, so nothing in this suite is
-        // timed against a fixed sleep a loaded CI machine can overrun.
-        decoder.sleep = () => new Promise(r => setImmediate(r))
-    })
-
-    afterEach(function () {
-        decoder.stop()
-    })
+    afterEach(stopDecoder)
 
     it('stop() should set stopFlag and break the main loop', async function () {
         mockConnector.getBlockchainInfo.resolves({ blocks: 0, verificationprogress: 1.0 })
@@ -98,6 +102,12 @@ describe('CE-08: Signal Handling and Graceful Shutdown', function () {
 
         assert.strictEqual(decoder.isSynced(), true)
     })
+})
+
+describe('CE-08: Signal Handling and Graceful Shutdown', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('api.js should register signal handlers and health endpoint', function () {
         const fs = require('fs')
@@ -135,6 +145,12 @@ describe('CE-08: Signal Handling and Graceful Shutdown', function () {
         assert.ok(decoder.lastPollAt > 0, 'the loop must stamp lastPollAt')
         assert.strictEqual(decoder.isPollSilent(), false, 'a loop that just ran is not silent')
     })
+})
+
+describe('CE-08: Signal Handling and Graceful Shutdown', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     // start() resolves only when the loop breaks, so the SIGTERM path must report
     // not-running immediately rather than waiting out the poll-silence window.
