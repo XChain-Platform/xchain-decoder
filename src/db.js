@@ -51,6 +51,17 @@ function resolveQueryTimeout(raw, defaultMs = DEFAULT_QUERY_TIMEOUT_MS) {
     return parsed
 }
 
+// JSON.stringify replacer that keeps a stray BigInt in an event payload from killing
+// the whole write. JSON has no BigInt literal, so the native serializer throws on one;
+// a BigInt that fits a safe integer becomes a plain Number (a table id, a count), and
+// one that does not becomes a decimal string so no precision is silently dropped.
+function jsonBigIntSafe(key, value){
+    if (typeof value !== 'bigint') return value
+    return (value >= Number.MIN_SAFE_INTEGER && value <= Number.MAX_SAFE_INTEGER)
+        ? Number(value)
+        : value.toString()
+}
+
 // True when str[i] opens a backslash escape inside the currently open quoted span.
 //
 // MariaDB/MySQL honour `\<char>` inside `'` and `"` string literals by default, so a
@@ -2057,7 +2068,9 @@ class Database {
             let timeString = blockTime != null
                 ? new Date(blockTime * 1000).toISOString().slice(0, 19).replace('T', ' ')
                 : new Date().toISOString().slice(0, 19).replace('T', ' ');
-            let dataString = JSON.stringify(data)
+            // Replacer keeps a stray BigInt field (jsonBigIntSafe above) from throwing
+            // and silently failing the whole event write.
+            let dataString = JSON.stringify(data, jsonBigIntSafe)
         
             await connection.query(query, [
                 timeString,
@@ -2759,9 +2772,16 @@ class Database {
             if (row.code === 'REORG_HALT_CLEARED'){
                 return { ...none, cleared_at: at, cleared_reason: reason }
             }
+            // events.id is a BIGINT column, and the pool below sets insertIdAsNumber
+            // but not bigIntAsNumber, so the driver hands row.id back as a JS BigInt.
+            // An events id never approaches Number.MAX_SAFE_INTEGER, so normalise to a
+            // plain number here: every caller that compares it or puts it in a JSON
+            // audit payload (clearReorgHalt's cleared_halt_id) gets a safe value
+            // instead of a BigInt that JSON.stringify throws on.
+            const id = (row.id != null) ? Number(row.id) : null
             // Any other shape (the expected REORG_HALT, or a row whose code could not
             // be read) is a live halt.
-            return { halted: true, id: (row.id != null ? row.id : null), at: at, reason: reason, cleared_at: null, cleared_reason: null }
+            return { halted: true, id: id, at: at, reason: reason, cleared_at: null, cleared_reason: null }
         } finally {
             if (ownLease){
                 await connection.release()

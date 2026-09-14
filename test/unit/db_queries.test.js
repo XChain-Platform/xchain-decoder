@@ -486,6 +486,23 @@ describe('Database#insertEvent()', () => {
         assert.strictEqual(args[1], 'MYCODE');
         assert.strictEqual(args[2], JSON.stringify({ foo: 'bar' }));
     });
+
+    // A BigInt field (e.g. an events.id read back from the driver) must not kill the
+    // whole write the way a plain JSON.stringify(data) does.
+    it('serialises a BigInt field instead of throwing', async () => {
+        const db = makeDb();
+        const q  = sinon.stub().resolves([]);
+        const { pool, conn } = withConn(q);
+        injectPool(db, pool);
+        const ok = await db.insertEvent('MYCODE', { cleared_halt_id: 7n, huge: 12345678901234567890n });
+        assert.strictEqual(ok, true);
+        const stored = JSON.parse(conn.query.firstCall.args[1][2]);
+        // Fits a safe integer: becomes a plain Number.
+        assert.strictEqual(stored.cleared_halt_id, 7);
+        assert.strictEqual(typeof stored.cleared_halt_id, 'number');
+        // Too big for a safe integer: becomes a decimal string, not a truncated Number.
+        assert.strictEqual(stored.huge, '12345678901234567890');
+    });
 });
 
 describe('Database#deleteBlockByIndex()', () => {

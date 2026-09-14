@@ -148,6 +148,27 @@ describe('Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides', fun
         assert.strictEqual((await db.getReorgHaltMarker()).id, 7)
     })
 
+    // The mariadb driver hands events.id back as a BigInt (the pool sets
+    // insertIdAsNumber but not bigIntAsNumber). readReorgHaltState must normalise it
+    // to a Number, or the audit write below dies inside JSON.stringify and the clear
+    // reports FAILED with the halt still live.
+    it('clears when the driver returns the halt row id as a BigInt', async function () {
+        let state = [halt(1n)]
+        const inserted = []
+        const { db } = dbAnswering((sql, params) => {
+            if (/INSERT INTO events/.test(sql)) { inserted.push(params); state = [cleared(2)]; return { affectedRows: 1 } }
+            return state
+        })
+        const marker = await db.getReorgHaltMarker()
+        assert.strictEqual(marker.id, 1)
+        assert.strictEqual(typeof marker.id, 'number')
+        const res = await db.clearReorgHalt({ reason: 'checks taken against a BigInt row id', expectedHaltId: marker.id })
+        assert.deepStrictEqual(res, { cleared: true, alreadyClear: false })
+        const payload = JSON.parse(inserted[0][2])
+        assert.strictEqual(payload.cleared_halt_id, 1)
+        assert.strictEqual(typeof payload.cleared_halt_id, 'number')
+    })
+
     it('a later halt after a clear is live again', async function () {
         const { db } = dbAnswering(() => [halt(12)])
         assert.strictEqual(await db.isReorgHalted(), true)
