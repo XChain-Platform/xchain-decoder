@@ -2418,12 +2418,18 @@ class XChainDecoder {
         }
 
         let dbStatus   = await this.db.createDatabase();
+        // Verify the configured database actually exists before doing anything else with
+        // it, so a mistyped or unprovisioned DECODER_DB_NAME fails loudly here instead of
+        // on the first query.
         let dbVerified = await this.db.verifyDatabase();
         if(!dbVerified){
             // Throw a real Error (not a bare string) so `err.message` is populated for
             // the api.js start() catch and the health() error field.
             util.throwError(new Error("Database " + this.dbName + " doesn't exist!"));
         } else {
+            // Verify every table this decoder needs is present before running migrations
+            // or parsing, so a bare, unmigrated database fails here rather than on the
+            // first missing table mid-parse.
             let tablesVerified = await this.db.verifyTables();
             if(!tablesVerified)
                 util.throwError(new Error("Database " + this.dbName + " tables don't exist!"));
