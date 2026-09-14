@@ -67,16 +67,19 @@ function createDecoder() {
     return decoder
 }
 
+let decoder
+
+function prepareDecoder() {
+    decoder = createDecoder()
+}
+
+function restoreSinon() {
+    sinon.restore()
+}
+
 describe('Security: ACTION Data Validation', () => {
-    let decoder
-
-    beforeEach(() => {
-        decoder = createDecoder()
-    })
-
-    afterEach(() => {
-        sinon.restore()
-    })
+    beforeEach(prepareDecoder)
+    afterEach(restoreSinon)
 
     // --- SEC-02/03: Post-decryption ACTION validation ---
 
@@ -119,6 +122,11 @@ describe('Security: ACTION Data Validation', () => {
             assert.ok(result.data.length > 0)
         })
     })
+})
+
+describe('Security: ACTION Data Validation', () => {
+    beforeEach(prepareDecoder)
+    afterEach(restoreSinon)
 
     // --- SEC-03: Oversized payloads ---
 
@@ -147,6 +155,14 @@ describe('Security: ACTION Data Validation', () => {
                 `compiledDataLength (${result.compiledDataLength}) should exceed decompiled data.length (${result.data.length}) by the OP_PUSHDATA overhead`
             )
         })
+    })
+})
+
+describe('Security: ACTION Data Validation', () => {
+    beforeEach(prepareDecoder)
+    afterEach(restoreSinon)
+
+    describe('Payload size limits', () => {
 
         // Roundtrip conformance at the exact boundaries where a silent-drop bug
         // hides: an encoder-assembled (bitcoin.script.compile) payload must
@@ -170,6 +186,14 @@ describe('Security: ACTION Data Validation', () => {
                     `payload of ${n} raw bytes must roundtrip byte-identically`)
             }
         })
+    })
+})
+
+describe('Security: ACTION Data Validation', () => {
+    beforeEach(prepareDecoder)
+    afterEach(restoreSinon)
+
+    describe('Payload size limits', () => {
 
         it('dual-push (data + rawData) payloads re-measure to the summed compiled size', async () => {
             // FILE-style dual push: prepareData compiles [dataBuf, rawDataBuf].
@@ -195,6 +219,14 @@ describe('Security: ACTION Data Validation', () => {
                     `rawData push of ${b} bytes must roundtrip byte-identically`)
             }
         })
+    })
+})
+
+describe('Security: ACTION Data Validation', () => {
+    beforeEach(prepareDecoder)
+    afterEach(restoreSinon)
+
+    describe('Payload size limits', () => {
 
         it('the drop gate boundary: 8192 compiled is accepted, 8193 exceeds MAX_ACTION_DATA_LENGTH', async () => {
             const MAX = XChainDecoder.MAX_ACTION_DATA_LENGTH
@@ -206,6 +238,11 @@ describe('Security: ACTION Data Validation', () => {
             assert.ok(over.compiledDataLength > MAX, '8193 is dropped by the block-processing gate')
         })
     })
+})
+
+describe('Security: ACTION Data Validation', () => {
+    beforeEach(prepareDecoder)
+    afterEach(restoreSinon)
 
     // --- SEC-12: UTF-8 handling ---
 
@@ -219,6 +256,11 @@ describe('Security: ACTION Data Validation', () => {
             assert.strictEqual(decoded, 'SEND|0|XCHAIN|1000')
         })
     })
+})
+
+describe('Security: ACTION Data Validation', () => {
+    beforeEach(prepareDecoder)
+    afterEach(restoreSinon)
 
     // --- P2SH/P2WSH bounds safety (SEC-05) ---
 
@@ -257,6 +299,11 @@ describe('Security: ACTION Data Validation', () => {
             assert.strictEqual(result.data.length, 0)
         })
     })
+})
+
+describe('Security: ACTION Data Validation', () => {
+    beforeEach(prepareDecoder)
+    afterEach(restoreSinon)
 
     describe('P2WSH input bounds safety', () => {
         it('[REGRESSION P0] R-ACT-005: should not crash on a P2WSH marker with missing witness data', async () => {
@@ -310,6 +357,11 @@ describe('Security: ACTION Data Validation', () => {
             assert.strictEqual(result.data.length, 0)
         })
     })
+})
+
+describe('Security: ACTION Data Validation', () => {
+    beforeEach(prepareDecoder)
+    afterEach(restoreSinon)
 
     // --- Multisig with non-Buffer elements ---
 
