@@ -11,6 +11,26 @@
 const assert = require('assert')
 const Database = require('../../src/db')
 
+// A fake connection whose query() fails on the Nth call, recording
+// whether the transaction was rolled back and the connection released.
+function makeFailingConnection(failOnCall = 1) {
+    const state = { rolledBack: false, released: false, committed: false, calls: 0 }
+    const connection = {
+        beginTransaction: async () => {},
+        commit: async () => { state.committed = true },
+        rollback: async () => { state.rolledBack = true },
+        release: async () => { state.released = true },
+        query: async () => {
+            state.calls += 1
+            if (state.calls === failOnCall) {
+                throw new Error('simulated DB failure (timeout/deadlock/disk full)')
+            }
+            return []
+        }
+    }
+    return { connection, state }
+}
+
 describe('Security: Connection Handling', () => {
 
     // --- SEC-06: Connection pool timeout ---
@@ -51,6 +71,9 @@ describe('Security: Connection Handling', () => {
             )
         })
     })
+})
+
+describe('Security: Connection Handling', () => {
 
     // --- SEC-07: Transaction lock ---
 
@@ -83,6 +106,12 @@ describe('Security: Connection Handling', () => {
 
             db.releaseTransactionLock()
         })
+    })
+})
+
+describe('Security: Connection Handling', () => {
+
+    describe('Transaction lock mechanism', () => {
 
         it('should queue second caller when lock is held', async () => {
             const db = new Database('localhost', 3306, 'test_db', 'root', '')
@@ -111,6 +140,12 @@ describe('Security: Connection Handling', () => {
 
             db.releaseTransactionLock()
         })
+    })
+})
+
+describe('Security: Connection Handling', () => {
+
+    describe('Transaction lock mechanism', () => {
 
         it('should release lock when queue is empty', () => {
             const db = new Database('localhost', 3306, 'test_db', 'root', '')
@@ -151,6 +186,9 @@ describe('Security: Connection Handling', () => {
             assert.deepStrictEqual(order, [1, 2, 3])
         })
     })
+})
+
+describe('Security: Connection Handling', () => {
 
     // --- SEC-08: deleteBlockByIndex must not leak the transaction lock on failure ---
     //
@@ -161,26 +199,6 @@ describe('Security: Connection Handling', () => {
     // retry loop, halting all block ingestion until a manual restart.
 
     describe('deleteBlockByIndex failure handling', () => {
-        // A fake connection whose query() fails on the Nth call, recording
-        // whether the transaction was rolled back and the connection released.
-        function makeFailingConnection(failOnCall = 1) {
-            const state = { rolledBack: false, released: false, committed: false, calls: 0 }
-            const connection = {
-                beginTransaction: async () => {},
-                commit: async () => { state.committed = true },
-                rollback: async () => { state.rolledBack = true },
-                release: async () => { state.released = true },
-                query: async () => {
-                    state.calls += 1
-                    if (state.calls === failOnCall) {
-                        throw new Error('simulated DB failure (timeout/deadlock/disk full)')
-                    }
-                    return []
-                }
-            }
-            return { connection, state }
-        }
-
         it('[REGRESSION P1] R-BUG-001: releases the transaction lock when a query fails', async () => {
             const db = new Database('localhost', 3306, 'test_db', 'root', '')
             const { connection, state } = makeFailingConnection(1)
@@ -200,6 +218,12 @@ describe('Security: Connection Handling', () => {
             assert.ok(state.rolledBack, 'a failed delete should roll back the open transaction')
             assert.ok(state.released, 'a failed delete should release the connection')
         })
+    })
+})
+
+describe('Security: Connection Handling', () => {
+
+    describe('deleteBlockByIndex failure handling', () => {
 
         it('[REGRESSION P1] R-BUG-001: a subsequent call does not deadlock after a failure', async () => {
             const db = new Database('localhost', 3306, 'test_db', 'root', '')
