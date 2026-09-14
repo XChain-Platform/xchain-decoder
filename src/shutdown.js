@@ -15,7 +15,7 @@
  * XChain Decoder - Graceful shutdown
  *
  * Bounded, idempotent drain for SIGTERM/SIGINT, the same shape as the
- * indexer's src/shutdown.js. The Dockerfile CMD runs node as PID 1, so
+ * indexer's src/api/shutdown.js. The Dockerfile CMD runs node as PID 1, so
  * `docker stop` delivers SIGTERM here.
  *
  * Before this file the handler in api.js only set the decoder's stopFlag. The

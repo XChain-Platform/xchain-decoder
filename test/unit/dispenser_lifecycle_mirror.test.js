@@ -510,7 +510,7 @@ describe('DISPENSER lifecycle mirror: advisory open-view', function () {
         // stays open in the decoder view until its OWN EXPIRATION (or a cancel/edit), and the
         // over-captured dispense payments are the known, bounded divergence the indexer
         // authoritatively drops (findMatchingDispensers ignores the closed dispenser) and
-        // xchain-indexer/src/dispenser_divergence_metrics.js (recordRejectedDispense) already
+        // xchain-indexer/src/chain/dispenser_divergence_metrics.js (recordRejectedDispense) already
         // measures. Below the caps flag-day the indexer does not close at 1000, so there is
         // no divergence to mirror.
         const model = new DispenserModel()

@@ -69,7 +69,7 @@ const INDEXER_CHANGES = path.join(INDEXER_ROOT, 'src', 'protocol_changes.js');
 
 const VENDORED = path.join(__dirname, '../src/protocol/indexer_batch_limits.js');
 
-// Minimal stand-in for the `action` object xchain-indexer/src/actions.js hands the Batch
+// Minimal stand-in for the `action` object xchain-indexer/src/actions/index.js hands the Batch
 // constructor. The constructor only STORES these, so identity is all that is required; any
 // method call would be a change in that constructor and is meant to break loudly here.
 function stubAction(){

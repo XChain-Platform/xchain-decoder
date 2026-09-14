@@ -3327,7 +3327,7 @@ class XChainDecoder {
                                 // there. `startsWith("DISPENSER")` selects on a bare action NAME, but
                                 // the wire delimits the name with '|', so it also matches every
                                 // longer string sharing that head: `DISPENSERX|0|...`, which
-                                // xchain-indexer/src/actions.js dispatches nowhere, and the real but
+                                // xchain-indexer/src/actions/index.js dispatches nowhere, and the real but
                                 // indexer-SYNTHESIZED DISPENSER_CLOSE / DISPENSER_EXPIRE (both sit in
                                 // FEE_QUOTE_EXEMPT beside DISPENSE and ORDER_MATCH), whose
                                 // wire-spelled form carries no resolvable DISPENSER_ACTION_INDEX and
@@ -3398,7 +3398,7 @@ class XChainDecoder {
                                     // action_index that would disambiguate is not in the decoder's id
                                     // space, so the row keyed on the operating address wins, then the
                                     // most recent. The residual gap is enumerated in
-                                    // xchain-indexer/src/dispenser_divergence_metrics.js.
+                                    // xchain-indexer/src/chain/dispenser_divergence_metrics.js.
                                     let commandVersion = decodedDataSplit[1]
                                     let dispenserFormat = parseInt(commandVersion, 10)
 
