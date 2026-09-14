@@ -22,22 +22,26 @@ const sinon = require('sinon')
 const XChainDecoder = require('../../src/XChainDecoder')
 const { createMockDatabase, createMockConnector, createMinimalBlockHex, captureConsole } = require('./support/helpers')
 
+let decoder
+let mockDb
+let mockConnector
+
+function createDecoder() {
+    decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
+    mockDb = createMockDatabase()
+    mockConnector = createMockConnector()
+    decoder.db = mockDb
+    decoder.connector = mockConnector
+}
+
+function stopDecoder() {
+    decoder.stop()
+}
+
 describe('CE-10: Fire-and-Forget DB Call (insertTransactionOutput)', function () {
-    let decoder
-    let mockDb
-    let mockConnector
+    beforeEach(createDecoder)
 
-    beforeEach(function () {
-        decoder = new XChainDecoder('bitcoin-regtest', 'localhost', 3306, 'test_db', 'root', '', 'localhost', 8332, 'rpc', 'rpc')
-        mockDb = createMockDatabase()
-        mockConnector = createMockConnector()
-        decoder.db = mockDb
-        decoder.connector = mockConnector
-    })
-
-    afterEach(function () {
-        decoder.stop()
-    })
+    afterEach(stopDecoder)
 
     it('should verify insertTransactionOutput is awaited in source code', function () {
         const fs = require('fs')
@@ -58,6 +62,12 @@ describe('CE-10: Fire-and-Forget DB Call (insertTransactionOutput)', function ()
         }
         assert.ok(found, 'insertTransactionOutput should be awaited in XChainDecoder.js')
     })
+})
+
+describe('CE-10: Fire-and-Forget DB Call (insertTransactionOutput)', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('insertTransactionOutput failure should be observable', async function () {
         // Set up a scenario where parseTransaction returns dispense outputs
@@ -112,6 +122,12 @@ describe('CE-10: Fire-and-Forget DB Call (insertTransactionOutput)', function ()
         const written = mockDb.insertTransactionOutput.getCalls().slice(1).map(c => c.args[0].vout)
         assert.deepStrictEqual(written, [0, 1], 'The retry should re-write every dispense output in order')
     })
+})
+
+describe('CE-10: Fire-and-Forget DB Call (insertTransactionOutput)', function () {
+    beforeEach(createDecoder)
+
+    afterEach(stopDecoder)
 
     it('insertTransactionOutput should be called with correct parameters', async function () {
         const mockParseResult = {
