@@ -36,26 +36,31 @@ function createDecoder() {
     )
 }
 
+let decoder
+let reporter
+
+function prepareReporter() {
+    if (!reporter) {
+        reporter = new FuzzReporter('removeObfuscation')
+    }
+}
+
+function prepareDecoder() {
+    decoder = createDecoder()
+}
+
+function reportSummary() {
+    reporter.printSummary()
+    const s = reporter.getSummary()
+    assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found; check test/fuzz/crashes/removeObfuscation/`)
+    assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
+    assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
+}
+
 describe('Fuzz: removeObfuscation', function () {
     this.timeout(120000)
-    let decoder
-    let reporter
-
-    before(() => {
-        reporter = new FuzzReporter('removeObfuscation')
-    })
-
-    beforeEach(() => {
-        decoder = createDecoder()
-    })
-
-    after(() => {
-        reporter.printSummary()
-        const s = reporter.getSummary()
-        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found; check test/fuzz/crashes/removeObfuscation/`)
-        assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
-        assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
-    })
+    before(prepareReporter)
+    beforeEach(prepareDecoder)
 
     // --- Hypothesis H1: Short txid strings ---
     describe('H1: short/malformed txid', () => {
@@ -89,6 +94,12 @@ describe('Fuzz: removeObfuscation', function () {
             })
         }
     })
+})
+
+describe('Fuzz: removeObfuscation', function () {
+    this.timeout(120000)
+    before(prepareReporter)
+    beforeEach(prepareDecoder)
 
     // --- Random data with valid txid ---
     describe('random data, valid txid', () => {
@@ -114,6 +125,12 @@ describe('Fuzz: removeObfuscation', function () {
             }
         })
     })
+})
+
+describe('Fuzz: removeObfuscation', function () {
+    this.timeout(120000)
+    before(prepareReporter)
+    beforeEach(prepareDecoder)
 
     // --- Mutated known-good payloads ---
     describe('mutated known-good payloads', () => {
@@ -139,6 +156,12 @@ describe('Fuzz: removeObfuscation', function () {
             }
         })
     })
+})
+
+describe('Fuzz: removeObfuscation', function () {
+    this.timeout(120000)
+    before(prepareReporter)
+    beforeEach(prepareDecoder)
 
     // --- Random txid + random data ---
     describe('random txid + random data', () => {
@@ -165,6 +188,12 @@ describe('Fuzz: removeObfuscation', function () {
             }
         })
     })
+})
+
+describe('Fuzz: removeObfuscation', function () {
+    this.timeout(120000)
+    before(prepareReporter)
+    beforeEach(prepareDecoder)
 
     // --- Non-Buffer types ---
     describe('non-Buffer types', () => {
@@ -200,6 +229,13 @@ describe('Fuzz: removeObfuscation', function () {
             })
         }
     })
+})
+
+describe('Fuzz: removeObfuscation', function () {
+    this.timeout(120000)
+    before(prepareReporter)
+    beforeEach(prepareDecoder)
+    after(reportSummary)
 
     // --- Boundary sizes ---
     describe('boundary-size buffers', () => {
