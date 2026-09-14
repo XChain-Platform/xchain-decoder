@@ -56,6 +56,13 @@ const MEMPOOL_INTERVAL = 60000 //60 seconds between mempool checks
 // cache is that an unauthenticated health endpoint must not turn into one DB query
 // per request.
 const REORG_HALT_PROBE_INTERVAL_MS = 60000
+// How long the parse loop sleeps between passes while it is PARKED on a REORG_HALT.
+// Deliberately NOT the probe cadence above: the marker is re-read on that TTL (the
+// parked pass calls checkReorgHalt un-forced, so every TTL expiry is a real re-read and
+// the passes in between cost nothing), while this tick is what returns the loop to its
+// stopFlag check. At a minute a SIGTERM arriving just after a pass would spend most of
+// the shutdown budget waiting for a sleep to end.
+const REORG_HALT_PARK_TICK_MS = 1000
 // How long the block loop may make no forward progress, while the node tip is fresh and
 // visibly ahead, before isStalled() calls the decoder wedged. The loop never skips a
 // block on a fetch/parse fault (skipping would corrupt the index), so a deterministic
@@ -457,6 +464,20 @@ class XChainDecoder {
         this.reorgHaltMarkerPersisted = null
         this._reorgHaltProbeInFlight = null
 
+        // Parse-loop park state for a REORG_HALT refusal (parkOnReorgHalt). Without a park
+        // the refusal escapes start() and exits the process so the restart policy acts,
+        // but the marker is restart-durable and only an operator clear releases it, so
+        // an uncapped `--restart unless-stopped` turned one halt into an unbounded
+        // restart loop: an operator's testnet decoder restarted 5737 times in three
+        // days, and the restart count was the only surface that said so. Parked, the
+        // loop stops parsing and the process stays up, which is what the CLI's restart
+        // count, the halt-aware healthcheck and the audited clear all already assume.
+        // reorgHaltParkedHeight is the stored tip the park began at, published so an
+        // operator can tell a park from a latent marker on a decoder still advancing.
+        this.reorgHaltParked = false
+        this.reorgHaltParkedAt = null
+        this.reorgHaltParkedHeight = null
+
         // Non-null only while the parse loop is waiting out a node in initial block
         // download whose tip sits below our stored tip (see the wait branch in
         // start()). That wait is otherwise indistinguishable from a wedge on every
@@ -594,6 +615,13 @@ class XChainDecoder {
     isStalled() {
         // A process that has never advanced has nothing to be behind on yet.
         if (!this.lastAdvanceAt) return false
+        // Parked on a REORG_HALT: not advancing is the POINT, and it is the same
+        // "restarting fixes nothing" class as the stale-tip gate below. The decoder
+        // healthcheck carries autoheal, so reporting stalled here would recycle the
+        // container every couple of minutes for a marker only an operator clear can
+        // release, which is the crash loop parking exists to end. The halt itself is
+        // reported on its own field by every health surface.
+        if (this.reorgHaltParked) return false
         // Neither height is known, so there is no gap to measure.
         if (this.blockchainInfoLastBlock < 0 || this.lastProcessedBlockIndex < 0) return false
         // The chain is not waiting on us: a decoder at or one block behind the tip
@@ -729,12 +757,71 @@ class XChainDecoder {
             halted:     !!this.reorgHalted,
             reason:     this.reorgHaltReason || null,
             at:         this.reorgHaltAt || null,
+            // Whether the PARSE LOOP has stopped on this halt, as distinct from
+            // carrying one. A latent marker leaves the decoder parsing forward and
+            // healthy; parked means nothing is being parsed until the marker clears,
+            // and only this field separates the two on an operator's surfaces.
+            parked:     !!this.reorgHaltParked,
+            parked_at:  this.reorgHaltParkedAt || null,
+            parked_height: (this.reorgHaltParkedHeight === null || this.reorgHaltParkedHeight === undefined)
+                ? null : this.reorgHaltParkedHeight,
             cleared_at:     this.reorgHaltClearedAt || null,
             cleared_reason: this.reorgHaltClearedReason || null,
             checked_at: this.reorgHaltCheckedAt || null,
             marker_persisted: (this.reorgHaltMarkerPersisted === null || this.reorgHaltMarkerPersisted === undefined)
                 ? null : !!this.reorgHaltMarkerPersisted
         }
+    }
+
+    // Stop parsing on a REORG_HALT refusal and keep this process up.
+    //
+    // Only a refusal belongs here, never an ordinary fault: the durable marker blocks
+    // every rollback until an operator clears it, so a restart lands back in the same
+    // refusal a few seconds later, forever. Idempotent, because the loop can reach a
+    // refusal from three call sites and only the first one is news.
+    parkOnReorgHalt(reason, blockHeight){
+        if (this.reorgHaltParked) return
+        this.reorgHaltParked = true
+        this.reorgHaltParkedAt = new Date().toISOString()
+        this.reorgHaltParkedHeight = (typeof blockHeight === 'number' && blockHeight >= 0) ? blockHeight : null
+        // A halt whose marker write failed has nothing an operator can clear, so the
+        // park cannot end on its own and the line has to say so rather than promise a
+        // resume that will never come.
+        const recorded = this.reorgHaltMarkerPersisted !== false
+        this.logError('PARKED on a REORG_HALT at block height '
+            + (this.reorgHaltParkedHeight === null ? 'unknown' : this.reorgHaltParkedHeight)
+            + '. The parse loop has stopped and this process stays up: the durable marker refuses every '
+            + 'rollback and a restart cannot clear it. Clear it with `xchain-node clear-reorg-halt <chain> '
+            + '<network> --reason "..."`, which verifies the rolled-back range has been re-parsed and records '
+            + 'the clear as its own events row. This decoder re-reads the marker every '
+            + Math.round(REORG_HALT_PROBE_INTERVAL_MS / 1000) + 's and resumes parsing on its own once it is '
+            + 'gone, with no restart.'
+            + (recorded ? '' : ' The marker could NOT be persisted, so nothing exists for a clear to supersede '
+                + 'and this park will NOT end on its own: repair the database and restart.')
+            + (reason ? ' Reason: ' + reason : ''))
+    }
+
+    // Ask whether a park may end, and end it when it may. True once the loop may parse
+    // again; false while it must stay parked.
+    //
+    // The probe is deliberately un-forced: checkReorgHalt's own TTL
+    // (REORG_HALT_PROBE_INTERVAL_MS) is the re-read cadence, so a loop ticking every
+    // second costs one query a minute and every expiry is a real re-read of the events
+    // table rather than the cached answer. A halt whose marker never persisted is never
+    // resumed from: the probe would find no row, read that as cleared, and resume
+    // straight back into the same refusal once per tick.
+    async resumeFromReorgHaltPark(){
+        if (!this.reorgHaltParked) return true
+        if (this.reorgHaltMarkerPersisted === false) return false
+        const status = await this.checkReorgHalt()
+        if (status.halted) return false
+        const height = this.reorgHaltParkedHeight
+        this.reorgHaltParked = false
+        this.reorgHaltParkedAt = null
+        this.reorgHaltParkedHeight = null
+        this.log('REORG_HALT cleared; resuming the parse loop'
+            + (height === null ? '' : ' from block height ' + height) + ' without a restart.')
+        return true
     }
 
     stop(){
@@ -1945,7 +2032,12 @@ class XChainDecoder {
                 + "would permanently lose money-bearing dispenser state. Recovery: perform a full resync "
                 + "from a known-good snapshot."
             logger.error(msg)
-            throw new Error(msg)
+            // Tagged so the parse loop parks on this refusal instead of exiting into a
+            // restart loop: the marker outlives every restart and is released only by
+            // an audited operator clear, which lands while this process runs.
+            const err = new Error(msg)
+            err.reorgHalt = true
+            throw err
         }
 
         // Depth already rolled back and not yet re-synced, carried across restarts.
@@ -2113,7 +2205,15 @@ class XChainDecoder {
                     + "resync from a known-good snapshot."
                 logger.error(msg)
                 await haltReorg(msg)
-                throw new Error(msg)
+                // Same tag as the entry guard above, and for the same reason: the marker
+                // haltReorg just wrote is what every later rollback will refuse on, so
+                // the parse loop parks rather than exiting. The delete-failure halts
+                // below are deliberately NOT tagged: those are infrastructure faults,
+                // where a fresh process and a fresh pool are a real repair attempt, and
+                // their marker parks the next boot through the entry guard anyway.
+                const err = new Error(msg)
+                err.reorgHalt = true
+                throw err
             }
         }
 
@@ -2550,6 +2650,15 @@ class XChainDecoder {
             await this.sleep(3000)
         }
 
+        // Answer a failed reconcile: park on a REORG_HALT refusal, rethrow anything
+        // else. Shared by the three verifyReorg call sites so all three classify a halt
+        // the same way; before this, two of them let it escape start() into the
+        // exit-and-restart loop parkOnReorgHalt exists to end.
+        const parkOrRethrow = (err, blockHeight) => {
+            if (!(err && err.reorgHalt)) throw err
+            this.parkOnReorgHalt(err.message, blockHeight)
+        }
+
         main_parsing:
         while (true){
             // Liveness heartbeat, first statement in the loop so every path back to the
@@ -2565,6 +2674,25 @@ class XChainDecoder {
                     this.mempoolInterval = null
                 }   
                 break
+            }
+
+            // Parked on a REORG_HALT (parkOnReorgHalt): nothing is fetched, deleted or
+            // inserted until the marker clears, so this sits above the tip refresh and
+            // everything under it. Below the stopFlag check on purpose, so a SIGTERM
+            // arriving during a park drains at the next tick like any other iteration.
+            if (this.reorgHaltParked){
+                if (!(await this.resumeFromReorgHaltPark())){
+                    await this.sleep(REORG_HALT_PARK_TICK_MS)
+                    continue main_parsing
+                }
+                // Resumed. Re-derive the cursors from the stored tip exactly as the
+                // rollback paths do, and drop the cached tip so the next pass re-polls
+                // the node and re-runs the reorg check the clear has now unblocked.
+                lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
+                lastProcessedTxIndex = await this.db.getLastTxIndex()
+                blocksQuantity = 0
+                lastBlockchainInfo = null
+                continue main_parsing
             }
 
             // Edge-triggered stale-tip warn. Evaluated every iteration
@@ -2764,7 +2892,8 @@ class XChainDecoder {
                             await this.sleep(5000)
                             continue
                         }
-                        throw err
+                        parkOrRethrow(err, lastProcessedBlockIndex)
+                        continue main_parsing
                     }
                     tipBelowStoredTipRefused = false
                     // Re-clamp: a deep reorg can empty the blocks table, causing
@@ -2812,14 +2941,20 @@ class XChainDecoder {
                         logger.error(formatLogLine('Error during equal-height tip-hash detection reads, skipping:', e))
                     }
                     if (needsReconcile){
-                        // Run the reconcile OUTSIDE the try so a fail-closed verifyReorg abort
-                        // (durable REORG_HALT, safe-depth ceiling, or delete-failure) propagates
-                        // out of start() and halts loudly, matching the two sibling verifyReorg
-                        // call sites. Swallowing it here left a partially rolled-back DB under a
-                        // stale in-memory cursor while this.synced stayed true.
+                        // Run the reconcile OUTSIDE the detection try so a fail-closed verifyReorg
+                        // abort is never swallowed as a transient blip, which left a partially
+                        // rolled-back DB under a stale in-memory cursor while this.synced stayed
+                        // true. Its own catch classifies rather than swallows: a REORG_HALT
+                        // refusal parks the loop (nothing a restart can fix), every other abort
+                        // still propagates out of start() and halts loudly.
                         this.log("Equal-height tip replacement detected at height " + lastProcessedBlockIndex + ". Reconciling...")
                         await this.db.endTransaction()
-                        await this.verifyReorg(this.blockchainInfoLastBlock)
+                        try {
+                            await this.verifyReorg(this.blockchainInfoLastBlock)
+                        } catch (err){
+                            parkOrRethrow(err, lastProcessedBlockIndex)
+                            continue main_parsing
+                        }
                         lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
                         lastProcessedTxIndex = await this.db.getLastTxIndex()
                         blocksQuantity = 0
@@ -2943,7 +3078,14 @@ class XChainDecoder {
                         await this.db.endTransaction()
                         this.logWarn("A reorg has been detected at block " + nextBlockHeight + ". Cleaning blocks...")
                         const preReorgBlock = lastProcessedBlockIndex
-                        await this.verifyReorg(this.blockchainInfoLastBlock)
+                        try {
+                            await this.verifyReorg(this.blockchainInfoLastBlock)
+                        } catch (err){
+                            // A REORG_HALT refusal parks the loop instead of exiting the
+                            // process; every other abort still propagates and halts loudly.
+                            parkOrRethrow(err, lastProcessedBlockIndex)
+                            continue main_parsing
+                        }
                         // Re-clamp: same as the pre-loop guard and the node-tip regression path.
                         lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
                         // Count rolled-back blocks as the difference between the pre-reorg tip

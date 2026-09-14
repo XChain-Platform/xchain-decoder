@@ -194,9 +194,11 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
         // costs at most one DB query per minute.
         //
         // Deliberately NOT in the healthy gate below, for the reason given at /status
-        // and the health method: the marker survives restarts and is cleared only by a
-        // resync, while the halted decoder keeps parsing forward, so gating would make
-        // autoheal restart-loop a service that is doing useful work and fix nothing.
+        // and the health method: the marker survives restarts and is released only by an
+        // audited operator clear, so gating would have autoheal restart-loop a container
+        // for a fault no restart touches. That holds in both halt shapes, latent (the
+        // decoder keeps parsing forward and is doing useful work) and parked (it has
+        // stopped on purpose and is waiting for the clear, which lands while it runs).
         let reorgHalt = { halted: false, reason: null, at: null }
         if (dbOk && typeof decoder.checkReorgHalt === 'function'){
             try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', '/live', e) }
@@ -220,6 +222,11 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
             // node_height_stale below, and the only surface that separates "the node has
             // never answered" from "the node is fine".
             ...nodeReachabilityFields(decoder),
+            // Reported, never gated on, like the halt itself: the parse loop parks on a
+            // REORG_HALT deliberately, and this route drives autoheal, so a parked
+            // decoder answering 503 here would restart-loop it for a marker no restart
+            // clears. isStalled() carries the matching gate.
+            reorg_halt_parked: reorgHalt.parked === true,
             // A frozen node tip, reported but deliberately NOT gating. isStalled()
             // returns false while the tip is stale on purpose: restarting the container
             // cannot fix an upstream node outage, and gating on it re-opens the
@@ -285,8 +292,14 @@ async function startApi(){
         // the process would otherwise linger as a permanently-unhealthy but RUNNING
         // container that `--restart unless-stopped` never recycles. Exit non-zero so the
         // container restart policy (or a supervisor) can act, mirroring the sibling
-        // xchain-indexer fatal handler. Faults that require an operator resync (durable
-        // REORG_HALT) surface as a visible Exited(1) rather than a silent wedge.
+        // xchain-indexer fatal handler.
+        //
+        // A REORG_HALT refusal does not arrive here: the parse loop parks on it and
+        // keeps this process up (XChainDecoder.parkOnReorgHalt), because the marker
+        // outlives every restart and only an audited clear releases it, so exiting made
+        // one halt an unbounded restart loop against an uncapped `--restart
+        // unless-stopped`. What still reaches this handler is the fault class a restart
+        // can actually repair, and those keep the visible Exited(1).
         process.exit(1)
     })
 
@@ -407,10 +420,11 @@ async function startApi(){
             // Latent REORG_HALT marker. TTL-cached inside checkReorgHalt, so a
             // monitoring burst costs at most one DB query per minute. Deliberately does
             // NOT flip `status` to unhealthy: the decoder healthcheck carries autoheal,
-            // and a halted decoder still parses forward, so reporting unhealthy would
-            // restart-loop a service that is doing useful work while fixing nothing (the
-            // marker survives restarts and is only cleared by a resync). Report it as its
-            // own field instead, and let the operator/watchdog act on it.
+            // and the marker survives every restart (only an audited clear releases it),
+            // so reporting unhealthy would restart-loop the container while fixing
+            // nothing, whether the decoder is still parsing forward on a latent marker or
+            // parked on the halt. Report it as its own field instead, with
+            // reorg_halt_parked separating the two, and let the operator/watchdog act.
             let reorgHalt = { halted: false, reason: null, at: null, cleared_at: null, cleared_reason: null, checked_at: null }
             if (dbOk && typeof decoder.checkReorgHalt === 'function'){
                 try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', 'rpc:health', e) }
@@ -433,6 +447,10 @@ async function startApi(){
                 // node_last_ok_at + node_unreachable: whether the coin node is answering
                 // this decoder at all, and since when it stopped. Reported, not gated on.
                 ...nodeReachabilityFields(decoder),
+                // True once the parse loop has stopped on the halt and is waiting for
+                // the clear; a latent marker on a decoder still parsing reports false.
+                reorg_halt_parked:   reorgHalt.parked === true,
+                reorg_halt_parked_at: reorgHalt.parked_at || null,
                 // Set once an operator cleared a halt (db.clearReorgHalt); null while a
                 // halt is live or none was ever recorded.
                 reorg_halt_cleared_at:     reorgHalt.cleared_at || null,
@@ -529,9 +547,9 @@ async function startApi(){
             // db.ping() uses its own pooled connection; see the health method note.
             try { dbOk = await decoder.db.ping() } catch (e) { noteProbeFailure('db_ping', '/status', e) }
         }
-        // Latent halt marker, reported here too so an operator can see it on
-        // the cheap probe. The HTTP code stays keyed on running+db for the reason given
-        // in health() above: a dormant halt must not make an advancing decoder look dead.
+        // Halt marker, reported here too so an operator can see it on the cheap probe.
+        // The HTTP code stays keyed on running+db for the reason given in health()
+        // above: neither a dormant halt nor a park is a fault a restart repairs.
         let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
         if (dbOk && typeof decoder.checkReorgHalt === 'function'){
             try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', '/status', e) }
@@ -564,7 +582,11 @@ async function startApi(){
             // this body (xchain-node's BootstrapHealthGate falls back to GET /status when
             // the JSON-RPC health surface is unavailable) can only tell those two apart
             // if this route carries the timestamp the health method already carries.
-            reorg_halt_checked_at: reorgHalt.checked_at
+            reorg_halt_checked_at: reorgHalt.checked_at,
+            // True only once the parse loop has STOPPED on the halt. A latent marker on a
+            // decoder still parsing forward reports false; see getReorgHaltStatus().
+            reorg_halt_parked: reorgHalt.parked === true,
+            reorg_halt_parked_at: reorgHalt.parked_at || null
         })
     })
 
