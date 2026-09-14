@@ -78,6 +78,9 @@ describe('Malformed Data Integration', () => {
             assert.strictEqual(tx, null, 'Text OP_RETURN should not be stored')
         })
     })
+})
+
+describe('Malformed Data Integration', () => {
 
     describe('blocks with mixed valid and invalid transactions', () => {
 
@@ -106,6 +109,9 @@ describe('Malformed Data Integration', () => {
             assert.strictEqual(xchnTx.data, action)
         })
     })
+})
+
+describe('Malformed Data Integration', () => {
 
     describe('decoder stability after invalid data', () => {
 
