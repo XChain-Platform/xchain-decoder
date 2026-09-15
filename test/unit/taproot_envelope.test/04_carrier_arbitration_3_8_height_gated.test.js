@@ -131,6 +131,10 @@ describe('Taproot envelope recognition', function () {
             assert.strictEqual(post.data.length, 0)
         })
     })
+})
+
+describe('Taproot envelope recognition', function () {
+    afterEach(() => sinon.restore())
 
     describe('carrier arbitration (§3.8), height-gated', function () {
 
@@ -170,6 +174,10 @@ describe('Taproot envelope recognition', function () {
             assert.strictEqual(post.data.length, 0)
         })
     })
+})
+
+describe('Taproot envelope recognition', function () {
+    afterEach(() => sinon.restore())
 
     describe('carrier arbitration (§3.8), height-gated', function () {
 
@@ -215,6 +223,10 @@ describe('Taproot envelope recognition', function () {
             assert.strictEqual(rpc.callCount, 0)
         })
     })
+})
+
+describe('Taproot envelope recognition', function () {
+    afterEach(() => sinon.restore())
 
     describe('carrier arbitration (§3.8), height-gated', function () {
 

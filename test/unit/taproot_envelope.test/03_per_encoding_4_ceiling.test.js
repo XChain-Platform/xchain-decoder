@@ -90,6 +90,25 @@ describe('Taproot envelope recognition', function () {
             assert.ok(result.compiledDataLength <= result.payloadCeiling, 'block/mempool guards accept at the ceiling')
             assert.strictEqual(result.data.toString('utf-8'), 'FILE|0|x')
         })
+    })
+})
+
+describe('Taproot envelope recognition', function () {
+    afterEach(() => sinon.restore())
+
+    describe('per-encoding §4 ceiling', function () {
+        let decoder
+        beforeEach(() => {
+            decoder = createDecoder()
+        })
+
+        function wireFor(script){
+            const fundingTx = buildFundingTx()
+            const commitTx = buildCommitTx(fundingTx)
+            const revealTx = buildRevealTx(commitTx, script)
+            wireConnector(decoder, [fundingTx, commitTx])
+            return revealTx
+        }
 
         it('[ADVERSARIAL] a 390,001-byte payload measures OVER the ceiling: the guard drops it in both paths', async function () {
             this.timeout(20000)

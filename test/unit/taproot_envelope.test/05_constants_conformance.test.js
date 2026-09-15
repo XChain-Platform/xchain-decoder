@@ -76,6 +76,10 @@ describe('Taproot envelope recognition', function () {
             })
         })
     })
+})
+
+describe('Taproot envelope recognition', function () {
+    afterEach(() => sinon.restore())
 
     describe('constants conformance', function () {
         describe('parity with the canonical xchain-documentation copy', function () {
@@ -117,6 +121,10 @@ describe('Taproot envelope recognition', function () {
             })
         })
     })
+})
+
+describe('Taproot envelope recognition', function () {
+    afterEach(() => sinon.restore())
 
     describe('constants conformance', function () {
         describe('parity with the encoder validator', function () {

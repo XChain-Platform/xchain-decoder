@@ -111,6 +111,15 @@ describe('Taproot envelope recognition', function () {
             const witness = GOLDEN.annexWitnessHex.map(h => Buffer.from(h, 'hex'))
             assert.strictEqual(decoder.detectEnvelopeWitness(witness), null)
         })
+    })
+})
+
+describe('Taproot envelope recognition', function () {
+    afterEach(() => sinon.restore())
+
+    describe('detectEnvelopeWitness()', function () {
+        let decoder
+        beforeEach(() => { decoder = createDecoder() })
 
         it('[ADVERSARIAL] structural violations are all rejected without throwing', function () {
             const cases = [
@@ -147,6 +156,15 @@ describe('Taproot envelope recognition', function () {
             assert.ok(hit)
             assert.deepStrictEqual(hit.payload, GOLDEN_PAYLOAD)
         })
+    })
+})
+
+describe('Taproot envelope recognition', function () {
+    afterEach(() => sinon.restore())
+
+    describe('detectEnvelopeWitness()', function () {
+        let decoder
+        beforeEach(() => { decoder = createDecoder() })
 
         it('[ADVERSARIAL] a payload push that canonicalizes to a bare opcode breaks the walk (encoder rebalance exists for this)', function () {
             // Hand-assembled: payload pushes are <519 bytes> then OP_7 where a
@@ -171,6 +189,15 @@ describe('Taproot envelope recognition', function () {
             assert.ok(hit, 'rebalanced envelope recognized')
             assert.deepStrictEqual(hit.payload, payload)
         })
+    })
+})
+
+describe('Taproot envelope recognition', function () {
+    afterEach(() => sinon.restore())
+
+    describe('detectEnvelopeWitness()', function () {
+        let decoder
+        beforeEach(() => { decoder = createDecoder() })
 
         it('[ADVERSARIAL] foreign ord-style inscriptions are not recognized', function () {
             // Real ord grammar: <pubkey> OP_CHECKSIG OP_FALSE OP_IF "ord" ... OP_ENDIF
@@ -215,5 +242,4 @@ describe('Taproot envelope recognition', function () {
             }
         })
     })
-
 })

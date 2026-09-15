@@ -118,6 +118,10 @@ describe('Taproot envelope recognition', function () {
             assert.strictEqual(rpc.callCount, 0)
         })
     })
+})
+
+describe('Taproot envelope recognition', function () {
+    afterEach(() => sinon.restore())
 
     describe('parseTransaction: golden envelope reveal', function () {
         let decoder, fundingTx, commitTx, revealTx, rpc, sourceAddr

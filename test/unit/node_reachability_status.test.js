@@ -168,7 +168,9 @@ describe('the connector records both instants at its single POST choke point', f
         assert.ok(r.node_unreachable, 'the timeout the operator saw 2099 times must show here')
         assert.strictEqual(r.node_unreachable.last_ok_at, null)
     })
+})
 
+describe('the connector records both instants at its single POST choke point', function () {
     it('every RPC method reaches the recording site through rpcPost', function () {
         // Source-level: instrumenting per method is how the next added method silently
         // escapes the surface. Nothing in this class may POST around the choke point.
