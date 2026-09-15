@@ -117,6 +117,63 @@
       "test/unit/taproot_envelope.test/04_carrier_arbitration_3_8_height_gated.test.js",
       "test/unit/taproot_envelope.test/05_constants_conformance.test.js",
       "test/unit/taproot_envelope.test/06_wire_fidelity_with_the_shipped_encoder_sibling_gated.test.js"
+    ],
+    "test/unit/batch_whole_batch_rejection.test.js": [
+      "test/unit/batch_whole_batch_rejection.test.js",
+      "test/unit/batch_whole_batch_rejection.test/01_the_real_on_chain_corpus.test.js"
+    ],
+    "test/unit/blockchain_connector.test.js": [
+      "test/unit/blockchain_connector.test.js",
+      "test/unit/blockchain_connector.test/01_get_block_without_aux_pow.test.js",
+      "test/unit/blockchain_connector.test/02_blockchain_connector_get_raw_transactions_bounded_concurrency.test.js"
+    ],
+    "test/unit/boundary/dispenser_parsing.test.js": [
+      "test/unit/boundary/dispenser_parsing.test.js",
+      "test/unit/boundary/dispenser_parsing.test/01_boundary_combinatorial_dispenser_scenarios.test.js"
+    ],
+    "test/unit/boundary/script_types.test.js": [
+      "test/unit/boundary/script_types.test.js",
+      "test/unit/boundary/script_types.test/01_boundary_multisig_zero_trim_edge_cases.test.js",
+      "test/unit/boundary/script_types.test/02_boundary_magic_prefix_encoding_type_detection.test.js",
+      "test/unit/boundary/script_types.test/03_boundary_is_future_segwit_script_additional_edge_cases.test.js"
+    ],
+    "test/unit/db_queries.test.js": [
+      "test/unit/db_queries.test.js",
+      "test/unit/db_queries.test/01_has_pubkey.test.js",
+      "test/unit/db_queries.test/02_insert_pubkey.test.js",
+      "test/unit/db_queries.test/03_insert_event.test.js",
+      "test/unit/db_queries.test/04_delete_block_by_index.test.js",
+      "test/unit/db_queries.test/05_insert_block.test.js",
+      "test/unit/db_queries.test/06_insert_transaction.test.js",
+      "test/unit/db_queries.test/07_insert_mempool_transaction.test.js",
+      "test/unit/db_queries.test/08_insert_dispenser.test.js",
+      "test/unit/db_queries.test/09_insert_transaction_output.test.js",
+      "test/unit/db_queries.test/10_is_there_a_dispenser_for_address.test.js",
+      "test/unit/db_queries.test/11_get_all_open_dispenser_addresses.test.js",
+      "test/unit/db_queries.test/12_delete_open_dispensers.test.js",
+      "test/unit/db_queries.test/13_purge_expired_dispensers.test.js",
+      "test/unit/db_queries.test/14_has_dispenser_transactions.test.js",
+      "test/unit/db_queries.test/15_delete_and_compare_txs_not_in_list.test.js",
+      "test/unit/db_queries.test/16_drop_database.test.js",
+      "test/unit/db_queries.test/17_release_connection.test.js",
+      "test/unit/db_queries.test/18_end_transaction.test.js",
+      "test/unit/db_queries.test/19_verify_database.test.js",
+      "test/unit/db_queries.test/20_error_path_transaction_connection_branches.test.js"
+    ],
+    "test/unit/batch_dispenser_registration.test.js": [
+      "test/unit/batch_dispenser_registration.test.js",
+      "test/unit/batch_dispenser_registration.test/01_a_dispenser_created_inside_a_batch.test.js",
+      "test/unit/batch_dispenser_registration.test/02_several_dispenser_sub_commands_in_one_batch.test.js",
+      "test/unit/batch_dispenser_registration.test/03_two_creates_on_the_same_operating_address_the_primary_key_collision.test.js",
+      "test/unit/batch_dispenser_registration.test/04_the_money_bearing_end_payments_to_a_batch_created_dispenser.test.js",
+      "test/unit/batch_dispenser_registration.test/05_batched_v2_refill_v1_cancel.test.js",
+      "test/unit/batch_dispenser_registration.test/06_batched_v2_refill_v1_cancel_continued.test.js",
+      "test/unit/batch_dispenser_registration.test/07_registration_rides_the_same_flag_day_as_payment_output_capture.test.js",
+      "test/unit/batch_dispenser_registration.test/08_the_dispenser_prefix_carries_its_delimiter_above_the_gate_invariants.test.js",
+      "test/unit/batch_dispenser_registration.test/09_the_dispenser_prefix_carries_its_delimiter_above_the_gate_inside_a_batch.test.js",
+      "test/unit/batch_dispenser_registration.test/10_the_dispenser_prefix_carries_its_delimiter_above_the_gate_inside_a_batch_continued.test.js",
+      "test/unit/batch_dispenser_registration.test/11_the_dispenser_prefix_carries_its_delimiter_above_the_gate_at_the_top_level.test.js",
+      "test/unit/batch_dispenser_registration.test/12_collapse_dispenser_registrations.test.js"
     ]
   }
 }
