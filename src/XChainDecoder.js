@@ -98,184 +98,198 @@ const ENVELOPE_RECOGNITION_ACTIVATION = require('./protocol/constants.js').ENVEL
 // would be a require cycle). Re-exported below under this name, which is how the
 // ActionManifestConformance guard binds it to the canonical manifest.
 const ACTION_ALIASES = require('./protocol/action_aliases.js')
+function initializeDecoderIdentity(decoder, network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword, feeDestination) {
+    decoder.network = CryptoNetworks.getBitcoinJsNetwork(network)
+
+    // Uppercase native-coin ticker ('BTC'|'DOGE'|'LTC') for this chain. This is
+    // the identity a v0 DISPENSER's GIVE_COIN/GET_COIN fields must name and the
+    // value the indexer validates against (config['COIN']); the dispenser-open
+    // gate below compares against it so the decoder only opens dispensers the
+    // indexer will accept. getBitcoinJsNetwork above already threw on an unknown
+    // key, so this cannot throw.
+    decoder.coinTick = CryptoNetworks.getCoinTick(network)
+
+    // Net portion ('mainnet'|'testnet'|'regtest') of the "<fullname>-<network>"
+    // key, for the boot-time consensus-pin verification in start(). The
+    // getBitcoinJsNetwork call above already threw on an unknown key, so the
+    // suffix is guaranteed to be a valid network name here.
+    decoder.consensusNetwork = String(network).slice(String(network).lastIndexOf('-') + 1)
+
+    // Coin/network-prefixed loggers so cadence/reorg/stall lines are self-describing
+    // even when a log pipeline strips container labels. Reads the fields at call time.
+    decoder.log = (...args) => logger.info(formatLogLine('[' + decoder.coinTick + '/' + decoder.consensusNetwork + ']', ...args))
+    // Warn exists so a notable-but-not-failed event (a reorg starting) can reach a
+    // warn-and-above alerting rule without being dressed up as an error. console.log
+    // writes to stdout, which those rules do not read.
+    decoder.logWarn = (...args) => logger.warn(formatLogLine('[' + decoder.coinTick + '/' + decoder.consensusNetwork + ']', ...args))
+    decoder.logError = (...args) => logger.error(formatLogLine('[' + decoder.coinTick + '/' + decoder.consensusNetwork + ']', ...args))
+
+    // Native-coin protocol fee destination address for this coin+network. When set (not the
+    // unset placeholder), the decoder also persists any output paying it to transaction_outputs
+    // so the indexer can validate native-coin fee payments. Null/placeholder disables capture.
+    decoder.feeDestination = (feeDestination && feeDestination !== 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX')
+        ? feeDestination
+        : null
+
+    decoder.connector = new BlockchainConnector(nodeUrl, nodePort, nodeUser, nodePassword)
+    decoder.dbUrl = dbUrl
+    decoder.dbPort = dbPort
+    decoder.dbName = dbName
+    decoder.dbUser = dbUser
+    decoder.dbPassword = dbPassword
+    decoder.startBlockIndex = CryptoNetworks.getFirstBlock(network)
+    // Pinned block-0 hash of this chain, or null when the registry leaves it
+    // unpinned. It is the ONLY value that separates a same-tier foreign endpoint
+    // from ours (BTC-mainnet and DOGE-mainnet both report chain="main"), so
+    // start() and the throttled tip refresh assert it against `getblockhash 0`.
+    decoder.chainGenesisHash = CryptoNetworks.getChainGenesisHash(network)
+    // Timestamp (ms) of the last SUCCESSFUL block-0 read. Zero means never read, so
+    // the first refresh always checks. Throttled on its own clock rather than riding
+    // the getblockchaininfo refresh: a caught-up loop re-polls the tip every
+    // iteration, and block 0 cannot change under a chain that is still the same chain.
+    decoder.chainGenesisCheckedAt = 0
+    // Default EXPIRATION window (days) for v0 dispenser opens that omit the
+    // EXPIRATION field; must match the indexer's default-expiration rule.
+    decoder.expirationFeeDefaultDays = CryptoNetworks.getExpirationFeeDefaultDays(network)
+    decoder.xchainBlockDecoder = new XChainBlockDecoder(network)
+}
+
+function initializeDecoderProgress(decoder) {
+    decoder.db = null
+    decoder.mempoolDb = null
+    decoder.fm = null
+
+    decoder.debugTime = {}
+
+    decoder.synced = false
+
+    decoder.lastProcessedBlockIndex = -1
+    decoder.blockchainInfoLastBlock = -1
+    // Timestamp (ms) of the most recent successful getBlockchainInfo() call.
+    // Zero means the tip has never been fetched. Used by getSyncStatus() to
+    // flag a frozen tip so callers can distinguish a genuine zero lag from an
+    // outage where the cached tip stopped advancing.
+    decoder.blockchainInfoLastRefreshAt = 0
+    // Timestamp (ms) of the most recent FORWARD advance of lastProcessedBlockIndex,
+    // set at the top of the block loop and again on every committed block. Zero
+    // means the loop has not started, which isStalled() reads as "not stalled".
+    decoder.lastAdvanceAt = 0
+    // Timestamp (ms) of the most recent parse-loop ITERATION, set at the loop top
+    // whether or not a block arrived. Independent of chain progress on purpose:
+    // it is the only signal that separates a loop that is idle because it is
+    // caught up from a loop that is no longer running. Zero means the loop has
+    // not iterated yet (still in initial sync), which isPollSilent() reads as
+    // "not silent" so a booting decoder is never called dead.
+    decoder.lastPollAt = 0
+    // Structured logger from the observability shim, injected by api.js once
+    // installObservability has run. Null until then, and every use falls back to
+    // decoder.log, so a caller that never wires one (tests, migrate) still warns.
+    decoder.obsLogger = null
+    // Last logged value of isNodeHeightStale(), so the tip-stale warn is EDGE
+    // triggered. The block loop re-evaluates roughly every 3s during a node
+    // outage, so a level-triggered line would emit ~20 a minute for its duration.
+    decoder._nodeHeightStaleLogged = false
+    decoder.mempoolInterval = null
+    decoder.mempoolBusy = false
+    // Node-mempool observation snapshot from the last updateMempool cycle:
+    // the coin node's TOTAL mempool tx count (getrawmempool length, XChain or
+    // not) and when it was taken. -1/null until the first successful poll.
+    // Read by the API's getmempool method so the explorer can show
+    // "<node unconfirmed> / <XChain unconfirmed>" without its own node RPC.
+    decoder.nodeMempoolTxCount = -1
+    decoder.nodeMempoolUpdatedAt = null
+
+}
+
+function initializeDecoderMode(decoder) {
+    decoder.stopFlag = false
+
+    // Key the AuxPoW-stripping fetch path on coin identity ALONE, never on the
+    // AUX_POW env flag: an 'auxpow' coin (Dogecoin) carries a merged-mining AuxPoW
+    // section between the 80-byte header and the tx count, so the plain getBlock
+    // path would wedge/misparse at the first merged-mined block, and a non-auxpow
+    // coin (BTC, LTC) carries no such section, so stripping one truncates a valid
+    // block whenever its version signals bit 0x100. Both directions are
+    // read off the coin's declared wireFormat in the canonical registry (via
+    // xchainBlockDecoder, built above), matching bulk-sync/dump.js. The `auxPow`
+    // constructor parameter is retained for call-site stability (FEE_DESTINATION
+    // follows it positionally) and is deliberately no longer consulted.
+    decoder.auxPow = decoder.xchainBlockDecoder.wireFormat === 'auxpow'
+
+    decoder.rpcErrors = 0
+    decoder.parseErrors = 0
+}
+
+function initializeDecoderReorg(decoder) {
+    // Lifetime reorg counters, mirroring xchain-utxo-tracker. Each rolled-back block
+    // already writes a durable REORG row, but that trace is DB-only: without these a
+    // metrics-only deployment (no monitor plugin, indexer possibly down) has no
+    // scrapeable signal for a decoder thrashing through repeated shallow reorgs.
+    // Counted once per completed verifyReorg run, so count is reorg EVENTS and depth
+    // is the blocks rolled back by the most recent one.
+    decoder.reorgCount = 0
+    decoder.lastReorgDepth = 0
+
+    // Consecutive block-fetch failures at _fetchErrorHeight. _fetchErrorCount counts
+    // every failure (operator visibility); _auxPowParseErrorCount counts only the
+    // AuxPoW-header-strip content faults that may escalate to per-tx block
+    // reassembly. Both reset on a height change and on any success.
+    decoder._fetchErrorHeight = null
+    decoder._fetchErrorCount = 0
+    decoder._auxPowParseErrorCount = 0
+
+    // Latent REORG_HALT marker state. The durable marker written by verifyReorg
+    // must also be visible to periodic health and status probes. These fields
+    // cache that probe so a halted database cannot appear healthy between reorg
+    // checks or qualify as a healthy bootstrap snapshot.
+    // reorgHaltCheckedAt is the epoch-ms of the last successful probe
+    // (0 = never probed), which also drives the TTL that keeps a hot monitoring
+    // loop from issuing one query per request.
+    decoder.reorgHalted = false
+    decoder.reorgHaltReason = null
+    decoder.reorgHaltAt = null
+    decoder.reorgHaltCheckedAt = 0
+    // Whether a REORG_HALT row is known to be READABLE, as distinct from
+    // whether this decoder is halted. null = no halt has been raised or read
+    // yet; false = a halt exists in memory whose durable write could not be
+    // confirmed, which is the one state where a restart silently resumes the
+    // rollback and the bootstrap gate finds nothing to refuse on.
+    decoder.reorgHaltMarkerPersisted = null
+    decoder._reorgHaltProbeInFlight = null
+}
+
+function initializeDecoderHaltState(decoder) {
+    // Parse-loop park state for a REORG_HALT refusal (parkOnReorgHalt). Without a park
+    // the refusal escapes start() and exits the process so the restart policy acts,
+    // but the marker is restart-durable and only an operator clear releases it, so
+    // an uncapped `--restart unless-stopped` turned one halt into an unbounded
+    // restart loop: an operator's testnet decoder restarted 5737 times in three
+    // days, and the restart count was the only surface that said so. Parked, the
+    // loop stops parsing and the process stays up, which is what the CLI's restart
+    // count, the halt-aware healthcheck and the audited clear all already assume.
+    // reorgHaltParkedHeight is the stored tip the park began at, published so an
+    // operator can tell a park from a latent marker on a decoder still advancing.
+    decoder.reorgHaltParked = false
+    decoder.reorgHaltParkedAt = null
+    decoder.reorgHaltParkedHeight = null
+
+    // Non-null only while the parse loop is waiting out a node in initial block
+    // download whose tip sits below our stored tip (see the wait branch in
+    // start()). That wait is otherwise indistinguishable from a wedge on every
+    // health surface: the height stops moving and nothing says why. Published
+    // verbatim as node_catching_up so `xchain-node ps` can name the wait.
+    // Shape: { node_height, stored_height, since } where since is the ISO
+    // timestamp the CURRENT wait began, held fixed until it ends.
+    decoder.nodeCatchingUp = null
+}
+
 class XChainDecoder {
     constructor(network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword, auxPow, feeDestination) {
-        this.network = CryptoNetworks.getBitcoinJsNetwork(network)
-
-        // Uppercase native-coin ticker ('BTC'|'DOGE'|'LTC') for this chain. This is
-        // the identity a v0 DISPENSER's GIVE_COIN/GET_COIN fields must name and the
-        // value the indexer validates against (config['COIN']); the dispenser-open
-        // gate below compares against it so the decoder only opens dispensers the
-        // indexer will accept. getBitcoinJsNetwork above already threw on an unknown
-        // key, so this cannot throw.
-        this.coinTick = CryptoNetworks.getCoinTick(network)
-
-        // Net portion ('mainnet'|'testnet'|'regtest') of the "<fullname>-<network>"
-        // key, for the boot-time consensus-pin verification in start(). The
-        // getBitcoinJsNetwork call above already threw on an unknown key, so the
-        // suffix is guaranteed to be a valid network name here.
-        this.consensusNetwork = String(network).slice(String(network).lastIndexOf('-') + 1)
-
-        // Coin/network-prefixed loggers so cadence/reorg/stall lines are self-describing
-        // even when a log pipeline strips container labels. Reads the fields at call time.
-        this.log = (...args) => logger.info(formatLogLine('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args))
-        // Warn exists so a notable-but-not-failed event (a reorg starting) can reach a
-        // warn-and-above alerting rule without being dressed up as an error. console.log
-        // writes to stdout, which those rules do not read.
-        this.logWarn = (...args) => logger.warn(formatLogLine('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args))
-        this.logError = (...args) => logger.error(formatLogLine('[' + this.coinTick + '/' + this.consensusNetwork + ']', ...args))
-
-        // Native-coin protocol fee destination address for this coin+network. When set (not the
-        // unset placeholder), the decoder also persists any output paying it to transaction_outputs
-        // so the indexer can validate native-coin fee payments. Null/placeholder disables capture.
-        this.feeDestination = (feeDestination && feeDestination !== 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX')
-            ? feeDestination
-            : null
-
-        this.connector = new BlockchainConnector(nodeUrl, nodePort, nodeUser, nodePassword)
-        this.dbUrl = dbUrl
-        this.dbPort = dbPort
-        this.dbName = dbName
-        this.dbUser = dbUser
-        this.dbPassword = dbPassword
-        this.startBlockIndex = CryptoNetworks.getFirstBlock(network)
-        // Pinned block-0 hash of this chain, or null when the registry leaves it
-        // unpinned. It is the ONLY value that separates a same-tier foreign endpoint
-        // from ours (BTC-mainnet and DOGE-mainnet both report chain="main"), so
-        // start() and the throttled tip refresh assert it against `getblockhash 0`.
-        this.chainGenesisHash = CryptoNetworks.getChainGenesisHash(network)
-        // Timestamp (ms) of the last SUCCESSFUL block-0 read. Zero means never read, so
-        // the first refresh always checks. Throttled on its own clock rather than riding
-        // the getblockchaininfo refresh: a caught-up loop re-polls the tip every
-        // iteration, and block 0 cannot change under a chain that is still the same chain.
-        this.chainGenesisCheckedAt = 0
-        // Default EXPIRATION window (days) for v0 dispenser opens that omit the
-        // EXPIRATION field; must match the indexer's default-expiration rule.
-        this.expirationFeeDefaultDays = CryptoNetworks.getExpirationFeeDefaultDays(network)
-        this.xchainBlockDecoder = new XChainBlockDecoder(network)
-      
-        this.db = null
-        this.mempoolDb = null
-        this.fm = null
-      
-        this.debugTime = {}
-      
-        this.synced = false
-
-        this.lastProcessedBlockIndex = -1
-        this.blockchainInfoLastBlock = -1
-        // Timestamp (ms) of the most recent successful getBlockchainInfo() call.
-        // Zero means the tip has never been fetched. Used by getSyncStatus() to
-        // flag a frozen tip so callers can distinguish a genuine zero lag from an
-        // outage where the cached tip stopped advancing.
-        this.blockchainInfoLastRefreshAt = 0
-        // Timestamp (ms) of the most recent FORWARD advance of lastProcessedBlockIndex,
-        // set at the top of the block loop and again on every committed block. Zero
-        // means the loop has not started, which isStalled() reads as "not stalled".
-        this.lastAdvanceAt = 0
-        // Timestamp (ms) of the most recent parse-loop ITERATION, set at the loop top
-        // whether or not a block arrived. Independent of chain progress on purpose:
-        // it is the only signal that separates a loop that is idle because it is
-        // caught up from a loop that is no longer running. Zero means the loop has
-        // not iterated yet (still in initial sync), which isPollSilent() reads as
-        // "not silent" so a booting decoder is never called dead.
-        this.lastPollAt = 0
-        // Structured logger from the observability shim, injected by api.js once
-        // installObservability has run. Null until then, and every use falls back to
-        // this.log, so a caller that never wires one (tests, migrate) still warns.
-        this.obsLogger = null
-        // Last logged value of isNodeHeightStale(), so the tip-stale warn is EDGE
-        // triggered. The block loop re-evaluates roughly every 3s during a node
-        // outage, so a level-triggered line would emit ~20 a minute for its duration.
-        this._nodeHeightStaleLogged = false
-        this.mempoolInterval = null
-        this.mempoolBusy = false
-        // Node-mempool observation snapshot from the last updateMempool cycle:
-        // the coin node's TOTAL mempool tx count (getrawmempool length, XChain or
-        // not) and when it was taken. -1/null until the first successful poll.
-        // Read by the API's getmempool method so the explorer can show
-        // "<node unconfirmed> / <XChain unconfirmed>" without its own node RPC.
-        this.nodeMempoolTxCount = -1
-        this.nodeMempoolUpdatedAt = null
-
-        this.stopFlag = false
-
-        // Key the AuxPoW-stripping fetch path on coin identity ALONE, never on the
-        // AUX_POW env flag: an 'auxpow' coin (Dogecoin) carries a merged-mining AuxPoW
-        // section between the 80-byte header and the tx count, so the plain getBlock
-        // path would wedge/misparse at the first merged-mined block, and a non-auxpow
-        // coin (BTC, LTC) carries no such section, so stripping one truncates a valid
-        // block whenever its version signals bit 0x100. Both directions are
-        // read off the coin's declared wireFormat in the canonical registry (via
-        // xchainBlockDecoder, built above), matching bulk-sync/dump.js. The `auxPow`
-        // constructor parameter is retained for call-site stability (FEE_DESTINATION
-        // follows it positionally) and is deliberately no longer consulted.
-        this.auxPow = this.xchainBlockDecoder.wireFormat === 'auxpow'
-
-        this.rpcErrors = 0
-        this.parseErrors = 0
-
-        // Lifetime reorg counters, mirroring xchain-utxo-tracker. Each rolled-back block
-        // already writes a durable REORG row, but that trace is DB-only: without these a
-        // metrics-only deployment (no monitor plugin, indexer possibly down) has no
-        // scrapeable signal for a decoder thrashing through repeated shallow reorgs.
-        // Counted once per completed verifyReorg run, so count is reorg EVENTS and depth
-        // is the blocks rolled back by the most recent one.
-        this.reorgCount = 0
-        this.lastReorgDepth = 0
-
-        // Consecutive block-fetch failures at _fetchErrorHeight. _fetchErrorCount counts
-        // every failure (operator visibility); _auxPowParseErrorCount counts only the
-        // AuxPoW-header-strip content faults that may escalate to per-tx block
-        // reassembly. Both reset on a height change and on any success.
-        this._fetchErrorHeight = null
-        this._fetchErrorCount = 0
-        this._auxPowParseErrorCount = 0
-
-        // Latent REORG_HALT marker state. The durable marker written by verifyReorg
-        // used to be read only by verifyReorg, so a decoder carrying one looked
-        // perfectly healthy right up until the next reorg tripped it, which can be
-        // weeks later and then reads as a sudden unexplained outage. Worse, a
-        // bootstrap-snapshot job published such a halted database as the newest
-        // "good" archive in the meantime. These fields cache a periodic probe so
-        // health()/GET /status can report the marker BEFORE a reorg finds it.
-        // reorgHaltCheckedAt is the epoch-ms of the last successful probe
-        // (0 = never probed), which also drives the TTL that keeps a hot monitoring
-        // loop from issuing one query per request.
-        this.reorgHalted = false
-        this.reorgHaltReason = null
-        this.reorgHaltAt = null
-        this.reorgHaltCheckedAt = 0
-        // Whether a REORG_HALT row is known to be READABLE, as distinct from
-        // whether this decoder is halted. null = no halt has been raised or read
-        // yet; false = a halt exists in memory whose durable write could not be
-        // confirmed, which is the one state where a restart silently resumes the
-        // rollback and the bootstrap gate finds nothing to refuse on.
-        this.reorgHaltMarkerPersisted = null
-        this._reorgHaltProbeInFlight = null
-
-        // Parse-loop park state for a REORG_HALT refusal (parkOnReorgHalt). Without a park
-        // the refusal escapes start() and exits the process so the restart policy acts,
-        // but the marker is restart-durable and only an operator clear releases it, so
-        // an uncapped `--restart unless-stopped` turned one halt into an unbounded
-        // restart loop: an operator's testnet decoder restarted 5737 times in three
-        // days, and the restart count was the only surface that said so. Parked, the
-        // loop stops parsing and the process stays up, which is what the CLI's restart
-        // count, the halt-aware healthcheck and the audited clear all already assume.
-        // reorgHaltParkedHeight is the stored tip the park began at, published so an
-        // operator can tell a park from a latent marker on a decoder still advancing.
-        this.reorgHaltParked = false
-        this.reorgHaltParkedAt = null
-        this.reorgHaltParkedHeight = null
-
-        // Non-null only while the parse loop is waiting out a node in initial block
-        // download whose tip sits below our stored tip (see the wait branch in
-        // start()). That wait is otherwise indistinguishable from a wedge on every
-        // health surface: the height stops moving and nothing says why. Published
-        // verbatim as node_catching_up so `xchain-node ps` can name the wait.
-        // Shape: { node_height, stored_height, since } where since is the ISO
-        // timestamp the CURRENT wait began, held fixed until it ends.
-        this.nodeCatchingUp = null
+        initializeDecoderIdentity(this, network, dbUrl, dbPort, dbName, dbUser, dbPassword, nodeUrl, nodePort, nodeUser, nodePassword, feeDestination)
+        initializeDecoderProgress(this)
+        initializeDecoderMode(this)
+        initializeDecoderReorg(this)
+        initializeDecoderHaltState(this)
     }
 
     // blockHeight gates Taproot-envelope recognition (envelope spec §7): the
