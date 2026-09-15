@@ -16,61 +16,69 @@ const helmet = require('helmet')
 const cors = require('cors')
 const jsonRouter = require('express-json-rpc-router')
 
-describe('Smoke: Express API & Ping Endpoint', () => {
-    let server
-    let port
+let server
+let port
 
-    before((done) => {
-        const app = express()
-        app.use(helmet())
-        app.use(bodyParser.json())
-        app.use(cors())
+function startServer(done) {
+    const app = express()
+    app.use(helmet())
+    app.use(bodyParser.json())
+    app.use(cors())
 
-        const jsonRpcController = {
-            async ping() {
-                return { status: 'success' }
-            }
+    const jsonRpcController = {
+        async ping() {
+            return { status: 'success' }
         }
-        app.use(jsonRouter({ methods: jsonRpcController }))
+    }
+    app.use(jsonRouter({ methods: jsonRpcController }))
 
-        server = app.listen(0, () => {
-            port = server.address().port
-            done()
+    server = app.listen(0, () => {
+        port = server.address().port
+        done()
+    })
+}
+
+function stopServer(done) {
+    if (server) server.close(done)
+    else done()
+}
+
+function jsonRpcRequest(method) {
+    return new Promise((resolve, reject) => {
+        const body = JSON.stringify({ jsonrpc: '2.0', method, id: 1 })
+        const req = http.request({
+            hostname: '127.0.0.1',
+            port,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(body)
+            }
+        }, (res) => {
+            let data = ''
+            res.on('data', (chunk) => { data += chunk })
+            res.on('end', () => {
+                try {
+                    resolve({ status: res.statusCode, body: JSON.parse(data) })
+                } catch (e) {
+                    reject(new Error(`Invalid JSON response: ${data}`))
+                }
+            })
         })
+        req.on('error', reject)
+        req.write(body)
+        req.end()
+    })
+}
+
+describe('Smoke: Express API & Ping Endpoint', () => {
+    before((done) => {
+        startServer(done)
     })
 
     after((done) => {
-        if (server) server.close(done)
-        else done()
+        stopServer(done)
     })
-
-    function jsonRpcRequest(method) {
-        return new Promise((resolve, reject) => {
-            const body = JSON.stringify({ jsonrpc: '2.0', method, id: 1 })
-            const req = http.request({
-                hostname: '127.0.0.1',
-                port,
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(body)
-                }
-            }, (res) => {
-                let data = ''
-                res.on('data', (chunk) => { data += chunk })
-                res.on('end', () => {
-                    try {
-                        resolve({ status: res.statusCode, body: JSON.parse(data) })
-                    } catch (e) {
-                        reject(new Error(`Invalid JSON response: ${data}`))
-                    }
-                })
-            })
-            req.on('error', reject)
-            req.write(body)
-            req.end()
-        })
-    }
 
     it('should start the Express server without errors', () => {
         assert.ok(server.listening)
@@ -88,6 +96,16 @@ describe('Smoke: Express API & Ping Endpoint', () => {
         const res = await jsonRpcRequest('nonexistent')
         assert.strictEqual(res.status, 200)
         assert.ok(res.body.error || res.body.result === undefined || res.body.result === null)
+    })
+})
+
+describe('Smoke: Express API & Ping Endpoint', () => {
+    before((done) => {
+        startServer(done)
+    })
+
+    after((done) => {
+        stopServer(done)
     })
 
     it('should include CORS headers', async () => {
