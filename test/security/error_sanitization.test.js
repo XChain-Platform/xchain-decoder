@@ -51,6 +51,16 @@ describe('Security: Error Log Sanitization', () => {
                 'verifyTables should not log full error objects'
             )
         })
+    })
+})
+
+describe('Security: Error Log Sanitization', () => {
+    describe('db.js error logging', () => {
+        let dbSource
+
+        before(() => {
+            dbSource = fs.readFileSync(require.resolve('../../src/db.js'), 'utf-8')
+        })
 
         it('should not log full error objects in commitTransaction', () => {
             const commitSection = dbSource.substring(
@@ -72,6 +82,9 @@ describe('Security: Error Log Sanitization', () => {
             )
         })
     })
+})
+
+describe('Security: Error Log Sanitization', () => {
 
     describe('BlockchainConnector.js error logging', () => {
         let connectorSource
@@ -98,13 +111,17 @@ describe('Security: Error Log Sanitization', () => {
                 'Connector should log error.message for safe output'
             )
         })
+    })
+})
 
-        // Behavioral lock for the credential-leak fix: every RPC call passes
-        // auth:{username,password} to axios, and axios attaches that config to the
-        // thrown error. Logging or re-throwing the raw error serializes the RPC
-        // password into the decoder logs. Drive a failing RPC and assert the
-        // password never reaches console.error and is scrubbed from the re-thrown
-        // error. FAKE_RPC_PASSWORD is a test sentinel, not a real credential.
+// Behavioral lock for the credential-leak fix: every RPC call passes
+// auth:{username,password} to axios, and axios attaches that config to the
+// thrown error. Logging or re-throwing the raw error serializes the RPC
+// password into the decoder logs. Drive a failing RPC and assert the
+// password never reaches console.error and is scrubbed from the re-thrown
+// error. FAKE_RPC_PASSWORD is a test sentinel, not a real credential.
+describe('Security: Error Log Sanitization', () => {
+    describe('BlockchainConnector.js error logging', () => {
         it('[REGRESSION P0] does not leak the RPC password when an axios call fails', async () => {
             const util = require('util')
             const axios = require('axios')
@@ -151,12 +168,16 @@ describe('Security: Error Log Sanitization', () => {
                 'the re-thrown error must have its config.auth scrubbed'
             )
         })
+    })
+})
 
-        // getBlockWithoutAuxPow propagates RPC faults UNWRAPPED so the decoder can
-        // read error.code; the old rewrap incidentally hid the axios config, so the
-        // safety now rests entirely on sanitizeRpcError scrubbing the error in place
-        // inside getBlockHeader/getBlock before they rethrow. Lock that, or the
-        // unwrapped path becomes a credential leak.
+// getBlockWithoutAuxPow propagates RPC faults UNWRAPPED so the decoder can
+// read error.code; the old rewrap incidentally hid the axios config, so the
+// safety now rests entirely on sanitizeRpcError scrubbing the error in place
+// inside getBlockHeader/getBlock before they rethrow. Lock that, or the
+// unwrapped path becomes a credential leak.
+describe('Security: Error Log Sanitization', () => {
+    describe('BlockchainConnector.js error logging', () => {
         it('[REGRESSION P0] does not leak the RPC password through the unwrapped getBlockWithoutAuxPow path', async () => {
             const util = require('util')
             const axios = require('axios')
@@ -208,6 +229,9 @@ describe('Security: Error Log Sanitization', () => {
             )
         })
     })
+})
+
+describe('Security: Error Log Sanitization', () => {
 
     describe('api.js security headers', () => {
         let apiSource
