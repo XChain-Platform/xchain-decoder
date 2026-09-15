@@ -228,6 +228,10 @@ describe('DISPENSER expiry realignment (DISPENSER_EXPIRY_REALIGN_ACTIVATION)', f
         assert.ok(model.seenOpenSets.every(s => s.has(ADDR)),
             'the dispenser is open for the WHOLE block, matching the indexer')
     })
+})
+
+describe('DISPENSER expiry realignment (DISPENSER_EXPIRY_REALIGN_ACTIVATION)', function () {
+    this.timeout(0)
 
     it('LEGACY: the block-start expiry survives verbatim below the gate', async () => {
         const model = new DispenserModel()
@@ -283,6 +287,10 @@ describe('DISPENSER expiry realignment (DISPENSER_EXPIRY_REALIGN_ACTIVATION)', f
             assert.strictEqual(m.rows[0].expiredBlockIndex, -1, name + ': and keeps its original stamp')
         }
     })
+})
+
+describe('DISPENSER expiry realignment (DISPENSER_EXPIRY_REALIGN_ACTIVATION)', function () {
+    this.timeout(0)
 
     it('REALIGNED: a same-block edge extension keeps the dispenser open past the end-of-block expiry', async () => {
         // The money-bearing case end to end. A dispenser expiring at this block's time is
@@ -330,6 +338,10 @@ describe('DISPENSER expiry realignment (DISPENSER_EXPIRY_REALIGN_ACTIVATION)', f
             'the persistent leg stays fixed: the same-block stamp is cleared by the extend')
         assert.strictEqual(model.rows[0].expiration, extended)
     })
+})
+
+describe('DISPENSER expiry realignment (DISPENSER_EXPIRY_REALIGN_ACTIVATION)', function () {
+    this.timeout(0)
 
     // Unit cover for the e2e case (test/e2e/dispenserLifecycle.e2e.js B2.1), which runs on
     // regtest and therefore on the realigned side of the gate. A create whose EXPIRATION is
