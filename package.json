@@ -25,7 +25,7 @@
   },
   "scripts": {
     "api": "node ./src/api.js",
-    "migrate": "node ./src/migrate.js",
+    "migrate": "node ./src/db/migrate.js",
     "clear-reorg-halt": "node ./src/clear_reorg_halt.js",
     "lint": "eslint .",
     "test": "mocha --timeout 5000 --require ./test/unit/support/setup.js 'test/unit/**/*.test.js' --exit",
