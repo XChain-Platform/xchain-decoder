@@ -64,56 +64,61 @@ function addSignatureLikeInput(tx, hash, index){
     tx.ins[tx.ins.length - 1].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
 }
 
+function prepareTransactions(){
+    const decoder = createDecoder()
+
+    // The commit's own funder. Its vout 0 carries the address the reveal's source
+    // resolves to, via getSourceFromOutput's P2SH walk-back.
+    const funderTx = new bitcoin.Transaction()
+    funderTx.version = 2
+    addSignatureLikeInput(funderTx, Buffer.alloc(32, 0x11), 0)
+    funderTx.addOutput(bitcoin.address.toOutputScript(SOURCE_ADDR, decoder.network), 100000)
+
+    // The commit: vout 0 is the P2SH script output the reveal spends, vout 1 is the
+    // native-coin fee output findFundingFeeOutputs must attribute to the action.
+    const commitTx = new bitcoin.Transaction()
+    commitTx.version = 2
+    addSignatureLikeInput(commitTx, funderTx.getHash(), 0)
+    commitTx.addOutput(Buffer.from('a914' + 'bb'.repeat(20) + '87', 'hex'), 90000)
+    commitTx.addOutput(bitcoin.address.toOutputScript(FEE_ADDR, decoder.network), FEE_AMOUNT)
+
+    // The reveal: spends the commit's P2SH output, pays one ordinary output and
+    // carries the OP_RETURN that flags the chunk encoding.
+    const revealTx = new bitcoin.Transaction()
+    revealTx.version = 2
+    addSignatureLikeInput(revealTx, commitTx.getHash(), 0)
+    revealTx.addOutput(bitcoin.address.toOutputScript(SOURCE_ADDR, decoder.network), 50000)
+    revealTx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, Buffer.alloc(20, 0x01)]), 0)
+
+    // Drive the P2SH chunk branch (sets p2shFundingTxId = firstInputTxId) without
+    // reproducing the obfuscation, exactly as parseTransaction.test.js does.
+    sinon.stub(decoder, 'removeObfuscation').resolves(
+        Buffer.concat([Buffer.from('XCHN'), Buffer.from('p2sh')])
+    )
+
+    const rpc = wireConnector(decoder, [funderTx, commitTx])
+    return { decoder, rpc, funderTx, commitTx, revealTx }
+}
+
+function dispenserSetFor(tx, decoder){
+    const set = new Set()
+    for (const out of tx.outs){
+        try { set.add(bitcoin.address.fromOutputScript(out.script, decoder.network)) } catch (err) { /* OP_RETURN */ }
+    }
+    return set
+}
+
 describe('P2SH/P2WSH chunk-carrier reveal: one commit fetch per parse', function () {
     let decoder, rpc, funderTx, commitTx, revealTx
 
     beforeEach(() => {
-        decoder = createDecoder()
-
-        // The commit's own funder. Its vout 0 carries the address the reveal's source
-        // resolves to, via getSourceFromOutput's P2SH walk-back.
-        funderTx = new bitcoin.Transaction()
-        funderTx.version = 2
-        addSignatureLikeInput(funderTx, Buffer.alloc(32, 0x11), 0)
-        funderTx.addOutput(bitcoin.address.toOutputScript(SOURCE_ADDR, decoder.network), 100000)
-
-        // The commit: vout 0 is the P2SH script output the reveal spends, vout 1 is the
-        // native-coin fee output findFundingFeeOutputs must attribute to the action.
-        commitTx = new bitcoin.Transaction()
-        commitTx.version = 2
-        addSignatureLikeInput(commitTx, funderTx.getHash(), 0)
-        commitTx.addOutput(Buffer.from('a914' + 'bb'.repeat(20) + '87', 'hex'), 90000)
-        commitTx.addOutput(bitcoin.address.toOutputScript(FEE_ADDR, decoder.network), FEE_AMOUNT)
-
-        // The reveal: spends the commit's P2SH output, pays one ordinary output and
-        // carries the OP_RETURN that flags the chunk encoding.
-        revealTx = new bitcoin.Transaction()
-        revealTx.version = 2
-        addSignatureLikeInput(revealTx, commitTx.getHash(), 0)
-        revealTx.addOutput(bitcoin.address.toOutputScript(SOURCE_ADDR, decoder.network), 50000)
-        revealTx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, Buffer.alloc(20, 0x01)]), 0)
-
-        // Drive the P2SH chunk branch (sets p2shFundingTxId = firstInputTxId) without
-        // reproducing the obfuscation, exactly as parseTransaction.test.js does.
-        sinon.stub(decoder, 'removeObfuscation').resolves(
-            Buffer.concat([Buffer.from('XCHN'), Buffer.from('p2sh')])
-        )
-
-        rpc = wireConnector(decoder, [funderTx, commitTx])
+        ({ decoder, rpc, funderTx, commitTx, revealTx } = prepareTransactions())
     })
 
     afterEach(() => sinon.restore())
 
-    function dispenserSetFor(tx){
-        const set = new Set()
-        for (const out of tx.outs){
-            try { set.add(bitcoin.address.fromOutputScript(out.script, decoder.network)) } catch (err) { /* OP_RETURN */ }
-        }
-        return set
-    }
-
     it('fetches the commit exactly once and still attributes its fee output', async function () {
-        const result = await decoder.parseTransaction(revealTx, dispenserSetFor(revealTx))
+        const result = await decoder.parseTransaction(revealTx, dispenserSetFor(revealTx, decoder))
         assert.ok(result, 'the reveal must parse')
 
         // Source resolution walked back through the commit to its funder.
@@ -138,6 +143,16 @@ describe('P2SH/P2WSH chunk-carrier reveal: one commit fetch per parse', function
         assert.strictEqual(Number(fees[0].vout), XChainDecoder.FUNDING_VOUT_BASE + 1)
         assert.strictEqual(Number(fees[0].amount), FEE_AMOUNT)
     })
+})
+
+describe('P2SH/P2WSH chunk-carrier reveal: one commit fetch per parse', function () {
+    let decoder, rpc, commitTx
+
+    beforeEach(() => {
+        ({ decoder, rpc, commitTx } = prepareTransactions())
+    })
+
+    afterEach(() => sinon.restore())
 
     it('still fetches the commit itself when source resolution never ran', async function () {
         // getSourceFromOutput is skipped when the source is already known, so the
