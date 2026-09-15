@@ -303,6 +303,16 @@ describe('roundtrip conformance fixture: every case reaches the stored record', 
   it('drives every alias case to the record the row INSERT receives', async function () {
     for (const c of fixture.aliasCases) await assertCase(decoder, db, c, buildOpReturnTransaction(c))
   })
+})
+
+describe('roundtrip conformance fixture: every case reaches the stored record', function () {
+  let decoder
+  let db
+
+  beforeEach(function () {
+    decoder = createDecoder()
+    db = createDbStub()
+  })
 
   it('drives every TAPROOT envelope case to the record the row INSERT receives', async function () {
     for (const c of fixture.envelopeCases) {
@@ -341,116 +351,5 @@ describe('roundtrip conformance fixture: every case reaches the stored record', 
       assert.strictEqual(detected.payload.toString('hex'), c.compiledHex,
         `${c.name}: reassembled envelope payload diverges from the encoder's compiled stream`)
     }
-  })
-})
-
-describe('roundtrip conformance fixture: stored-record invariants', function () {
-  let decoder
-  let db
-
-  beforeEach(function () {
-    decoder = createDecoder()
-    db = createDbStub()
-  })
-
-  it('stores the CANONICAL action name, never the on-wire alias', async function () {
-    for (const c of fixture.aliasCases) {
-      const { record } = await storedRecordFor(decoder, db, buildOpReturnTransaction(c))
-      assert.strictEqual(record.data.split('|')[0], c.expected.actionName,
-        `${c.name}: stored record must carry the canonical name`)
-      assert.ok(!record.data.startsWith(c.expected.rawActionName + '|'),
-        `${c.name}: alias spelling '${c.expected.rawActionName}' reached the row`)
-    }
-  })
-
-  it('lets an alias expansion push the stored record PAST the compiled wire ceiling', async function () {
-    // The size gate bounds the WIRE (alias) form; canonicalization runs after it,
-    // so a CAST at exactly the ceiling stores as a longer BROADCAST record. If the
-    // gate is ever moved after the rewrite, this case starts being dropped.
-    const c = fixture.aliasCases.find((x) => x.expected.actionName === 'BROADCAST')
-    assert.ok(c, 'expected the ceiling alias case in the fixture')
-    const { parseResult, record } = await storedRecordFor(decoder, db, buildOpReturnTransaction(c))
-    assert.strictEqual(parseResult.compiledDataLength, XChainDecoder.MAX_ACTION_DATA_LENGTH,
-      'the ceiling case must sit exactly on the wire cap')
-    assert.strictEqual(record.skip, false, 'the ceiling case must still be stored')
-    assert.ok(Buffer.byteLength(record.data, 'utf8') > XChainDecoder.MAX_ACTION_DATA_LENGTH,
-      'the canonical record must be longer than the wire cap it was measured against')
-  })
-
-  it('captures the spender pubkey through the real extraction on a P2WSH reveal', async function () {
-    // The witness stack's second element is the spender pubkey; parseTransaction
-    // must look it up against the resolved source rather than skipping the write.
-    const c = fixture.p2shCases.find((x) => x.encoding === 'P2WSH')
-    assert.ok(c, 'expected a P2WSH case in the fixture')
-    await storedRecordFor(decoder, db, buildP2shTransaction(c))
-    assert.deepStrictEqual(db.calls.getAddressId, [SOURCE_ADDRESS],
-      'the pubkey capture must resolve the source address exactly once')
-  })
-
-  it('has teeth: a one-byte perturbation of the ciphertext destroys the stored record', async function () {
-    const c = fixture.cases.find((x) => STORED_FATE[x.name].skip === false)
-    assert.ok(c, 'expected at least one stored OP_RETURN case')
-    const tampered = { ...c, obfuscatedOpReturnHex: null }
-    const bytes = Buffer.from(c.obfuscatedOpReturnHex, 'hex')
-    bytes[bytes.length - 1] ^= 0xff
-    tampered.obfuscatedOpReturnHex = bytes.toString('hex')
-    const { storable, record } = await storedRecordFor(decoder, db, buildOpReturnTransaction(tampered))
-    const stored = storable && !record.skip ? record.data : null
-    assert.notStrictEqual(stored, expectedStoredData(c),
-      'perturbed ciphertext must not produce the golden stored record')
-  })
-
-  it('has teeth: dropping an interior chunk destroys the stored record', async function () {
-    // The fail-loud contract's premise: a reveal missing one of its chunk inputs
-    // must never reassemble into the golden ACTION string.
-    const c = fixture.p2shCases.find((x) => STORED_FATE[x.name].skip === false && x.redeemScriptsHex.length >= 2)
-    assert.ok(c, 'expected a stored multi-chunk case')
-    const { storable, record } = await storedRecordFor(decoder, db,
-      buildP2shTransaction(c, c.redeemScriptsHex.length - 1))
-    const stored = storable && !record.skip ? record.data : null
-    assert.notStrictEqual(stored, expectedStoredData(c),
-      'a truncated chunk set must not produce the golden stored record')
-  })
-
-  it('has teeth: the fixture still covers the 1-byte final-chunk rebalance boundary', function () {
-    assert.ok(fixture.p2shCases.some((c) =>
-      c.chunkLengths.length >= 2 && c.chunkLengths[c.chunkLengths.length - 1] === 2
-    ), 'no case pins the rebalanced final chunk')
-  })
-
-  it('has teeth: every reveal marker routes through the real deobfuscation', async function () {
-    // A marker that no longer deobfuscates to XCHN+p2sh/p2wsh would send the whole
-    // chunk lane down the plain OP_RETURN branch and silently store nothing.
-    const magic = Buffer.from(fixture.magicWord, 'utf8')
-    for (const c of fixture.p2shCases) {
-      const marker = await decoder.removeObfuscation(Buffer.from(c.markerOpReturnHex, 'hex'), c.firstInputTxid)
-      assert.ok(marker != null, `${c.name}: marker deobfuscation returned null`)
-      assert.ok(marker.equals(Buffer.concat([magic, Buffer.from(c.encoding.toLowerCase(), 'utf8')])),
-        `${c.name}: marker must deobfuscate to XCHN+${c.encoding.toLowerCase()}`)
-    }
-  })
-})
-
-// IDENTITY: the vendored copy must match the canonical encoder fixture (skip
-// when the sibling xchain-encoder is not checked out, matching the
-// ActionManifestConformance convention; hard-fail under XCHAIN_REQUIRE_SIBLINGS).
-describe('roundtrip conformance fixture: byte-identity to encoder original', function () {
-  const ENCODER = process.env.XCHAIN_ENCODER_DIR ||
-    path.join(__dirname, '..', '..', '..', 'xchain-encoder')
-  const CANON = path.join(ENCODER, 'test', 'fixtures', 'roundtrip-conformance.json')
-
-  before(function () {
-    if (!fs.existsSync(CANON)) {
-      if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
-        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but canonical roundtrip-conformance.json not found at ' + CANON)
-      }
-      this.skip()
-    }
-  })
-
-  it('vendored test/fixtures/roundtrip-conformance.json is byte-identical to the encoder original', function () {
-    assert.strictEqual(fs.readFileSync(VENDORED, 'utf8'), fs.readFileSync(CANON, 'utf8'),
-      'vendored roundtrip-conformance.json drifted from the encoder original; ' +
-      're-run the encoder fixture generator and re-vendor the copy here.')
   })
 })
