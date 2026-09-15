@@ -66,6 +66,9 @@ describe('endpoint chain-tier identity gate @regression', function () {
             });
         }
     });
+});
+
+describe('endpoint chain-tier identity gate @regression', function () {
 
     describe('the two deliberate fail-open holes', function () {
         it('an absent chain field is not a mismatch (a trimmed RPC proxy must not stall the fleet)', function () {
@@ -87,6 +90,9 @@ describe('endpoint chain-tier identity gate @regression', function () {
             assert.strictEqual(chainFieldMissing('main'), false);
         });
     });
+});
+
+describe('endpoint chain-tier identity gate @regression', function () {
 
     describe('the gate is wired into the block loop, not merely exported', function () {
         const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder.js'), 'utf8');
@@ -138,6 +144,9 @@ describe('endpoint chain-tier identity gate @regression', function () {
                 'the tip assignment must be the ELSE of the genesis-mismatch branch, so a foreign tip is never taken');
         });
     });
+});
+
+describe('endpoint chain-tier identity gate @regression', function () {
 
     describe('the coin-identity half is documented as NOT closed here', function () {
         it('chain_identity.js records that chain does not distinguish coins', function () {
