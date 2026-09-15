@@ -13,7 +13,7 @@
  ********************************************************************/
 
 const { installObservability } = require('../observability');   // default-off /metrics + structured log shim
-const { registerDecoderMetrics } = require('../decoder_metrics'); // decoder feed-freshness gauges
+const { registerDecoderMetrics } = require('../metrics/decoder_metrics'); // decoder feed-freshness gauges
 
 // Observability for the decoder's app: /metrics and the log shim, then the
 // decoder's feed-freshness gauges. COIN is the raw env value the caller read.

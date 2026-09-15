@@ -32,7 +32,7 @@ const fs = require('fs');
 const http = require('http');
 const express = require('express');
 const XChainDecoder = require('../../src/XChainDecoder');
-const { registerDecoderMetrics } = require('../../src/decoder_metrics');
+const { registerDecoderMetrics } = require('../../src/metrics/decoder_metrics');
 const { Registry } = require('../../src/observability/metrics');
 
 // src/XChainDecoder.js BLOCKCHAIN_INFO_REFRESH_MS; stale is > 2x this.
