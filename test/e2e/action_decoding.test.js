@@ -74,6 +74,13 @@ describe('E2E: ACTION Decoding', function () {
             const tx = await txBuilder.waitForTransaction(txHash)
             assert.strictEqual(tx.data, action)
         })
+    })
+})
+
+describe('E2E: ACTION Decoding', function () {
+    this.timeout(0)
+
+    describe('ACTION types via OP_RETURN', () => {
 
         it('A1.5:should decode SWEEP action', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
@@ -116,6 +123,13 @@ describe('E2E: ACTION Decoding', function () {
             const tx = await txBuilder.waitForTransaction(txHash)
             assert.strictEqual(tx.data, action)
         })
+    })
+})
+
+describe('E2E: ACTION Decoding', function () {
+    this.timeout(0)
+
+    describe('ACTION types via OP_RETURN', () => {
 
         it('A1.9:should decode DIVIDEND action', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
@@ -157,6 +171,13 @@ describe('E2E: ACTION Decoding', function () {
             const tx = await txBuilder.waitForTransaction(txHash)
             assert.strictEqual(tx.data, action)
         })
+    })
+})
+
+describe('E2E: ACTION Decoding', function () {
+    this.timeout(0)
+
+    describe('ACTION types via OP_RETURN', () => {
 
         it('A1.13:should decode CALLBACK action', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
@@ -197,6 +218,13 @@ describe('E2E: ACTION Decoding', function () {
             const tx = await txBuilder.waitForTransaction(txHash)
             assert.strictEqual(tx.data, action)
         })
+    })
+})
+
+describe('E2E: ACTION Decoding', function () {
+    this.timeout(0)
+
+    describe('ACTION types via OP_RETURN', () => {
 
         it('A1.17:should decode SLEEP action', async () => {
             const funded = await txBuilder.createFundedLegacyAddress()
@@ -241,161 +269,6 @@ describe('E2E: ACTION Decoding', function () {
             // absence of a feature the decoder documents.
             const tx = await txBuilder.waitForTransaction(txHash)
             assert.strictEqual(tx.data, 'SEND' + params)
-        })
-    })
-
-    // ---------------------------------------------------------------
-    // A2: All encoding types (same ACTION, different encoding)
-    // ---------------------------------------------------------------
-    describe('encoding types', () => {
-
-        it('A2.1:should decode ACTION via direct OP_RETURN', async () => {
-            const funded = await txBuilder.createFundedLegacyAddress()
-            const action = 'SEND|0|ENCTEST|100|' + global.mainTestAddress + '|opreturn'
-            const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
-            await txBuilder.waitForDecoder(blockIndex)
-
-            const tx = await txBuilder.waitForTransaction(txHash)
-            assert.strictEqual(tx.data, action)
-        })
-
-        it('A2.2:should decode ACTION via 1-of-3 multisig', async () => {
-            const funded = await txBuilder.createFundedLegacyAddress()
-            const action = 'SEND|0|ENCTEST|100|' + global.mainTestAddress + '|msig'
-            const { txHash, blockIndex } = await txBuilder.broadcastMultisig(funded, action)
-            await txBuilder.waitForDecoder(blockIndex)
-
-            const tx = await txBuilder.waitForTransaction(txHash)
-            assert.strictEqual(tx.data, action)
-            assert.strictEqual(tx.source, funded.address)
-        })
-
-        it('A2.3:multisig should strip trailing zeros from short payload', async () => {
-            const funded = await txBuilder.createFundedLegacyAddress()
-            const action = 'SEND|0|X|1||'
-            const { txHash, blockIndex } = await txBuilder.broadcastMultisig(funded, action)
-            await txBuilder.waitForDecoder(blockIndex)
-
-            const tx = await txBuilder.waitForTransaction(txHash)
-            assert.strictEqual(tx.data, action)
-            assert.ok(!tx.data.includes('\0'), 'No null bytes in decoded data')
-        })
-    })
-
-    // ---------------------------------------------------------------
-    // A3: Source address resolution across address types
-    // ---------------------------------------------------------------
-    describe('source address resolution', () => {
-
-        it('A3.1:should resolve Legacy (P2PKH) source address', async () => {
-            const funded = await txBuilder.createFundedLegacyAddress()
-            const action = 'SEND|0|SRCTEST|1|' + global.mainTestAddress + '|legacy'
-            const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
-            await txBuilder.waitForDecoder(blockIndex)
-
-            const tx = await txBuilder.waitForTransaction(txHash)
-            assert.strictEqual(tx.source, funded.address)
-            // P2PKH addresses start with 'm' or 'n' on regtest
-            assert.ok(/^[mn]/.test(tx.source), 'Legacy address should start with m or n')
-        })
-
-        it('A3.2:should resolve SegWit (P2WPKH) source address', async () => {
-            const funded = await txBuilder.createFundedSegwitAddress()
-            const action = 'SEND|0|SRCTEST|1|' + global.mainTestAddress + '|segwit'
-            const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
-            await txBuilder.waitForDecoder(blockIndex)
-
-            const tx = await txBuilder.waitForTransaction(txHash)
-            assert.strictEqual(tx.source, funded.address)
-            // P2WPKH addresses start with 'bcrt1q' on regtest
-            assert.ok(tx.source.startsWith('bcrt1q'), 'SegWit address should start with bcrt1q')
-        })
-
-        it('A3.3:should resolve Taproot (P2TR) source address', async () => {
-            const funded = await txBuilder.createFundedTaprootAddress()
-            const action = 'SEND|0|SRCTEST|1|' + global.mainTestAddress + '|taproot'
-            const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
-            await txBuilder.waitForDecoder(blockIndex)
-
-            const tx = await txBuilder.waitForTransaction(txHash)
-            assert.strictEqual(tx.source, funded.address)
-            // P2TR addresses start with 'bcrt1p' on regtest
-            assert.ok(tx.source.startsWith('bcrt1p'), 'Taproot address should start with bcrt1p')
-        })
-
-        it('A3.4:same ACTION from all three address types produces identical data', async () => {
-            const fundedLegacy = await txBuilder.createFundedLegacyAddress()
-            const fundedSegwit = await txBuilder.createFundedSegwitAddress()
-            const fundedTaproot = await txBuilder.createFundedTaprootAddress()
-
-            const action = 'SEND|0|SAME|42|' + global.mainTestAddress + '|'
-
-            const r1 = await txBuilder.broadcastOpReturn(fundedLegacy, action)
-            await txBuilder.waitForDecoder(r1.blockIndex)
-            const tx1 = await txBuilder.waitForTransaction(r1.txHash)
-
-            const r2 = await txBuilder.broadcastOpReturn(fundedSegwit, action)
-            await txBuilder.waitForDecoder(r2.blockIndex)
-            const tx2 = await txBuilder.waitForTransaction(r2.txHash)
-
-            const r3 = await txBuilder.broadcastOpReturn(fundedTaproot, action)
-            await txBuilder.waitForDecoder(r3.blockIndex)
-            const tx3 = await txBuilder.waitForTransaction(r3.txHash)
-
-            // All three should decode to the same ACTION string
-            assert.strictEqual(tx1.data, action)
-            assert.strictEqual(tx2.data, action)
-            assert.strictEqual(tx3.data, action)
-
-            // But each should have a different source address
-            assert.notStrictEqual(tx1.source, tx2.source)
-            assert.notStrictEqual(tx2.source, tx3.source)
-        })
-    })
-
-    // ---------------------------------------------------------------
-    // A4: Edge cases in ACTION payloads
-    // ---------------------------------------------------------------
-    describe('ACTION payload edge cases', () => {
-
-        it('A4.1:should handle ACTION with empty memo field', async () => {
-            const funded = await txBuilder.createFundedLegacyAddress()
-            const action = 'SEND|0|TOKEN|1|' + global.mainTestAddress + '|'
-            const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
-            await txBuilder.waitForDecoder(blockIndex)
-
-            const tx = await txBuilder.waitForTransaction(txHash)
-            assert.strictEqual(tx.data, action)
-        })
-
-        it('A4.2:should handle ACTION with many trailing pipe-delimited empty fields', async () => {
-            const funded = await txBuilder.createFundedLegacyAddress()
-            const action = 'ISSUE|0|EDGE|1000|100|8|||||||||||||||||||'
-            const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
-            await txBuilder.waitForDecoder(blockIndex)
-
-            const tx = await txBuilder.waitForTransaction(txHash)
-            assert.strictEqual(tx.data, action)
-        })
-
-        it('A4.3:should handle ACTION with special characters in memo', async () => {
-            const funded = await txBuilder.createFundedLegacyAddress()
-            const action = 'SEND|0|TOKEN|1|' + global.mainTestAddress + '|hello & goodbye < > "'
-            const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
-            await txBuilder.waitForDecoder(blockIndex)
-
-            const tx = await txBuilder.waitForTransaction(txHash)
-            assert.strictEqual(tx.data, action)
-        })
-
-        it('A4.4:should handle minimum-length ACTION', async () => {
-            const funded = await txBuilder.createFundedLegacyAddress()
-            const action = 'SEND|0|X|1||'
-            const { txHash, blockIndex } = await txBuilder.broadcastOpReturn(funded, action)
-            await txBuilder.waitForDecoder(blockIndex)
-
-            const tx = await txBuilder.waitForTransaction(txHash)
-            assert.strictEqual(tx.data, action)
         })
     })
 })

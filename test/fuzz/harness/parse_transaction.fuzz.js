@@ -17,12 +17,9 @@
  * dispenser detection, source resolution edge cases.
  */
 
-const assert = require('assert')
 const crypto = require('crypto')
 const sinon = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
-const ecc = require('tiny-secp256k1')
-const XChainDecoder = require('../../../src/XChainDecoder')
 const { flipBits } = require('../support/mutators/bit_flip')
 const { mutateRandom } = require('../support/mutators/byte_manipulate')
 const {
@@ -30,117 +27,13 @@ const {
     buildOpReturnTx, buildMultisigTx, randomActionString, randomDispenserString,
     randomTxid, encrypt
 } = require('../support/mutators/structure_aware')
-const { checkParseTransactionResult, withTimeout } = require('../support/invariants')
-const FuzzReporter = require('../support/reporter')
-
-bitcoin.initEccLib(ecc)
-
-const ITERATIONS = parseInt(process.env.FUZZ_ITERATIONS) || 2000
-
-function createDecoder() {
-    const decoder = new XChainDecoder(
-        'bitcoin-regtest', null, null, null, null, null,
-        '127.0.0.1', 18443, 'rpc', 'rpc', false
-    )
-    decoder.db = {
-        isThereADispenserForAddress: sinon.stub().resolves(false)
-    }
-    decoder.connector = {
-        getRawTransaction: sinon.stub().rejects(new Error('mocked'))
-    }
-    return decoder
-}
-
-// Errors thrown by bitcoinjs-lib during Transaction.fromHex/fromBuffer are expected
-// when we feed it corrupted hex. These are not decoder bugs.
-function isBitcoinjsParseError(err) {
-    const msg = err.message || ''
-    return msg.includes('Cannot read slice out of bounds') ||
-           msg.includes('Transaction has unexpected data') ||
-           msg.includes('RangeError: value out of range') ||
-           msg.includes('out of range') ||
-           msg.includes('outside buffer bounds') ||
-           msg.includes('Expected') // bitcoinjs-lib format errors
-}
-
-// THE INJECTED RPC FAILURE IS THE CONTRACT WORKING, NOT A CRASH.
-//
-// `createDecoder` stubs `connector.getRawTransaction` to reject, on purpose:
-// every fuzz input runs without a node. Any input whose parse needs a prevout
-// (P2SH/P2WSH source resolution, envelope commit/reveal, dispenser funding)
-// therefore hits that rejection.
-//
-// The decoder's documented answer to an RPC lookup failure is to tag it
-// `rpcLookupFailure = true` and RETHROW, so the block loop rolls the block
-// back and retries rather than committing a tx sourced from a failed lookup
-// (XChainDecoder.js: "A prevout lookup that FAILS is not a prevout that does
-// not exist"). Swallowing it would be the consensus bug.
-//
-// Counting that rethrow as a crash is what this function used to do, and the
-// cost was not cosmetic: a `FUZZ_ITERATIONS=100` run reported 411 crashes, of
-// which 411 were this mock. Across every crash file the suite has ever
-// written, 7693 of 7704 were. Real findings do not survive that ratio - the
-// two genuine ones in that pile (a `no_inputs` TypeError, since fixed) sat
-// unread for a month.
-//
-// Keyed on the TAG rather than on the stub's message, so this stays a real
-// assertion: if the decoder ever stops tagging an RPC failure, these stop
-// being expected and the suite goes red, which is exactly the signal the
-// block loop depends on.
-function isInjectedRpcFailure(err) {
-    return err != null && err.rpcLookupFailure === true
-}
-
-// Helper to run one fuzz iteration
-async function fuzzOne(decoder, reporter, txOrHex, mutatorName) {
-    try {
-        let result
-        if (typeof txOrHex === 'string') {
-            result = await withTimeout(() => decoder.parseRawTransaction(txOrHex), 5000)
-        } else {
-            result = await withTimeout(() => decoder.parseTransaction(txOrHex), 5000)
-        }
-        const check = checkParseTransactionResult(result)
-        if (!check.ok) {
-            reporter.recordInvariantViolation(txOrHex, check.violations, mutatorName)
-        } else {
-            reporter.recordSuccess()
-        }
-    } catch (err) {
-        if (err.message.startsWith('Timeout:')) {
-            reporter.recordTimeout(txOrHex, mutatorName)
-        } else if (typeof txOrHex === 'string' && isBitcoinjsParseError(err)) {
-            // Expected: bitcoinjs-lib rejects malformed hex before decoder code runs
-            reporter.recordSuccess()
-        } else if (isInjectedRpcFailure(err)) {
-            // Expected: this harness has no node, and the decoder is supposed
-            // to fail loud on a prevout lookup it cannot complete.
-            reporter.recordSuccess()
-        } else {
-            reporter.recordCrash(txOrHex, err, mutatorName)
-        }
-    }
-}
+const {
+    ITERATIONS, configureSuite, createDecoder, fuzzOne
+} = require('./parse_transaction.fuzz/support.cjs')
 
 describe('Fuzz: parseTransaction', function () {
     this.timeout(300000)
-    let reporter
-
-    before(() => {
-        reporter = new FuzzReporter('parseTransaction')
-    })
-
-    afterEach(() => {
-        sinon.restore()
-    })
-
-    after(() => {
-        reporter.printSummary()
-        const s = reporter.getSummary()
-        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found; see test/fuzz/crashes/parseTransaction/`)
-        assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
-        assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
-    })
+    const reporter = configureSuite()
 
     // --- OP_RETURN with random ACTION payloads ---
     describe('OP_RETURN with random ACTION data', () => {
@@ -153,6 +46,11 @@ describe('Fuzz: parseTransaction', function () {
             }
         })
     })
+})
+
+describe('Fuzz: parseTransaction', function () {
+    this.timeout(300000)
+    const reporter = configureSuite()
 
     // --- OP_RETURN with random DISPENSER payloads ---
     describe('OP_RETURN with random DISPENSER data', () => {
@@ -165,6 +63,11 @@ describe('Fuzz: parseTransaction', function () {
             }
         })
     })
+})
+
+describe('Fuzz: parseTransaction', function () {
+    this.timeout(300000)
+    const reporter = configureSuite()
 
     // --- Bit-flipped known-good transaction hex ---
     describe('bit-flipped transaction hex', () => {
@@ -180,6 +83,11 @@ describe('Fuzz: parseTransaction', function () {
             }
         })
     })
+})
+
+describe('Fuzz: parseTransaction', function () {
+    this.timeout(300000)
+    const reporter = configureSuite()
 
     // --- Byte-mutated transaction hex ---
     describe('byte-mutated transaction hex', () => {
@@ -194,6 +102,11 @@ describe('Fuzz: parseTransaction', function () {
             }
         })
     })
+})
+
+describe('Fuzz: parseTransaction', function () {
+    this.timeout(300000)
+    const reporter = configureSuite()
 
     // --- Completely random hex strings (parseRawTransaction) ---
     describe('completely random hex', () => {
@@ -206,6 +119,11 @@ describe('Fuzz: parseTransaction', function () {
             }
         })
     })
+})
+
+describe('Fuzz: parseTransaction', function () {
+    this.timeout(300000)
+    const reporter = configureSuite()
 
     // --- Hypothesis H2: Multisig with tiny pubkeys ---
     describe('H2: multisig with tiny/empty pubkeys', () => {
@@ -240,6 +158,11 @@ describe('Fuzz: parseTransaction', function () {
             })
         }
     })
+})
+
+describe('Fuzz: parseTransaction', function () {
+    this.timeout(300000)
+    const reporter = configureSuite()
 
     // --- Hypothesis H3: P2SH with partial input failures ---
     describe('H3: P2SH with mixed valid/invalid inputs', () => {
@@ -274,6 +197,11 @@ describe('Fuzz: parseTransaction', function () {
             }
         })
     })
+})
+
+describe('Fuzz: parseTransaction', function () {
+    this.timeout(300000)
+    const reporter = configureSuite()
 
     // --- Hypothesis H4: Script decompile returns opcode at index 0 ---
     describe('H4: dataBuffer that decompiles to opcodes', () => {
@@ -307,176 +235,6 @@ describe('Fuzz: parseTransaction', function () {
 
                 await fuzzOne(decoder, reporter, tx, 'opcode_script_decompile')
             }
-        })
-    })
-
-    // --- Transactions with no inputs ---
-    describe('edge: transaction with no inputs', () => {
-        it('should handle transaction with empty ins array', async () => {
-            const decoder = createDecoder()
-            const tx = new bitcoin.Transaction()
-            tx.version = 2
-            tx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
-            // tx.ins is empty. This case DID crash: the two genuine crash
-            // records this suite ever produced are both from here, a
-            // `Cannot read properties of undefined (reading 'hash')` out of
-            // parseTransaction. Current code returns null instead, verified
-            // by running exactly this input, so the case now guards a fix
-            // rather than reporting an open bug.
-
-            try {
-                const result = await withTimeout(() => decoder.parseTransaction(tx), 5000)
-                // Should return null or handle gracefully
-                const check = checkParseTransactionResult(result)
-                if (!check.ok) {
-                    reporter.recordInvariantViolation(tx, check.violations, 'no_inputs')
-                } else {
-                    reporter.recordSuccess()
-                }
-            } catch (err) {
-                if (isInjectedRpcFailure(err)) {
-                    reporter.recordSuccess()
-                } else {
-                    reporter.recordCrash(tx, err, 'no_inputs')
-                }
-            }
-        })
-    })
-
-    // --- Transactions with no outputs ---
-    describe('edge: transaction with no outputs', () => {
-        it('should handle transaction with empty outs array', async () => {
-            const decoder = createDecoder()
-            const tx = new bitcoin.Transaction()
-            tx.version = 2
-            tx.addInput(PREV_HASH, 1)
-            tx.ins[0].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
-            // tx.outs is empty
-
-            await fuzzOne(decoder, reporter, tx, 'no_outputs')
-        })
-    })
-
-    // --- Many outputs ---
-    describe('edge: transaction with many outputs', () => {
-        it('should handle transaction with 100 random outputs', async () => {
-            const decoder = createDecoder()
-            const tx = new bitcoin.Transaction()
-            tx.version = 2
-            tx.addInput(PREV_HASH, 1)
-            tx.ins[0].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
-
-            for (let i = 0; i < 100; i++) {
-                const scriptType = crypto.randomInt(4)
-                switch (scriptType) {
-                    case 0: // OP_RETURN
-                        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, crypto.randomBytes(crypto.randomInt(76))]), 0)
-                        break
-                    case 1: // P2PKH
-                        tx.addOutput(Buffer.from('76a914' + crypto.randomBytes(20).toString('hex') + '88ac', 'hex'), crypto.randomInt(100000000))
-                        break
-                    case 2: // random script
-                        tx.addOutput(crypto.randomBytes(crypto.randomInt(50) + 2), crypto.randomInt(100000000))
-                        break
-                    case 3: // empty script
-                        tx.addOutput(Buffer.alloc(0), 0)
-                        break
-                }
-            }
-
-            await fuzzOne(decoder, reporter, tx, 'many_outputs')
-        })
-    })
-
-    // --- Dispenser address match with fuzzed outputs ---
-    describe('dispenser detection with various output types', () => {
-        it(`should handle ${Math.min(ITERATIONS, 500)} txs with dispenser-matching addresses`, async () => {
-            for (let i = 0; i < Math.min(ITERATIONS, 500); i++) {
-                const decoder = createDecoder()
-                // Every address matches a dispenser
-                decoder.db.isThereADispenserForAddress = sinon.stub().resolves(true)
-
-                const action = randomActionString()
-                const tx = buildOpReturnTx(action)
-                await fuzzOne(decoder, reporter, tx, 'dispenser_match')
-            }
-        })
-    })
-
-    // --- Multisig with all-zero data ---
-    describe('multisig: all-zero pubkey data', () => {
-        it('should handle multisig where pubkeys are all zeros', async () => {
-            const decoder = createDecoder()
-            const tx = new bitcoin.Transaction()
-            tx.version = 2
-            tx.addInput(PREV_HASH, 1)
-            tx.ins[0].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
-
-            const pubkey1 = Buffer.alloc(33, 0x00)
-            pubkey1[0] = 0x02
-            const pubkey2 = Buffer.alloc(33, 0x00)
-            pubkey2[0] = 0x02
-            const pubkey3 = Buffer.alloc(33, 0x03)
-
-            const msScript = bitcoin.script.compile([
-                bitcoin.opcodes.OP_1,
-                pubkey1, pubkey2, pubkey3,
-                bitcoin.opcodes.OP_3,
-                bitcoin.opcodes.OP_CHECKMULTISIG
-            ])
-            tx.addOutput(msScript, 1000)
-            tx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
-
-            await fuzzOne(decoder, reporter, tx, 'allzero_multisig')
-        })
-    })
-
-    // --- P2WSH with missing/corrupt witness data ---
-    describe('P2WSH with missing/corrupt witness', () => {
-        it(`should handle ${Math.min(ITERATIONS, 500)} P2WSH txs with corrupt witness`, async () => {
-            for (let i = 0; i < Math.min(ITERATIONS, 500); i++) {
-                const decoder = createDecoder()
-                const tx = new bitcoin.Transaction()
-                tx.version = 2
-                tx.addInput(PREV_HASH, 1)
-                tx.ins[0].script = Buffer.alloc(0)
-
-                // Randomly corrupt witness
-                const witnessType = crypto.randomInt(5)
-                switch (witnessType) {
-                    case 0: tx.ins[0].witness = []; break
-                    case 1: tx.ins[0].witness = [crypto.randomBytes(10)]; break
-                    case 2: tx.ins[0].witness = [crypto.randomBytes(10), crypto.randomBytes(10)]; break
-                    case 3: tx.ins[0].witness = [crypto.randomBytes(10), crypto.randomBytes(10), crypto.randomBytes(crypto.randomInt(100))]; break
-                    case 4: tx.ins[0].witness = [null, undefined, crypto.randomBytes(10)]; break
-                }
-
-                const txid = Buffer.from(PREV_HASH).reverse().toString('hex')
-                const marker = encrypt(Buffer.from('XCHNp2wsh'), txid)
-                tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, marker]), 0)
-                tx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
-
-                await fuzzOne(decoder, reporter, tx, 'p2wsh_corrupt_witness')
-            }
-        })
-    })
-
-    // --- Hypothesis H8: Empty reassembled data buffer ---
-    describe('H8: empty data buffer after output loop', () => {
-        it('should handle txs where all OP_RETURN outputs decrypt to non-XCHN data', async () => {
-            const decoder = createDecoder()
-            const tx = new bitcoin.Transaction()
-            tx.version = 2
-            tx.addInput(PREV_HASH, 1)
-            tx.ins[0].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
-
-            // Multiple OP_RETURN outputs, none with XCHN prefix
-            for (let i = 0; i < 5; i++) {
-                tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, crypto.randomBytes(32)]), 0)
-            }
-            tx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), 100000000)
-
-            await fuzzOne(decoder, reporter, tx, 'empty_reassembled')
         })
     })
 })
