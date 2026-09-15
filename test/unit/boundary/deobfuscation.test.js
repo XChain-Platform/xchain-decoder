@@ -29,13 +29,14 @@ function encrypt(plaintext, txid) {
 
 // Standard 64-char txid for most tests
 const VALID_TXID = 'aabbccdd11223344eeff556677889900aabbccdd11223344eeff556677889900'
+let decoder
+
+function setUpDecoder() {
+    decoder = createDecoder()
+}
 
 describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
-    let decoder
-
-    beforeEach(() => {
-        decoder = createDecoder()
-    })
+    beforeEach(setUpDecoder)
 
     // D-1: Empty data buffer
     it('[REGRESSION P0] R-DEC-004 D-1: should handle empty buffer without crash', async () => {
@@ -79,6 +80,10 @@ describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
         }
         // Either way, no unhandled crash
     })
+})
+
+describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
+    beforeEach(setUpDecoder)
 
     // D-5: Empty txid (both key and IV are empty strings)
     it('D-5: should handle empty txid without crashing', async () => {
@@ -116,6 +121,10 @@ describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
         assert.ok(Buffer.isBuffer(result))
         assert.strictEqual(result.toString('utf-8'), plaintext)
     })
+})
+
+describe('Boundary: AES-128-CTR Deobfuscation (D-1 through D-7)', () => {
+    beforeEach(setUpDecoder)
 
     // Additional boundary: exactly 16 bytes (one AES block)
     it('should handle exactly 16-byte (one AES block) buffer', async () => {
