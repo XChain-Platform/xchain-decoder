@@ -73,6 +73,13 @@ describe('BATCH dispenser registration', function () {
                 decoder.getDefaultExpiration(T0))
             assert.strictEqual(rowFor(decoder.model, DELEGATE_B).expiration, EXP_EARLY)
         })
+    })
+})
+
+describe('BATCH dispenser registration', function () {
+    this.timeout(0)
+
+    describe('several DISPENSER sub-commands in one BATCH', function () {
 
         it('skips only the sub-command with an out-of-range EXPIRATION', async () => {
             const decoder = await runOne('BATCH|0|' + [

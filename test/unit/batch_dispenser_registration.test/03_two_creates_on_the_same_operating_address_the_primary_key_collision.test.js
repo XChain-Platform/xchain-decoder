@@ -45,6 +45,13 @@ describe('BATCH dispenser registration', function () {
             assert.strictEqual(decoder.model.rows.length, 1)
             assert.strictEqual(decoder.model.rows[0].expiration, EXP_LATE)
         })
+    })
+})
+
+describe('BATCH dispenser registration', function () {
+    this.timeout(0)
+
+    describe('two creates on the SAME operating address (the PRIMARY KEY collision)', function () {
 
         it('collapses three same-address creates to one row', async () => {
             const decoder = await runOne('BATCH|0|' + [

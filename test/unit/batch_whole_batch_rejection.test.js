@@ -129,6 +129,10 @@ describe('BATCH whole-batch rejection: the rest of the class', function () {
                 'harness that never captures anything');
         });
     });
+});
+
+describe('BATCH whole-batch rejection: the rest of the class', function () {
+    this.timeout(0);
 
     // -------------------------------------------------------------------------------------
     describe('a nested BATCH', function () {
@@ -163,6 +167,10 @@ describe('BATCH whole-batch rejection: the rest of the class', function () {
             assert.strictEqual(decoder.model.insertCalls, 1);
         });
     });
+});
+
+describe('BATCH whole-batch rejection: the rest of the class', function () {
+    this.timeout(0);
 
     // -------------------------------------------------------------------------------------
     describe('the per-ACTION ISSUE cap, and the dotted-TICK exemption that is the trap', function () {
@@ -219,6 +227,10 @@ describe('BATCH whole-batch rejection: the rest of the class', function () {
                 'settlement output, which is the failure this whole row is written against');
         });
     });
+});
+
+describe('BATCH whole-batch rejection: the rest of the class', function () {
+    this.timeout(0);
 
     // -------------------------------------------------------------------------------------
     describe('the gated DEPLOY cap', function () {
@@ -237,6 +249,10 @@ describe('BATCH whole-batch rejection: the rest of the class', function () {
             assert.deepStrictEqual(decoder.captured, []);
         });
     });
+});
+
+describe('BATCH whole-batch rejection: the rest of the class', function () {
+    this.timeout(0);
 
     // -------------------------------------------------------------------------------------
     describe('the MINT cap, mirrored only as far as it is provable', function () {
@@ -288,6 +304,10 @@ describe('BATCH whole-batch rejection: the rest of the class', function () {
             assert.strictEqual(hasProvablyRejectedBatch(['toString|0|a'], ACTION_ALIASES), false);
         });
     });
+});
+
+describe('BATCH whole-batch rejection: the rest of the class', function () {
+    this.timeout(0);
 
     // -------------------------------------------------------------------------------------
     describe('what is NOT mirrored stays captured, deliberately', function () {
@@ -313,6 +333,10 @@ describe('BATCH whole-batch rejection: the rest of the class', function () {
             assert.strictEqual(reject(['issue|0|AAA|1', 'issue|0|BBB|1']), false);
         });
     });
+});
+
+describe('BATCH whole-batch rejection: the rest of the class', function () {
+    this.timeout(0);
 
     // -------------------------------------------------------------------------------------
     describe('BELOW the gate nothing moves', function () {
