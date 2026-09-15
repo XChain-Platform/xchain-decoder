@@ -11,6 +11,18 @@
 const assert = require('assert')
 const Database = require('../../src/db')
 
+// The Database class body lives in the entry and the parts it requires under src/db/,
+// so a source scan reads all of them, in the order the entry requires them.
+function readDbSource() {
+    const fs = require('fs')
+    const path = require('path')
+    const entryPath = require.resolve('../../src/db.js')
+    const entry = fs.readFileSync(entryPath, 'utf-8')
+    const parts = [...entry.matchAll(/require\('\.\/db\/([a-z_]+\.js)'\)/g)]
+        .map(m => fs.readFileSync(path.join(path.dirname(entryPath), 'db', m[1]), 'utf-8'))
+    return [entry, ...parts].join('\n')
+}
+
 describe('Security: SQL Parameterization', () => {
 
     // --- SEC-01: Database name whitelist ---
@@ -90,8 +102,7 @@ describe('Security: SQL Parameterization', () => {
     describe('deleteAndCompareTxsNotInList parameterization', () => {
         it('[REGRESSION P0] R-SEC-001: should use parameterized placeholders instead of string concatenation', () => {
             // Verify by reading the source code: the fix replaces .join(",") with placeholders
-            const fs = require('fs')
-            const dbSource = fs.readFileSync(require.resolve('../../src/db.js'), 'utf-8')
+            const dbSource = readDbSource()
 
             // The old vulnerable pattern should NOT exist
             assert.ok(

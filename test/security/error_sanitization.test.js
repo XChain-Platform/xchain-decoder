@@ -12,6 +12,16 @@ const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
 
+// The Database class body lives in the entry and the parts it requires under src/db/,
+// so a source scan reads all of them, in the order the entry requires them.
+function readDbSource() {
+    const entryPath = require.resolve('../../src/db.js')
+    const entry = fs.readFileSync(entryPath, 'utf-8')
+    const parts = [...entry.matchAll(/require\('\.\/db\/([a-z_]+\.js)'\)/g)]
+        .map(m => fs.readFileSync(path.join(path.dirname(entryPath), 'db', m[1]), 'utf-8'))
+    return [entry, ...parts].join('\n')
+}
+
 describe('Security: Error Log Sanitization', () => {
 
     // --- SEC-08: Credential leakage in error logs ---
@@ -20,7 +30,7 @@ describe('Security: Error Log Sanitization', () => {
         let dbSource
 
         before(() => {
-            dbSource = fs.readFileSync(require.resolve('../../src/db.js'), 'utf-8')
+            dbSource = readDbSource()
         })
 
         it('[REGRESSION P0] R-SEC-002: should not log full error objects in createDatabase', () => {
@@ -60,7 +70,7 @@ describe('Security: Error Log Sanitization', () => {
         let dbSource
 
         before(() => {
-            dbSource = fs.readFileSync(require.resolve('../../src/db.js'), 'utf-8')
+            dbSource = readDbSource()
         })
 
         it('should not log full error objects in commitTransaction', () => {
