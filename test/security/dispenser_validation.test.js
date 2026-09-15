@@ -109,6 +109,18 @@ describe('Security: DISPENSER Field Validation', () => {
             assert.ok(result.data.toString('utf-8').includes('DISPENSER'))
         })
     })
+})
+
+describe('Security: DISPENSER Field Validation', () => {
+    let decoder
+
+    beforeEach(() => {
+        decoder = createDecoder()
+    })
+
+    afterEach(() => {
+        sinon.restore()
+    })
 
     // --- SEC-13: parseInt radix ---
 
@@ -139,6 +151,18 @@ describe('Security: DISPENSER Field Validation', () => {
                 'Expiration must not be parsed with parseInt'
             )
         })
+    })
+})
+
+describe('Security: DISPENSER Field Validation', () => {
+    let decoder
+
+    beforeEach(() => {
+        decoder = createDecoder()
+    })
+
+    afterEach(() => {
+        sinon.restore()
     })
 
     // --- Pipe-delimited field injection ---
