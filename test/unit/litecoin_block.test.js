@@ -70,13 +70,17 @@ function buildBlockBuf(header, txBuffers) {
 }
 
 // ─── tests ──────────────────────────────────────────────────────────────────
-describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
-    let decoder
+let decoder
 
-    before(() => {
+function prepareDecoder() {
+    if (!decoder) {
         decoder = new XChainBlockDecoder('litecoin-mainnet')
         assert.strictEqual(decoder.coin, 'litecoin')
-    })
+    }
+}
+
+describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
+    before(prepareDecoder)
 
     it('should parse a litecoin header-only block (80 bytes)', () => {
         const header = buildHeader({ version: 2, timestamp: 1700000001 })
@@ -109,6 +113,10 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
         assert.ok(Array.isArray(block.transactions))
         assert.strictEqual(block.transactions.length, 2)
     })
+})
+
+describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
+    before(prepareDecoder)
 
     it('should strip MWEB (0x08) flag from the last transaction', () => {
         const header = buildHeader()
@@ -134,6 +142,10 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
         const block = decoder.blockFromBuffer(blockBuf)
         assert.ok(Array.isArray(block.transactions))
     })
+})
+
+describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
+    before(prepareDecoder)
 
     it('should throw for a buffer smaller than 80 bytes', () => {
         const tooSmall = Buffer.alloc(50, 0x00)
@@ -174,6 +186,10 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
         assert.ok(block)
         assert.strictEqual(block.version, 2)
     })
+})
+
+describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
+    before(prepareDecoder)
 
     it('should populate witnessCommit when the coinbase tx contains a BIP141 witness commitment', () => {
         // A minimal segwit litecoin block with:
