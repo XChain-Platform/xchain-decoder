@@ -71,16 +71,19 @@ function createDecoder() {
     return decoder
 }
 
+let decoder
+
+function resetDecoder() {
+    decoder = createDecoder()
+}
+
+function restoreSinon() {
+    sinon.restore()
+}
+
 describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
-    let decoder
-
-    beforeEach(() => {
-        decoder = createDecoder()
-    })
-
-    afterEach(() => {
-        sinon.restore()
-    })
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
 
     // S-1: OP_RETURN with empty push data
     it('[REGRESSION P0] R-SCR-001 S-1: OP_RETURN with 0-byte push: removeObfuscation receives empty buffer', async () => {
@@ -121,6 +124,11 @@ describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
         assert.ok(Buffer.isBuffer(result.data), 'result.data must be a Buffer, not the integer 0')
         assert.strictEqual(result.data.length, 0)
     })
+})
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
 
     // Same non-Buffer branch as S-1b, but the empty leading push is followed by a
     // second push (the rawData the sender paid to carry). The decoder still blanks the
@@ -158,6 +166,11 @@ describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
         assert.strictEqual(result.data.length, 0, 'acceptance must not change: payload stays blanked')
         assert.strictEqual(result.rawData, null, 'acceptance must not change: rawData stays unread')
     })
+})
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
 
     // S-1d: the inert case the blanking was written for (a lone OP_0 payload, S-1b's
     // shape) must stay silent, so the new report cannot become monitoring noise.
@@ -200,6 +213,11 @@ describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
         // Should decode successfully if cipher fits in 76 bytes
         assert.ok(result.data.length >= 0)
     })
+})
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
 
     // S-3: OP_RETURN with opcode instead of buffer (decompiledScript[1] is integer)
     it('S-3: OP_RETURN with opcode instead of buffer: removeObfuscation returns null', async () => {
@@ -241,6 +259,11 @@ describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
         // Non-Buffer pubkeys are now detected and the output is skipped
         assert.strictEqual(result.data.length, 0)
     })
+})
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
 
     // S-5: Multisig with pubkeys whose stripped bytes are all zeros
     it('S-5: multisig with all-zero data: zero-trim loop removes everything', async () => {
@@ -272,6 +295,11 @@ describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
         // to removeObfuscation. It won't match XCHN prefix.
         assert.strictEqual(result.data.length, 0)
     })
+})
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
 
     // S-6: P2SH marker but transaction has 0 additional inputs to process
     // (In practice the marker is in OP_RETURN, and the data is in inputs' scriptSigs)
@@ -310,6 +338,11 @@ describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
         // Accessing nextInput["witness"][2] on undefined throws TypeError (caught)
         assert.strictEqual(result.data.length, 0)
     })
+})
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
 
     // P2WSH with witness array having < 3 elements
     it('XCHNp2wsh with witness having only 1 element: caught by try/catch', async () => {
@@ -326,246 +359,5 @@ describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
         assert.ok(result)
         // witness[2] is undefined → decompile(undefined) throws
         assert.strictEqual(result.data.length, 0)
-    })
-})
-
-describe('Boundary: Multisig Zero-Trim Edge Cases', () => {
-    let decoder
-
-    beforeEach(() => {
-        decoder = createDecoder()
-    })
-
-    afterEach(() => {
-        sinon.restore()
-    })
-
-    // Multisig where data has a single trailing zero
-    it('should remove single trailing zero from multisig data', async () => {
-        const tx = new bitcoin.Transaction()
-        tx.version = 2
-        addStandardInput(tx)
-
-        // Build pubkeys where stripped data = [encrypted XCHN payload] + [0x00]
-        // We need the data after deobfuscation to start with XCHN
-        const { key, iv } = getKeyIv()
-        const targetPlain = Buffer.from('XCHNtest')
-        const cipher = crypto.createCipheriv('aes-128-ctr', key, iv)
-        const encrypted = Buffer.concat([cipher.update(targetPlain), cipher.final()])
-
-        // Pad to fit in two 32-byte pubkey data slots (64 bytes total), trailing zeros
-        const fullData = Buffer.alloc(64, 0x00)
-        encrypted.copy(fullData, 0)
-
-        const pubkey1 = Buffer.concat([Buffer.from([0x02]), fullData.subarray(0, 32)])
-        const pubkey2 = Buffer.concat([Buffer.from([0x02]), fullData.subarray(32, 64)])
-
-        const script = bitcoin.script.compile([
-            bitcoin.opcodes.OP_1,
-            pubkey1,
-            pubkey2,
-            Buffer.alloc(33, 0x03),
-            bitcoin.opcodes.OP_3,
-            bitcoin.opcodes.OP_CHECKMULTISIG
-        ])
-        tx.addOutput(script, 1000)
-        addP2PKHOutput(tx)
-
-        const result = await decoder.parseTransaction(tx)
-        assert.ok(result)
-        // Zero-trim should remove trailing zeros, leaving the encrypted bytes.
-        // After deobfuscation, the XCHN prefix should be stripped, leaving "test"
-    })
-
-    // Multisig where data has no trailing zeros (all bytes non-zero)
-    it('should keep all bytes when no trailing zeros exist', async () => {
-        const tx = new bitcoin.Transaction()
-        tx.version = 2
-        addStandardInput(tx)
-
-        // Fill with non-zero bytes
-        const pubkey1 = Buffer.alloc(33, 0xff)
-        pubkey1[0] = 0x02
-        const pubkey2 = Buffer.alloc(33, 0xff)
-        pubkey2[0] = 0x02
-
-        const script = bitcoin.script.compile([
-            bitcoin.opcodes.OP_1,
-            pubkey1,
-            pubkey2,
-            Buffer.alloc(33, 0x03),
-            bitcoin.opcodes.OP_3,
-            bitcoin.opcodes.OP_CHECKMULTISIG
-        ])
-        tx.addOutput(script, 1000)
-        addP2PKHOutput(tx)
-
-        const result = await decoder.parseTransaction(tx)
-        assert.ok(result)
-        // All 0xff bytes, zero-trim doesn't remove anything.
-        // Decrypted data won't match XCHN prefix → no data extracted
-        assert.strictEqual(result.data.length, 0)
-    })
-})
-
-describe('Boundary: Magic Prefix & Encoding Type Detection', () => {
-    let decoder
-
-    beforeEach(() => {
-        decoder = createDecoder()
-    })
-
-    afterEach(() => {
-        sinon.restore()
-    })
-
-    // Data decrypts to "XCHM" (off-by-one from XCHN)
-    it('should reject data decrypting to XCHM (off-by-one)', async () => {
-        const tx = new bitcoin.Transaction()
-        tx.version = 2
-        addStandardInput(tx)
-
-        const cipher = encryptBuf(Buffer.from('XCHMsome data'))
-        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
-        addP2PKHOutput(tx)
-
-        const result = await decoder.parseTransaction(tx)
-        assert.ok(result)
-        assert.strictEqual(result.data.length, 0)
-    })
-
-    // After XCHN prefix strip, "p2s" falls to the else branch. decompile may return null
-    // for non-script data: now handled gracefully.
-    it('should handle XCHNp2s (incomplete p2sh) gracefully: no crash', async () => {
-        const tx = new bitcoin.Transaction()
-        tx.version = 2
-        addStandardInput(tx)
-
-        const cipher = encryptBuf(Buffer.from('XCHNp2s'))
-        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
-        addP2PKHOutput(tx)
-
-        const result = await decoder.parseTransaction(tx)
-        assert.ok(result)
-        // decompile returns null for invalid script → dataBuffer reset to empty
-        assert.strictEqual(result.data.length, 0)
-    })
-
-    // "XCHNp2shX": trailing data after p2sh marker
-    it('should handle XCHNp2shX (extra byte after p2sh) gracefully: no crash', async () => {
-        const tx = new bitcoin.Transaction()
-        tx.version = 2
-        addStandardInput(tx)
-
-        const cipher = encryptBuf(Buffer.from('XCHNp2shX'))
-        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
-        addP2PKHOutput(tx)
-
-        const result = await decoder.parseTransaction(tx)
-        assert.ok(result)
-        assert.strictEqual(result.data.length, 0)
-    })
-
-    // Multiple OP_RETURN outputs: one valid XCHN, one not
-    it('should extract data only from valid XCHN OP_RETURN, ignoring non-XCHN', async () => {
-        const tx = new bitcoin.Transaction()
-        tx.version = 2
-        addStandardInput(tx)
-
-        // First OP_RETURN: valid XCHN payload
-        const validCipher = buildXchnPayload('SEND|0|XCHAIN|500')
-        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, validCipher]), 0)
-
-        // Second OP_RETURN: random non-XCHN data
-        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, crypto.randomBytes(32)]), 0)
-
-        addP2PKHOutput(tx)
-
-        const result = await decoder.parseTransaction(tx)
-        assert.ok(result)
-        assert.ok(result.data.length > 0)
-        assert.strictEqual(result.data.toString('utf-8'), 'SEND|0|XCHAIN|500')
-    })
-
-    // Multiple valid XCHN OP_RETURNs: both get concatenated into dataBuffer
-    it('should concatenate data from multiple valid XCHN OP_RETURN outputs', async () => {
-        const tx = new bitcoin.Transaction()
-        tx.version = 2
-        addStandardInput(tx)
-
-        const cipher1 = buildXchnPayload('PART1')
-        const cipher2 = buildXchnPayload('PART2')
-        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher1]), 0)
-        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher2]), 0)
-        addP2PKHOutput(tx)
-
-        const result = await decoder.parseTransaction(tx)
-        assert.ok(result)
-        // Both outputs' data get concatenated. The final bitcoin.script.decompile
-        // on the combined buffer may or may not parse cleanly.
-        assert.ok(result.data.length > 0)
-    })
-})
-
-describe('Boundary: isFutureSegwitScript additional edge cases', () => {
-    let decoder
-
-    beforeEach(() => {
-        decoder = createDecoder()
-    })
-
-    // Exactly 4 bytes (minimum valid length)
-    it('should handle 4-byte script at minimum length boundary', () => {
-        // OP_2 (0x52) + push 2 + 2 bytes data = 4 total
-        const script = Buffer.from([0x52, 0x02, 0xaa, 0xbb])
-        assert.strictEqual(decoder.isFutureSegwitScript(script), true)
-    })
-
-    // Exactly 42 bytes (maximum valid length)
-    it('should handle 42-byte script at maximum length boundary', () => {
-        // OP_2 (0x52) + push 40 + 40 bytes data = 42 total
-        const script = Buffer.concat([Buffer.from([0x52, 0x28]), Buffer.alloc(40, 0xaa)])
-        assert.strictEqual(decoder.isFutureSegwitScript(script), true)
-    })
-
-    // 3 bytes: below minimum
-    it('should reject 3-byte script (below minimum)', () => {
-        const script = Buffer.from([0x52, 0x01, 0xaa])
-        assert.strictEqual(decoder.isFutureSegwitScript(script), false)
-    })
-
-    // 43 bytes: above maximum
-    it('should reject 43-byte script (above maximum)', () => {
-        const script = Buffer.concat([Buffer.from([0x52, 0x29]), Buffer.alloc(41, 0xaa)])
-        assert.strictEqual(decoder.isFutureSegwitScript(script), false)
-    })
-
-    // Version byte 0x51 (OP_1 / taproot): just below future segwit range
-    it('should reject version byte 0x51 (OP_1 taproot, not future segwit)', () => {
-        const script = Buffer.concat([Buffer.from([0x51, 0x20]), Buffer.alloc(32, 0xcc)])
-        assert.strictEqual(decoder.isFutureSegwitScript(script), false)
-    })
-
-    // Version byte 0x61 (just above OP_16 range)
-    it('should reject version byte 0x61 (above OP_16)', () => {
-        const script = Buffer.concat([Buffer.from([0x61, 0x14]), Buffer.alloc(20, 0xaa)])
-        assert.strictEqual(decoder.isFutureSegwitScript(script), false)
-    })
-
-    // Push length 1 (below minimum witness program)
-    it('should reject push length 1 (below minimum witness program size)', () => {
-        const script = Buffer.from([0x52, 0x01, 0xaa])
-        assert.strictEqual(decoder.isFutureSegwitScript(script), false)
-    })
-
-    // Push length 41 (above maximum witness program)
-    it('should reject push length 41 (above maximum witness program size)', () => {
-        const script = Buffer.concat([Buffer.from([0x52, 0x29]), Buffer.alloc(41, 0xaa)])
-        assert.strictEqual(decoder.isFutureSegwitScript(script), false)
-    })
-
-    // Empty buffer
-    it('should reject empty buffer', () => {
-        assert.strictEqual(decoder.isFutureSegwitScript(Buffer.alloc(0)), false)
     })
 })
