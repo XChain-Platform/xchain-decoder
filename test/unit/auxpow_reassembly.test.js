@@ -39,6 +39,18 @@ function makeConnector(overrides) {
     return Object.assign(connector, overrides)
 }
 
+// Select the strip path by NETWORK, not by a flag: the constructor derives
+// auxPow solely from the coin's declared wireFormat, so dogecoin-* is the only
+// way to reach getBlockWithoutAuxPow and litecoin-* the only way to reach plain
+// getBlock. The trailing constructor argument is the now-inert auxPow parameter,
+// passed false to prove it is not consulted.
+function makeDecoder(network, connector) {
+    const decoder = new XChainDecoder(network, '127.0.0.1', 3306, 'db', 'u', 'p',
+        '127.0.0.1', 0, 'u', 'p', false, null)
+    decoder.connector = connector
+    return decoder
+}
+
 describe('malformed-AuxPoW block reassembly fallback', function () {
 
     describe('encodeVarintHex', function () {
@@ -52,6 +64,9 @@ describe('malformed-AuxPoW block reassembly fallback', function () {
             assert.throws(() => encodeVarintHex(0x100000000), /out of supported range/)
         })
     })
+})
+
+describe('malformed-AuxPoW block reassembly fallback', function () {
 
     describe('BlockchainConnector.getBlockReassembled', function () {
         it('rebuilds header + tx-count varint + raw txs, parseable as a block', async function () {
@@ -97,12 +112,16 @@ describe('malformed-AuxPoW block reassembly fallback', function () {
             })
             await assert.rejects(() => connector.getBlockReassembled('hash'), /no raw tx for in-block txid/)
         })
+    })
+})
 
-        // The three RPC fetches sit inside the try, so a transport fault is wrapped by the
-        // same catch that wraps a content fault. Once _auxPowParseErrorCount has escalated a
-        // height into this path it never decays, so every later failure at that height comes
-        // through here, and error.code is the only thing separating "the node is unreachable"
-        // from "this block's bytes are unusable" in the operator log.
+// The three RPC fetches sit inside the try, so a transport fault is wrapped by the
+// same catch that wraps a content fault. Once _auxPowParseErrorCount has escalated a
+// height into this path it never decays, so every later failure at that height comes
+// through here, and error.code is the only thing separating "the node is unreachable"
+// from "this block's bytes are unusable" in the operator log.
+describe('malformed-AuxPoW block reassembly fallback', function () {
+    describe('BlockchainConnector.getBlockReassembled', function () {
         it('preserves error.code and the original error as cause on a transport fault', async function () {
             const transportErr = new Error('socket hang up')
             transportErr.code = 'ECONNRESET'
@@ -141,6 +160,9 @@ describe('malformed-AuxPoW block reassembly fallback', function () {
             )
         })
     })
+})
+
+describe('malformed-AuxPoW block reassembly fallback', function () {
 
     describe('BlockchainConnector.probeTxIndex', function () {
         it('returns true when the tip coinbase is retrievable without a blockhash', async function () {
@@ -176,20 +198,11 @@ describe('malformed-AuxPoW block reassembly fallback', function () {
             assert.strictEqual(await connector.probeTxIndex(), null)
         })
     })
+})
+
+describe('malformed-AuxPoW block reassembly fallback', function () {
 
     describe('XChainDecoder.fetchBlockHex', function () {
-        // Select the strip path by NETWORK, not by a flag: the constructor derives
-        // auxPow solely from the coin's declared wireFormat, so dogecoin-* is the only
-        // way to reach getBlockWithoutAuxPow and litecoin-* the only way to reach plain
-        // getBlock. The trailing constructor argument is the now-inert auxPow parameter,
-        // passed false to prove it is not consulted.
-        function makeDecoder(network, connector) {
-            const decoder = new XChainDecoder(network, '127.0.0.1', 3306, 'db', 'u', 'p',
-                '127.0.0.1', 0, 'u', 'p', false, null)
-            decoder.connector = connector
-            return decoder
-        }
-
         it('uses getBlockWithoutAuxPow below the failure threshold', async function () {
             const calls = []
             const decoder = makeDecoder('dogecoin-regtest', {
@@ -222,11 +235,15 @@ describe('malformed-AuxPoW block reassembly fallback', function () {
             assert.strictEqual(await decoder.fetchBlockHex('hash', 100), 'cc')
             assert.deepStrictEqual(calls, ['getBlock'])
         })
+    })
+})
 
-        // Transport faults must never reach the escalation counter. A Dogecoin 1.14
-        // node that drops the TCP connection when its RPC queue fills
-        // surfaces as a bare ECONNRESET; escalating on that pointed getBlockReassembled's
-        // per-tx getrawtransaction fan-out at the very node that was already saturated.
+// Transport faults must never reach the escalation counter. A Dogecoin 1.14
+// node that drops the TCP connection when its RPC queue fills
+// surfaces as a bare ECONNRESET; escalating on that pointed getBlockReassembled's
+// per-tx getrawtransaction fan-out at the very node that was already saturated.
+describe('malformed-AuxPoW block reassembly fallback', function () {
+    describe('XChainDecoder.fetchBlockHex', function () {
         it('does not reassemble when transport faults, not content faults, drove the count', async function () {
             const calls = []
             const decoder = makeDecoder('dogecoin-regtest', {
@@ -241,10 +258,12 @@ describe('malformed-AuxPoW block reassembly fallback', function () {
             assert.deepStrictEqual(calls, ['strip'], 'a transport-fault streak must not escalate')
         })
     })
+})
 
-    // The classification seam itself. getBlockWithoutAuxPow used to wrap every throw
-    // (RPC included) in a bare Error, discarding error.code, so the decoder could not
-    // tell node overload from a malformed block.
+// The classification seam itself: getBlockWithoutAuxPow must not wrap RPC and
+// content faults in a bare Error, since discarding error.code leaves the decoder
+// unable to tell node overload from a malformed block.
+describe('malformed-AuxPoW block reassembly fallback', function () {
     describe('getBlockWithoutAuxPow fault classification', function () {
         function connErr(code) {
             const e = new Error(code)
