@@ -264,6 +264,15 @@ describe('clear-reorg-halt CLI', function () {
         assert.ok(lines.some(l => /dry run/.test(l)))
     })
 
+    it('--dry-run without --reason prints the verdict, writes nothing and exits 0', async function () {
+        const { db, calls } = fakeDb()
+        const lines = []
+        assert.strictEqual(await run({ db, argv: ['--dry-run'], log: (l) => lines.push(l), error: quiet.error }), EXIT.OK)
+        assert.strictEqual(calls.clear.length, 0)
+        assert.ok(lines.some(l => /pass --reason to clear it for real/.test(l)))
+        assert.ok(!lines.some(l => /undefined/.test(l)))
+    })
+
     it('reports failure when the clear row does not land', async function () {
         const { db } = fakeDb({ clearResult: { cleared: false, alreadyClear: false } })
         assert.strictEqual(await run({ db, argv: ['--reason', REASON], ...quiet }), EXIT.FAILED)

@@ -14,7 +14,7 @@
  *
  * XChain Decoder - audited clear of a durable REORG_HALT marker
  *
- *   node src/clear_reorg_halt.js --reason "<why this database is known good>" [--force] [--dry-run]
+ *   node src/clear_reorg_halt.js [--reason "<why this database is known good>"] [--force] [--dry-run]
  *   (under xchain-node: `xchain-node clear-reorg-halt <chain> <network> --reason "..."`)
  *
  * verifyReorg writes the REORG_HALT marker when a rollback crossed the dispenser
@@ -61,7 +61,7 @@ const EXIT = {
     HALT_SUPERSEDED: 5
 }
 
-const USAGE = 'usage: node src/clear_reorg_halt.js --reason "<why this database is known good>" [--force] [--dry-run]'
+const USAGE = 'usage: node src/clear_reorg_halt.js [--reason "<why this database is known good>"] [--force] [--dry-run]  (--reason is required unless --dry-run)'
 
 function parseArgs(argv){
     const out = { reason: null, force: false, dryRun: false, help: false, bad: null }
@@ -119,7 +119,9 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
     const args = parseArgs(argv)
     if (args.help){ log(USAGE); return EXIT.OK }
     if (args.bad){ error('clear-reorg-halt: ' + args.bad + '\n' + USAGE); return EXIT.USAGE }
-    if (typeof args.reason !== 'string' || args.reason.trim().length < 8){
+    // A dry run writes nothing, so it needs no reason; a real clear records one.
+    const reason = typeof args.reason === 'string' ? args.reason.trim() : ''
+    if (!args.dryRun && reason.length < 8){
         error('clear-reorg-halt: --reason must say, in at least 8 characters, why this database is known good; it is recorded with the clear.\n' + USAGE)
         return EXIT.USAGE
     }
@@ -141,7 +143,8 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
     const verdict = 'checks: rolled-back blocks above tip = 0; dispensers = ' + dispensers + '; DISPENSER actions decoded = ' + dispenserTxs
         + (dispenserClean ? ' (clean)' : ' (FORCED by the operator)')
     if (args.dryRun){
-        log('clear-reorg-halt: dry run. ' + verdict + '. The marker would be cleared with reason: ' + args.reason.trim())
+        log('clear-reorg-halt: dry run. ' + verdict + '. The marker would be cleared'
+            + (reason.length >= 8 ? ' with reason: ' + reason : '; pass --reason to clear it for real'))
         return EXIT.OK
     }
 
@@ -149,7 +152,7 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
     // parsing while this command runs, so a verifyReorg abort can write a NEWER
     // REORG_HALT inside that window; clearing without the pin would supersede a halt
     // nobody audited and record checks taken before it existed.
-    const result = await db.clearReorgHalt({ reason: args.reason.trim(), checks: checks, forced: !dispenserClean, expectedHaltId: marker.id })
+    const result = await db.clearReorgHalt({ reason, checks: checks, forced: !dispenserClean, expectedHaltId: marker.id })
     if (result.alreadyClear){
         log('clear-reorg-halt: the marker was cleared by someone else while this ran. Nothing to do.')
         return EXIT.OK
@@ -165,7 +168,7 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
         error('clear-reorg-halt: FAILED. The REORG_HALT_CLEARED row could not be written or read back; the halt is still live.')
         return EXIT.FAILED
     }
-    log('clear-reorg-halt: cleared. ' + verdict + '. Recorded as events.code=REORG_HALT_CLEARED with reason: ' + args.reason.trim()
+    log('clear-reorg-halt: cleared. ' + verdict + '. Recorded as events.code=REORG_HALT_CLEARED with reason: ' + reason
         + '. The decoder reports reorg_halted=false on its next probe (within a minute); the halt row itself is kept for the audit trail.')
     return EXIT.OK
 }
