@@ -234,7 +234,7 @@ describe('CE-05: Malformed Mempool Transaction', function () {
 
     it('should verify the post-sort body is wrapped in try/finally that resets mempoolBusy in source', function () {
         const fs = require('fs')
-        const rawSource = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8')
+        const rawSource = fs.readFileSync(require.resolve('../../src/XChainDecoder/mempool_refresh.js'), 'utf-8')
 
         // Strip comments before scanning. The narrative comments inside updateMempool
         // mention the word "finally" in prose, so a raw indexOf('finally') lands on a
@@ -263,7 +263,7 @@ describe('CE-05: Malformed Mempool Transaction', function () {
 
     it('should verify transactionFromHex is wrapped in try/catch in source', function () {
         const fs = require('fs')
-        const source = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8')
+        const source = fs.readFileSync(require.resolve('../../src/XChainDecoder/mempool_refresh.js'), 'utf-8')
 
         // Find the mempool section with transactionFromHex
         const lines = source.split('\n')

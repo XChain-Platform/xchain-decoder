@@ -32,7 +32,7 @@ function manifestSlice(flag) {
     return Object.entries(MANIFEST.actions).filter(([, v]) => v[flag]).map(([k]) => k).sort();
 }
 function localDecoderSet() {
-    const src = decomment(fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder.js'), 'utf8'));
+    const src = decomment(fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder', 'constants.js'), 'utf8'));
     const m = src.match(/VALID_ACTION_NAMES = new Set\(\[([\s\S]*?)\]\)/);
     assert.ok(m, 'could not locate VALID_ACTION_NAMES Set literal in src/XChainDecoder.js');
     return [...new Set([...m[1].matchAll(/'([A-Z_]+)'/g)].map(x => x[1]))].sort();

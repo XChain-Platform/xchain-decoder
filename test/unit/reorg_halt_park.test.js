@@ -306,7 +306,7 @@ describe('a park is not a wedge, and a SIGTERM during one still drains', functio
     })
 
     it('ticks far below the shutdown budget, so a SIGTERM is not waited out', function () {
-        const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder.js'), 'utf8')
+        const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder', 'constants.js'), 'utf8')
         const match = SRC.match(/const REORG_HALT_PARK_TICK_MS = (\d+)/)
         assert.ok(match, 'the park tick must be a named constant')
         assert.ok(Number(match[1]) <= 5000,
