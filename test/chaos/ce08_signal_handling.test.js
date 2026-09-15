@@ -111,7 +111,9 @@ describe('CE-08: Signal Handling and Graceful Shutdown', function () {
 
     it('api.js should register signal handlers and health endpoint', function () {
         const fs = require('fs')
+        // The crash handlers live in the crash_reporting part, so the scan reads the entry and the part.
         const apiSource = fs.readFileSync(require.resolve('../../src/api.js'), 'utf-8')
+            + fs.readFileSync(require.resolve('../../src/api/crash_reporting.js'), 'utf-8')
 
         assert.ok(apiSource.includes("process.on('SIGTERM'"), 'Should register SIGTERM handler')
         assert.ok(apiSource.includes("process.on('SIGINT'"), 'Should register SIGINT handler')

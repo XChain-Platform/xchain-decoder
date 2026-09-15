@@ -313,7 +313,7 @@ describe('registerDecoderMetrics() feed-freshness gauges', function () {
     });
 
     it('registers on the handle api.js captures, not a discarded return value', function () {
-        const source = fs.readFileSync(require.resolve('../../src/api.js'), 'utf-8');
+        const source = fs.readFileSync(require.resolve('../../src/api/observability_wiring.js'), 'utf-8');   // the part holds the wiring
         assert.ok(
             /const observability = installObservability\(/.test(source),
             'the observability handle must be captured or there is no registry to register on'

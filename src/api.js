@@ -42,8 +42,6 @@ const { createShutdown, createDecoderDrain } = require('./shutdown');
 const XChainDecoder  = require('./XChainDecoder');
 const { resolveFeeDestination } = require('./protocol/fee_destination');
 const jsonRouter = require('express-json-rpc-router')
-const { installObservability, getLogger } = require('./observability');   // default-off /metrics + structured log shim
-const { registerDecoderMetrics } = require('./decoder_metrics'); // decoder feed-freshness gauges
 const {
     makeRpcBatchGuard,
     registerLiveRoute,
@@ -53,6 +51,9 @@ const {
     ageProbeLogState,
     PROBE_LOG_WINDOW_MS
 } = require('./api/probe_routes');
+const { reportStartFailure, installCrashHandlers } = require('./api/crash_reporting');
+const { getHealthProbeState } = require('./api/health_probe');
+const { installDecoderObservability } = require('./api/observability_wiring');
 
 const NETWORK = process.env.NETWORK
 const NODE_URL =  process.env.NODE_URL
@@ -72,149 +73,115 @@ const AUX_POW = process.env.AUX_POW === 'true' || process.env.AUX_POW === '1'
 const FEE_DESTINATION = resolveFeeDestination(NETWORK, process.env.FEE_DESTINATION || null)
 
 
-async function startApi(){
-    // Validate required env vars that have no safe default: a missing port causes Node to
-    // bind a random OS-assigned port, making the container appear healthy while every
-    // downstream caller gets connection-refused. Checked here (not at module load) so the
-    // module can be required by tests without a valid port set.
-    if (!process.env.DECODER_API_PORT || isNaN(DECODER_API_PORT) || DECODER_API_PORT < 1 || DECODER_API_PORT > 65535) {
-        console.error('DECODER_API_PORT is not set or invalid. Set a valid port (1-65535) in the environment.')
-        process.exit(1)
+// The JSON-RPC health payload, built from getHealthProbeState's result. The caller
+// reads the running flag and the start error after that probe resolves, so both
+// describe the moment the payload is built.
+function buildHealthResult(decoder, state, decoderRunning, decoderError){
+    const { syncStatus, dbOk, dbPhase, reorgHalt } = state
+    const healthy = decoderRunning && dbOk
+    return {
+        status: healthy ? "healthy" : "unhealthy",
+        phase: dbPhase,
+        synced: decoder.isSynced(),
+        // True when this decoder is carrying a durable REORG_HALT marker, whether
+        // it was just written or has sat dormant since before the last restart.
+        // Any database reporting true is unfit to publish as a bootstrap.
+        reorg_halted:        reorgHalt.halted,
+        reorg_halt_reason:   reorgHalt.reason,
+        reorg_halted_at:     reorgHalt.at,
+        // { node_height, stored_height, since } while the parse loop is waiting
+        // out a node in initial block download below our tip, null otherwise.
+        node_catching_up:    (decoder && decoder.nodeCatchingUp) || null,
+        // node_last_ok_at + node_unreachable: whether the coin node is answering
+        // this decoder at all, and since when it stopped. Reported, not gated on.
+        ...nodeReachabilityFields(decoder),
+        // True once the parse loop has stopped on the halt and is waiting for
+        // the clear; a latent marker on a decoder still parsing reports false.
+        reorg_halt_parked:   reorgHalt.parked === true,
+        reorg_halt_parked_at: reorgHalt.parked_at || null,
+        // Set once an operator cleared a halt (db.clearReorgHalt); null while a
+        // halt is live or none was ever recorded.
+        reorg_halt_cleared_at:     reorgHalt.cleared_at || null,
+        reorg_halt_cleared_reason: reorgHalt.cleared_reason || null,
+        reorg_halt_checked_at: reorgHalt.checked_at,
+        ...syncStatus,
+        lastProcessedBlock: syncStatus.last_processed_block,
+        chainTipBlock: syncStatus.node_height,
+        blockLag: syncStatus.lag,
+        // null when either height is still unknown (-1 before the first
+        // getBlockchainInfo, or nothing processed yet): the old Math.max(0, ...)
+        // clamp turned a genuinely-unknown/negative gap into a false "synced 0",
+        // disagreeing with blockLag above. Report the true gap or null.
+        lag_blocks: (decoder.blockchainInfoLastBlock >= 0 && decoder.lastProcessedBlockIndex >= 0)
+            ? (decoder.blockchainInfoLastBlock - decoder.lastProcessedBlockIndex)
+            : null,
+        rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors,
+        parse_errors: decoder.parseErrors,
+        error: decoderError ? decoderError.message : null
     }
-    const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DECODER_DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD, AUX_POW, FEE_DESTINATION);
-    let decoderRunning = true
-    let decoderError = null
-    // start() awaits the parse loop, so this promise SETTLES when the loop breaks:
-    // on a fatal error here, or on the stopFlag the drain sets at a block boundary.
-    const decoderExited = decoder.start().then(() => {
-        // start() awaits the parse loop, so it RESOLVES only when the loop breaks:
-        // the SIGTERM/stopFlag path, or any fall-through out of `while (true)`.
-        // Without this, decoderRunning only ever went false on a REJECTION, so a
-        // cleanly-stopped decoder kept answering /live with 200 while parsing
-        // nothing. Reported immediately, ahead of the poll-silence window.
-        console.log('Decoder parse loop exited; reporting not-running.')
-        decoderRunning = false
-    }).catch((err) => {
-        decoderRunning = false
-        decoderError = err
-        // One record, not a record plus a prose twin. A collector reading warn+
-        // lines would file the same crash as two separate residue items, and the
-        // record carries strictly more than the prose line did (message, stack,
-        // and the halt state below).
-        //
-        // The halt state rides the crash record because the two failures look
-        // identical from outside: an exited container, restart policy cycling it.
-        // A decoder that aborted a rollback past the dispenser safe-depth window
-        // needs an operator resync, while an ordinary crash needs a restart, and
-        // the process is gone before any health route can be asked which it was.
-        try {
-            getLogger().error('CRASH', {
-                kind:  'startFailure',
-                err:   err && err.message ? err.message : String(err),
-                stack: err && err.stack ? err.stack : undefined,
-                reorgHalted:     decoder.reorgHalted === true,
-                reorgHaltReason: decoder.reorgHaltReason || null
-            })
-        } catch (_) { /* never mask the crash */ }
-        // A decoder whose start() rejected does no work: the parse loop never runs and
-        // the process would otherwise linger as a permanently-unhealthy but RUNNING
-        // container that `--restart unless-stopped` never recycles. Exit non-zero so the
-        // container restart policy (or a supervisor) can act, mirroring the sibling
-        // xchain-indexer fatal handler.
-        //
-        // A REORG_HALT refusal does not arrive here: the parse loop parks on it and
-        // keeps this process up (XChainDecoder.parkOnReorgHalt), because the marker
-        // outlives every restart and only an audited clear releases it, so exiting made
-        // one halt an unbounded restart loop against an uncapped `--restart
-        // unless-stopped`. What still reaches this handler is the fault class a restart
-        // can actually repair, and those keep the visible Exited(1).
-        process.exit(1)
+}
+
+// GET /status: returns 200 when the decoder is running and the DB is reachable,
+// or 503 when not. Distinct from the JSON-RPC `health` method so load-balancer /
+// uptime monitors can rely on the HTTP status code directly (the JSON-RPC
+// catch-all routes all GETs to 200 today).
+function registerStatusRoute(app, decoder, isDecoderRunning){
+    app.get('/status', async (req, res) => {
+        let dbOk = false
+        if (decoder.db) {
+            // db.ping() uses its own pooled connection; see the note in src/api/health_probe.js.
+            try { dbOk = await decoder.db.ping() } catch (e) { noteProbeFailure('db_ping', '/status', e) }
+        }
+        // Halt marker, reported here too so an operator can see it on the cheap probe.
+        // The HTTP code stays keyed on running+db for the reason given in
+        // src/api/health_probe.js: neither a dormant halt nor a park is a fault a restart repairs.
+        let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
+        if (dbOk && typeof decoder.checkReorgHalt === 'function'){
+            try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', '/status', e) }
+        }
+        // RULED 2026-09-01: xchain-node's BootstrapHealthGate refuses any
+        // /status payload with no lag key (lagKeys: lag_blocks, blockLag, lag) once it
+        // falls back to this route. getSyncStatus() already reports the same
+        // node-height-minus-processed-height gap the JSON-RPC health method and /live
+        // publish, null before the first processed block rather than a false zero.
+        const syncStatus = decoder.getSyncStatus()
+        // A getter: the flag flips from start()'s settle and from the shutdown drain.
+        const decoderRunning = isDecoderRunning()
+        const healthy = decoderRunning && dbOk
+        res.status(healthy ? 200 : 503).json({
+            status: healthy ? 'healthy' : 'unhealthy',
+            db: dbOk,
+            running: decoderRunning,
+            lag: syncStatus.lag,
+            reorg_halted:      reorgHalt.halted,
+            reorg_halt_reason: reorgHalt.reason,
+            reorg_halted_at:   reorgHalt.at,
+            // { node_height, stored_height, since } while the parse loop is waiting out
+            // a node in initial block download below our tip, null otherwise.
+            node_catching_up:  (decoder && decoder.nodeCatchingUp) || null,
+            // node_last_ok_at + node_unreachable: whether the coin node is answering
+            // this decoder at all, and since when it stopped. Reported, not gated on.
+            ...nodeReachabilityFields(decoder),
+            // Ships beside the boolean, never without it. "Not halted" is only an answer
+            // if something looked, and the probe is fail-soft: its state starts at
+            // not-halted with checked_at null, so a decoder that has NEVER completed a
+            // probe publishes exactly what a clean one publishes. Consumers that gate on
+            // this body (xchain-node's BootstrapHealthGate falls back to GET /status when
+            // the JSON-RPC health surface is unavailable) can only tell those two apart
+            // if this route carries the timestamp the health method already carries.
+            reorg_halt_checked_at: reorgHalt.checked_at,
+            // True only once the parse loop has STOPPED on the halt. A latent marker on a
+            // decoder still parsing forward reports false; see getReorgHaltStatus().
+            reorg_halt_parked: reorgHalt.parked === true,
+            reorg_halt_parked_at: reorgHalt.parked_at || null
+        })
     })
+}
 
-    // Crash visibility. Registered inside startApi(), not at module scope: several
-    // unit suites require this module in-process under mocha to reach registerLiveRoute
-    // and makeRpcBatchGuard, and mocha installs its own handlers. A module-scope
-    // handler that calls process.exit would abort the whole run instead of failing one
-    // test. Same placement as xchain-sync/src/api.js.
-    //
-    // An uncaughtException leaves the parse loop and the DB pool in an unknown shape
-    // mid-block, so the process exits after logging and lets the restart policy act.
-    // An unhandledRejection logs and CONTINUES, which is the choice this file already
-    // made: a single unresolved promise does not by itself corrupt shared state.
-    process.on('uncaughtException', (err) => {
-        try {
-            getLogger().error('CRASH', {
-                kind:  'uncaughtException',
-                err:   err && err.message ? err.message : String(err),
-                stack: err && err.stack ? err.stack : undefined,
-                reorgHalted:     decoder.reorgHalted === true,
-                reorgHaltReason: decoder.reorgHaltReason || null
-            })
-        } catch (_) { /* never mask the crash */ }
-        process.exit(1)
-    })
-
-    process.on('unhandledRejection', (reason) => {
-        const err = reason instanceof Error ? reason : new Error(String(reason))
-        try {
-            getLogger().error('CRASH', {
-                kind:  'unhandledRejection',
-                err:   err.message,
-                stack: err.stack,
-                reorgHalted:     decoder.reorgHalted === true,
-                reorgHaltReason: decoder.reorgHaltReason || null
-            })
-        } catch (_) { /* never mask the rejection */ }
-    })
-
-    const app = express();
-    app.use(helmet());
-
-    // Rate limiting (requests per minute per IP; override with DECODER_RATE_LIMIT_RPM)
-    app.use(rateLimit({
-        windowMs: 60 * 1000,
-        limit: parseInt(process.env.DECODER_RATE_LIMIT_RPM, 10) || 100,
-        standardHeaders: true,
-        legacyHeaders: false
-    }));
-
-    app.use(bodyParser.json({ limit: '100kb' }));
-    // Open CORS: every method this API exposes is a read-only status probe, so
-    // there is nothing a cross-origin caller can reach that a direct one cannot.
-    app.use(cors());
-
-    // Prometheus /metrics plus a structured log shim, both DEFAULT OFF.
-    // Nothing is registered and no timer starts unless METRICS_ENABLED (and, for
-    // log shipping, LOG_SHIP_ENABLED + LOG_SHIP_URL) are set. The coin/network
-    // labels let one Prometheus scrape distinguish the per-chain decoders.
-    // See src/observability/README.md.
-    let decoderVersion = '';
-    try { decoderVersion = require('../package.json').version; } catch { /* version label is cosmetic */ }
-    const observability = installObservability(app, {
-        service: 'xchain-decoder',
-        version: decoderVersion,
-        // The decoder has no coin env of its own (chain identity comes from the
-        // node it is pointed at), so COIN is optional and the label stays empty
-        // unless a deploy sets it.
-        coin:    process.env.COIN || '',
-        network: NETWORK || ''
-    });
-
-    // The log shim is a console passthrough when shipping is off, so the stale-tip
-    // warn works in every deployment; only its DESTINATION depends on the env.
-    decoder.setObservabilityLogger(observability.logger)
-
-    // Decoder feed-freshness gauges. registry is null unless
-    // METRICS_ENABLED, and registerDecoderMetrics is then a no-op: nothing is
-    // registered and no collector runs, matching the module's default-off contract.
-    registerDecoderMetrics(observability.registry, decoder)
-
-
-    // getmempool's shared snapshot cache (see the method's comment). Held here so
-    // every request, whatever its limit, slices one cached 500-row window.
-    let getmempoolCache = null;
-
-    const jsonRpcController = {
+// The JSON-RPC methods, keyed by name for express-json-rpc-router. The health
+// method's flag and error come through getters for the same reason as /status.
+function createJsonRpcController(decoder, isDecoderRunning, getDecoderError){
+    return {
         // Function to check if xchain-decoder is up
         async ping() {
             return {status:"success"};
@@ -225,80 +192,8 @@ async function startApi(){
         // we report phase "starting" and status "unhealthy" so monitoring can
         // distinguish "process up, DB unreachable" from "parse loop running".
         async health() {
-            const syncStatus = decoder.getSyncStatus();
-
-            // Live DB reachability probe. decoder.db is null until start()
-            // creates the Database instance, so a null db means we are still
-            // before the DB-connect phase. db.ping() draws its own pooled
-            // connection; probing via getConnection() would grab (and then
-            // release!) the block loop's open transaction connection mid-block.
-            let dbOk = false
-            let dbPhase = 'starting'
-            if(decoder.db){
-                try {
-                    await decoder.db.ping()
-                    dbOk = true
-                    dbPhase = 'running'
-                } catch(e) {
-                    dbPhase = 'db-unreachable'
-                    noteProbeFailure('db_ping', 'rpc:health', e)
-                }
-            }
-
-            // Latent REORG_HALT marker. TTL-cached inside checkReorgHalt, so a
-            // monitoring burst costs at most one DB query per minute. Deliberately does
-            // NOT flip `status` to unhealthy: the decoder healthcheck carries autoheal,
-            // and the marker survives every restart (only an audited clear releases it),
-            // so reporting unhealthy would restart-loop the container while fixing
-            // nothing, whether the decoder is still parsing forward on a latent marker or
-            // parked on the halt. Report it as its own field instead, with
-            // reorg_halt_parked separating the two, and let the operator/watchdog act.
-            let reorgHalt = { halted: false, reason: null, at: null, cleared_at: null, cleared_reason: null, checked_at: null }
-            if (dbOk && typeof decoder.checkReorgHalt === 'function'){
-                try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', 'rpc:health', e) }
-            }
-
-            const healthy = decoderRunning && dbOk
-            return {
-                status: healthy ? "healthy" : "unhealthy",
-                phase: dbPhase,
-                synced: decoder.isSynced(),
-                // True when this decoder is carrying a durable REORG_HALT marker, whether
-                // it was just written or has sat dormant since before the last restart.
-                // Any database reporting true is unfit to publish as a bootstrap.
-                reorg_halted:        reorgHalt.halted,
-                reorg_halt_reason:   reorgHalt.reason,
-                reorg_halted_at:     reorgHalt.at,
-                // { node_height, stored_height, since } while the parse loop is waiting
-                // out a node in initial block download below our tip, null otherwise.
-                node_catching_up:    (decoder && decoder.nodeCatchingUp) || null,
-                // node_last_ok_at + node_unreachable: whether the coin node is answering
-                // this decoder at all, and since when it stopped. Reported, not gated on.
-                ...nodeReachabilityFields(decoder),
-                // True once the parse loop has stopped on the halt and is waiting for
-                // the clear; a latent marker on a decoder still parsing reports false.
-                reorg_halt_parked:   reorgHalt.parked === true,
-                reorg_halt_parked_at: reorgHalt.parked_at || null,
-                // Set once an operator cleared a halt (db.clearReorgHalt); null while a
-                // halt is live or none was ever recorded.
-                reorg_halt_cleared_at:     reorgHalt.cleared_at || null,
-                reorg_halt_cleared_reason: reorgHalt.cleared_reason || null,
-                reorg_halt_checked_at: reorgHalt.checked_at,
-                ...syncStatus,
-                lastProcessedBlock: syncStatus.last_processed_block,
-                chainTipBlock: syncStatus.node_height,
-                blockLag: syncStatus.lag,
-                // null when either height is still unknown (-1 before the first
-                // getBlockchainInfo, or nothing processed yet): the old Math.max(0, ...)
-                // clamp turned a genuinely-unknown/negative gap into a false "synced 0",
-                // disagreeing with blockLag above. Report the true gap or null.
-                lag_blocks: (decoder.blockchainInfoLastBlock >= 0 && decoder.lastProcessedBlockIndex >= 0)
-                    ? (decoder.blockchainInfoLastBlock - decoder.lastProcessedBlockIndex)
-                    : null,
-                rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors,
-                parse_errors: decoder.parseErrors,
-                error: decoderError ? decoderError.message : null
-            }
+            const state = await getHealthProbeState(decoder)
+            return buildHealthResult(decoder, state, isDecoderRunning(), getDecoderError())
         },
         // Latest decoded block index alongside the coin-node's tip so the
         // decoder→node lag is visible in a single call.
@@ -310,6 +205,15 @@ async function startApi(){
                 is_synced:        decoder.isSynced()
             };
         },
+        ...createMempoolMethods(decoder)
+    }
+}
+
+// getmempool's shared snapshot cache (see the method's comment). Held here so
+// every request, whatever its limit, slices one cached 500-row window.
+function createMempoolMethods(decoder){
+    let getmempoolCache = null;
+    return {
         // Current mempool snapshot for remote explorers. mempool_transactions is
         // deliberately excluded from xchain-sync replication (node-local,
         // non-deterministic observation), so an explorer serving from synced
@@ -364,61 +268,34 @@ async function startApi(){
             };
         }
     }
+}
 
-    // GET /status: returns 200 when the decoder is running and the DB is reachable,
-    // or 503 when not. Distinct from the JSON-RPC `health` method so load-balancer /
-    // uptime monitors can rely on the HTTP status code directly (the JSON-RPC
-    // catch-all routes all GETs to 200 today).
-    app.get('/status', async (req, res) => {
-        let dbOk = false
-        if (decoder.db) {
-            // db.ping() uses its own pooled connection; see the health method note.
-            try { dbOk = await decoder.db.ping() } catch (e) { noteProbeFailure('db_ping', '/status', e) }
-        }
-        // Halt marker, reported here too so an operator can see it on the cheap probe.
-        // The HTTP code stays keyed on running+db for the reason given in health()
-        // above: neither a dormant halt nor a park is a fault a restart repairs.
-        let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
-        if (dbOk && typeof decoder.checkReorgHalt === 'function'){
-            try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', '/status', e) }
-        }
-        // RULED 2026-09-01: xchain-node's BootstrapHealthGate refuses any
-        // /status payload with no lag key (lagKeys: lag_blocks, blockLag, lag) once it
-        // falls back to this route. getSyncStatus() already reports the same
-        // node-height-minus-processed-height gap the JSON-RPC health method and /live
-        // publish, null before the first processed block rather than a false zero.
-        const syncStatus = decoder.getSyncStatus()
-        const healthy = decoderRunning && dbOk
-        res.status(healthy ? 200 : 503).json({
-            status: healthy ? 'healthy' : 'unhealthy',
-            db: dbOk,
-            running: decoderRunning,
-            lag: syncStatus.lag,
-            reorg_halted:      reorgHalt.halted,
-            reorg_halt_reason: reorgHalt.reason,
-            reorg_halted_at:   reorgHalt.at,
-            // { node_height, stored_height, since } while the parse loop is waiting out
-            // a node in initial block download below our tip, null otherwise.
-            node_catching_up:  (decoder && decoder.nodeCatchingUp) || null,
-            // node_last_ok_at + node_unreachable: whether the coin node is answering
-            // this decoder at all, and since when it stopped. Reported, not gated on.
-            ...nodeReachabilityFields(decoder),
-            // Ships beside the boolean, never without it. "Not halted" is only an answer
-            // if something looked, and the probe is fail-soft: its state starts at
-            // not-halted with checked_at null, so a decoder that has NEVER completed a
-            // probe publishes exactly what a clean one publishes. Consumers that gate on
-            // this body (xchain-node's BootstrapHealthGate falls back to GET /status when
-            // the JSON-RPC health surface is unavailable) can only tell those two apart
-            // if this route carries the timestamp the health method already carries.
-            reorg_halt_checked_at: reorgHalt.checked_at,
-            // True only once the parse loop has STOPPED on the halt. A latent marker on a
-            // decoder still parsing forward reports false; see getReorgHaltStatus().
-            reorg_halt_parked: reorgHalt.parked === true,
-            reorg_halt_parked_at: reorgHalt.parked_at || null
-        })
-    })
+// The app's middleware in registration order: security headers, the per-IP rate
+// limiter, the JSON body limit, CORS, then observability and the decoder's gauges.
+function installAppMiddleware(app, decoder){
+    app.use(helmet());
 
-    registerLiveRoute(app, decoder, () => decoderRunning)
+    // Rate limiting (requests per minute per IP; override with DECODER_RATE_LIMIT_RPM)
+    app.use(rateLimit({
+        windowMs: 60 * 1000,
+        limit: parseInt(process.env.DECODER_RATE_LIMIT_RPM, 10) || 100,
+        standardHeaders: true,
+        legacyHeaders: false
+    }));
+
+    app.use(bodyParser.json({ limit: '100kb' }));
+    // Open CORS: every method this API exposes is a read-only status probe, so
+    // there is nothing a cross-origin caller can reach that a direct one cannot.
+    app.use(cors());
+
+    installDecoderObservability(app, decoder, { COIN: process.env.COIN, NETWORK })
+}
+
+// Routes in registration order: GET /status, GET /live, the batch guard, the
+// empty-body default, then the JSON-RPC router mounted at the root.
+function registerRoutes(app, decoder, isDecoderRunning, getDecoderError){
+    registerStatusRoute(app, decoder, isDecoderRunning)
+    registerLiveRoute(app, decoder, isDecoderRunning)
 
     // Bound JSON-RPC batch size (see makeRpcBatchGuard). Must run after bodyParser
     // (req.body parsed) and before the router (dispatch).
@@ -431,7 +308,42 @@ async function startApi(){
     // that fall through to this root-mounted router get a normal JSON-RPC error
     // response instead of crashing the request.
     app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
-    app.use(jsonRouter({methods: jsonRpcController}))
+    app.use(jsonRouter({methods: createJsonRpcController(decoder, isDecoderRunning, getDecoderError)}))
+}
+
+async function startApi(){
+    // Validate required env vars that have no safe default: a missing port causes Node to
+    // bind a random OS-assigned port, making the container appear healthy while every
+    // downstream caller gets connection-refused. Checked here (not at module load) so the
+    // module can be required by tests without a valid port set.
+    if (!process.env.DECODER_API_PORT || isNaN(DECODER_API_PORT) || DECODER_API_PORT < 1 || DECODER_API_PORT > 65535) {
+        console.error('DECODER_API_PORT is not set or invalid. Set a valid port (1-65535) in the environment.')
+        process.exit(1)
+    }
+    const decoder = new XChainDecoder(NETWORK, DB_URL, DB_PORT, DECODER_DB_NAME, DECODER_DB_USER, DB_PASSWORD, NODE_URL, NODE_PORT, NODE_USER, NODE_PASSWORD, AUX_POW, FEE_DESTINATION);
+    let decoderRunning = true
+    let decoderError = null
+    // start() awaits the parse loop, so this promise SETTLES when the loop breaks:
+    // on a fatal error here, or on the stopFlag the drain sets at a block boundary.
+    const decoderExited = decoder.start().then(() => {
+        // start() awaits the parse loop, so it RESOLVES only when the loop breaks:
+        // the SIGTERM/stopFlag path, or any fall-through out of `while (true)`.
+        // Without this, decoderRunning only ever went false on a REJECTION, so a
+        // cleanly-stopped decoder kept answering /live with 200 while parsing
+        // nothing. Reported immediately, ahead of the poll-silence window.
+        console.log('Decoder parse loop exited; reporting not-running.')
+        decoderRunning = false
+    }).catch((err) => {
+        decoderRunning = false
+        decoderError = err
+        reportStartFailure(decoder, err)
+    })
+
+    installCrashHandlers(decoder)
+
+    const app = express();
+    installAppMiddleware(app, decoder)
+    registerRoutes(app, decoder, () => decoderRunning, () => decoderError)
 
     const server = app.listen(DECODER_API_PORT, () => {
       console.log('API listening on port '+DECODER_API_PORT);
