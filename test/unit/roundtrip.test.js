@@ -114,8 +114,18 @@ function canonicalize(rawString) {
     return canonicalizeActionPayload(Buffer.from(rawString, 'utf8')).buffer.toString('utf8')
 }
 
+// Each entry: [alias, canonical, sample payload tail]
+const ALIAS_CASES = [
+    ['TRANSFER', 'SEND',      '0|XCHAIN|100'],
+    ['ADDR',     'ADDRESS',   '0|mzBc4XEFSdzCDcTxAgf6EZXgsZWpztRhef'],
+    ['DROP',     'AIRDROP',   '0|XCHAIN|50'],
+    ['CAST',     'BROADCAST', '0|hello world'],
+    ['MSG',      'MESSAGE',   '0|ping'],
+]
+
+let decoder
+
 describe('ACTION-name alias round-trip', () => {
-    let decoder
 
     beforeEach(() => {
         decoder = createDecoder()
@@ -124,15 +134,6 @@ describe('ACTION-name alias round-trip', () => {
     afterEach(() => {
         sinon.restore()
     })
-
-    // Each entry: [alias, canonical, sample payload tail]
-    const ALIAS_CASES = [
-        ['TRANSFER', 'SEND',      '0|XCHAIN|100'],
-        ['ADDR',     'ADDRESS',   '0|mzBc4XEFSdzCDcTxAgf6EZXgsZWpztRhef'],
-        ['DROP',     'AIRDROP',   '0|XCHAIN|50'],
-        ['CAST',     'BROADCAST', '0|hello world'],
-        ['MSG',      'MESSAGE',   '0|ping'],
-    ]
 
     for (const [alias, canonical, tail] of ALIAS_CASES) {
         const aliasedPayload   = `${alias}|${tail}`
@@ -179,13 +180,24 @@ describe('ACTION-name alias round-trip', () => {
         )
     })
 
-    // canonicalizeActionPayload is the single shared implementation behind
-    // both the confirmed-block and mempool decode gates. These pin its
-    // byte-level contract directly, including the case two separate
-    // implementations would only agree on by accident: invalid UTF-8
-    // after the first pipe never occurs in an encoder-producible payload, but
-    // the decoder must still handle it consistently because it decodes
-    // arbitrary on-chain bytes.
+})
+
+// canonicalizeActionPayload is the single shared implementation behind
+// both the confirmed-block and mempool decode gates. These pin its
+// byte-level contract directly, including the case two separate
+// implementations would only agree on by accident: invalid UTF-8
+// after the first pipe never occurs in an encoder-producible payload, but
+// the decoder must still handle it consistently because it decodes
+// arbitrary on-chain bytes.
+describe('ACTION-name alias round-trip', () => {
+    beforeEach(() => {
+        decoder = createDecoder()
+    })
+
+    afterEach(() => {
+        sinon.restore()
+    })
+
     describe('canonicalizeActionPayload (shared helper)', () => {
         it('preserves bytes after the first pipe verbatim, including invalid UTF-8', () => {
             const payload = Buffer.concat([
