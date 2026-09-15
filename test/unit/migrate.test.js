@@ -37,72 +37,74 @@ const DOTENV_PATH  = require.resolve('dotenv');
 const ENV_KEYS = ['DECODER_DB_HOST', 'DECODER_DB_PORT', 'DECODER_DB_NAME',
                   'DECODER_DB_USER', 'DECODER_DB_PASS'];
 
+let savedEnv, savedExitCode, savedArgv, exitStub, consoleErrStub, consoleLogStub;
+
+function prepareMigrateTest() {
+    savedEnv = {};
+    for (const k of ENV_KEYS) { savedEnv[k] = process.env[k]; delete process.env[k]; }
+    savedExitCode = process.exitCode;
+    // Pin a clean argv baseline so the CLI's --file parser sees no stray flags
+    // from the mocha invocation; individual tests append their own targeting args.
+    savedArgv = process.argv;
+    process.argv = ['node', 'migrate.js'];
+    exitStub       = sinon.stub(process, 'exit');
+    consoleErrStub = sinon.stub(console, 'error');
+    consoleLogStub = sinon.stub(console, 'log');
+}
+
+function restoreMigrateTest() {
+    sinon.restore();
+    process.exitCode = savedExitCode;
+    process.argv = savedArgv;
+    for (const k of ENV_KEYS) {
+        if (savedEnv[k] === undefined) delete process.env[k];
+        else process.env[k] = savedEnv[k];
+    }
+    delete require.cache[MIGRATE_PATH];
+    delete require.cache[DB_PATH];
+    delete require.cache[DOTENV_PATH];
+}
+
+// Build a fake Database class; `done` resolves when pool.end() runs
+// (the CLI's finally block), which is the end of main() on every path.
+function makeFakeDb({ runMigrations }) {
+    let resolveDone;
+    const done = new Promise((res) => { resolveDone = res; });
+    const state = { constructed: [], poolEnded: false, runArgs: null, done };
+    class FakeDatabase {
+        constructor(host, port, name, user, pass) {
+            state.constructed.push({ host, port, name, user, pass });
+            this.pool = {
+                end: async () => { state.poolEnded = true; resolveDone(); }
+            };
+        }
+        async runMigrations(opts) {
+            state.runArgs = opts;
+            return runMigrations(opts);
+        }
+    }
+    state.FakeDatabase = FakeDatabase;
+    return state;
+}
+
+function loadMigrateWith(fakeDbClass) {
+    delete require.cache[MIGRATE_PATH];
+    require.cache[DB_PATH] = {
+        id: DB_PATH, filename: DB_PATH, loaded: true, exports: fakeDbClass
+    };
+    // Neutralize migrate.js's require-time dotenv.config(): a .env in the
+    // checkout (CI renders one per run) would repopulate the DECODER_DB_*
+    // vars these tests deliberately unset.
+    require.cache[DOTENV_PATH] = {
+        id: DOTENV_PATH, filename: DOTENV_PATH, loaded: true,
+        exports: { config: () => ({ parsed: {} }) }
+    };
+    require(MIGRATE_PATH);
+}
+
 describe('migrate.js operator CLI @regression', function () {
-
-    let savedEnv, savedExitCode, savedArgv, exitStub, consoleErrStub, consoleLogStub;
-
-    beforeEach(function () {
-        savedEnv = {};
-        for (const k of ENV_KEYS) { savedEnv[k] = process.env[k]; delete process.env[k]; }
-        savedExitCode = process.exitCode;
-        // Pin a clean argv baseline so the CLI's --file parser sees no stray flags
-        // from the mocha invocation; individual tests append their own targeting args.
-        savedArgv = process.argv;
-        process.argv = ['node', 'migrate.js'];
-        exitStub       = sinon.stub(process, 'exit');
-        consoleErrStub = sinon.stub(console, 'error');
-        consoleLogStub = sinon.stub(console, 'log');
-    });
-
-    afterEach(function () {
-        sinon.restore();
-        process.exitCode = savedExitCode;
-        process.argv = savedArgv;
-        for (const k of ENV_KEYS) {
-            if (savedEnv[k] === undefined) delete process.env[k];
-            else process.env[k] = savedEnv[k];
-        }
-        delete require.cache[MIGRATE_PATH];
-        delete require.cache[DB_PATH];
-        delete require.cache[DOTENV_PATH];
-    });
-
-    // Build a fake Database class; `done` resolves when pool.end() runs
-    // (the CLI's finally block), which is the end of main() on every path.
-    function makeFakeDb({ runMigrations }) {
-        let resolveDone;
-        const done = new Promise((res) => { resolveDone = res; });
-        const state = { constructed: [], poolEnded: false, runArgs: null, done };
-        class FakeDatabase {
-            constructor(host, port, name, user, pass) {
-                state.constructed.push({ host, port, name, user, pass });
-                this.pool = {
-                    end: async () => { state.poolEnded = true; resolveDone(); }
-                };
-            }
-            async runMigrations(opts) {
-                state.runArgs = opts;
-                return runMigrations(opts);
-            }
-        }
-        state.FakeDatabase = FakeDatabase;
-        return state;
-    }
-
-    function loadMigrateWith(fakeDbClass) {
-        delete require.cache[MIGRATE_PATH];
-        require.cache[DB_PATH] = {
-            id: DB_PATH, filename: DB_PATH, loaded: true, exports: fakeDbClass
-        };
-        // Neutralize migrate.js's require-time dotenv.config(): a .env in the
-        // checkout (CI renders one per run) would repopulate the DECODER_DB_*
-        // vars these tests deliberately unset.
-        require.cache[DOTENV_PATH] = {
-            id: DOTENV_PATH, filename: DOTENV_PATH, loaded: true,
-            exports: { config: () => ({ parsed: {} }) }
-        };
-        require(MIGRATE_PATH);
-    }
+    beforeEach(prepareMigrateTest);
+    afterEach(restoreMigrateTest);
 
     it('env guard: exits 2 when DECODER_DB_HOST/NAME/USER are unset', async function () {
         const fake = makeFakeDb({ runMigrations: async () => ({ applied: [], pending: [] }) });
@@ -132,6 +134,11 @@ describe('migrate.js operator CLI @regression', function () {
         assert.match(out, /applied=\["003-x\.sql"\]/);
         assert.match(out, /still-pending=\["004-manual\.sql"\]/);
     });
+});
+
+describe('migrate.js operator CLI @regression', function () {
+    beforeEach(prepareMigrateTest);
+    afterEach(restoreMigrateTest);
 
     it('failure path: runMigrations rejection sets exitCode 1 and still closes the pool', async function () {
         process.env.DECODER_DB_HOST = 'db.test';
@@ -169,6 +176,11 @@ describe('migrate.js operator CLI @regression', function () {
         assert.match(err, /migrate: SKIPPED/);
         assert.match(err, /xchain_migrate_decoder_test/);
     });
+});
+
+describe('migrate.js operator CLI @regression', function () {
+    beforeEach(prepareMigrateTest);
+    afterEach(restoreMigrateTest);
 
     it('--file: scopes the run to the named migration (passes opts.only) @regression', async function () {
         process.env.DECODER_DB_HOST = 'db.test';
@@ -203,6 +215,11 @@ describe('migrate.js operator CLI @regression', function () {
             only: ['a.sql', 'b.sql', 'c.sql', 'd.sql']
         });
     });
+});
+
+describe('migrate.js operator CLI @regression', function () {
+    beforeEach(prepareMigrateTest);
+    afterEach(restoreMigrateTest);
 
     it('--file with no value exits 2 before building a DB handle @regression', async function () {
         process.env.DECODER_DB_HOST = 'db.test';
