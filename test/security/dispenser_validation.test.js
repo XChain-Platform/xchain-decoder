@@ -127,7 +127,7 @@ describe('Security: DISPENSER Field Validation', () => {
     describe('Version parsing safety', () => {
         it('[REGRESSION P1] R-DSP-002: should verify parseInt uses radix 10 in source code', () => {
             const fs = require('fs')
-            const source = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8')
+            const source = fs.readFileSync(require.resolve('../../src/XChainDecoder/dispenser_registration.js'), 'utf-8')   // the part holds the dispenser walk
 
             // Look for dispenser version parsing; should use radix 10
             const dispenserParseIntMatch = source.match(/parseInt\(commandVersion,\s*10\)/)
@@ -136,7 +136,7 @@ describe('Security: DISPENSER Field Validation', () => {
 
         it('should verify Number() is used for expiration (not parseInt)', () => {
             const fs = require('fs')
-            const source = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8')
+            const source = fs.readFileSync(require.resolve('../../src/XChainDecoder/dispenser_registration.js'), 'utf-8')   // the part holds the dispenser walk
 
             // Expiration should use Number() for strict numeric conversion (not parseInt,
             // which would silently accept trailing garbage like "100abc"). The field is

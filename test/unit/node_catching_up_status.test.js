@@ -165,7 +165,7 @@ describe('the IBD wait is published as node_catching_up', function () {
     })
 
     it('clears above the tip-regression branch, which a caught-up node never enters again', function () {
-        const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder.js'), 'utf8')
+        const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder', 'tip_refresh.js'), 'utf8')   // the part holds the tip refresh
         const branch = SRC.indexOf('if (lastProcessedBlockIndex > this.blockchainInfoLastBlock){')
         assert.ok(branch > 0, 'the tip-regression branch must still be there to clear above')
 

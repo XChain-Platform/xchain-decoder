@@ -103,7 +103,7 @@ describe('endpoint chain-tier identity gate @regression', function () {
             .map((p) => fs.readFileSync(p, 'utf8')).join('\n');
 
         it('XChainDecoder requires the module', function () {
-            assert.ok(/require\('\.\/protocol\/chain_identity'\)/.test(SRC));
+            assert.ok(/require\('\.\.?\/protocol\/chain_identity'\)/.test(SRC));   // the parts require it from one level down
         });
 
         it('the refresh gate calls chainTierMismatch against the configured network', function () {

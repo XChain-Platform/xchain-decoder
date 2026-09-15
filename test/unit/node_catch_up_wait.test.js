@@ -133,7 +133,7 @@ describe('verifyReorg: an above-tip gap the window cannot absorb is refused befo
 })
 
 describe('the parse loop waits on a node in initial block download instead of reconciling', function () {
-    const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder.js'), 'utf8')
+    const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder', 'tip_refresh.js'), 'utf8')   // the part holds the tip-regression branch
 
     // The branch under test needs a live node whose tip sits below the stored tip
     // and a full start() loop to reach, so this is a source-level drift guard in

@@ -45,7 +45,7 @@ describe('CE-10: Fire-and-Forget DB Call (insertTransactionOutput)', function ()
 
     it('should verify insertTransactionOutput is awaited in source code', function () {
         const fs = require('fs')
-        const source = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8')
+        const source = fs.readFileSync(require.resolve('../../src/XChainDecoder/transaction_ingest.js'), 'utf-8')   // the part holds the output inserts
 
         // Find the insertTransactionOutput call and verify it's awaited
         const lines = source.split('\n')

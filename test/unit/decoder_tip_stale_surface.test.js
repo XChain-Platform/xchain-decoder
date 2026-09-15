@@ -159,7 +159,7 @@ describe('XChainDecoder stale-tip warn is edge-triggered', function () {
     });
 
     it('is called by the block loop, which is the only place an outage is observable', function () {
-        const source = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8');
+        const source = fs.readFileSync(require.resolve('../../src/XChainDecoder/startup.js'), 'utf-8');   // the part holds the block loop
         assert.ok(
             /this\.noteNodeTipStaleTransition\(\)/.test(source),
             'the parse loop must invoke the transition check; without a caller the latch never flips'

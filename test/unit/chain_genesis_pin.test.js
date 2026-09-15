@@ -245,7 +245,10 @@ describe('block-0 chain-identity pin @regression', function () {
 
 describe('block-0 chain-identity pin @regression', function () {
     describe('the assertion is wired where it has to be, not merely exported', function () {
-        const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder.js'), 'utf8');
+        // start() and its block loop live in parts beside the entry: boot in startup.js,
+        // the throttled tip refresh in tip_refresh.js, read together in that order.
+        const SRC = ['startup.js', 'tip_refresh.js']
+            .map((f) => fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder', f), 'utf8')).join('\n');
 
         it('start() asserts the pin immediately after verifyConsensusPin', function () {
             const pinIdx     = SRC.indexOf("coins.verifyConsensusPin(this.consensusNetwork)");
