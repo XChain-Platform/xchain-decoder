@@ -22,19 +22,21 @@ const assert = require('assert')
 const sinon  = require('sinon')
 const axios  = require('axios')
 const BlockchainConnector = require('../../src/chain/blockchain_connector')
+let connector
+let axiosStub
+
+function setUpConnector() {
+    connector = new BlockchainConnector('127.0.0.1', 8332, 'user', 'pass')
+    axiosStub = sinon.stub(axios, 'post')
+}
+
+function restoreStubs() {
+    sinon.restore()
+}
 
 describe('BlockchainConnector (extra coverage)', () => {
-    let connector
-    let axiosStub
-
-    beforeEach(() => {
-        connector = new BlockchainConnector('127.0.0.1', 8332, 'user', 'pass')
-        axiosStub = sinon.stub(axios, 'post')
-    })
-
-    afterEach(() => {
-        sinon.restore()
-    })
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
 
     // ─── constructor: already-prefixed URL ──────────────────────────────────
     describe('constructor', () => {
@@ -53,6 +55,12 @@ describe('BlockchainConnector (extra coverage)', () => {
             assert.strictEqual(c.url, 'http://127.0.0.1:8332')
         })
     })
+
+})
+
+describe('BlockchainConnector (extra coverage)', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
 
     // ─── getBlockchainInfo: timeout retry and exhaustion ───────────────────
     describe('#getBlockchainInfo() ECONNABORTED handling', () => {
@@ -91,6 +99,12 @@ describe('BlockchainConnector (extra coverage)', () => {
         })
     })
 
+})
+
+describe('BlockchainConnector (extra coverage)', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
+
     // ─── getNetworkInfo: timeout retry and exhaustion ───────────────────────
     describe('#getNetworkInfo() ECONNABORTED handling', () => {
         it('should retry on ECONNABORTED and succeed on a later attempt', async () => {
@@ -127,6 +141,12 @@ describe('BlockchainConnector (extra coverage)', () => {
         })
     })
 
+})
+
+describe('BlockchainConnector (extra coverage)', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
+
     // ─── getRawMempool: timeout retry and exhaustion ────────────────────────
     describe('#getRawMempool() ECONNABORTED handling', () => {
         it('should retry on ECONNABORTED and succeed on a later attempt', async () => {
@@ -162,6 +182,12 @@ describe('BlockchainConnector (extra coverage)', () => {
             assert.strictEqual(axiosStub.callCount, 1)
         })
     })
+
+})
+
+describe('BlockchainConnector (extra coverage)', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
 
     // ─── getBlock: timeout retry and exhaustion ─────────────────────────────
     describe('#getBlock() ECONNABORTED handling', () => {
@@ -207,6 +233,12 @@ describe('BlockchainConnector (extra coverage)', () => {
         })
     })
 
+})
+
+describe('BlockchainConnector (extra coverage)', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
+
     // ─── getBlockHash: timeout retry and exhaustion ─────────────────────────
     describe('#getBlockHash() ECONNABORTED handling', () => {
         it('should retry on ECONNABORTED and succeed on a later attempt', async () => {
@@ -232,6 +264,12 @@ describe('BlockchainConnector (extra coverage)', () => {
         })
     })
 
+})
+
+describe('BlockchainConnector (extra coverage)', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
+
     // ─── getBlockHeader: no-result branch ──────────────────────────────────
     describe('#getBlockHeader() no-result branch', () => {
         it('should throw when response has no result', async () => {
@@ -242,6 +280,12 @@ describe('BlockchainConnector (extra coverage)', () => {
             )
         })
     })
+
+})
+
+describe('BlockchainConnector (extra coverage)', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
 
     // ─── getRawTransaction: ECONNABORTED branch ─────────────────────────────
     describe('#getRawTransaction() ECONNABORTED branch', () => {
@@ -255,6 +299,12 @@ describe('BlockchainConnector (extra coverage)', () => {
             assert.strictEqual(axiosStub.callCount, 2)
         }).timeout(5000)
     })
+
+})
+
+describe('BlockchainConnector (extra coverage)', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
 
     // ─── getRawTransaction: ECONNRESET backoff ─────────────────────────────
     describe('#getRawTransaction() ECONNRESET backoff', () => {
@@ -273,6 +323,12 @@ describe('BlockchainConnector (extra coverage)', () => {
         }).timeout(10000)
     })
 
+})
+
+describe('BlockchainConnector (extra coverage)', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
+
     // ─── getRawTransaction: RPC -5 not-found (eviction) branch ──────────────
     describe('#getRawTransaction() RPC -5 not-found branch', () => {
         it('should resolve null immediately when the node returns HTTP 500 + JSON-RPC code -5', async () => {
@@ -290,6 +346,12 @@ describe('BlockchainConnector (extra coverage)', () => {
         }).timeout(5000)
     })
 
+})
+
+describe('BlockchainConnector (extra coverage)', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
+
     // ─── block-path RPC methods: surface node JSON-RPC error object ─────────
     describe('block-path RPC methods surface response.data.error', () => {
         it('getBlockHash includes the node error code/message when HTTP 200 carries an error object', async () => {
@@ -300,6 +362,12 @@ describe('BlockchainConnector (extra coverage)', () => {
             )
         })
     })
+
+})
+
+describe('BlockchainConnector (extra coverage)', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
 
     // ─── block-path timeout retry backoff ──────────────────────────────────
     describe('block-path ECONNABORTED retries back off', () => {
