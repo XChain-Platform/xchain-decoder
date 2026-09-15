@@ -165,7 +165,7 @@ describe('CE-08: Signal Handling and Graceful Shutdown', function () {
         assert.ok(shutdownBody.includes('decoderRunning = false'),
             'the drain should mark the decoder not-running before stopping it')
         // The drain itself (flag first, stop, listener and loop, pools last, hard
-        // exit) is pinned behaviourally in test/unit/shutdown.test.js.
+        // exit) is pinned behaviourally in test/unit/api/health/shutdown.test.js.
         // Whether /live actually turns 503 on a silent heartbeat is pinned
         // behaviourally against the shipped route in
         // test/unit/decoderLiveHeartbeat.test.js. A grep for `isPollSilent` here would
