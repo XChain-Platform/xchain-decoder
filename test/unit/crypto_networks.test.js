@@ -41,6 +41,12 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(net.pubKeyHash, bitcoin.networks.regtest.pubKeyHash)
             assert.strictEqual(net.dustThreshold, 546)
         })
+    })
+})
+
+describe('CryptoNetworks', () => {
+
+    describe('#getBitcoinJsNetwork()', () => {
 
         it('[REGRESSION P2] R-NET-001: should return Dogecoin mainnet config with correct pubKeyHash', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('dogecoin-mainnet')
@@ -78,6 +84,12 @@ describe('CryptoNetworks', () => {
             const net = CryptoNetworks.getBitcoinJsNetwork('litecoin-regtest')
             assert.strictEqual(net.bech32, 'rltc')
         })
+    })
+})
+
+describe('CryptoNetworks', () => {
+
+    describe('#getBitcoinJsNetwork()', () => {
 
         it('[REGRESSION P2] R-NET-001: should throw a TypeError for an unknown network (fail fast, no silent mainnet default)', () => {
             assert.throws(
@@ -113,6 +125,9 @@ describe('CryptoNetworks', () => {
             }
         })
     })
+})
+
+describe('CryptoNetworks', () => {
 
     describe('#getFirstBlock()', () => {
         it('[REGRESSION P2] R-NET-005: should return 950000 for bitcoin-mainnet', () => {
