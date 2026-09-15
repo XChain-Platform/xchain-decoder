@@ -26,20 +26,22 @@ const assert = require('assert')
 const sinon  = require('sinon')
 const axios  = require('axios')
 const BlockchainConnector = require('../../src/chain/blockchain_connector')
+let connector
+let axiosStub
+
+function setUpConnector() {
+    connector = new BlockchainConnector('127.0.0.1', 8332, 'user', 'pass')
+    connector.sleep = async () => {} // no real backoff delays
+    axiosStub = sinon.stub(axios, 'post')
+}
+
+function restoreStubs() {
+    sinon.restore()
+}
 
 describe('BlockchainConnector RPC error accounting and reporting', () => {
-    let connector
-    let axiosStub
-
-    beforeEach(() => {
-        connector = new BlockchainConnector('127.0.0.1', 8332, 'user', 'pass')
-        connector.sleep = async () => {} // no real backoff delays
-        axiosStub = sinon.stub(axios, 'post')
-    })
-
-    afterEach(() => {
-        sinon.restore()
-    })
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
 
     describe('#getRawTransaction() final-attempt accounting', () => {
         it('does NOT increment rpcErrors when the fetch succeeds on the 10th attempt', async () => {
@@ -73,6 +75,11 @@ describe('BlockchainConnector RPC error accounting and reporting', () => {
         }).timeout(5000)
     })
 
+})
+describe('BlockchainConnector RPC error accounting and reporting', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
+
     describe('#getRawTransaction() fail-loud on deterministic errors', () => {
         it('carries the node cause into the final rejection instead of a bare message', async () => {
             // Core delivers most RPC errors as HTTP 500 + JSON body. A code that is
@@ -98,6 +105,11 @@ describe('BlockchainConnector RPC error accounting and reporting', () => {
             assert.strictEqual(connector.rpcErrors, 1)
         }).timeout(5000)
     })
+
+})
+describe('BlockchainConnector RPC error accounting and reporting', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
 
     describe('#getRawTransaction() classifies an HTTP-200 JSON-RPC error body', () => {
         // A node honouring the jsonrpc:"2.0" request field (Bitcoin Core >= v28)
@@ -135,6 +147,12 @@ describe('BlockchainConnector RPC error accounting and reporting', () => {
         }).timeout(5000)
     })
 
+})
+
+describe('BlockchainConnector RPC error accounting and reporting', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
+
     describe('block-path methods surface the HTTP-500 JSON-RPC error code', () => {
         it('getBlockHash rethrows an error carrying the node rpcCode/rpcMessage', async () => {
             const rpcErr = Object.assign(new Error('Request failed with status code 500'), {
@@ -153,6 +171,12 @@ describe('BlockchainConnector RPC error accounting and reporting', () => {
             )
         }).timeout(5000)
     })
+
+})
+
+describe('BlockchainConnector RPC error accounting and reporting', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
 
     describe('the shared result extractor reads PRESENCE, not truthiness', () => {
         // JSON-RPC 2.0: a success carries a `result` member, which may legitimately
@@ -185,6 +209,12 @@ describe('BlockchainConnector RPC error accounting and reporting', () => {
             await assert.rejects(() => connector.getBlockHash(0), /RPC error -8: Block height out of range/)
         }).timeout(5000)
     })
+
+})
+
+describe('BlockchainConnector RPC error accounting and reporting', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
 
     describe('envInt() falls back on values that used to parse to NaN', () => {
         // NODE_RPC_TIMEOUT feeds axios.defaults.timeout, which axios gates on
@@ -227,73 +257,92 @@ describe('BlockchainConnector RPC error accounting and reporting', () => {
         })
     })
 
-    describe('the block-path RPC ladder is one implementation', () => {
-        // Seven methods each carried a byte-identical retry-and-classify block while
-        // getRawTransaction's classifier grew apart from them, so a correction to what
-        // the node's failure modes ARE could land in one copy and miss six.
-        const LADDER_METHODS = [
-            ['getNetworkInfo',    [],     'getnetworkinfo'],
-            ['getBlockchainInfo', [],     'getblockchaininfo'],
-            ['getBlockHash',      [0],    'getblockhash'],
-            ['getBlockHeader',    ['aa'], 'getblockheader'],
-            ['getBlockVerbose',   ['aa'], 'getblock'],
-            ['getRawMempool',     [],     'getrawmempool'],
-            ['getBlock',          ['aa'], 'getblock'],
-        ]
+})
 
-        it('routes every block-path method through the shared ladder', async () => {
-            const seen = []
-            connector.rpcCallWithTimeoutRetry = async (data) => { seen.push(data.method); return 'ok' }
+// Seven methods each carried a byte-identical retry-and-classify block while
+// getRawTransaction's classifier grew apart from them, so a correction to what
+// the node's failure modes ARE could land in one copy and miss six.
+const LADDER_METHODS = [
+    ['getNetworkInfo',    [],     'getnetworkinfo'],
+    ['getBlockchainInfo', [],     'getblockchaininfo'],
+    ['getBlockHash',      [0],    'getblockhash'],
+    ['getBlockHeader',    ['aa'], 'getblockheader'],
+    ['getBlockVerbose',   ['aa'], 'getblock'],
+    ['getRawMempool',     [],     'getrawmempool'],
+    ['getBlock',          ['aa'], 'getblock'],
+]
 
-            for (const [name, args] of LADDER_METHODS) {
-                assert.strictEqual(await connector[name](...args), 'ok',
-                    `${name} must go through the shared ladder, not a private copy`)
-            }
-            assert.deepStrictEqual(seen, LADDER_METHODS.map(([, , rpc]) => rpc))
-        }).timeout(5000)
+function blockPathRoutingTests() {
+    it('routes every block-path method through the shared ladder', async () => {
+        const seen = []
+        connector.rpcCallWithTimeoutRetry = async (data) => { seen.push(data.method); return 'ok' }
 
-        it('counts an exhausted timeout ladder toward rpc_errors_total and keeps the cause', async () => {
-            // A node that black-holes every request only ever raises ECONNABORTED, which
-            // the copies retried ten times and then rethrew as a bare sentence: the
-            // counter described as "Node RPC errors seen since process start" stayed 0
-            // through a total outage, and the cause was discarded with it.
-            axiosStub.callsFake(async () => {
-                throw Object.assign(new Error('timeout of 30000ms exceeded'), { code: 'ECONNABORTED' })
-            })
+        for (const [name, args] of LADDER_METHODS) {
+            assert.strictEqual(await connector[name](...args), 'ok',
+                `${name} must go through the shared ladder, not a private copy`)
+        }
+        assert.deepStrictEqual(seen, LADDER_METHODS.map(([, , rpc]) => rpc))
+    }).timeout(5000)
+}
 
-            await assert.rejects(
-                () => connector.getBlockHash(0),
-                (err) => {
-                    assert.ok(/There were problems getting block hash\./.test(err.message),
-                        'the per-method exhaustion message is unchanged')
-                    assert.ok(/timeout of 30000ms exceeded/.test(err.message),
-                        'the last sanitized cause survives the exhaustion throw')
-                    return true
-                }
-            )
-            assert.strictEqual(axiosStub.callCount, 10, 'the 10-attempt timeout ladder is unchanged')
-            assert.strictEqual(connector.rpcErrors, 1, 'a black-holing node must move rpc_errors_total')
-        }).timeout(5000)
+function blockPathFailureTests() {
+    it('counts an exhausted timeout ladder toward rpc_errors_total and keeps the cause', async () => {
+        // A node that black-holes every request only ever raises ECONNABORTED, which
+        // the copies retried ten times and then rethrew as a bare sentence: the
+        // counter described as "Node RPC errors seen since process start" stayed 0
+        // through a total outage, and the cause was discarded with it.
+        axiosStub.callsFake(async () => {
+            throw Object.assign(new Error('timeout of 30000ms exceeded'), { code: 'ECONNABORTED' })
+        })
 
-        it('keeps the block path failing FAST on a queue-full answer', async () => {
-            // Deliberately NOT getRawTransaction's 5s x10 queue-full ladder. The wedge
-            // signal counts consecutive fetch failures at one height
-            // (XChainDecoder._fetchErrorCount vs STALL_FETCH_ATTEMPTS) and reaches its
-            // verdict in about a minute at the block loop's 3s sleep; at ~50s per
-            // in-call ladder the same twenty attempts take a quarter of an hour.
-            axiosStub.rejects(Object.assign(new Error('Request failed with status code 500'), {
-                code: 'ERR_BAD_RESPONSE',
-                response: { status: 500, data: { error: { code: -429, message: 'Work queue depth exceeded' } } }
-            }))
-
-            await assert.rejects(() => connector.getBlockHash(0), (err) => {
-                assert.strictEqual(err.rpcCode, -429, 'the node code reaches the caller intact')
+        await assert.rejects(
+            () => connector.getBlockHash(0),
+            (err) => {
+                assert.ok(/There were problems getting block hash\./.test(err.message),
+                    'the per-method exhaustion message is unchanged')
+                assert.ok(/timeout of 30000ms exceeded/.test(err.message),
+                    'the last sanitized cause survives the exhaustion throw')
                 return true
-            })
-            assert.strictEqual(axiosStub.callCount, 1, 'no in-call retry for a non-timeout error')
-            assert.strictEqual(connector.rpcErrors, 1)
-        }).timeout(5000)
-    })
+            }
+        )
+        assert.strictEqual(axiosStub.callCount, 10, 'the 10-attempt timeout ladder is unchanged')
+        assert.strictEqual(connector.rpcErrors, 1, 'a black-holing node must move rpc_errors_total')
+    }).timeout(5000)
+
+    it('keeps the block path failing FAST on a queue-full answer', async () => {
+        // Deliberately NOT getRawTransaction's 5s x10 queue-full ladder. The wedge
+        // signal counts consecutive fetch failures at one height
+        // (XChainDecoder._fetchErrorCount vs STALL_FETCH_ATTEMPTS) and reaches its
+        // verdict in about a minute at the block loop's 3s sleep; at ~50s per
+        // in-call ladder the same twenty attempts take a quarter of an hour.
+        axiosStub.rejects(Object.assign(new Error('Request failed with status code 500'), {
+            code: 'ERR_BAD_RESPONSE',
+            response: { status: 500, data: { error: { code: -429, message: 'Work queue depth exceeded' } } }
+        }))
+
+        await assert.rejects(() => connector.getBlockHash(0), (err) => {
+            assert.strictEqual(err.rpcCode, -429, 'the node code reaches the caller intact')
+            return true
+        })
+        assert.strictEqual(axiosStub.callCount, 1, 'no in-call retry for a non-timeout error')
+        assert.strictEqual(connector.rpcErrors, 1)
+    }).timeout(5000)
+}
+
+function registerBlockPathTests() {
+    describe('the block-path RPC ladder is one implementation', blockPathRoutingTests)
+    describe('the block-path RPC ladder is one implementation', blockPathFailureTests)
+}
+
+describe('BlockchainConnector RPC error accounting and reporting', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
+    registerBlockPathTests()
+})
+
+describe('BlockchainConnector RPC error accounting and reporting', () => {
+    beforeEach(setUpConnector)
+    afterEach(restoreStubs)
 
     describe('every RPC knob in the file goes through envInt', () => {
         // The two remaining env reads used bare parseInt behind a `|| default` guard,
