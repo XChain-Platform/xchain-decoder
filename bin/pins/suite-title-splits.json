@@ -26,6 +26,97 @@
       "test/unit/batch_sub_command_output_capture_activation.test.js",
       "test/unit/batch_sub_command_output_capture_activation.test/batch_sub_command_split.test.js",
       "test/unit/batch_sub_command_output_capture_activation.test/capture_command_view.test.js"
+    ],
+    "test/unit/verify_reorg_retry.test.js": [
+      "test/unit/verify_reorg_retry.test.js",
+      "test/unit/verify_reorg_retry.test/01_xchain_decoder_verify_reorg_mid_walk_tip_regression.test.js",
+      "test/unit/verify_reorg_retry.test/02_xchain_decoder_verify_reorg_does_not_mistake_a_failed_db_read_for_an_exhausted_table.test.js"
+    ],
+    "test/unit/xchain_decoder.test.js": [
+      "test/unit/xchain_decoder.test.js",
+      "test/unit/xchain_decoder.test/01_xchain_decoder_find_funding_fee_outputs.test.js",
+      "test/unit/xchain_decoder.test/02_xchain_decoder_verify_reorg_edge_cases.test.js",
+      "test/unit/xchain_decoder.test/03_xchain_decoder_aux_pow_chain_identity_forcing.test.js",
+      "test/unit/xchain_decoder.test/04_xchain_decoder_max_action_data_length.test.js"
+    ],
+    "test/unit/roundtrip_conformance.test.js": [
+      "test/unit/roundtrip_conformance.test.js",
+      "test/unit/roundtrip_conformance.test/01_stored_record_invariants.test.js",
+      "test/unit/roundtrip_conformance.test/02_byte_identity_to_encoder_original.test.js"
+    ],
+    "test/unit/rpc_lookup_failure.test.js": [
+      "test/unit/rpc_lookup_failure.test.js",
+      "test/unit/rpc_lookup_failure.test/01_block_loop_rollback_signal_handling.test.js",
+      "test/unit/rpc_lookup_failure.test/02_wire_decode_faults_escape_untagged.test.js",
+      "test/unit/rpc_lookup_failure.test/03_start_refuses_a_dogecoin_decoder_with_an_inactive_bigint_reader.test.js"
+    ],
+    "test/unit/db.test.js": [
+      "test/unit/db.test.js",
+      "test/unit/db.test/01_database_big_int_satoshi_to_decimals_string.test.js",
+      "test/unit/db.test/02_database_strip_sql_line_comments.test.js",
+      "test/unit/db.test/03_database_parse_expected_columns.test.js",
+      "test/unit/db.test/04_database_transaction_lock_queue.test.js",
+      "test/unit/db.test/05_database_parse_expected_indexes.test.js",
+      "test/unit/db.test/06_database_reconcile_table_indexes.test.js"
+    ],
+    "test/unit/dispenser_cancel_grace.test.js": [
+      "test/unit/dispenser_cancel_grace.test.js",
+      "test/unit/dispenser_cancel_grace.test/01_database_get_all_open_dispenser_addresses_grace_floor.test.js"
+    ],
+    "test/e2e/action_decoding.test.js": [
+      "test/e2e/action_decoding.test.js",
+      "test/e2e/action_decoding.test/01_encoding_types.test.js",
+      "test/e2e/action_decoding.test/02_source_address_resolution.test.js",
+      "test/e2e/action_decoding.test/03_action_payload_edge_cases.test.js"
+    ],
+    "test/fuzz/harness/parse_transaction.fuzz.js": [
+      "test/fuzz/harness/parse_transaction.fuzz.js",
+      "test/fuzz/harness/parse_transaction.fuzz/01_edge_transaction_with_no_inputs.fuzz.js",
+      "test/fuzz/harness/parse_transaction.fuzz/02_edge_transaction_with_no_outputs.fuzz.js",
+      "test/fuzz/harness/parse_transaction.fuzz/03_edge_transaction_with_many_outputs.fuzz.js",
+      "test/fuzz/harness/parse_transaction.fuzz/04_dispenser_detection_with_various_output_types.fuzz.js",
+      "test/fuzz/harness/parse_transaction.fuzz/05_multisig_all_zero_pubkey_data.fuzz.js",
+      "test/fuzz/harness/parse_transaction.fuzz/06_p2wsh_with_missing_corrupt_witness.fuzz.js",
+      "test/fuzz/harness/parse_transaction.fuzz/07_h8_empty_data_buffer_after_output_loop.fuzz.js"
+    ],
+    "test/unit/parse_transaction.test.js": [
+      "test/unit/parse_transaction.test.js",
+      "test/unit/parse_transaction.test/01_parse_transaction_multisig_and_extraction.test.js",
+      "test/unit/parse_transaction.test/02_parse_transaction_outputs_and_defaults.test.js",
+      "test/unit/parse_transaction.test/03_is_future_segwit_script.test.js",
+      "test/unit/parse_transaction.test/04_get_source_from_output.test.js",
+      "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js"
+    ],
+    "test/unit/migration_runner.test.js": [
+      "test/unit/migration_runner.test.js",
+      "test/unit/migration_runner.test/01_committed_migrations_declare_intent.test.js",
+      "test/unit/migration_runner.test/02_database_migration_checksum_rebaselines.test.js",
+      "test/unit/migration_runner.test/03_run_migrations_checksum_re_bless_path.test.js",
+      "test/unit/migration_runner.test/04_run_migrations_file_opts_only_scoping.test.js",
+      "test/unit/migration_runner.test/05_run_migrations_migration_preconditions.test.js",
+      "test/unit/migration_runner.test/06_database_split_sql_statements.test.js",
+      "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js"
+    ],
+    "test/unit/dispenser_lifecycle_mirror.test.js": [
+      "test/unit/dispenser_lifecycle_mirror.test.js",
+      "test/unit/dispenser_lifecycle_mirror.test/01_same_block_expiration_edits.test.js",
+      "test/unit/dispenser_lifecycle_mirror.test/02_delegated_dispenser_ownership.test.js",
+      "test/unit/dispenser_lifecycle_mirror.test/03_dispenser_caps_and_expiration_validation.test.js"
+    ],
+    "test/unit/dispenser_oracle_fee_output.test.js": [
+      "test/unit/dispenser_oracle_fee_output.test.js",
+      "test/unit/dispenser_oracle_fee_output.test/01_set_membership_capture_over_a_sources_open_mode_b_dispensers.test.js",
+      "test/unit/dispenser_oracle_fee_output.test/02_activation_gate.test.js",
+      "test/unit/dispenser_oracle_fee_output.test/03_field_extraction.test.js"
+    ],
+    "test/unit/taproot_envelope.test.js": [
+      "test/unit/taproot_envelope.test.js",
+      "test/unit/taproot_envelope.test/01_envelope_recognition_height_envelope_active_at.test.js",
+      "test/unit/taproot_envelope.test/02_parse_transaction_golden_envelope_reveal.test.js",
+      "test/unit/taproot_envelope.test/03_per_encoding_4_ceiling.test.js",
+      "test/unit/taproot_envelope.test/04_carrier_arbitration_3_8_height_gated.test.js",
+      "test/unit/taproot_envelope.test/05_constants_conformance.test.js",
+      "test/unit/taproot_envelope.test/06_wire_fidelity_with_the_shipped_encoder_sibling_gated.test.js"
     ]
   }
 }
