@@ -79,6 +79,9 @@ describe('nodeReachabilityFrom() (the reducer both fields are derived from)', fu
         assert.strictEqual(r.node_unreachable.last_ok_at, null)
         assert.strictEqual(r.node_unreachable.seconds, 3600)
     })
+})
+
+describe('nodeReachabilityFrom() (the reducer both fields are derived from)', function () {
 
     it('clears the outage as soon as one attempt succeeds again', function () {
         // Failure at FAIL, success after it: the LATEST attempt is what decides.
@@ -175,41 +178,41 @@ describe('the connector records both instants at its single POST choke point', f
     })
 })
 
-describe('the reachability fields ride the health payloads', function () {
-    const API = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'api.js'), 'utf8')
+const API = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'api.js'), 'utf8')
 
-    function liveApp(decoder, running = true){
-        const app = express()
-        registerLiveRoute(app, decoder, () => running)
-        return app
-    }
+function liveApp(decoder, running = true){
+    const app = express()
+    registerLiveRoute(app, decoder, () => running)
+    return app
+}
 
-    function getLive(app){
-        return new Promise((resolve, reject) => {
-            const server = app.listen(0, () => {
-                http.get({ port: server.address().port, path: '/live' }, (res) => {
-                    let body = ''
-                    res.on('data', (c) => { body += c })
-                    res.on('end', () => { server.close(); resolve({ status: res.statusCode, body: JSON.parse(body) }) })
-                }).on('error', (e) => { server.close(); reject(e) })
-            })
+function getLive(app){
+    return new Promise((resolve, reject) => {
+        const server = app.listen(0, () => {
+            http.get({ port: server.address().port, path: '/live' }, (res) => {
+                let body = ''
+                res.on('data', (c) => { body += c })
+                res.on('end', () => { server.close(); resolve({ status: res.statusCode, body: JSON.parse(body) }) })
+            }).on('error', (e) => { server.close(); reject(e) })
         })
-    }
+    })
+}
 
-    function probeDecoder(connector){
-        const decoder = new XChainDecoder(
-            'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
-        )
-        decoder.lastProcessedBlockIndex = 100
-        decoder.blockchainInfoLastBlock = 100
-        decoder.blockchainInfoLastRefreshAt = Date.now()
-        decoder.lastAdvanceAt = Date.now()
-        decoder.lastPollAt = Date.now()
-        decoder.db = { ping: async () => true }
-        decoder.connector = connector || { rpcErrors: 0 }
-        return decoder
-    }
+function probeDecoder(connector){
+    const decoder = new XChainDecoder(
+        'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+    )
+    decoder.lastProcessedBlockIndex = 100
+    decoder.blockchainInfoLastBlock = 100
+    decoder.blockchainInfoLastRefreshAt = Date.now()
+    decoder.lastAdvanceAt = Date.now()
+    decoder.lastPollAt = Date.now()
+    decoder.db = { ping: async () => true }
+    decoder.connector = connector || { rpcErrors: 0 }
+    return decoder
+}
 
+describe('the reachability fields ride the health payloads', function () {
     it('/live publishes the outage of a node that has never answered', async function () {
         const connector = new BlockchainConnector('127.0.0.1', '18443', 'u', 'p')
         connector.rpcErrors = 0
@@ -251,6 +254,9 @@ describe('the reachability fields ride the health payloads', function () {
         assert.strictEqual(res.body.node_last_ok_at, null)
         assert.strictEqual(res.body.node_unreachable, null)
     })
+})
+
+describe('the reachability fields ride the health payloads', function () {
 
     // /status and the JSON-RPC health method are built inside startApi(), which binds a
     // port and a live decoder, so those two are pinned at source level, the shape
