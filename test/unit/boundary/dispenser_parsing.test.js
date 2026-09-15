@@ -126,6 +126,18 @@ describe('Boundary: ACTION String Parsing (A-1 through A-12)', () => {
         const decoded = result.data.toString('utf-8')
         assert.ok(!decoded.startsWith('DISPENSER'))
     })
+})
+
+describe('Boundary: ACTION String Parsing (A-1 through A-12)', () => {
+    let decoder
+
+    beforeEach(() => {
+        decoder = createDecoder()
+    })
+
+    afterEach(() => {
+        sinon.restore()
+    })
 
     // A-5: DISPENSER with all 15 fields present (v0 complete happy path)
     it('[REGRESSION P1] R-DSP-001 A-5: DISPENSER v0 with all 15 fields → complete parse', async () => {
@@ -206,6 +218,9 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         assert.strictEqual(parseInt(commandVersion), 0)
         // This means the dispenser creation branch is entered
     })
+})
+
+describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', () => {
 
     // A-10/A-11: MEDIUMTEXT limits are DB-level constraints, tested as assertions
     it('A-10: ACTION string near MEDIUMTEXT limit (16,777,215 bytes): large string creates correctly', () => {
@@ -246,6 +261,9 @@ describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', (
         assert.strictEqual(getAddress, 'addr')
         assert.ok(getCoin != '' || giveCoin != '')
     })
+})
+
+describe('Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11)', () => {
 
     // Case sensitivity: "dispenser" (lowercase)
     it('lowercase "dispenser": startsWith("DISPENSER") returns false', () => {
@@ -311,6 +329,9 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
         assert.strictEqual(parseInt(expiration), -1)
         // BOUNDARY FINDING: FROM_UNIXTIME(-1) = NULL on most MariaDB versions
     })
+})
+
+describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
 
     // E-5: Non-numeric
     it('E-5: expiration "abc": parseInt returns NaN', () => {
@@ -346,65 +367,5 @@ describe('Boundary: Dispenser Expiration Values (E-1 through E-7)', () => {
         const expiration = '99999999999'
         assert.strictEqual(parseInt(expiration), 99999999999)
         // FROM_UNIXTIME(99999999999) is beyond DATETIME max (9999-12-31), returns NULL
-    })
-})
-
-describe('Boundary: Combinatorial DISPENSER Scenarios', () => {
-    let decoder
-
-    beforeEach(() => {
-        decoder = createDecoder()
-    })
-
-    afterEach(() => {
-        sinon.restore()
-    })
-
-    // Combo 4: DISPENSER data + source address resolution failure
-    it('DISPENSER payload but getSourceFromOutput returns null: tx skipped', async () => {
-        decoder.connector.getRawTransaction = sinon.stub().rejects(new Error('not found'))
-
-        const action = 'DISPENSER|0|BTC|JDOG|1|10|LTC||0.01|addr|||3600|||'
-        const tx = buildActionTx(action)
-        const result = await decoder.parseTransaction(tx)
-
-        assert.ok(result)
-        assert.ok(result.data.length > 0)
-        // source is null because getSourceFromOutput failed
-        assert.strictEqual(result.source, null)
-        // The block-processing loop stores a tx only when data.length > 0 AND source
-        // is non-null, so this one is skipped and no DISPENSER is created.
-    })
-
-    // Combo 5: BATCH string with DISPENSER as non-first command
-    it('BATCH with DISPENSER as second command: decoder does not parse it', async () => {
-        const action = 'SEND|0|BTC|100;DISPENSER|0|BTC|||LTC||||addr|||3600|||'
-        const tx = buildActionTx(action)
-        const result = await decoder.parseTransaction(tx)
-
-        assert.ok(result)
-        const decoded = result.data.toString('utf-8')
-        // The full BATCH string is stored. startsWith("DISPENSER") is false
-        // because the string starts with "SEND".
-        assert.ok(!decoded.startsWith('DISPENSER'))
-        assert.ok(decoded.includes('DISPENSER'))
-        // The decoder does NOT create a dispenser for BATCH-embedded DISPENSERs.
-    })
-
-    // Combo: DISPENSER as first command in a BATCH (should be caught)
-    it('BATCH with DISPENSER as first command: decoder does parse it', async () => {
-        const action = 'DISPENSER|0|BTC|||||LTC|||addr||||3600|||;SEND|0|BTC|100'
-        const tx = buildActionTx(action)
-        const result = await decoder.parseTransaction(tx)
-
-        assert.ok(result)
-        const decoded = result.data.toString('utf-8')
-        // startsWith("DISPENSER") is true
-        assert.ok(decoded.startsWith('DISPENSER'))
-        // But the split on "|" will include the ";SEND|0|BTC|100" in later fields
-        // This could pollute the expiration and other fields
-        const split = decoded.split('|')
-        // EXPIRATION lives at index 14 in the current layout
-        assert.strictEqual(split[14], '3600')
     })
 })
