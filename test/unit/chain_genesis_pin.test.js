@@ -88,6 +88,9 @@ describe('block-0 chain-identity pin @regression', function () {
         });
     });
 
+});
+
+describe('block-0 chain-identity pin @regression', function () {
     describe('the registry carries the pin, and carries it OUTSIDE the consensus hash', function () {
         it('every coin/network declares chainGenesisHash (null = unpinned)', function () {
             for(const tick of coins.ALLOWED_COINS)
@@ -127,6 +130,9 @@ describe('block-0 chain-identity pin @regression', function () {
         });
     });
 
+});
+
+describe('block-0 chain-identity pin @regression', function () {
     describe('CryptoNetworks.getChainGenesisHash', function () {
         it('resolves the registry value for a network key', function () {
             const BTC = require('../../src/coins/BTC.js');
@@ -148,82 +154,96 @@ describe('block-0 chain-identity pin @regression', function () {
         });
     });
 
-    describe('the decoder asserts it against the node', function () {
-        it('the constructor reads the pin off the registry', function () {
-            const BTC = require('../../src/coins/BTC.js');
-            BTC.networks.regtest.chainGenesisHash = HASH_A;
-            try {
-                assert.strictEqual(makeDecoder('bitcoin-regtest').chainGenesisHash, HASH_A);
-            } finally {
-                BTC.networks.regtest.chainGenesisHash = null;
-            }
-            assert.strictEqual(makeDecoder('bitcoin-regtest').chainGenesisHash, null);
-        });
+});
 
-        it('never calls the node while the pin is unset (an unpinned decoder costs no RPC)', async function () {
-            const decoder = makeDecoder('bitcoin-regtest');
-            let calls = 0;
-            decoder.connector = { getBlockHash: async () => { calls++; return HASH_B; } };
-            assert.strictEqual(await decoder.verifyChainGenesis(), null);
-            assert.strictEqual(calls, 0);
-        });
-
-        it('returns the mismatch for a same-tier foreign node', async function () {
-            const decoder = makeDecoder('bitcoin-regtest');
-            decoder.chainGenesisHash = HASH_A;
-            decoder.connector = { getBlockHash: async () => HASH_B };
-            const reason = await decoder.verifyChainGenesis();
-            assert.ok(reason && reason.includes(HASH_B));
-            assert.strictEqual(decoder.chainGenesisCheckedAt, 0,
-                'a refused endpoint must not count as a check, so every retry re-proves it');
-        });
-
-        it('records the check only when the node actually agreed', async function () {
-            const decoder = makeDecoder('bitcoin-regtest');
-            decoder.chainGenesisHash = HASH_A;
-            decoder.connector = { getBlockHash: async () => HASH_A };
-            assert.strictEqual(await decoder.verifyChainGenesis(), null);
-            assert.ok(decoder.chainGenesisCheckedAt > 0);
-        });
-
-        it('an RPC failure leaves the check pending rather than halting the decoder', async function () {
-            const decoder = makeDecoder('bitcoin-regtest');
-            decoder.chainGenesisHash = HASH_A;
-            decoder.connector = { getBlockHash: async () => { throw new Error('ECONNREFUSED'); } };
-            assert.strictEqual(await decoder.verifyChainGenesis(), null);
-            assert.strictEqual(decoder.chainGenesisCheckedAt, 0,
-                'an unreadable hash must not be recorded as verified, so the next refresh retries at once');
-        });
-
-        it('an empty/garbage block-0 response is unreadable, not a mismatch', async function () {
-            const decoder = makeDecoder('bitcoin-regtest');
-            decoder.chainGenesisHash = HASH_A;
-            decoder.connector = { getBlockHash: async () => '' };
-            assert.strictEqual(await decoder.verifyChainGenesis(), null);
-            assert.strictEqual(decoder.chainGenesisCheckedAt, 0);
-        });
-
-        it('start() halts fail-closed on a mismatch, before any DB handle is built', async function () {
-            const decoder = makeDecoder('bitcoin-regtest');
-            decoder.chainGenesisHash = HASH_A;
-            decoder.connector = { getBlockHash: async () => HASH_B };
-            await assert.rejects(() => decoder.start(), /Refusing to start/);
-            assert.strictEqual(decoder.db, null);
-            assert.strictEqual(decoder.mempoolDb, null);
-        });
-
-        it('start() does NOT halt when the node is merely unreachable (no boot crash loop)', async function () {
-            const decoder = makeDecoder('bitcoin-regtest');
-            decoder.chainGenesisHash = HASH_A;
-            decoder.connector = { getBlockHash: async () => { throw new Error('ECONNREFUSED'); } };
-            // Pre-seeded handles so boot walks PAST the identity assertion into the DB
-            // stage; reaching the stub is the proof that an unreadable hash did not halt.
-            decoder.db = { createDatabase: async () => { throw new Error('DB-STAGE-REACHED'); } };
-            decoder.mempoolDb = {};
-            await assert.rejects(() => decoder.start(), /DB-STAGE-REACHED/);
-        });
+function decoderRegistryTests() {
+    it('the constructor reads the pin off the registry', function () {
+        const BTC = require('../../src/coins/BTC.js');
+        BTC.networks.regtest.chainGenesisHash = HASH_A;
+        try {
+            assert.strictEqual(makeDecoder('bitcoin-regtest').chainGenesisHash, HASH_A);
+        } finally {
+            BTC.networks.regtest.chainGenesisHash = null;
+        }
+        assert.strictEqual(makeDecoder('bitcoin-regtest').chainGenesisHash, null);
     });
 
+    it('never calls the node while the pin is unset (an unpinned decoder costs no RPC)', async function () {
+        const decoder = makeDecoder('bitcoin-regtest');
+        let calls = 0;
+        decoder.connector = { getBlockHash: async () => { calls++; return HASH_B; } };
+        assert.strictEqual(await decoder.verifyChainGenesis(), null);
+        assert.strictEqual(calls, 0);
+    });
+
+    it('returns the mismatch for a same-tier foreign node', async function () {
+        const decoder = makeDecoder('bitcoin-regtest');
+        decoder.chainGenesisHash = HASH_A;
+        decoder.connector = { getBlockHash: async () => HASH_B };
+        const reason = await decoder.verifyChainGenesis();
+        assert.ok(reason && reason.includes(HASH_B));
+        assert.strictEqual(decoder.chainGenesisCheckedAt, 0,
+            'a refused endpoint must not count as a check, so every retry re-proves it');
+    });
+
+    it('records the check only when the node actually agreed', async function () {
+        const decoder = makeDecoder('bitcoin-regtest');
+        decoder.chainGenesisHash = HASH_A;
+        decoder.connector = { getBlockHash: async () => HASH_A };
+        assert.strictEqual(await decoder.verifyChainGenesis(), null);
+        assert.ok(decoder.chainGenesisCheckedAt > 0);
+    });
+}
+
+function decoderVerificationTests() {
+    it('an RPC failure leaves the check pending rather than halting the decoder', async function () {
+        const decoder = makeDecoder('bitcoin-regtest');
+        decoder.chainGenesisHash = HASH_A;
+        decoder.connector = { getBlockHash: async () => { throw new Error('ECONNREFUSED'); } };
+        assert.strictEqual(await decoder.verifyChainGenesis(), null);
+        assert.strictEqual(decoder.chainGenesisCheckedAt, 0,
+            'an unreadable hash must not be recorded as verified, so the next refresh retries at once');
+    });
+
+    it('an empty/garbage block-0 response is unreadable, not a mismatch', async function () {
+        const decoder = makeDecoder('bitcoin-regtest');
+        decoder.chainGenesisHash = HASH_A;
+        decoder.connector = { getBlockHash: async () => '' };
+        assert.strictEqual(await decoder.verifyChainGenesis(), null);
+        assert.strictEqual(decoder.chainGenesisCheckedAt, 0);
+    });
+
+    it('start() halts fail-closed on a mismatch, before any DB handle is built', async function () {
+        const decoder = makeDecoder('bitcoin-regtest');
+        decoder.chainGenesisHash = HASH_A;
+        decoder.connector = { getBlockHash: async () => HASH_B };
+        await assert.rejects(() => decoder.start(), /Refusing to start/);
+        assert.strictEqual(decoder.db, null);
+        assert.strictEqual(decoder.mempoolDb, null);
+    });
+
+    it('start() does NOT halt when the node is merely unreachable (no boot crash loop)', async function () {
+        const decoder = makeDecoder('bitcoin-regtest');
+        decoder.chainGenesisHash = HASH_A;
+        decoder.connector = { getBlockHash: async () => { throw new Error('ECONNREFUSED'); } };
+        // Pre-seeded handles so boot walks PAST the identity assertion into the DB
+        // stage; reaching the stub is the proof that an unreadable hash did not halt.
+        decoder.db = { createDatabase: async () => { throw new Error('DB-STAGE-REACHED'); } };
+        decoder.mempoolDb = {};
+        await assert.rejects(() => decoder.start(), /DB-STAGE-REACHED/);
+    });
+}
+
+function registerDecoderTests() {
+    describe('the decoder asserts it against the node', decoderRegistryTests);
+    describe('the decoder asserts it against the node', decoderVerificationTests);
+}
+
+describe('block-0 chain-identity pin @regression', function () {
+    registerDecoderTests();
+});
+
+describe('block-0 chain-identity pin @regression', function () {
     describe('the assertion is wired where it has to be, not merely exported', function () {
         const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder.js'), 'utf8');
 
