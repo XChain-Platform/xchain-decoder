@@ -139,6 +139,10 @@ describe('the IBD wait is published as node_catching_up', function () {
                 'an ISO instant, not a locale string')
         })
     })
+})
+
+describe('the IBD wait is published as node_catching_up', function () {
+    this.timeout(0)
 
     it('clears when the node leaves initial block download, on the same transition as the log', async function () {
         const { decoder, waits } = buildDecoder(
@@ -193,41 +197,41 @@ describe('the IBD wait is published as node_catching_up', function () {
     })
 })
 
-describe('node_catching_up rides the health payloads', function () {
-    const API = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'api.js'), 'utf8')
+const API = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'api.js'), 'utf8')
 
-    function liveApp(decoder, running = true){
-        const app = express()
-        registerLiveRoute(app, decoder, () => running)
-        return app
-    }
+function liveApp(decoder, running = true){
+    const app = express()
+    registerLiveRoute(app, decoder, () => running)
+    return app
+}
 
-    function getLive(app){
-        return new Promise((resolve, reject) => {
-            const server = app.listen(0, () => {
-                http.get({ port: server.address().port, path: '/live' }, (res) => {
-                    let body = ''
-                    res.on('data', (c) => { body += c })
-                    res.on('end', () => { server.close(); resolve({ status: res.statusCode, body: JSON.parse(body) }) })
-                }).on('error', (e) => { server.close(); reject(e) })
-            })
+function getLive(app){
+    return new Promise((resolve, reject) => {
+        const server = app.listen(0, () => {
+            http.get({ port: server.address().port, path: '/live' }, (res) => {
+                let body = ''
+                res.on('data', (c) => { body += c })
+                res.on('end', () => { server.close(); resolve({ status: res.statusCode, body: JSON.parse(body) }) })
+            }).on('error', (e) => { server.close(); reject(e) })
         })
-    }
+    })
+}
 
-    function probeDecoder(){
-        const decoder = new XChainDecoder(
-            'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
-        )
-        decoder.lastProcessedBlockIndex = STORED_TIP
-        decoder.blockchainInfoLastBlock = 50
-        decoder.blockchainInfoLastRefreshAt = Date.now()
-        decoder.lastAdvanceAt = Date.now()
-        decoder.lastPollAt = Date.now()
-        decoder.db = { ping: async () => true }
-        decoder.connector = { rpcErrors: 0 }
-        return decoder
-    }
+function probeDecoder(){
+    const decoder = new XChainDecoder(
+        'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+    )
+    decoder.lastProcessedBlockIndex = STORED_TIP
+    decoder.blockchainInfoLastBlock = 50
+    decoder.blockchainInfoLastRefreshAt = Date.now()
+    decoder.lastAdvanceAt = Date.now()
+    decoder.lastPollAt = Date.now()
+    decoder.db = { ping: async () => true }
+    decoder.connector = { rpcErrors: 0 }
+    return decoder
+}
 
+describe('node_catching_up rides the health payloads', function () {
     it('/live publishes the wait verbatim (the real registrar, not a copy of it)', async function () {
         const decoder = probeDecoder()
         decoder.nodeCatchingUp = { node_height: 50, stored_height: STORED_TIP, since: '2026-09-08T12:00:00.000Z' }
@@ -240,6 +244,9 @@ describe('node_catching_up rides the health payloads', function () {
         assert.ok('node_catching_up' in res.body, 'absent reads as "this build cannot tell you", not "not waiting"')
         assert.strictEqual(res.body.node_catching_up, null)
     })
+})
+
+describe('node_catching_up rides the health payloads', function () {
 
     // /status and the JSON-RPC health method are built inside startApi(), which binds a
     // port and a live decoder, so these two are pinned at source level: the field must
