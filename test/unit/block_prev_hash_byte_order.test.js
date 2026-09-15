@@ -21,8 +21,6 @@ const util = require('../../src/util')
 // wire bytes. Reorg detection was unaffected (it read the already-computed local),
 // so only the stored value was wrong, which is why this drives the real start()
 // loop and captures what reaches db.insertBlock rather than testing a helper.
-describe('XChainDecoder block previous_block_hash byte order', function () {
-    this.timeout(0)
 
     // A 32-byte previous-hash in wire (little-endian) order, as it appears in the
     // raw block header. The display-format hash is this buffer byte-reversed.
@@ -81,6 +79,9 @@ describe('XChainDecoder block previous_block_hash byte order', function () {
 
         return { decoder, getInserted: () => inserted }
     }
+
+describe('XChainDecoder block previous_block_hash byte order', function () {
+    this.timeout(0)
 
     it('[REGRESSION P1] R-BUG-001: stores the big-endian display hash, not the reversed wire bytes', async function () {
         const { decoder, getInserted } = buildDecoder()
