@@ -69,6 +69,28 @@ function extractFunction(source, name) {
     return lines.slice(start, end + 1).join('\n')
 }
 
+// 80-byte header, version 0x00620104 little-endian: AuxPoW bit (0x100) SET.
+const AUXPOW_HEADER = '04016200' + '11'.repeat(76)
+// Same header with the AuxPoW bit clear (version 2).
+const PLAIN_HEADER = '02000000' + '11'.repeat(76)
+const TX_COUNT_AND_TXS = '01' + '0a'.repeat(60)
+
+// Minimal legacy coinbase tx: 1 input, 1 empty-script output.
+const COINBASE =
+    '01000000' +
+    '01' +
+    '00'.repeat(32) + 'ffffffff' + '00' + 'ffffffff' +
+    '01' + '0100000000000000' + '00' +
+    '00000000'
+// AuxPoW tail: parent hash (32 B) + empty coinbase branch (count 0 + index 4 B)
+// + empty chain branch + parent header (80 B).
+const AUXPOW_TAIL =
+    'bb'.repeat(32) +
+    '00' + '00000000' +
+    '00' + '00000000' +
+    'cc'.repeat(80)
+const AUXPOW_SECTION = COINBASE + AUXPOW_TAIL
+
 describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function () {
 
     describe('cross-repo byte identity [REGRESSION P1]', function () {
@@ -110,32 +132,12 @@ describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function ()
             }
         })
     })
+})
 
-    // The identity check above only proves the two copies agree; these pin what they
-    // agree ON, so an identical-but-wrong edit to both still trips the suite.
+// The identity check above only proves the two copies agree; these pin what they
+// agree ON, so an identical-but-wrong edit to both still trips the suite.
+describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function () {
     describe('stripAuxPowFromBlockHex behavior', function () {
-        // 80-byte header, version 0x00620104 little-endian: AuxPoW bit (0x100) SET.
-        const AUXPOW_HEADER = '04016200' + '11'.repeat(76)
-        // Same header with the AuxPoW bit clear (version 2).
-        const PLAIN_HEADER = '02000000' + '11'.repeat(76)
-        const TX_COUNT_AND_TXS = '01' + '0a'.repeat(60)
-
-        // Minimal legacy coinbase tx: 1 input, 1 empty-script output.
-        const COINBASE =
-            '01000000' +
-            '01' +
-            '00'.repeat(32) + 'ffffffff' + '00' + 'ffffffff' +
-            '01' + '0100000000000000' + '00' +
-            '00000000'
-        // AuxPoW tail: parent hash (32 B) + empty coinbase branch (count 0 + index 4 B)
-        // + empty chain branch + parent header (80 B).
-        const AUXPOW_TAIL =
-            'bb'.repeat(32) +
-            '00' + '00000000' +
-            '00' + '00000000' +
-            'cc'.repeat(80)
-        const AUXPOW_SECTION = COINBASE + AUXPOW_TAIL
-
         it('strips the AuxPoW section parsed from the block hex when the header is 160 chars', function () {
             const blockHex = AUXPOW_HEADER + AUXPOW_SECTION + TX_COUNT_AND_TXS
             assert.strictEqual(
@@ -156,6 +158,11 @@ describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function ()
                 stripAuxPowFromBlockHex(legacyHeader, blockHex),
                 AUXPOW_HEADER + TX_COUNT_AND_TXS)
         })
+    })
+})
+
+describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function () {
+    describe('stripAuxPowFromBlockHex behavior', function () {
 
         it('passes a non-AuxPoW block through unchanged', function () {
             const blockHex = PLAIN_HEADER + TX_COUNT_AND_TXS
@@ -172,10 +179,12 @@ describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function ()
                 /AuxPoW parse:/)
         })
     })
+})
 
-    // The error wrapping is the one part that deliberately differs from the twin; pin it
-    // so a "make the copies identical" refactor cannot quietly drop the tag that
-    // fetchBlockHex escalates on.
+// The error wrapping is the one part that deliberately differs from the twin; pin it
+// so a "make the copies identical" refactor cannot quietly drop the tag that
+// fetchBlockHex escalates on.
+describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function () {
     describe('getBlockWithoutAuxPow error framing (deliberate divergence)', function () {
         const BlockchainConnector = require('../../src/chain/blockchain_connector')
 
