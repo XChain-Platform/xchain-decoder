@@ -54,8 +54,16 @@ function makeRunningDecoder() {
     return decoder;
 }
 
-describe('XChainDecoder#isNodeHeightStale()', function () {
+function captureLogger() {
+    const lines = { warn: [], info: [] };
+    return {
+        lines,
+        warn: (message, fields) => lines.warn.push({ message, fields }),
+        info: (message, fields) => lines.info.push({ message, fields })
+    };
+}
 
+describe('XChainDecoder#isNodeHeightStale()', function () {
     it('is false before the first tip poll, so a booting decoder is never stale', function () {
         const decoder = makeDecoder();
         assert.strictEqual(decoder.blockchainInfoLastRefreshAt, 0);
@@ -97,16 +105,6 @@ describe('XChainDecoder#isNodeHeightStale()', function () {
 });
 
 describe('XChainDecoder stale-tip warn is edge-triggered', function () {
-
-    function captureLogger() {
-        const lines = { warn: [], info: [] };
-        return {
-            lines,
-            warn: (message, fields) => lines.warn.push({ message, fields }),
-            info: (message, fields) => lines.info.push({ message, fields })
-        };
-    }
-
     it('warns once when the tip goes stale, however many polls run in the outage', function () {
         const decoder = makeRunningDecoder();
         const logger = captureLogger();
@@ -142,7 +140,8 @@ describe('XChainDecoder stale-tip warn is edge-triggered', function () {
         assert.strictEqual(logger.lines.info.length, 1);
         assert.match(logger.lines.info[0].message, /node tip recovered/);
     });
-
+});
+describe('XChainDecoder stale-tip warn is edge-triggered', function () {
     it('falls back to the console logger when no shim is wired, and never throws', function () {
         const decoder = makeRunningDecoder();
         const seen = [];
@@ -169,7 +168,6 @@ describe('XChainDecoder stale-tip warn is edge-triggered', function () {
 });
 
 describe('registerDecoderMetrics() feed-freshness gauges', function () {
-
     it('is a no-op when metrics are off, matching the default-off contract', function () {
         // installObservability returns registry:null unless METRICS_ENABLED.
         assert.strictEqual(registerDecoderMetrics(null, makeRunningDecoder()), null);
@@ -217,7 +215,8 @@ describe('registerDecoderMetrics() feed-freshness gauges', function () {
         assert.ok(!/xchain_decoder_tip_age_seconds/.test(body));
         assert.match(body, /^xchain_decoder_node_height_stale 0$/m);
     });
-
+});
+describe('registerDecoderMetrics() feed-freshness gauges', function () {
     // Poll silence was the one /live gate the Prometheus surface did not carry, so an
     // alert written against `stalled` -- whose help text called itself THE liveness
     // signal -- read 0 through a parse loop that had died while caught up.
@@ -259,7 +258,8 @@ describe('registerDecoderMetrics() feed-freshness gauges', function () {
         assert.ok(!/xchain_decoder_last_poll_timestamp_seconds/.test(body));
         assert.match(body, /^xchain_decoder_poll_silent 0$/m);
     });
-
+});
+describe('registerDecoderMetrics() feed-freshness gauges', function () {
     // Reorg churn had no decoder-side signal at all: the durable REORG rows are
     // DB-only and the indexer's reorgsProcessed needs the indexer to be up, so a
     // metrics-only deployment could watch a decoder thrash through shallow reorgs
@@ -301,7 +301,8 @@ describe('registerDecoderMetrics() feed-freshness gauges', function () {
             'depth must be the blocks rolled back by the run that just completed'
         );
     });
-
+});
+describe('registerDecoderMetrics() feed-freshness gauges', function () {
     it('surfaces the same counters on getSyncStatus, which /status spreads', function () {
         const decoder = makeRunningDecoder();
         decoder.reorgCount = 2;
@@ -328,44 +329,43 @@ describe('registerDecoderMetrics() feed-freshness gauges', function () {
     });
 });
 
+// The route body is rebuilt here from the same shape api.js serves, so the
+// assertions run against a real express response; the source assertions below
+// pin api.js itself, the way test/unit/jsonrpc-body-guard.test.js does.
+function liveApp(decoder) {
+    const app = express();
+    app.get('/live', (req, res) => {
+        const stalled = decoder.isStalled();
+        const syncStatus = decoder.getSyncStatus();
+        const healthy = true && true && !stalled;
+        res.status(healthy ? 200 : 503).json({
+            status: healthy ? 'healthy' : 'unhealthy',
+            stalled,
+            node_height_stale: syncStatus.node_height_stale === true,
+            last_processed_block: syncStatus.last_processed_block,
+            node_height: syncStatus.node_height,
+            lag: syncStatus.lag
+        });
+    });
+    return app;
+}
+
+function getLive(app) {
+    return new Promise((resolve, reject) => {
+        const server = app.listen(0, () => {
+            http.get({ port: server.address().port, path: '/live' }, (res) => {
+                let body = '';
+                res.on('data', (c) => { body += c; });
+                res.on('end', () => {
+                    server.close();
+                    resolve({ status: res.statusCode, body: JSON.parse(body) });
+                });
+            }).on('error', (e) => { server.close(); reject(e); });
+        });
+    });
+}
+
 describe('/live reports the stale tip without gating on it', function () {
-
-    // The route body is rebuilt here from the same shape api.js serves, so the
-    // assertions run against a real express response; the source assertions below
-    // pin api.js itself, the way test/unit/jsonrpc-body-guard.test.js does.
-    function liveApp(decoder) {
-        const app = express();
-        app.get('/live', (req, res) => {
-            const stalled = decoder.isStalled();
-            const syncStatus = decoder.getSyncStatus();
-            const healthy = true && true && !stalled;
-            res.status(healthy ? 200 : 503).json({
-                status: healthy ? 'healthy' : 'unhealthy',
-                stalled,
-                node_height_stale: syncStatus.node_height_stale === true,
-                last_processed_block: syncStatus.last_processed_block,
-                node_height: syncStatus.node_height,
-                lag: syncStatus.lag
-            });
-        });
-        return app;
-    }
-
-    function getLive(app) {
-        return new Promise((resolve, reject) => {
-            const server = app.listen(0, () => {
-                http.get({ port: server.address().port, path: '/live' }, (res) => {
-                    let body = '';
-                    res.on('data', (c) => { body += c; });
-                    res.on('end', () => {
-                        server.close();
-                        resolve({ status: res.statusCode, body: JSON.parse(body) });
-                    });
-                }).on('error', (e) => { server.close(); reject(e); });
-            });
-        });
-    }
-
     it('answers 200 on a stale tip but says so in the body', async function () {
         const decoder = makeRunningDecoder();
         decoder.blockchainInfoLastRefreshAt = Date.now() - (3 * REFRESH_MS);
@@ -382,7 +382,8 @@ describe('/live reports the stale tip without gating on it', function () {
         assert.strictEqual(res.body.node_height_stale, false,
             'getSyncStatus omits the key when fresh; a watchdog needs false, not undefined');
     });
-
+});
+describe('/live reports the stale tip without gating on it', function () {
     it('is wired into the real /live handler with the healthy gate untouched', function () {
         const source = fs.readFileSync(require.resolve('../../src/api.js'), 'utf-8');
         const live = source.slice(source.indexOf("app.get('/live'"));
