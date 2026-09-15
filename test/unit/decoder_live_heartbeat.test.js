@@ -115,6 +115,9 @@ describe('/live gates on the poll-loop heartbeat', function () {
         assert.strictEqual(res.body.poll_silent, false);
         assert.strictEqual(res.body.last_poll_at, null);
     });
+});
+
+describe('/live gates on the poll-loop heartbeat', function () {
 
     // The outage retry path re-enters the loop top every ~3s (catch -> sleep(3000) ->
     // continue main_parsing), so the heartbeat keeps ticking through a node outage.
@@ -156,6 +159,9 @@ describe('/live gates on the poll-loop heartbeat', function () {
         assert.strictEqual(res.body.reorg_halt_reason, 'delete failed at 149');
         assert.strictEqual(res.body.reorg_halted_at, '2026-08-20T04:00:00.000Z');
     });
+});
+
+describe('/live gates on the poll-loop heartbeat', function () {
 
     it('still answers 200 while halted, so autoheal cannot restart-loop a resync case', async function () {
         // The regression that matters. The marker survives restarts and is cleared only
