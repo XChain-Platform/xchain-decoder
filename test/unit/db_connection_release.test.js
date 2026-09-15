@@ -93,6 +93,9 @@ describe('Database connection release accounting (transactional inserts)', () =>
             'connection released exactly once on the transactional error path')
         assert.strictEqual(db.transactionConnection, null)
     })
+})
+
+describe('Database connection release accounting (transactional inserts)', () => {
 
     it('[REGRESSION P1] R-BUG-002: insertBlock outside a transaction releases its own lease exactly once on success', async () => {
         const db = makeDb()
