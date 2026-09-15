@@ -109,6 +109,10 @@ describe('Database#extendOpenDispenserExpirationBySource()', () => {
         assert.strictEqual(args[1], 900);
         assert.strictEqual(args[4], 900);
     });
+});
+
+describe('Database#extendOpenDispenserExpirationBySource()', () => {
+    afterEach(() => sinon.restore());
 
     it('picks no row: no ORDER BY and no LIMIT, so every open row of the source is covered', async () => {
         // The target selection IS the defect. With two open dispensers on one source, a
@@ -200,6 +204,10 @@ describe('dispenser create-SOURCE keying', () => {
         assert.strictEqual(params[4], null, 'no redundant source id when it equals address_id');
         assert.strictEqual(createAddress.callCount, 1, 'and no redundant address interning');
     });
+});
+
+describe('dispenser create-SOURCE keying', () => {
+    afterEach(() => sinon.restore());
 
     it('the oracle-address lookup resolves on the create SOURCE too', async () => {
         // A v2 refill of a DELEGATED Mode B dispenser is paid by its creator, whose
