@@ -73,6 +73,10 @@ describe('Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides', fun
         const { db } = dbAnswering(() => [{ id: 3, time: 't', code: undefined, data: '{not json' }])
         assert.strictEqual(await db.isReorgHalted(), true)
     })
+})
+
+describe('Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides', function () {
+    afterEach(() => sinon.restore())
 
     it('clearReorgHalt writes a REORG_HALT_CLEARED row that supersedes the halt and confirms by read-back', async function () {
         let state = [halt(7)]
@@ -113,6 +117,10 @@ describe('Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides', fun
         })
         assert.deepStrictEqual(await db.clearReorgHalt({ reason: 'long enough reason' }), { cleared: false, alreadyClear: false })
     })
+})
+
+describe('Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides', function () {
+    afterEach(() => sinon.restore())
 
     // The decoder keeps parsing while the operator command runs. A verifyReorg abort
     // inside that window writes a NEWER REORG_HALT, and a clear that only tested
@@ -147,6 +155,10 @@ describe('Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides', fun
         const { db } = dbAnswering(() => [halt(7)])
         assert.strictEqual((await db.getReorgHaltMarker()).id, 7)
     })
+})
+
+describe('Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides', function () {
+    afterEach(() => sinon.restore())
 
     // The mariadb driver hands events.id back as a BigInt (the pool sets
     // insertIdAsNumber but not bigIntAsNumber). readReorgHaltState must normalise it
@@ -175,22 +187,22 @@ describe('Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides', fun
     })
 })
 
-describe('clear-reorg-halt CLI', function () {
-    function fakeDb({ halted = true, haltId = 7, deletesAboveTip = 0, dispensers = 0, dispenserTxs = false, clearResult = { cleared: true, alreadyClear: false } } = {}) {
-        const calls = { clear: [] }
-        const db = {
-            getReorgHaltMarker:        async () => (halted ? { halted: true, id: haltId, at: '2026-09-07T06:29:07Z', reason: 'safe-depth', cleared_at: null, cleared_reason: null }
-                                                          : { halted: false, id: null, at: null, reason: null, cleared_at: '2026-09-08T10:00:00Z', cleared_reason: 'earlier clear' }),
-            countReorgDeletesAboveTip: async () => deletesAboveTip,
-            countDispensers:           async () => dispensers,
-            hasDispenserTransactions:  async () => dispenserTxs,
-            clearReorgHalt:            async (opts) => { calls.clear.push(opts); return clearResult }
-        }
-        return { db, calls }
+function fakeDb({ halted = true, haltId = 7, deletesAboveTip = 0, dispensers = 0, dispenserTxs = false, clearResult = { cleared: true, alreadyClear: false } } = {}) {
+    const calls = { clear: [] }
+    const db = {
+        getReorgHaltMarker:        async () => (halted ? { halted: true, id: haltId, at: '2026-09-07T06:29:07Z', reason: 'safe-depth', cleared_at: null, cleared_reason: null }
+                                                      : { halted: false, id: null, at: null, reason: null, cleared_at: '2026-09-08T10:00:00Z', cleared_reason: 'earlier clear' }),
+        countReorgDeletesAboveTip: async () => deletesAboveTip,
+        countDispensers:           async () => dispensers,
+        hasDispenserTransactions:  async () => dispenserTxs,
+        clearReorgHalt:            async (opts) => { calls.clear.push(opts); return clearResult }
     }
-    const quiet = { log: () => {}, error: () => {} }
-    const REASON = 'BTC mainnet decoder, no dispensers exist yet, block range intact'
+    return { db, calls }
+}
+const quiet = { log: () => {}, error: () => {} }
+const REASON = 'BTC mainnet decoder, no dispensers exist yet, block range intact'
 
+describe('clear-reorg-halt CLI', function () {
     it('parses --reason, --force and --dry-run', function () {
         assert.deepStrictEqual(parseArgs(['--reason', 'x y z', '--force', '--dry-run']),
             { reason: 'x y z', force: true, dryRun: true, help: false, bad: null })
@@ -230,6 +242,9 @@ describe('clear-reorg-halt CLI', function () {
         assert.strictEqual(await run({ db, argv: ['--reason', REASON, '--force'], ...quiet }), EXIT.NOT_RESYNCED)
         assert.strictEqual(calls.clear.length, 0)
     })
+})
+
+describe('clear-reorg-halt CLI', function () {
 
     it('refuses a database that has held dispenser state unless forced, and records the force', async function () {
         const { db, calls } = fakeDb({ dispensers: 3 })
