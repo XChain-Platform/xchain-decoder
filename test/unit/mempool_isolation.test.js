@@ -19,43 +19,43 @@ const XChainDecoder = require('../../src/XChainDecoder')
 // block transaction, and a failed mempool insert called endTransaction() and rolled the whole
 // block back mid-parse. All mempool DB work now runs on a dedicated this.mempoolDb that never
 // opens a block transaction, so mempool errors can neither roll back nor block the block loop.
+// Build a decoder wired with distinct db / mempoolDb spies and just enough connector +
+// decoder stubs to drive one mempool cycle over a single pending tx.
+function buildDecoder(insertResult) {
+  const decoder = new XChainDecoder(
+    'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+  )
+
+  const calls = { db: [], mempoolDb: [] }
+  const spyDb = (label) => ({
+    deleteAndCompareTxsNotInList: async () => { calls[label].push('delete'); return { transactionsDeleted: 0 } },
+    insertMempoolTransaction:     async () => { calls[label].push('insert'); return insertResult },
+    // A block delete/rollback surface: touching these from the mempool path would be the bug.
+    endTransaction: async () => { calls[label].push('endTransaction') },
+  })
+
+  decoder.db        = spyDb('db')
+  decoder.mempoolDb = spyDb('mempoolDb')
+
+  decoder.connector = {
+    getRawMempool:      async () => ['txid1'],
+    getRawTransactions: async () => ['hexdata'],
+  }
+  // Bypass real block/tx decoding: yield a tx object shaped like the mempool loop expects.
+  decoder.xchainBlockDecoder = { transactionFromHex: () => ({ ins: [{}], getId: () => 'txid1' }) }
+
+  // Record which db handle parseTransaction is handed, and return a decodable SEND action.
+  let parseTxDbArg
+  decoder.parseTransaction = async (_tx, _openDispensers, db) => {
+    parseTxDbArg = db
+    return { data: Buffer.from('SEND'), compiledDataLength: 4, source: 'src', destination: null, amount: '0' }
+  }
+
+  return { decoder, calls, getParseTxDbArg: () => parseTxDbArg }
+}
+
 describe('updateMempool DB isolation', function () {
   this.timeout(0)
-
-  // Build a decoder wired with distinct db / mempoolDb spies and just enough connector +
-  // decoder stubs to drive one mempool cycle over a single pending tx.
-  function buildDecoder(insertResult) {
-    const decoder = new XChainDecoder(
-      'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
-    )
-
-    const calls = { db: [], mempoolDb: [] }
-    const spyDb = (label) => ({
-      deleteAndCompareTxsNotInList: async () => { calls[label].push('delete'); return { transactionsDeleted: 0 } },
-      insertMempoolTransaction:     async () => { calls[label].push('insert'); return insertResult },
-      // A block delete/rollback surface: touching these from the mempool path would be the bug.
-      endTransaction: async () => { calls[label].push('endTransaction') },
-    })
-
-    decoder.db        = spyDb('db')
-    decoder.mempoolDb = spyDb('mempoolDb')
-
-    decoder.connector = {
-      getRawMempool:      async () => ['txid1'],
-      getRawTransactions: async () => ['hexdata'],
-    }
-    // Bypass real block/tx decoding: yield a tx object shaped like the mempool loop expects.
-    decoder.xchainBlockDecoder = { transactionFromHex: () => ({ ins: [{}], getId: () => 'txid1' }) }
-
-    // Record which db handle parseTransaction is handed, and return a decodable SEND action.
-    let parseTxDbArg
-    decoder.parseTransaction = async (_tx, _openDispensers, db) => {
-      parseTxDbArg = db
-      return { data: Buffer.from('SEND'), compiledDataLength: 4, source: 'src', destination: null, amount: '0' }
-    }
-
-    return { decoder, calls, getParseTxDbArg: () => parseTxDbArg }
-  }
 
   it('routes the mempool DELETE and INSERT to mempoolDb, never to the block db', async () => {
     const { decoder, calls } = buildDecoder(true)
@@ -89,6 +89,10 @@ describe('updateMempool DB isolation', function () {
     assert.deepStrictEqual(received.slice().sort(), ['aaa', 'bbb', 'ccc'],
       'rawMempool must be the deduped txid set the node reported')
   })
+})
+
+describe('updateMempool DB isolation', function () {
+  this.timeout(0)
 
   it('a mempool insert failure never rolls back or ends the block transaction', async () => {
     // insertMempoolTransaction returns false (its own rollback path is a no-op with no open
@@ -126,6 +130,10 @@ describe('updateMempool DB isolation', function () {
     await decoder.updateMempool()
     assert.deepStrictEqual(received, [], 'an empty snapshot must still be handed to the diff')
   })
+})
+
+describe('updateMempool DB isolation', function () {
+  this.timeout(0)
 
   // deleteAndCompareTxsNotInList empties and refills the caller's array in place, leaving it
   // holding only the new arrivals, so the cycle summary must not read that array for the
