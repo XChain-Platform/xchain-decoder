@@ -142,6 +142,9 @@ describe('Database.STARTUP_ASSERTED_MIGRATIONS @regression @tier1', function () 
         assert.deepStrictEqual(offenders, [], 'auto migrations self-apply and can never be the missing ' +
             'precondition; tagging one makes the deploy guard refuse a deploy it should let through: ' + offenders.join(', '));
     });
+});
+
+describe('Database.STARTUP_ASSERTED_MIGRATIONS @regression @tier1', function () {
 
     describe('startupAssertedMigrationFile()', function () {
         it('resolves each registered assertion to its migration filename', function () {
