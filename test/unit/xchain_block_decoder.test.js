@@ -16,6 +16,18 @@ const XChainBlockDecoder = require('../../src/chain/XChainBlockDecoder')
 // 80-byte block header: version=2, prevHash=0xaa*32, merkleRoot=0xbb*32, timestamp=1700000000, bits, nonce
 const HEADER_HEX = '02000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb00f15365ffff001d39300000'
 
+function makeWitnessTxHex() {
+    // Build a genuinely valid segwit litecoin tx: marker 0x00, flag 0x01
+    // (ordinary segwit, NOT MWEB). Only flags 0x08/0x09 must be stripped, so
+    // this tx's marker+flag and its witness data must survive decode intact.
+    const witnessTx = new Transaction()
+    witnessTx.version = 2
+    witnessTx.addInput(Buffer.alloc(32, 1), 0)
+    witnessTx.addOutput(Buffer.from('0014' + '00'.repeat(20), 'hex'), 1000)
+    witnessTx.setWitness(0, [Buffer.from('deadbeef', 'hex')])
+    return witnessTx.toHex()
+}
+
 describe('XChainBlockDecoder', () => {
 
     describe('constructor', () => {
@@ -54,7 +66,9 @@ describe('XChainBlockDecoder', () => {
                 /namecoin/)
         })
     })
+})
 
+describe('XChainBlockDecoder', () => {
     describe('#doubleSha256AndReverse()', () => {
         it('should return a deterministic result for known input', () => {
             const decoder = new XChainBlockDecoder('bitcoin-regtest')
@@ -88,7 +102,9 @@ describe('XChainBlockDecoder', () => {
             assert.strictEqual(result.length, 32)
         })
     })
+})
 
+describe('XChainBlockDecoder', () => {
     describe('#blockFromHex()', () => {
         it('should parse a header-only block (80 bytes, no transactions)', () => {
             const decoder = new XChainBlockDecoder('bitcoin-regtest')
@@ -140,7 +156,9 @@ describe('XChainBlockDecoder', () => {
             assert.strictEqual(btcBlock.timestamp, dogeBlock.timestamp)
         })
     })
+})
 
+describe('XChainBlockDecoder', () => {
     describe('#blockFromBuffer()', () => {
         it('should parse a buffer the same as blockFromHex', () => {
             const decoder = new XChainBlockDecoder('bitcoin-regtest')
@@ -153,7 +171,9 @@ describe('XChainBlockDecoder', () => {
             assert.strictEqual(block1.timestamp, block2.timestamp)
         })
     })
+})
 
+describe('XChainBlockDecoder', () => {
     describe('#transactionFromHex()', () => {
         it('should parse a standard bitcoin transaction', () => {
             const btcDecoder = new XChainBlockDecoder('bitcoin-regtest')
@@ -197,15 +217,7 @@ describe('XChainBlockDecoder', () => {
         it('[REGRESSION P2] R-NET-002: should not strip non-MWEB flags on litecoin (flag != 0x08 or 0x09)', () => {
             const ltcDecoder = new XChainBlockDecoder('litecoin-mainnet')
 
-            // Build a genuinely valid segwit litecoin tx: marker 0x00, flag 0x01
-            // (ordinary segwit, NOT MWEB). Only flags 0x08/0x09 must be stripped, so
-            // this tx's marker+flag and its witness data must survive decode intact.
-            const witnessTx = new Transaction()
-            witnessTx.version = 2
-            witnessTx.addInput(Buffer.alloc(32, 1), 0)
-            witnessTx.addOutput(Buffer.from('0014' + '00'.repeat(20), 'hex'), 1000)
-            witnessTx.setWitness(0, [Buffer.from('deadbeef', 'hex')])
-            const txHex = witnessTx.toHex()
+            const txHex = makeWitnessTxHex()
 
             // Sanity: the fixture really is a flag-0x01 segwit tx.
             assert.strictEqual(txHex.substr(8, 2), '00', 'fixture marker byte should be 0x00')
@@ -220,7 +232,9 @@ describe('XChainBlockDecoder', () => {
             assert.strictEqual(parsed.toHex(), txHex, 'non-MWEB flag tx must round-trip unchanged (not stripped)')
         })
     })
+})
 
+describe('XChainBlockDecoder', () => {
     describe('Litecoin-specific parsing', () => {
         it('should parse a litecoin header-only block identically to bitcoin', () => {
             const ltcDecoder = new XChainBlockDecoder('litecoin-mainnet')
