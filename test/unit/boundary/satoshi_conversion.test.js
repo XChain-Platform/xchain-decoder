@@ -10,13 +10,14 @@
 
 const assert = require('assert')
 const Database = require('../../../src/db')
+let db
+
+function setUpDatabase() {
+    db = new Database('localhost', 3306, 'test_db', 'root', '')
+}
 
 describe('Boundary: bigIntSatoshiToDecimalsString (DB-6 through DB-8)', () => {
-    let db
-
-    beforeEach(() => {
-        db = new Database('localhost', 3306, 'test_db', 'root', '')
-    })
+    beforeEach(setUpDatabase)
 
     // DB-6: Zero value
     it('[REGRESSION P1] R-DB-004 DB-6: 0 → "0.00000000"', () => {
@@ -54,6 +55,10 @@ describe('Boundary: bigIntSatoshiToDecimalsString (DB-6 through DB-8)', () => {
         const result = db.bigIntSatoshiToDecimalsString(-50000000)
         assert.strictEqual(result, '-0.50000000')
     })
+})
+
+describe('Boundary: bigIntSatoshiToDecimalsString (DB-6 through DB-8)', () => {
+    beforeEach(setUpDatabase)
 
     // DB-8: Very large satoshi value
     it('[REGRESSION P1] R-DB-004 DB-8: 100000000000000000n → "1000000000.00000000"', () => {
@@ -86,6 +91,10 @@ describe('Boundary: bigIntSatoshiToDecimalsString (DB-6 through DB-8)', () => {
         const result = db.bigIntSatoshiToDecimalsString(123456789)
         assert.strictEqual(result, '1.23456789')
     })
+})
+
+describe('Boundary: bigIntSatoshiToDecimalsString (DB-6 through DB-8)', () => {
+    beforeEach(setUpDatabase)
 
     // Boundary: exactly 8 digits (equals SATOSHIS_DECIMALS)
     it('99999999 → "0.99999999" (exactly 8 digits, boundary)', () => {
