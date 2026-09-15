@@ -10,6 +10,7 @@
 
 const assert = require('assert')
 const fs = require('fs')
+const path = require('path')
 
 describe('Security: Error Log Sanitization', () => {
 
@@ -90,7 +91,17 @@ describe('Security: Error Log Sanitization', () => {
         let connectorSource
 
         before(() => {
-            connectorSource = fs.readFileSync(require.resolve('../../src/chain/blockchain_connector.js'), 'utf-8')
+            // The class body can live in the entry file or be split across sibling
+            // part files, so the source scan below covers the entry plus every part.
+            const entryPath = require.resolve('../../src/chain/blockchain_connector.js')
+            const partsDir = path.join(path.dirname(entryPath), 'blockchain_connector')
+            const sources = [fs.readFileSync(entryPath, 'utf-8')]
+            if (fs.existsSync(partsDir)) {
+                for (const name of fs.readdirSync(partsDir)) {
+                    if (name.endsWith('.js')) sources.push(fs.readFileSync(path.join(partsDir, name), 'utf-8'))
+                }
+            }
+            connectorSource = sources.join('\n')
         })
 
         it('should not log full error objects in getBlockHeader', () => {
