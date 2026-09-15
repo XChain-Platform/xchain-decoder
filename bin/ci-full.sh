@@ -70,10 +70,13 @@ run_tier() {
   fi
 }
 need_sib() {
-  local s
+  local s missing
   for s in "$@"; do
-    if [ ! -d "$SIB/$s" ]; then
-      echo "ci:full: MISSING SIBLING $SIB/$s" >&2
+    missing=""
+    [ -e "$SIB/$s/package.json" ] || missing="$missing package.json"
+    [ -e "$SIB/$s/.git" ] || missing="$missing .git"
+    if [ -n "$missing" ]; then
+      echo "ci:full: MISSING SIBLING $SIB/$s (missing:$missing)" >&2
       echo "ci:full: GitHub CI checks this sibling out and runs steps against it," >&2
       echo "ci:full: so skipping here would gate green on a subset. Declare it in" >&2
       echo "ci:full: .ci-siblings (venue) or clone it beside this repo (hand run)." >&2
