@@ -26,10 +26,16 @@ function connectionError(code) {
     return err
 }
 
-describe('BlockchainConnector NODE_URL_FALLBACK failover', () => {
-    let axiosStub
-    let warnStub
+let axiosStub
+let warnStub
 
+function makeConnector(fallback, threshold) {
+    if (fallback !== undefined) process.env.NODE_URL_FALLBACK = fallback
+    if (threshold !== undefined) process.env.NODE_FAILOVER_THRESHOLD = String(threshold)
+    return new BlockchainConnector('127.0.0.1', 8332, 'testuser', 'testpass')
+}
+
+describe('BlockchainConnector NODE_URL_FALLBACK failover', () => {
     beforeEach(() => {
         axiosStub = sinon.stub(axios, 'post')
         warnStub = sinon.stub(console, 'warn')
@@ -42,12 +48,6 @@ describe('BlockchainConnector NODE_URL_FALLBACK failover', () => {
         delete process.env.NODE_URL_FALLBACK
         delete process.env.NODE_FAILOVER_THRESHOLD
     })
-
-    function makeConnector(fallback, threshold) {
-        if (fallback !== undefined) process.env.NODE_URL_FALLBACK = fallback
-        if (threshold !== undefined) process.env.NODE_FAILOVER_THRESHOLD = String(threshold)
-        return new BlockchainConnector('127.0.0.1', 8332, 'testuser', 'testpass')
-    }
 
     describe('endpoint parsing', () => {
         it('has a single endpoint when NODE_URL_FALLBACK is unset', () => {
@@ -75,87 +75,118 @@ describe('BlockchainConnector NODE_URL_FALLBACK failover', () => {
             assert.throws(() => makeConnector('ht!tp://bad url'), /invalid RPC endpoint/)
         })
     })
+})
+
+describe('BlockchainConnector NODE_URL_FALLBACK failover', () => {
+    beforeEach(() => {
+        axiosStub = sinon.stub(axios, 'post')
+        warnStub = sinon.stub(console, 'warn')
+        sinon.stub(console, 'error')
+        sinon.stub(console, 'log')
+    })
+
+    afterEach(() => {
+        sinon.restore()
+        delete process.env.NODE_URL_FALLBACK
+        delete process.env.NODE_FAILOVER_THRESHOLD
+    })
 
     describe('failover rotation', () => {
-        it('rotates to the fallback after threshold consecutive connection failures', async () => {
-            const connector = makeConnector('10.0.0.2', 3)
-            axiosStub.rejects(connectionError('ECONNREFUSED'))
+        defineThresholdAndRetryTests()
+    })
 
-            for (let i = 0; i < 3; i++) {
-                await assert.rejects(() => connector.getBlockchainInfo())
-            }
+    describe('failover rotation', () => {
+        defineResetTests()
+    })
 
-            assert.strictEqual(connector.url, 'http://10.0.0.2:8332')
-            assert.strictEqual(warnStub.callCount, 1)
-
-            // Next request goes to the fallback endpoint.
-            axiosStub.resolves({ data: { result: { blocks: 7 } } })
-            const result = await connector.getBlockchainInfo()
-            assert.deepStrictEqual(result, { blocks: 7 })
-            assert.strictEqual(axiosStub.lastCall.args[0], 'http://10.0.0.2:8332')
-        })
-
-        it('recovers within a single timeout-retry loop call', async () => {
-            // getBlockHash retries ECONNABORTED up to 10x in-method; with a
-            // threshold of 2 the connector rotates mid-call and the same call
-            // succeeds against the fallback without the caller seeing an error.
-            const connector = makeConnector('10.0.0.2', 2)
-            axiosStub.onCall(0).rejects(connectionError('ECONNABORTED'))
-            axiosStub.onCall(1).rejects(connectionError('ECONNABORTED'))
-            axiosStub.onCall(2).resolves({ data: { result: 'deadbeef' } })
-
-            const hash = await connector.getBlockHash(5)
-            assert.strictEqual(hash, 'deadbeef')
-            assert.strictEqual(axiosStub.getCall(2).args[0], 'http://10.0.0.2:8332')
-        })
-
-        it('a success resets the consecutive-failure counter', async () => {
-            const connector = makeConnector('10.0.0.2', 3)
-            axiosStub.rejects(connectionError('ECONNREFUSED'))
-            await assert.rejects(() => connector.getBlockchainInfo())
-            await assert.rejects(() => connector.getBlockchainInfo())
-
-            axiosStub.resolves({ data: { result: {} } })
-            await connector.getBlockchainInfo()
-
-            axiosStub.rejects(connectionError('ECONNREFUSED'))
-            await assert.rejects(() => connector.getBlockchainInfo())
-            await assert.rejects(() => connector.getBlockchainInfo())
-
-            // 2 + 2 failures with a success between: never reaches 3 in a row.
-            assert.strictEqual(connector.url, 'http://127.0.0.1:8332')
-        })
-
-        it('HTTP-level errors (node reachable) do not count toward failover', async () => {
-            const connector = makeConnector('10.0.0.2', 2)
-            const httpError = new Error('Request failed with status code 500')
-            httpError.response = { status: 500, data: { error: { code: -32603, message: 'oops' } } }
-            axiosStub.rejects(httpError)
-
-            for (let i = 0; i < 5; i++) {
-                await assert.rejects(() => connector.getBlockchainInfo())
-            }
-            assert.strictEqual(connector.url, 'http://127.0.0.1:8332')
-        })
-
-        it('rotates round-robin back to the primary when the fallback also dies', async () => {
-            const connector = makeConnector('10.0.0.2', 1)
-            axiosStub.rejects(connectionError('EHOSTUNREACH'))
-
-            await assert.rejects(() => connector.getBlockchainInfo())
-            assert.strictEqual(connector.url, 'http://10.0.0.2:8332')
-            await assert.rejects(() => connector.getBlockchainInfo())
-            assert.strictEqual(connector.url, 'http://127.0.0.1:8332')
-        })
-
-        it('never rotates when no fallback is configured', async () => {
-            const connector = makeConnector(undefined, 1)
-            axiosStub.rejects(connectionError('ECONNREFUSED'))
-            for (let i = 0; i < 4; i++) {
-                await assert.rejects(() => connector.getBlockchainInfo())
-            }
-            assert.strictEqual(connector.url, 'http://127.0.0.1:8332')
-            assert.strictEqual(warnStub.callCount, 0)
-        })
+    describe('failover rotation', () => {
+        defineRotationTests()
     })
 })
+
+function defineThresholdAndRetryTests() {
+    it('rotates to the fallback after threshold consecutive connection failures', async () => {
+        const connector = makeConnector('10.0.0.2', 3)
+        axiosStub.rejects(connectionError('ECONNREFUSED'))
+
+        for (let i = 0; i < 3; i++) {
+            await assert.rejects(() => connector.getBlockchainInfo())
+        }
+
+        assert.strictEqual(connector.url, 'http://10.0.0.2:8332')
+        assert.strictEqual(warnStub.callCount, 1)
+
+        // Next request goes to the fallback endpoint.
+        axiosStub.resolves({ data: { result: { blocks: 7 } } })
+        const result = await connector.getBlockchainInfo()
+        assert.deepStrictEqual(result, { blocks: 7 })
+        assert.strictEqual(axiosStub.lastCall.args[0], 'http://10.0.0.2:8332')
+    })
+
+    it('recovers within a single timeout-retry loop call', async () => {
+        // getBlockHash retries ECONNABORTED up to 10x in-method; with a
+        // threshold of 2 the connector rotates mid-call and the same call
+        // succeeds against the fallback without the caller seeing an error.
+        const connector = makeConnector('10.0.0.2', 2)
+        axiosStub.onCall(0).rejects(connectionError('ECONNABORTED'))
+        axiosStub.onCall(1).rejects(connectionError('ECONNABORTED'))
+        axiosStub.onCall(2).resolves({ data: { result: 'deadbeef' } })
+
+        const hash = await connector.getBlockHash(5)
+        assert.strictEqual(hash, 'deadbeef')
+        assert.strictEqual(axiosStub.getCall(2).args[0], 'http://10.0.0.2:8332')
+    })
+}
+
+function defineResetTests() {
+    it('a success resets the consecutive-failure counter', async () => {
+        const connector = makeConnector('10.0.0.2', 3)
+        axiosStub.rejects(connectionError('ECONNREFUSED'))
+        await assert.rejects(() => connector.getBlockchainInfo())
+        await assert.rejects(() => connector.getBlockchainInfo())
+
+        axiosStub.resolves({ data: { result: {} } })
+        await connector.getBlockchainInfo()
+
+        axiosStub.rejects(connectionError('ECONNREFUSED'))
+        await assert.rejects(() => connector.getBlockchainInfo())
+        await assert.rejects(() => connector.getBlockchainInfo())
+
+        // 2 + 2 failures with a success between: never reaches 3 in a row.
+        assert.strictEqual(connector.url, 'http://127.0.0.1:8332')
+    })
+
+    it('HTTP-level errors (node reachable) do not count toward failover', async () => {
+        const connector = makeConnector('10.0.0.2', 2)
+        const httpError = new Error('Request failed with status code 500')
+        httpError.response = { status: 500, data: { error: { code: -32603, message: 'oops' } } }
+        axiosStub.rejects(httpError)
+
+        for (let i = 0; i < 5; i++) {
+            await assert.rejects(() => connector.getBlockchainInfo())
+        }
+        assert.strictEqual(connector.url, 'http://127.0.0.1:8332')
+    })
+}
+
+function defineRotationTests() {
+    it('rotates round-robin back to the primary when the fallback also dies', async () => {
+        const connector = makeConnector('10.0.0.2', 1)
+        axiosStub.rejects(connectionError('EHOSTUNREACH'))
+
+        await assert.rejects(() => connector.getBlockchainInfo())
+        assert.strictEqual(connector.url, 'http://10.0.0.2:8332')
+        await assert.rejects(() => connector.getBlockchainInfo())
+        assert.strictEqual(connector.url, 'http://127.0.0.1:8332')
+    })
+
+    it('never rotates when no fallback is configured', async () => {
+        const connector = makeConnector(undefined, 1)
+        axiosStub.rejects(connectionError('ECONNREFUSED'))
+        for (let i = 0; i < 4; i++) {
+            await assert.rejects(() => connector.getBlockchainInfo())
+        }
+        assert.strictEqual(connector.url, 'http://127.0.0.1:8332')
+        assert.strictEqual(warnStub.callCount, 0)
+    })
+}
