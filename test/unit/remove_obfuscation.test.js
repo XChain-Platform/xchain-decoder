@@ -77,6 +77,14 @@ describe('XChainDecoder#removeObfuscation()', () => {
         assert.strictEqual(result.toString('utf-8'), 'XCHN')
         assert.strictEqual(result.length, 4)
     })
+})
+
+describe('XChainDecoder#removeObfuscation()', () => {
+    let decoder
+
+    beforeEach(() => {
+        decoder = createDecoder()
+    })
 
     it('[REGRESSION P0] R-DEC-004: should return null for non-Buffer input (string)', async () => {
         const result = await decoder.removeObfuscation('not a buffer', fixtures.txid)
@@ -110,6 +118,14 @@ describe('XChainDecoder#removeObfuscation()', () => {
         const result2 = await decoder.removeObfuscation(Buffer.from(fixtures.xchnPayload.cipher, 'hex'), fixtures.txid)
 
         assert.ok(result1.equals(result2))
+    })
+})
+
+describe('XChainDecoder#removeObfuscation()', () => {
+    let decoder
+
+    beforeEach(() => {
+        decoder = createDecoder()
     })
 
     it('[REGRESSION P0] R-DEC-005: should decrypt correctly with different txids (different key/iv)', async () => {
