@@ -76,6 +76,10 @@ describe('XChainDecoder latent REORG_HALT reporting', function () {
         assert.strictEqual(queries, 2, 'a probe past the TTL must re-query')
     })
 
+})
+
+describe('XChainDecoder latent REORG_HALT reporting', function () {
+
     it('force bypasses the TTL', async function () {
         const decoder = makeDecoder()
         let queries = 0
@@ -119,6 +123,10 @@ describe('XChainDecoder latent REORG_HALT reporting', function () {
         const status = await decoder.checkReorgHalt({ force: true })
         assert.strictEqual(status.halted, false)
     })
+
+})
+
+describe('XChainDecoder latent REORG_HALT reporting', function () {
 
     it('concurrent probes collapse onto one in-flight query', async function () {
         const decoder = makeDecoder()
