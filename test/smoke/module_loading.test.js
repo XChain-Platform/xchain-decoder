@@ -35,6 +35,9 @@ describe('Smoke: Module Loading', () => {
         const XChainBlockDecoder = require('../../src/chain/XChainBlockDecoder')
         assert.strictEqual(typeof XChainBlockDecoder, 'function')
     })
+})
+
+describe('Smoke: Module Loading', () => {
 
     it('should load util', () => {
         const util = require('../../src/util')
