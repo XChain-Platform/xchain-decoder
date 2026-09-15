@@ -24,76 +24,76 @@ const XChainDecoder = require('../../src/XChainDecoder')
 // (so a transient RPC/DB blip never skips a tx), then quarantine the poison
 // transaction with a PARSE_ERROR event and continue. A mempool parse throw
 // skips just that tx instead of aborting the whole mempool cycle.
+const PREV_WIRE = Buffer.from(
+    '00112233445566778899aabbccddeeff0123456789abcdeffedcba9876543210',
+    'hex'
+)
+
+function fakeTx(id) {
+    return { getId: () => id, outs: [] }
+}
+
+function buildDecoder({ transactions = [] } = {}) {
+    const decoder = new XChainDecoder(
+        'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+    )
+    decoder.startBlockIndex = 0
+    decoder.sleep = async () => {}
+
+    const calls = {
+        insertBlock: 0,
+        endTransaction: 0,
+        commitTransaction: 0,
+        insertEvent: [],
+    }
+
+    decoder.connector = {
+        getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: 0 }),
+        getBlockHash: async () => 'aabbccdd',
+        getBlock: async () => ''
+    }
+
+    decoder.db = {
+        createDatabase: async () => true,
+        verifyDatabase: async () => true,
+        verifyTables: async () => true,
+        runMigrations: async () => ({ applied: [], pending: [] }),
+        getLastBlockIndex: async () => -1,
+        getLastTxIndex: async () => 0,
+        beginTransaction: async () => {},
+        endTransaction: async () => { calls.endTransaction++ },
+        commitTransaction: async () => {
+            calls.commitTransaction++
+            // The block made it all the way through: stop the loop.
+            decoder.stopFlag = true
+            return true
+        },
+        deleteOpenDispensers: async () => true,
+        purgeExpiredDispensers: async () => {},
+        getAllOpenDispenserAddresses: async () => new Set(),
+        insertEvent: async (code, data) => {
+            calls.insertEvent.push({ code, data })
+            return true
+        },
+        insertBlock: async () => {
+            calls.insertBlock++
+            return true
+        }
+    }
+
+    decoder.xchainBlockDecoder = {
+        blockFromHex: () => ({
+            prevHash: Buffer.from(PREV_WIRE),
+            timestamp: 1700000000,
+            transactions
+        })
+    }
+
+    return { decoder, calls }
+}
+
 describe('XChainDecoder parse-loop quarantine', function () {
     this.timeout(0)
-
-    const PREV_WIRE = Buffer.from(
-        '00112233445566778899aabbccddeeff0123456789abcdeffedcba9876543210',
-        'hex'
-    )
-
-    function fakeTx(id) {
-        return { getId: () => id, outs: [] }
-    }
-
-    function buildDecoder({ transactions = [] } = {}) {
-        const decoder = new XChainDecoder(
-            'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
-        )
-        decoder.startBlockIndex = 0
-        decoder.sleep = async () => {}
-
-        const calls = {
-            insertBlock: 0,
-            endTransaction: 0,
-            commitTransaction: 0,
-            insertEvent: [],
-        }
-
-        decoder.connector = {
-            getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: 0 }),
-            getBlockHash: async () => 'aabbccdd',
-            getBlock: async () => ''
-        }
-
-        decoder.db = {
-            createDatabase: async () => true,
-            verifyDatabase: async () => true,
-            verifyTables: async () => true,
-            runMigrations: async () => ({ applied: [], pending: [] }),
-            getLastBlockIndex: async () => -1,
-            getLastTxIndex: async () => 0,
-            beginTransaction: async () => {},
-            endTransaction: async () => { calls.endTransaction++ },
-            commitTransaction: async () => {
-                calls.commitTransaction++
-                // The block made it all the way through: stop the loop.
-                decoder.stopFlag = true
-                return true
-            },
-            deleteOpenDispensers: async () => true,
-            purgeExpiredDispensers: async () => {},
-            getAllOpenDispenserAddresses: async () => new Set(),
-            insertEvent: async (code, data) => {
-                calls.insertEvent.push({ code, data })
-                return true
-            },
-            insertBlock: async () => {
-                calls.insertBlock++
-                return true
-            }
-        }
-
-        decoder.xchainBlockDecoder = {
-            blockFromHex: () => ({
-                prevHash: Buffer.from(PREV_WIRE),
-                timestamp: 1700000000,
-                transactions
-            })
-        }
-
-        return { decoder, calls }
-    }
 
     it('survives a blockFromHex throw and retries the block instead of dying', async function () {
         const { decoder, calls } = buildDecoder()
@@ -115,6 +115,10 @@ describe('XChainDecoder parse-loop quarantine', function () {
         assert.strictEqual(decoder.parseErrors, 1)
         assert.strictEqual(calls.insertEvent.length, 0, 'a block-level failure is never quarantined')
     })
+})
+
+describe('XChainDecoder parse-loop quarantine', function () {
+    this.timeout(0)
 
     it('retries the whole block when parseTransaction throws transiently (no quarantine)', async function () {
         const { decoder, calls } = buildDecoder({ transactions: [fakeTx('cafe01')] })
@@ -135,6 +139,10 @@ describe('XChainDecoder parse-loop quarantine', function () {
         assert.strictEqual(calls.commitTransaction, 1, 'the block should commit on the retry')
         assert.strictEqual(calls.insertEvent.length, 0, 'a transiently failing tx must NOT be quarantined')
     })
+})
+
+describe('XChainDecoder parse-loop quarantine', function () {
+    this.timeout(0)
 
     it('quarantines a poison transaction after exhausting block retries', async function () {
         const { decoder, calls } = buildDecoder({ transactions: [fakeTx('cafe01')] })
@@ -157,6 +165,10 @@ describe('XChainDecoder parse-loop quarantine', function () {
         assert.strictEqual(calls.insertEvent[0].data.block_index, 0)
         assert.strictEqual(calls.insertEvent[0].data.error, 'poison transaction')
     })
+})
+
+describe('XChainDecoder parse-loop quarantine', function () {
+    this.timeout(0)
 
     it('skips just the failing tx during a mempool update instead of aborting the cycle', async function () {
         const decoder = new XChainDecoder(
