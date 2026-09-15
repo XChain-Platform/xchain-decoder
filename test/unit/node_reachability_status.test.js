@@ -172,8 +172,18 @@ describe('the connector records both instants at its single POST choke point', f
     it('every RPC method reaches the recording site through rpcPost', function () {
         // Source-level: instrumenting per method is how the next added method silently
         // escapes the surface. Nothing in this class may POST around the choke point.
-        const SRC = fs.readFileSync(path.join(__dirname, '../../src/chain/blockchain_connector.js'), 'utf8')
-        const posts = SRC.match(/axios\.post\(/g) || []
+        // The class body can live in the entry file or be split across sibling part
+        // files (rpcPost's transport lives in blockchain_connector/rpc_transport.js),
+        // so every part is scanned along with the entry.
+        const entryPath = path.join(__dirname, '../../src/chain/blockchain_connector.js')
+        const partsDir = path.join(__dirname, '../../src/chain/blockchain_connector')
+        const sources = [fs.readFileSync(entryPath, 'utf8')]
+        if (fs.existsSync(partsDir)) {
+            for (const name of fs.readdirSync(partsDir)) {
+                if (name.endsWith('.js')) sources.push(fs.readFileSync(path.join(partsDir, name), 'utf8'))
+            }
+        }
+        const posts = sources.join('\n').match(/axios\.post\(/g) || []
         assert.strictEqual(posts.length, 1, 'axios.post must appear only inside rpcPost')
     })
 })
