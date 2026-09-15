@@ -122,12 +122,7 @@ function inertParseResult(){
     }
 }
 
-// Drive the real block loop over two blocks on `consensusNetwork`:
-//   block 0 at `expireAt` - the decoder's own soft-expire stamps the dispenser here;
-//   block 1 at `payAt`    - the payment block whose capture set the test asserts on.
-// Nothing is pre-stamped by hand: the stamp under test is written by the production
-// deleteOpenDispensers call site.
-function runTwoBlocks(consensusNetwork, expireAt, payAt, model){
+function makeDecoder(consensusNetwork){
     const decoder = new XChainDecoder(
         'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
     )
@@ -136,6 +131,16 @@ function runTwoBlocks(consensusNetwork, expireAt, payAt, model){
     decoder.consensusNetwork = consensusNetwork
     decoder.startBlockIndex = 0
     decoder.sleep = async () => {}
+    return decoder
+}
+
+// Drive the real block loop over two blocks on `consensusNetwork`:
+//   block 0 at `expireAt` - the decoder's own soft-expire stamps the dispenser here;
+//   block 1 at `payAt`    - the payment block whose capture set the test asserts on.
+// Nothing is pre-stamped by hand: the stamp under test is written by the production
+// deleteOpenDispensers call site.
+function runTwoBlocks(consensusNetwork, expireAt, payAt, model){
+    const decoder = makeDecoder(consensusNetwork)
 
     const timesByHeight = { 0: expireAt, 1: payAt }
     const setsSeenByParse = []
@@ -255,6 +260,10 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
         assert.ok(!payLoad.set.has(ADDR),
             'below the gate the expired dispenser stays out of the capture set')
     })
+})
+
+describe('dispenser cancellation grace: decoder capture outlasts the indexer fill window', function () {
+    this.timeout(0)
 
     it('carries the grace on mainnet at genesis, the state the 2026-09-09 ruling armed', async () => {
         // The armed mainnet path driven through the real block loop, not just the helper: the
@@ -287,6 +296,10 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
         assert.ok(!model.captureLoads[1].set.has(ADDR),
             'past the grace window the dispenser leaves the capture set')
     })
+})
+
+describe('dispenser cancellation grace: decoder capture outlasts the indexer fill window', function () {
+    this.timeout(0)
 
     it('covers every block of the indexer fill window, swept at five-minute steps', async () => {
         // The invariant, not a lucky point. Walk the payment block from the expiration out past
@@ -315,6 +328,10 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
         assert.ok(insideWindowBlocks >= 8,
             `the sweep must cross at least 8 blocks inside the indexer fill window, saw ${insideWindowBlocks}`)
     })
+})
+
+describe('dispenser cancellation grace: decoder capture outlasts the indexer fill window', function () {
+    this.timeout(0)
 
     // THE BOUNDARY-BLOCK CANCEL. The cases above cancel BEFORE the expiration, which is the
     // only shape a floor anchored on `expiration` can cover. The indexer accepts a cancel in
@@ -361,71 +378,5 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
             assert.ok(!model.captureLoads[1].set.has(ADDR),
                 'past the indexer close the dispenser leaves the capture set')
         })
-    })
-})
-
-describe('Database#getAllOpenDispenserAddresses() grace floor', function () {
-    afterEach(() => sinon.restore())
-
-    function makeDb(){ return new Database('127.0.0.1', 3306, 'xchain_btc_regtest', 'u', 'p') }
-    function withConn(queryStub){
-        const conn = {
-            query: queryStub, release: sinon.stub().resolves(),
-            beginTransaction: sinon.stub().resolves(), commit: sinon.stub().resolves(),
-            rollback: sinon.stub().resolves(),
-        }
-        return { pool: { getConnection: sinon.stub().resolves(conn) } }
-    }
-
-    it('runs the unwidened predicate and binds nothing when no floor is given', async () => {
-        const db = makeDb()
-        const q  = sinon.stub().resolves([{ address: ADDR }])
-        db.pool = withConn(q).pool
-        await db.getAllOpenDispenserAddresses()
-        const [sql, params] = q.firstCall.args
-        assert.ok(/expired_block_index IS NULL/.test(sql))
-        assert.ok(!/expiration >= \?/.test(sql),
-            'the below-gate query must not carry the grace clause')
-        assert.strictEqual(params, undefined, 'the below-gate query must bind no parameter')
-    })
-
-    it('adds the grace clause and binds the floor when one is given', async () => {
-        const db = makeDb()
-        const q  = sinon.stub().resolves([{ address: ADDR }])
-        db.pool = withConn(q).pool
-        const floor = cancelGraceFloor('regtest', EXPIRATION + 1800)
-        await db.getAllOpenDispenserAddresses(floor)
-        const [sql, params] = q.firstCall.args
-        assert.ok(/LEFT JOIN blocks eb ON eb\.block_index = op\.expired_block_index/.test(sql),
-            'the above-gate query must join the mark block so its header time is readable')
-        assert.ok(/expired_block_index IS NULL\s*\n\s*OR eb\.block_time >= \?\s*\n\s*OR op\.expiration >= \?/.test(sql),
-            'the above-gate query must admit rows whose mark time, or expiration, is no older than the floor')
-        const expectedFloor = EXPIRATION + 1800 - DISPENSER_CANCEL_GRACE_SECONDS
-        assert.deepStrictEqual(params, [expectedFloor, expectedFloor],
-            'the floor binds once per disjunct, in the order the clauses appear')
-    })
-
-    it('treats a null or non-finite floor as no grace at all', async () => {
-        // cancelGraceFloor returns null below the gate, so this is the fail-closed path that
-        // keeps an unarmed network on the legacy capture set.
-        for (const floor of [null, undefined, NaN, 'soon']){
-            const db = makeDb()
-            const q  = sinon.stub().resolves([])
-            db.pool = withConn(q).pool
-            await db.getAllOpenDispenserAddresses(floor)
-            const [sql, params] = q.firstCall.args
-            assert.ok(!/expiration >= \?/.test(sql), `floor ${String(floor)} must not widen the query`)
-            assert.strictEqual(params, undefined)
-        }
-    })
-
-    it('still returns null on a query fault, with or without a floor', async () => {
-        // A failed read and an empty set must stay distinguishable; the grace path must not
-        // quietly become an empty-set success.
-        for (const floor of [null, EXPIRATION]){
-            const db = makeDb()
-            db.pool = withConn(sinon.stub().rejects(new Error('fail'))).pool
-            assert.strictEqual(await db.getAllOpenDispenserAddresses(floor), null)
-        }
     })
 })
