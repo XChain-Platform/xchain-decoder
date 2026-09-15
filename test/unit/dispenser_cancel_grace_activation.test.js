@@ -122,6 +122,9 @@ describe('DISPENSER_CANCEL_GRACE_ACTIVATION conformance', function () {
         assert.strictEqual(DISPENSER_CANCEL_GRACE_ACTIVATION.mainnet, 0,
             'the map must be back to the genesis arm after the probe');
     });
+});
+
+describe('DISPENSER_CANCEL_GRACE_ACTIVATION conformance', function () {
 
     it('testnet and regtest are active from genesis', function () {
         assert.strictEqual(isDispenserCancelGraceActive('testnet', 0), true);
