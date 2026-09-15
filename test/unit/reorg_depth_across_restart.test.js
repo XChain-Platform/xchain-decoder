@@ -114,6 +114,9 @@ describe('verifyReorg: the safe-depth ceiling survives a lost halt marker', func
         assert.strictEqual(deleted.length, SAFE_DEPTH,
             'this is the resume the durable count exists to stop')
     })
+})
+
+describe('verifyReorg: the safe-depth ceiling survives a lost halt marker', function () {
 
     it('deletes nothing at all when the prior depth cannot be read', async function () {
         let attempts = 0
@@ -158,23 +161,22 @@ describe('verifyReorg: the safe-depth ceiling survives a lost halt marker', func
     })
 })
 
+// Answers the two queries the method makes, in order: the tip, then the scan.
+function dbWith(tipRows, eventRows) {
+    const db = new Database('127.0.0.1', 3306, 'xchain_btc_mainnet', 'u', 'p')
+    const query = sinon.stub().callsFake(async (sql) => {
+        if (/MAX\(block_index\)/.test(sql)) return tipRows
+        if (/code = 'REORG'/.test(sql))     return eventRows
+        throw new Error('unexpected query: ' + sql)
+    })
+    db.pool = { getConnection: sinon.stub().resolves({ query, release: sinon.stub().resolves() }) }
+    return { db, query }
+}
+
+const marker = (height) => ({ id: height, data: JSON.stringify([{ block_index: height, block_hash: 'bb' }]) })
+
 describe('Database#countReorgDeletesAboveTip()', function () {
-
     afterEach(() => sinon.restore())
-
-    // Answers the two queries the method makes, in order: the tip, then the scan.
-    function dbWith(tipRows, eventRows) {
-        const db = new Database('127.0.0.1', 3306, 'xchain_btc_mainnet', 'u', 'p')
-        const query = sinon.stub().callsFake(async (sql) => {
-            if (/MAX\(block_index\)/.test(sql)) return tipRows
-            if (/code = 'REORG'/.test(sql))     return eventRows
-            throw new Error('unexpected query: ' + sql)
-        })
-        db.pool = { getConnection: sinon.stub().resolves({ query, release: sinon.stub().resolves() }) }
-        return { db, query }
-    }
-
-    const marker = (height) => ({ id: height, data: JSON.stringify([{ block_index: height, block_hash: 'bb' }]) })
 
     it('counts only the marked heights above the current tip', async function () {
         const { db } = dbWith([{ max_height: 200n }], [marker(203), marker(202), marker(201), marker(199)])
@@ -196,6 +198,10 @@ describe('Database#countReorgDeletesAboveTip()', function () {
         const { db } = dbWith([{ max_height: 200n }], rows)
         assert.strictEqual(await db.countReorgDeletesAboveTip(), 2)
     })
+})
+
+describe('Database#countReorgDeletesAboveTip()', function () {
+    afterEach(() => sinon.restore())
 
     // "We could not tell" must never arrive at verifyReorg as "no prior rollback".
     it('THROWS on an unparseable marker payload', async function () {
@@ -212,6 +218,10 @@ describe('Database#countReorgDeletesAboveTip()', function () {
         const { db } = dbWith([{ max_height: 200n }], [{ id: 7, data: JSON.stringify([{ block_index: 'tip' }]) }])
         await assert.rejects(() => db.countReorgDeletesAboveTip(), /non-numeric block_index/)
     })
+})
+
+describe('Database#countReorgDeletesAboveTip()', function () {
+    afterEach(() => sinon.restore())
 
     it('bounds the scan, and refuses a nonsense bound rather than emitting it as SQL', async function () {
         const { db, query } = dbWith([{ max_height: 200n }], [])
