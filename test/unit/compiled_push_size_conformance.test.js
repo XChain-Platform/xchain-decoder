@@ -71,6 +71,9 @@ describe('compiled-push-size arbiter conformance', function () {
         assert.ok(pushSize(8190) > MAX);
         assert.strictEqual(bitcoin.script.compile([buf(8190)]).length, MAX + 1);
     });
+});
+
+describe('compiled-push-size arbiter conformance', function () {
 
     // CONFORMANCE: the encoder's emit-side helper must be the same function.
     // Skips when the sibling xchain-encoder is not checked out.
@@ -96,6 +99,16 @@ describe('compiled-push-size arbiter conformance', function () {
             const v = require(VALIDATOR);
             assert.strictEqual(v.MAX_COMPILED_ACTION_DATA_LENGTH, XChainDecoder.MAX_ACTION_DATA_LENGTH);
         });
+    });
+});
+
+describe('compiled-push-size arbiter conformance', function () {
+
+    describe('parity with the encoder compiledPushSize', function () {
+        const ENCODER = process.env.XCHAIN_ENCODER_DIR ||
+            path.join(__dirname, '..', '..', '..', 'xchain-encoder');
+        const VALIDATOR = path.join(ENCODER, 'src', 'common', 'validator.js');
+        before(function () { if (!fs.existsSync(VALIDATOR)) { if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-encoder sibling not found at ' + VALIDATOR + ' but XCHAIN_REQUIRE_SIBLINGS=1'); this.skip(); } });
 
         // The envelope band, which the sweep above cannot reach.
         //
@@ -126,6 +139,20 @@ describe('compiled-push-size arbiter conformance', function () {
                         `envelopePushSize(${n}) must equal bitcoin.script.compile length (${compiled})`);
                 }
             });
+        });
+    });
+});
+
+describe('compiled-push-size arbiter conformance', function () {
+
+    describe('parity with the encoder compiledPushSize', function () {
+        const ENCODER = process.env.XCHAIN_ENCODER_DIR ||
+            path.join(__dirname, '..', '..', '..', 'xchain-encoder');
+        const VALIDATOR = path.join(ENCODER, 'src', 'common', 'validator.js');
+        before(function () { if (!fs.existsSync(VALIDATOR)) { if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-encoder sibling not found at ' + VALIDATOR + ' but XCHAIN_REQUIRE_SIBLINGS=1'); this.skip(); } });
+
+        describe('envelope push band (0xffff .. ENVELOPE_MAX_PAYLOAD)', function () {
+            const BAND = [8192, 65534, 65535, 65536, 65537, 200000, 390000];
 
             it('the decoder helper under-counts by exactly 2 above 0xffff, and not below', function () {
                 const envelopePushSize = require(VALIDATOR).envelopePushSize;
@@ -152,6 +179,9 @@ describe('compiled-push-size arbiter conformance', function () {
             });
         });
     });
+});
+
+describe('compiled-push-size arbiter conformance', function () {
 
     // The OP_PUSHDATA2 overhead used to be a bare `+ 3` literal here, invisible to any
     // name-keyed cross-service drift check. The decoder now binds the canonical named
