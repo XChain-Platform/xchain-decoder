@@ -95,7 +95,12 @@ describe('endpoint chain-tier identity gate @regression', function () {
 describe('endpoint chain-tier identity gate @regression', function () {
 
     describe('the gate is wired into the block loop, not merely exported', function () {
-        const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder.js'), 'utf8');
+        // The block loop and verifyReorg live in parts beside the entry, so the gate
+        // sites are read from the entry and every part together.
+        const PARTS = path.join(__dirname, '..', '..', 'src', 'XChainDecoder');
+        const SRC = [path.join(__dirname, '..', '..', 'src', 'XChainDecoder.js')]
+            .concat(fs.readdirSync(PARTS).filter((f) => f.endsWith('.js')).sort().map((f) => path.join(PARTS, f)))
+            .map((p) => fs.readFileSync(p, 'utf8')).join('\n');
 
         it('XChainDecoder requires the module', function () {
             assert.ok(/require\('\.\/protocol\/chain_identity'\)/.test(SRC));

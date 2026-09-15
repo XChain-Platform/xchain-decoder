@@ -289,7 +289,7 @@ describe('registerDecoderMetrics() feed-freshness gauges', function () {
         // A per-block increment inside either delete branch would report one depth-5
         // reorg as five reorgs and destroy the frequency signal the counter exists for.
         // The branches need a live node to reach, so this is a source-level guard.
-        const source = fs.readFileSync(require.resolve('../../src/XChainDecoder.js'), 'utf-8');
+        const source = fs.readFileSync(require.resolve('../../src/XChainDecoder/reorg_verification.js'), 'utf-8');   // the part holds verifyReorg
         const increments = source.match(/this\.reorgCount\+\+/g) || [];
         assert.strictEqual(increments.length, 1, 'exactly one reorgCount increment site');
         assert.ok(
