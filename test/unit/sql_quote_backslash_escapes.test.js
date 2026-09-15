@@ -90,7 +90,9 @@ describe('SQL quote walkers honour backslash escapes @regression', function () {
         assert.strictEqual(stmts.length, 2);
         assert.ok(/^DROP\s+TABLE\b/i.test(stmts[1]));
     });
+});
 
+describe('SQL quote walkers honour backslash escapes @regression', function () {
     it('preserves a -- sequence inside a backslash-escaped literal instead of stripping it', function () {
         const raw = "INSERT INTO t (a) VALUES ('x" + BS + "' -- y');\nSELECT 1;\n";
         const out = stripComments(raw);
