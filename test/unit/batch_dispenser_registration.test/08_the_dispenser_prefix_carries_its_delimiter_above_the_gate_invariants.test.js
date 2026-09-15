@@ -16,7 +16,7 @@ const {
     assert,
     create,
     runOne,
-} = require('./support.js')
+} = require('./support/helpers.js')
 
 const renamed = (name, command) => name + command.slice(command.indexOf('|'))
 

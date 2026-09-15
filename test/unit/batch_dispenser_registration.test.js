@@ -50,7 +50,7 @@ const {
     refill,
     runAll,
     runOne,
-} = require('./batch_dispenser_registration.test/support.js')
+} = require('./batch_dispenser_registration.test/support/helpers.js')
 
 describe('BATCH dispenser registration', function () {
     this.timeout(0)

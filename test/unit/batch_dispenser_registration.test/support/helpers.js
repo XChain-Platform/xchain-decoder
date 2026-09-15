@@ -9,9 +9,9 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const XChainDecoder = require('../../../src/XChainDecoder')
+const XChainDecoder = require('../../../../src/XChainDecoder')
 const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
-        collapseDispenserRegistrations } = require('../../../src/protocol/batch_sub_command_capture.js')
+        collapseDispenserRegistrations } = require('../../../../src/protocol/batch_sub_command_capture.js')
 
 const PREV_WIRE = Buffer.from(
     '00112233445566778899aabbccddeeff0123456789abcdeffedcba9876543210',

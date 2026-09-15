@@ -19,7 +19,7 @@ const {
     refill,
     runAll,
     runOne,
-} = require('./support.js')
+} = require('./support/helpers.js')
 
 describe('BATCH dispenser registration', function () {
     this.timeout(0)

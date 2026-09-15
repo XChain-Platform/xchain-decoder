@@ -17,7 +17,7 @@ const {
     assert,
     create,
     runOne,
-} = require('./support.js')
+} = require('./support/helpers.js')
 
 const renamed = (name, command) => name + command.slice(command.indexOf('|'))
 const NEAR_MISS_NAMES = ['DISPENSERX', 'DISPENSERS', 'DISPENSER_CLOSE', 'DISPENSER_EXPIRE']

@@ -18,7 +18,7 @@ const {
     SOURCE,
     assert,
     collapseDispenserRegistrations,
-} = require('./support.js')
+} = require('./support/helpers.js')
 
 // The collapse itself, driven directly. Its inputs are already-validated creates, so these
 // pin the merge rule rather than the parsing.

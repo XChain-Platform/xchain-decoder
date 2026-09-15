@@ -40,7 +40,7 @@ const {
     create,
     rowFor,
     runOne,
-} = require('./support.js')
+} = require('./support/helpers.js')
 
 // Same field layout as `create`/`refill`, so the only thing that varies is the NAME.
 const renamed = (name, command) => name + command.slice(command.indexOf('|'))
