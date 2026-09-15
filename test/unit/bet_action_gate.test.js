@@ -83,6 +83,9 @@ describe('BET action-name gate', function () {
         // The bare name with no pipe is the same token and is still valid.
         assert.strictEqual(gate('BET').isKnown, true)
     })
+})
+
+describe('BET action-name gate', function () {
 
     it('a base64 DETAILS payload passes through byte-for-byte', function () {
         // DETAILS is the only field carrying + / and = on the wire. The gate
@@ -121,6 +124,9 @@ describe('BET action-name gate', function () {
         // The name gate is unaffected by size: it runs on the payload it is given.
         assert.strictEqual(gate(payload).isKnown, true)
     })
+})
+
+describe('BET action-name gate', function () {
 
     it('the DETAILS cap leaves room for a worst-case create on the same wire', function () {
         // The check that caught the original spec value. DETAILS is base64 on the
