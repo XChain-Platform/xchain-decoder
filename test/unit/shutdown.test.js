@@ -104,6 +104,11 @@ describe('graceful shutdown', function(){
             assert.strictEqual(calls, 1, 'drain must run exactly once');
             assert.deepStrictEqual(codes, [0]);
         });
+    });
+});
+
+describe('graceful shutdown', function(){
+    describe('createShutdown', function(){
 
         // The reason the handler is safe to install at all: registering one REMOVES
         // node's default terminate, so without this bound a hung drain turns every
@@ -142,6 +147,11 @@ describe('graceful shutdown', function(){
             timers.armed[0].fn();
             assert.deepStrictEqual(codes, [1], 'a cleared timer must not add a second exit');
         });
+    });
+});
+
+describe('graceful shutdown', function(){
+    describe('createShutdown', function(){
 
         it('does not fire the hard-exit timer after a clean drain', async function(){
             const codes  = [];
@@ -163,7 +173,9 @@ describe('graceful shutdown', function(){
             assert.deepStrictEqual(codes, [0], 'a cleared timer must not add a second exit');
         });
     });
+});
 
+describe('graceful shutdown', function(){
     describe('resolveTimeoutMs', function(){
         it('prefers an explicit budget, then the env var, then the default', function(){
             assert.strictEqual(resolveTimeoutMs(1234, {}), 1234);
@@ -206,7 +218,9 @@ describe('graceful shutdown', function(){
             assert.strictEqual(closes, 1);
         });
     });
+});
 
+describe('graceful shutdown', function(){
     describe('createDecoderDrain', function(){
 
         it('flips health, stops the decoder, drains the server and loop, then closes both pools', async function(){
@@ -257,6 +271,11 @@ describe('graceful shutdown', function(){
             await running;
             assert.strictEqual(decoder.db.closed, true);
         });
+    });
+});
+
+describe('graceful shutdown', function(){
+    describe('createDecoderDrain', function(){
 
         it('survives a rejected loop promise', async function(){
             const order   = [];
