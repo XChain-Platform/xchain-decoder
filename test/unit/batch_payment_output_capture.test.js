@@ -184,11 +184,182 @@ const TWO_SETTLEMENTS = [
     { destinationAddress: CHANGE,   vout: 2, amount: '5.00000000' },
 ]
 
+function batchedCoinpayCaptureTests() {
+    it('captures NOTHING below the gate (the live defect, preserved for replay)', async () => {
+        const decoder = await captureFor('BATCH|0|' + COINPAY_A, TWO_SETTLEMENTS,
+            BELOW_GATE, { feeDestination: null })
+        assert.deepStrictEqual(decoder.captured, [],
+            'pre-flag-day history must re-decode to the empty output set the fleet wrote')
+    })
+
+    it('captures its settlement outputs above the gate', async () => {
+        const decoder = await captureFor('BATCH|0|' + COINPAY_A, TWO_SETTLEMENTS,
+            ABOVE_GATE, { feeDestination: null })
+        assert.deepStrictEqual(addressesOf(decoder.captured),
+            [SELLER_A, SELLER_B, CHANGE].sort(),
+            'a batched COINPAY captures exactly what a top-level COINPAY captures')
+    })
+
+    it('captures the same set for several COINPAY sub-commands', async () => {
+        const decoder = await captureFor(
+            'BATCH|0|' + COINPAY_A + ';' + COINPAY_B, TWO_SETTLEMENTS,
+            ABOVE_GATE, { feeDestination: null })
+        assert.deepStrictEqual(addressesOf(decoder.captured),
+            [SELLER_A, SELLER_B, CHANGE].sort())
+    })
+
+    it('captures when the COINPAY is not the FIRST sub-command', async () => {
+        // The prefix strip only touches element 0, so a COINPAY anywhere in the list has
+        // to select capture.
+        const decoder = await captureFor(
+            'BATCH|0|SEND|0|BTC|TICK|1|' + SELLER_A + ';' + COINPAY_A, TWO_SETTLEMENTS,
+            ABOVE_GATE, { feeDestination: null })
+        assert.deepStrictEqual(addressesOf(decoder.captured),
+            [SELLER_A, SELLER_B, CHANGE].sort())
+    })
+}
+function batchedCoinpayEdgeTests() {
+    it('captures nothing extra for a batch with no COINPAY at all', async () => {
+        const decoder = await captureFor(
+            'BATCH|0|SEND|0|BTC|TICK|1|' + SELLER_A + ';ORDER|0|BTC|TICK|1|TICK2|2|100',
+            TWO_SETTLEMENTS, ABOVE_GATE, { feeDestination: null })
+        assert.deepStrictEqual(decoder.captured, [])
+    })
+
+    it('captures only the fee output for a non-settlement batch that pays the protocol fee', async () => {
+        // The feeDestination arm of the capture condition is untouched by this change:
+        // above the gate it still selects exactly the one fee output.
+        const outputs = [
+            { destinationAddress: FEE_DEST, vout: 0, amount: '0.00002000' },
+            { destinationAddress: CHANGE,   vout: 1, amount: '5.00000000' },
+        ]
+        const above = await captureFor('BATCH|0|SEND|0|BTC|TICK|1|' + SELLER_A, outputs, ABOVE_GATE)
+        assert.deepStrictEqual(addressesOf(above.captured), [FEE_DEST])
+        const below = await captureFor('BATCH|0|SEND|0|BTC|TICK|1|' + SELLER_A, outputs, BELOW_GATE)
+        assert.deepStrictEqual(addressesOf(below.captured), [FEE_DEST],
+            'the fee-output arm behaves identically on both sides of the gate')
+    })
+
+    it('captures nothing for a batch whose FORMAT prefix the indexer would not strip', async () => {
+        // 'BATCH||...' leaves element 0's action as BATCH, which actionLimits rejects
+        // whole-batch, so no COINPAY sub-command ever executes and capturing for one
+        // would persist outputs no node acts on.
+        const decoder = await captureFor('BATCH||' + COINPAY_A, TWO_SETTLEMENTS,
+            ABOVE_GATE, { feeDestination: null })
+        assert.deepStrictEqual(decoder.captured, [])
+    })
+}
+
+function registerBatchedCoinpayTests() {
+    describe('batched COINPAY', batchedCoinpayCaptureTests)
+    describe('batched COINPAY', batchedCoinpayEdgeTests)
+}
+
+const oracleOutputs = [
+    { destinationAddress: ORACLE_A, vout: 0, amount: '0.00001000' },
+    { destinationAddress: CHANGE,   vout: 1, amount: '1.00000000' },
+]
+
+function oracleFeeCaptureTests() {
+    it('captures NOTHING below the gate, even with the oracle gate itself on', async () => {
+        const decoder = await captureFor('BATCH|0|' + createWith(ORACLE_A), oracleOutputs,
+            ORACLE_ON_BATCH_OFF, { feeDestination: null })
+        assert.deepStrictEqual(decoder.captured, [],
+            'the oracle gate being armed must not leak the batch view in below its own gate')
+    })
+
+    it('captures the oracle-fee output of a batched v0 Mode B create above the gate', async () => {
+        const decoder = await captureFor('BATCH|0|' + createWith(ORACLE_A), oracleOutputs,
+            ABOVE_GATE, { feeDestination: null })
+        assert.deepStrictEqual(addressesOf(decoder.captured), [ORACLE_A],
+            'exactly the oracle-fee output is persisted (the change output is not)')
+        assert.strictEqual(decoder.captured[0].amount, '0.00001000')
+    })
+
+    it('captures the UNION of every DISPENSER sub-command oracle', async () => {
+        // Each DISPENSER sub-command is dispatched independently and pays its own oracle,
+        // so one batch can owe two operators and both outputs must be capturable.
+        const decoder = await captureFor(
+            'BATCH|0|' + createWith(ORACLE_A) + ';' + createWith(ORACLE_B),
+            [
+                { destinationAddress: ORACLE_A, vout: 0, amount: '0.00001000' },
+                { destinationAddress: ORACLE_B, vout: 1, amount: '0.00002000' },
+                { destinationAddress: CHANGE,   vout: 2, amount: '1.00000000' },
+            ],
+            ABOVE_GATE, { feeDestination: null })
+        assert.deepStrictEqual(addressesOf(decoder.captured), [ORACLE_A, ORACLE_B].sort())
+    })
+}
+
+function oracleFeeStateTests() {
+    it('resolves a batched v2 refill against the open dispenser registered by SOURCE', async () => {
+        const model = new DispenserModel()
+        const decoder = buildDecoder([
+            { id: 'create01', action: createWith(ORACLE_A), source: SOURCE, outputs: [] },
+            { id: 'refill01', action: 'BATCH|0|' + REFILL, source: SOURCE,
+              outputs: [{ destinationAddress: ORACLE_A, vout: 0, amount: '0.00000600' }] },
+        ], model, Object.assign({ feeDestination: null }, ABOVE_GATE))
+
+        await decoder.start()
+
+        assert.strictEqual(model.rows.length, 1, 'the top-level create registered an open dispenser')
+        assert.deepStrictEqual(addressesOf(decoder.captured), [ORACLE_A])
+        assert.strictEqual(decoder.captured[0].amount, '0.00000600')
+    })
+
+    it('issues ONE oracle lookup for a batch of many v2 refills', async () => {
+        // A v2 payload resolves purely from SOURCE, so all of them resolve identically.
+        // Without the cache a 250-command batch would fire 250 identical queries inside
+        // the block loop.
+        const model = new DispenserModel()
+        const decoder = buildDecoder([
+            { id: 'create01', action: createWith(ORACLE_A), source: SOURCE, outputs: [] },
+            { id: 'refill01', action: 'BATCH|0|' + [REFILL, REFILL, REFILL, REFILL].join(';'),
+              source: SOURCE,
+              outputs: [{ destinationAddress: ORACLE_A, vout: 0, amount: '0.00000600' }] },
+        ], model, Object.assign({ feeDestination: null }, ABOVE_GATE))
+
+        await decoder.start()
+
+        assert.strictEqual(model.lookups, 1,
+            'four v2 sub-commands share one resolution')
+        assert.deepStrictEqual(addressesOf(decoder.captured), [ORACLE_A])
+    })
+}
+function oracleFeeRetryTests() {
+    it('retries the block when a batched refill lookup faults, rather than capturing less', async () => {
+        // A deterministic DB fault must never quietly persist a smaller output set than a
+        // healthy node would; the loop rolls the block back instead.
+        const model = new DispenserModel()
+        let attempts = 0
+        const decoder = buildDecoder([
+            { id: 'create01', action: createWith(ORACLE_A), source: SOURCE, outputs: [] },
+            { id: 'refill01', action: 'BATCH|0|' + REFILL, source: SOURCE,
+              outputs: [{ destinationAddress: ORACLE_A, vout: 0, amount: '0.00000600' }] },
+        ], model, Object.assign({
+            feeDestination: null,
+            // regtest is genesis-on for set capture, so the accessor returns a LIST.
+            oracleLookup: async () => { attempts++; return attempts === 1 ? false : [ORACLE_A] },
+        }, ABOVE_GATE))
+
+        await decoder.start()
+
+        assert.ok(attempts >= 2, 'the faulted block was retried')
+        assert.deepStrictEqual(addressesOf(decoder.captured), [ORACLE_A],
+            'the retry captures what a healthy node captures')
+    })
+}
+
+function registerOracleFeeTests() {
+    describe('batched DISPENSER oracle-fee outputs', oracleFeeCaptureTests)
+    describe('batched DISPENSER oracle-fee outputs', oracleFeeStateTests)
+    describe('batched DISPENSER oracle-fee outputs', oracleFeeRetryTests)
+}
+
 describe('BATCH payment-output capture', function () {
     this.timeout(0)
 
     describe('top-level COINPAY is untouched on both sides of the gate', function () {
-
         it('captures every native-coin output above the gate, exactly as before', async () => {
             const decoder = await captureFor(COINPAY_A, TWO_SETTLEMENTS, ABOVE_GATE,
                 { feeDestination: null })
@@ -216,163 +387,14 @@ describe('BATCH payment-output capture', function () {
             assert.strictEqual(byAddress[SELLER_B].amount, '2.00000000')
         })
     })
+})
 
-    describe('batched COINPAY', function () {
+describe('BATCH payment-output capture', function () {
+    this.timeout(0)
+    registerBatchedCoinpayTests()
+})
 
-        it('captures NOTHING below the gate (the live defect, preserved for replay)', async () => {
-            const decoder = await captureFor('BATCH|0|' + COINPAY_A, TWO_SETTLEMENTS,
-                BELOW_GATE, { feeDestination: null })
-            assert.deepStrictEqual(decoder.captured, [],
-                'pre-flag-day history must re-decode to the empty output set the fleet wrote')
-        })
-
-        it('captures its settlement outputs above the gate', async () => {
-            const decoder = await captureFor('BATCH|0|' + COINPAY_A, TWO_SETTLEMENTS,
-                ABOVE_GATE, { feeDestination: null })
-            assert.deepStrictEqual(addressesOf(decoder.captured),
-                [SELLER_A, SELLER_B, CHANGE].sort(),
-                'a batched COINPAY captures exactly what a top-level COINPAY captures')
-        })
-
-        it('captures the same set for several COINPAY sub-commands', async () => {
-            const decoder = await captureFor(
-                'BATCH|0|' + COINPAY_A + ';' + COINPAY_B, TWO_SETTLEMENTS,
-                ABOVE_GATE, { feeDestination: null })
-            assert.deepStrictEqual(addressesOf(decoder.captured),
-                [SELLER_A, SELLER_B, CHANGE].sort())
-        })
-
-        it('captures when the COINPAY is not the FIRST sub-command', async () => {
-            // The prefix strip only touches element 0, so a COINPAY anywhere in the list has
-            // to select capture.
-            const decoder = await captureFor(
-                'BATCH|0|SEND|0|BTC|TICK|1|' + SELLER_A + ';' + COINPAY_A, TWO_SETTLEMENTS,
-                ABOVE_GATE, { feeDestination: null })
-            assert.deepStrictEqual(addressesOf(decoder.captured),
-                [SELLER_A, SELLER_B, CHANGE].sort())
-        })
-
-        it('captures nothing extra for a batch with no COINPAY at all', async () => {
-            const decoder = await captureFor(
-                'BATCH|0|SEND|0|BTC|TICK|1|' + SELLER_A + ';ORDER|0|BTC|TICK|1|TICK2|2|100',
-                TWO_SETTLEMENTS, ABOVE_GATE, { feeDestination: null })
-            assert.deepStrictEqual(decoder.captured, [])
-        })
-
-        it('captures only the fee output for a non-settlement batch that pays the protocol fee', async () => {
-            // The feeDestination arm of the capture condition is untouched by this change:
-            // above the gate it still selects exactly the one fee output.
-            const outputs = [
-                { destinationAddress: FEE_DEST, vout: 0, amount: '0.00002000' },
-                { destinationAddress: CHANGE,   vout: 1, amount: '5.00000000' },
-            ]
-            const above = await captureFor('BATCH|0|SEND|0|BTC|TICK|1|' + SELLER_A, outputs, ABOVE_GATE)
-            assert.deepStrictEqual(addressesOf(above.captured), [FEE_DEST])
-            const below = await captureFor('BATCH|0|SEND|0|BTC|TICK|1|' + SELLER_A, outputs, BELOW_GATE)
-            assert.deepStrictEqual(addressesOf(below.captured), [FEE_DEST],
-                'the fee-output arm behaves identically on both sides of the gate')
-        })
-
-        it('captures nothing for a batch whose FORMAT prefix the indexer would not strip', async () => {
-            // 'BATCH||...' leaves element 0's action as BATCH, which actionLimits rejects
-            // whole-batch, so no COINPAY sub-command ever executes and capturing for one
-            // would persist outputs no node acts on.
-            const decoder = await captureFor('BATCH||' + COINPAY_A, TWO_SETTLEMENTS,
-                ABOVE_GATE, { feeDestination: null })
-            assert.deepStrictEqual(decoder.captured, [])
-        })
-    })
-
-    describe('batched DISPENSER oracle-fee outputs', function () {
-
-        const oracleOutputs = [
-            { destinationAddress: ORACLE_A, vout: 0, amount: '0.00001000' },
-            { destinationAddress: CHANGE,   vout: 1, amount: '1.00000000' },
-        ]
-
-        it('captures NOTHING below the gate, even with the oracle gate itself on', async () => {
-            const decoder = await captureFor('BATCH|0|' + createWith(ORACLE_A), oracleOutputs,
-                ORACLE_ON_BATCH_OFF, { feeDestination: null })
-            assert.deepStrictEqual(decoder.captured, [],
-                'the oracle gate being armed must not leak the batch view in below its own gate')
-        })
-
-        it('captures the oracle-fee output of a batched v0 Mode B create above the gate', async () => {
-            const decoder = await captureFor('BATCH|0|' + createWith(ORACLE_A), oracleOutputs,
-                ABOVE_GATE, { feeDestination: null })
-            assert.deepStrictEqual(addressesOf(decoder.captured), [ORACLE_A],
-                'exactly the oracle-fee output is persisted (the change output is not)')
-            assert.strictEqual(decoder.captured[0].amount, '0.00001000')
-        })
-
-        it('captures the UNION of every DISPENSER sub-command oracle', async () => {
-            // Each DISPENSER sub-command is dispatched independently and pays its own oracle,
-            // so one batch can owe two operators and both outputs must be capturable.
-            const decoder = await captureFor(
-                'BATCH|0|' + createWith(ORACLE_A) + ';' + createWith(ORACLE_B),
-                [
-                    { destinationAddress: ORACLE_A, vout: 0, amount: '0.00001000' },
-                    { destinationAddress: ORACLE_B, vout: 1, amount: '0.00002000' },
-                    { destinationAddress: CHANGE,   vout: 2, amount: '1.00000000' },
-                ],
-                ABOVE_GATE, { feeDestination: null })
-            assert.deepStrictEqual(addressesOf(decoder.captured), [ORACLE_A, ORACLE_B].sort())
-        })
-
-        it('resolves a batched v2 refill against the open dispenser registered by SOURCE', async () => {
-            const model = new DispenserModel()
-            const decoder = buildDecoder([
-                { id: 'create01', action: createWith(ORACLE_A), source: SOURCE, outputs: [] },
-                { id: 'refill01', action: 'BATCH|0|' + REFILL, source: SOURCE,
-                  outputs: [{ destinationAddress: ORACLE_A, vout: 0, amount: '0.00000600' }] },
-            ], model, Object.assign({ feeDestination: null }, ABOVE_GATE))
-
-            await decoder.start()
-
-            assert.strictEqual(model.rows.length, 1, 'the top-level create registered an open dispenser')
-            assert.deepStrictEqual(addressesOf(decoder.captured), [ORACLE_A])
-            assert.strictEqual(decoder.captured[0].amount, '0.00000600')
-        })
-
-        it('issues ONE oracle lookup for a batch of many v2 refills', async () => {
-            // A v2 payload resolves purely from SOURCE, so all of them resolve identically.
-            // Without the cache a 250-command batch would fire 250 identical queries inside
-            // the block loop.
-            const model = new DispenserModel()
-            const decoder = buildDecoder([
-                { id: 'create01', action: createWith(ORACLE_A), source: SOURCE, outputs: [] },
-                { id: 'refill01', action: 'BATCH|0|' + [REFILL, REFILL, REFILL, REFILL].join(';'),
-                  source: SOURCE,
-                  outputs: [{ destinationAddress: ORACLE_A, vout: 0, amount: '0.00000600' }] },
-            ], model, Object.assign({ feeDestination: null }, ABOVE_GATE))
-
-            await decoder.start()
-
-            assert.strictEqual(model.lookups, 1,
-                'four v2 sub-commands share one resolution')
-            assert.deepStrictEqual(addressesOf(decoder.captured), [ORACLE_A])
-        })
-
-        it('retries the block when a batched refill lookup faults, rather than capturing less', async () => {
-            // A deterministic DB fault must never quietly persist a smaller output set than a
-            // healthy node would; the loop rolls the block back instead.
-            const model = new DispenserModel()
-            let attempts = 0
-            const decoder = buildDecoder([
-                { id: 'create01', action: createWith(ORACLE_A), source: SOURCE, outputs: [] },
-                { id: 'refill01', action: 'BATCH|0|' + REFILL, source: SOURCE,
-                  outputs: [{ destinationAddress: ORACLE_A, vout: 0, amount: '0.00000600' }] },
-            ], model, Object.assign({
-                feeDestination: null,
-                // regtest is genesis-on for set capture, so the accessor returns a LIST.
-                oracleLookup: async () => { attempts++; return attempts === 1 ? false : [ORACLE_A] },
-            }, ABOVE_GATE))
-
-            await decoder.start()
-
-            assert.ok(attempts >= 2, 'the faulted block was retried')
-            assert.deepStrictEqual(addressesOf(decoder.captured), [ORACLE_A],
-                'the retry captures what a healthy node captures')
-        })
-    })
+describe('BATCH payment-output capture', function () {
+    this.timeout(0)
+    registerOracleFeeTests()
 })
