@@ -105,6 +105,9 @@ describe('DISPENSER_EXPIRY_REALIGN_ACTIVATION conformance', function () {
         assert.strictEqual(DISPENSER_EXPIRY_REALIGN_ACTIVATION.mainnet, 0,
             'the map must be back to the genesis arm after the probe');
     });
+});
+
+describe('DISPENSER_EXPIRY_REALIGN_ACTIVATION conformance', function () {
 
     it('testnet is active from genesis, so the launch runs the realigned path', function () {
         assert.strictEqual(isDispenserExpiryRealignActive('testnet', 0), true);
