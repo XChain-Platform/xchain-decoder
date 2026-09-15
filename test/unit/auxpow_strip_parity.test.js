@@ -39,7 +39,10 @@ const {
     skipAuxPow,
 } = require('../../src/chain/blockchain_connector')
 
-const LOCAL_FILE = path.join(__dirname, '../../src/chain/blockchain_connector.js')
+// The strip primitives live in the auxpow_codec.js part beside the entry
+// (extracted from blockchain_connector.js), still as plain top-level
+// function declarations with their Keep-in-sync comments intact.
+const LOCAL_FILE = path.join(__dirname, '../../src/chain/blockchain_connector/auxpow_codec.js')
 const TRACKER_DIR = process.env.XCHAIN_UTXO_TRACKER_DIR ||
     path.join(__dirname, '..', '..', '..', 'xchain-utxo-tracker')
 const TWIN_FILE = path.join(TRACKER_DIR, 'src', 'chain', 'blockchain_connector.js')
@@ -91,10 +94,34 @@ const AUXPOW_TAIL =
     'cc'.repeat(80)
 const AUXPOW_SECTION = COINBASE + AUXPOW_TAIL
 
+// A 60-line function cap split skipAuxPow's coinbase-transaction-skipping block out
+// into skipCoinbaseTransaction, a pure in-file, behavior-preserving extraction local
+// to this repo (the twin has no such cap and keeps the block inline). That makes
+// skipAuxPow's own text legitimately differ from the twin's, so its comparison below
+// re-inlines the extracted helper first, reconstructing exactly the text the twin
+// still carries; every other shared function is untouched by the split and stays a
+// plain byte-for-byte comparison.
+function reinlineSkipCoinbaseTransaction(source) {
+    // Body already opens with `let offset = start` (skipCoinbaseTransaction's own
+    // first statement), so it drops straight into skipAuxPow's variable in place of
+    // the call; its final `return EXPR` becomes the plain assignment the pre-split
+    // inline code made, comment (if any) preserved.
+    const helperBody = extractFunction(source, 'skipCoinbaseTransaction')
+        .split('\n').slice(1, -1) // drop the `function skipCoinbaseTransaction(buf, start) {` / `}` lines
+        .map((line) => line.replace(/^(\s*)return (offset \+ 4)(\s*(\/\/.*)?)$/, '$1offset += 4$3'))
+        .join('\n')
+    return source.replace(
+        /^\s*let offset = skipCoinbaseTransaction\(buf, start\)$/m,
+        helperBody)
+}
+
 describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function () {
 
     describe('cross-repo byte identity [REGRESSION P1]', function () {
         const localSource = fs.readFileSync(LOCAL_FILE, 'utf8')
+        const localSourceForCompare = fs.existsSync(LOCAL_FILE) && localSource.includes('skipCoinbaseTransaction')
+            ? reinlineSkipCoinbaseTransaction(localSource)
+            : localSource
 
         before(function () {
             if (!TWIN_PRESENT) {
@@ -111,7 +138,7 @@ describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function ()
             it(`${name} is byte-identical in both repos`, function () {
                 const twinSource = fs.readFileSync(TWIN_FILE, 'utf8')
                 assert.strictEqual(
-                    extractFunction(localSource, name),
+                    extractFunction(localSourceForCompare, name),
                     extractFunction(twinSource, name),
                     `${name} has drifted between xchain-decoder and xchain-utxo-tracker; ` +
                     'apply the change to both copies')
