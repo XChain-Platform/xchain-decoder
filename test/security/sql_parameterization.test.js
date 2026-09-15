@@ -46,6 +46,11 @@ describe('Security: SQL Parameterization', () => {
             }, /Invalid database name/)
         })
 
+    })
+})
+
+describe('Security: SQL Parameterization', () => {
+    describe('Database name validation', () => {
         it('should reject a database name with parentheses', () => {
             assert.throws(() => {
                 new Database('localhost', 3306, 'db()', 'root', '')
@@ -76,6 +81,9 @@ describe('Security: SQL Parameterization', () => {
             }, /Invalid database name/)
         })
     })
+})
+
+describe('Security: SQL Parameterization', () => {
 
     // --- SEC-01: deleteAndCompareTxsNotInList parameterization ---
 
