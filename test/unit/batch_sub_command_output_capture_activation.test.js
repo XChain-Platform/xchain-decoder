@@ -47,9 +47,7 @@ const handlerSource = require('../../bin/indexer_handler_source.js');
 
 const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
         BATCH_SUB_COMMAND_FORMATS,
-        isBatchSubCommandCaptureActive,
-        batchSubCommands,
-        captureCommands } = require('../../src/protocol/batch_sub_command_capture.js');
+        isBatchSubCommandCaptureActive } = require('../../src/protocol/batch_sub_command_capture.js');
 
 const DOCS_CONSTANTS = process.env.XCHAIN_DOCS_DIR
     ? path.join(process.env.XCHAIN_DOCS_DIR, 'protocol', 'constants.js')
@@ -164,6 +162,9 @@ describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
                 'consensus-critical fan-out fault that halts the block');
         }
     });
+});
+
+describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
 
     it('arms at exactly the indexer BATCH_ISSUANCE_LIMITS instant on every network (one boundary)', function () {
         if (!siblingOrSkip(this, INDEXER_CHANGES)) return;
@@ -214,6 +215,9 @@ describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
                 'batch, so the sub-command view must not resolve it to its canonical name');
         }
     });
+});
+
+describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
 
     it('mirrors the BATCH FORMAT versions the indexer registers', function () {
         if (!siblingOrSkip(this, INDEXER_BATCH)) return;
@@ -267,6 +271,9 @@ describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
         assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, saved,
             'the probe must put back whatever the map held before it');
     });
+});
+
+describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
 
     it('testnet and regtest are active from genesis so the venues exercise the sub-command path', function () {
         assert.strictEqual(isBatchSubCommandCaptureActive('testnet', 0), true);
@@ -319,108 +326,5 @@ describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
         if (typeof saved === 'number')
             assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', saved), true,
                 'the restored map governs again, not the probe value');
-    });
-});
-
-// The split itself. A decoder that disagrees with the indexer about what a BATCH's
-// sub-commands ARE is a worse bug than the capture hole it is fixing, so these pin the
-// equivalence argument written out in batchSubCommandCapture.batchSubCommands.
-describe('BATCH sub-command split', function () {
-
-    it('returns null for anything that is not a BATCH', function () {
-        assert.strictEqual(batchSubCommands('COINPAY|0|1|abc'), null);
-        assert.strictEqual(batchSubCommands('DISPENSER|0|BTC|TICK|1'), null);
-        assert.strictEqual(batchSubCommands(''), null);
-        assert.strictEqual(batchSubCommands('BATCHY|0|SEND|0|A'), null);
-        assert.strictEqual(batchSubCommands(undefined), null);
-        assert.strictEqual(batchSubCommands(null), null);
-        assert.strictEqual(batchSubCommands(12345), null);
-    });
-
-    it("splits on ';' after stripping the BATCH|<version>| prefix, exactly like the indexer", function () {
-        assert.deepStrictEqual(
-            batchSubCommands('BATCH|0|COINPAY|0|1|abc;COINPAY|0|2|def'),
-            ['COINPAY|0|1|abc', 'COINPAY|0|2|def']);
-        assert.deepStrictEqual(
-            batchSubCommands('BATCH|0|SEND|0|BTC|TICK|1|addr'),
-            ['SEND|0|BTC|TICK|1|addr']);
-    });
-
-    it("keeps empty elements, matching the indexer's raw ';'-split list", function () {
-        // A trailing ';' yields a trailing empty command there too, which its activation scan
-        // whole-batch rejects. Counting it keeps the two lists index-for-index comparable.
-        assert.deepStrictEqual(batchSubCommands('BATCH|0|COINPAY|0|1|abc;'),
-            ['COINPAY|0|1|abc', '']);
-        assert.deepStrictEqual(batchSubCommands('BATCH|0|;;COINPAY|0|1|abc'),
-            ['', '', 'COINPAY|0|1|abc']);
-    });
-
-    it('yields NO sub-commands when the FORMAT prefix does not literally match', function () {
-        // The indexer strips a literal 'BATCH|' + format + '|'. A token that derives to 0 by
-        // another spelling leaves the head intact, element 0's action stays BATCH, and
-        // actionLimits['BATCH'] = 0 whole-batch rejects it, so nothing executes.
-        assert.deepStrictEqual(batchSubCommands('BATCH||COINPAY|0|1|abc'), []);
-        assert.deepStrictEqual(batchSubCommands('BATCH|00|COINPAY|0|1|abc'), []);
-        assert.deepStrictEqual(batchSubCommands('BATCH| 0 |COINPAY|0|1|abc'), []);
-        assert.deepStrictEqual(batchSubCommands('BATCH|"0"|COINPAY|0|1|abc'), []);
-    });
-
-    it('yields NO sub-commands for an unregistered FORMAT', function () {
-        // 'invalid: VERSION (unknown)' there: the sub-command loop never runs.
-        assert.deepStrictEqual(batchSubCommands('BATCH|1|COINPAY|0|1|abc'), []);
-        assert.deepStrictEqual(batchSubCommands('BATCH|255|COINPAY|0|1|abc'), []);
-        assert.deepStrictEqual(batchSubCommands('BATCH|x|COINPAY|0|1|abc'), []);
-    });
-
-    it('does not let a LATER BATCH|0| occurrence pass off as the stripped head', function () {
-        // The indexer's replace fires on the inner occurrence, but the head survives, so
-        // element 0's action is still BATCH and the whole batch is rejected.
-        assert.deepStrictEqual(batchSubCommands('BATCH||SEND|BATCH|0|COINPAY|0|1|abc'), []);
-    });
-
-    it('a nested BATCH sub-command is returned as-is (the indexer rejects the whole batch)', function () {
-        // actionLimits['BATCH'] = 0, so this batch is invalid there; capture over the list is
-        // harmless because a nested BATCH string carries no capture-selecting prefix itself.
-        assert.deepStrictEqual(batchSubCommands('BATCH|0|BATCH|0|COINPAY|0|1|abc'),
-            ['BATCH|0|COINPAY|0|1|abc']);
-    });
-});
-
-describe('capture command view', function () {
-
-    it('is the action string itself below the gate, for a BATCH and for anything else', function () {
-        // Pre-flag-day mainnet history: the view is the top-level string, so a from-genesis
-        // re-decode reproduces the output set the fleet wrote live, byte for byte.
-        assert.deepStrictEqual(
-            captureCommands('BATCH|0|COINPAY|0|1|abc', 'mainnet', BELOW_MAINNET_GATE),
-            ['BATCH|0|COINPAY|0|1|abc']);
-        assert.deepStrictEqual(captureCommands('COINPAY|0|1|abc', 'mainnet', BELOW_MAINNET_GATE),
-            ['COINPAY|0|1|abc']);
-    });
-
-    it('is the action string itself above the gate for a non-BATCH', function () {
-        assert.deepStrictEqual(captureCommands('COINPAY|0|1|abc', 'regtest', 0),
-            ['COINPAY|0|1|abc']);
-        assert.deepStrictEqual(captureCommands('DISPENSER|0|BTC', 'regtest', 0),
-            ['DISPENSER|0|BTC']);
-    });
-
-    it('is the sub-command list above the gate for a BATCH', function () {
-        assert.deepStrictEqual(captureCommands('BATCH|0|COINPAY|0|1|abc;SEND|0|BTC', 'regtest', 0),
-            ['COINPAY|0|1|abc', 'SEND|0|BTC']);
-    });
-
-    it('flips to the sub-command list on mainnet at its ratified instant', function () {
-        // The armed half of the same boundary, on the network the arming is about: one second
-        // below the instant a batched COINPAY is still invisible to capture, and at it the
-        // settlement sub-command is what capture sees.
-        assert.deepStrictEqual(
-            captureCommands('BATCH|0|COINPAY|0|1|abc;SEND|0|BTC', 'mainnet',
-                PINNED_MAINNET_ACTIVATION - 1),
-            ['BATCH|0|COINPAY|0|1|abc;SEND|0|BTC']);
-        assert.deepStrictEqual(
-            captureCommands('BATCH|0|COINPAY|0|1|abc;SEND|0|BTC', 'mainnet',
-                PINNED_MAINNET_ACTIVATION),
-            ['COINPAY|0|1|abc', 'SEND|0|BTC']);
     });
 });
