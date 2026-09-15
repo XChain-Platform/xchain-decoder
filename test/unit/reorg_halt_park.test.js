@@ -315,7 +315,9 @@ describe('a park is not a wedge, and a SIGTERM during one still drains', functio
 })
 
 describe('the park rides every health payload', function () {
+    // The /live route lives in the probe_routes part, so the payload sites span both files.
     const API = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'api.js'), 'utf8')
+        + fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'api', 'probe_routes.js'), 'utf8')
 
     it('publishes reorg_halt_parked on /live, the JSON-RPC health method and /status', function () {
         const sites = API.match(/reorg_halt_parked:/g) || []

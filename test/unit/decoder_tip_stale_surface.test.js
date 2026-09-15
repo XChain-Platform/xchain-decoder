@@ -385,8 +385,8 @@ describe('/live reports the stale tip without gating on it', function () {
 });
 describe('/live reports the stale tip without gating on it', function () {
     it('is wired into the real /live handler with the healthy gate untouched', function () {
-        const source = fs.readFileSync(require.resolve('../../src/api.js'), 'utf-8');
-        const live = source.slice(source.indexOf("app.get('/live'"));
+        const source = fs.readFileSync(require.resolve('../../src/api/probe_routes.js'), 'utf-8');
+        const live = source.slice(source.indexOf('// GET /live'));   // the part is the /live route
         assert.ok(
             /node_height_stale: syncStatus\.node_height_stale === true/.test(live),
             '/live must forward the already-computed staleness flag'

@@ -197,7 +197,9 @@ describe('the IBD wait is published as node_catching_up', function () {
     })
 })
 
+// The /live route lives in the probe_routes part, so the payload sites span both files.
 const API = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'api.js'), 'utf8')
+    + fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'api', 'probe_routes.js'), 'utf8')
 
 function liveApp(decoder, running = true){
     const app = express()
