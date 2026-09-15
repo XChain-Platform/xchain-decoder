@@ -49,6 +49,59 @@ const DECODER_COUNTERS = [
     ['reorgs_total',       'Reorgs this decoder has rolled back since process start']
 ];
 
+function collectDecoderMetrics(decoder, gauges, counters) {
+    const status = typeof decoder.getSyncStatus === 'function' ? decoder.getSyncStatus() : {};
+    setIf(gauges.last_processed_block, status.last_processed_block);
+    setIf(gauges.node_height,          status.node_height);
+    setIf(gauges.block_lag,            status.lag);
+
+    if (decoder.blockchainInfoLastRefreshAt > 0) {
+        setIf(gauges.last_tip_poll_timestamp_seconds, decoder.blockchainInfoLastRefreshAt / 1000);
+    }
+    if (decoder.lastAdvanceAt > 0) {
+        setIf(gauges.last_block_advance_timestamp_seconds, decoder.lastAdvanceAt / 1000);
+    }
+    if (typeof decoder.nodeTipAgeSeconds === 'function') {
+        setIf(gauges.tip_age_seconds, decoder.nodeTipAgeSeconds());
+    }
+    if (typeof decoder.isNodeHeightStale === 'function') {
+        gauges.node_height_stale.set({}, decoder.isNodeHeightStale() ? 1 : 0);
+    }
+    if (typeof decoder.isSynced === 'function')  gauges.synced.set({},  decoder.isSynced()  ? 1 : 0);
+    if (typeof decoder.isStalled === 'function') gauges.stalled.set({}, decoder.isStalled() ? 1 : 0);
+
+    // The dead-loop signal `stalled` is structurally blind to: isStalled() reports
+    // chain progress, which a caught-up decoder makes none of while perfectly
+    // healthy, so a loop that dies while caught up leaves stalled 0 forever. /live
+    // gates health on this one alongside stalled (api.js registerLiveRoute); a
+    // metrics-only deployment saw neither until now. Boolean always emits, matching
+    // isPollSilent()'s own "0 means not silent" answer before the first iteration;
+    // the timestamp stays absent until then, since 0 would read as 1970.
+    if (typeof decoder.isPollSilent === 'function') {
+        gauges.poll_silent.set({}, decoder.isPollSilent() ? 1 : 0);
+    }
+    if (decoder.lastPollAt > 0) {
+        setIf(gauges.last_poll_timestamp_seconds, decoder.lastPollAt / 1000);
+    }
+
+    // setMonotonic, not inc: these mirror lifetime counters the decoder already
+    // keeps, and a re-read must not double-count what the last scrape saw.
+    const rpcErrors = (decoder.rpcErrors || 0) + ((decoder.connector && decoder.connector.rpcErrors) || 0);
+    counters.rpc_errors_total.setMonotonic({}, rpcErrors);
+    counters.parse_errors_total.setMonotonic({}, decoder.parseErrors || 0);
+
+    // Reorg churn. The durable REORG rows and the indexer's reorgsProcessed cover
+    // the completed handshake, but neither is scrapeable when only Prometheus is
+    // deployed; these read the decoder's own lifetime counters at scrape time.
+    setIf(gauges.last_reorg_depth, decoder.lastReorgDepth);
+    counters.reorgs_total.setMonotonic({}, decoder.reorgCount || 0);
+}
+
+// Only finite numbers reach the registry: Gauge#set throws on NaN/undefined,
+// and getSyncStatus() returns nulls before the first processed block. A metric
+// simply carries no series until its source has a real value.
+const setIf = (gauge, value) => { if (Number.isFinite(value)) gauge.set({}, value); };
+
 /**
  * Registers the decoder's feed-freshness metrics and one scrape-time collector.
  *
@@ -68,58 +121,7 @@ function registerDecoderMetrics(registry, decoder) {
         counters[suffix] = registry.counter({ name: `xchain_decoder_${suffix}`, help });
     }
 
-    // Only finite numbers reach the registry: Gauge#set throws on NaN/undefined,
-    // and getSyncStatus() returns nulls before the first processed block. A metric
-    // simply carries no series until its source has a real value.
-    const setIf = (gauge, value) => { if (Number.isFinite(value)) gauge.set({}, value); };
-
-    const collector = registry.addCollector(() => {
-        const status = typeof decoder.getSyncStatus === 'function' ? decoder.getSyncStatus() : {};
-        setIf(gauges.last_processed_block, status.last_processed_block);
-        setIf(gauges.node_height,          status.node_height);
-        setIf(gauges.block_lag,            status.lag);
-
-        if (decoder.blockchainInfoLastRefreshAt > 0) {
-            setIf(gauges.last_tip_poll_timestamp_seconds, decoder.blockchainInfoLastRefreshAt / 1000);
-        }
-        if (decoder.lastAdvanceAt > 0) {
-            setIf(gauges.last_block_advance_timestamp_seconds, decoder.lastAdvanceAt / 1000);
-        }
-        if (typeof decoder.nodeTipAgeSeconds === 'function') {
-            setIf(gauges.tip_age_seconds, decoder.nodeTipAgeSeconds());
-        }
-        if (typeof decoder.isNodeHeightStale === 'function') {
-            gauges.node_height_stale.set({}, decoder.isNodeHeightStale() ? 1 : 0);
-        }
-        if (typeof decoder.isSynced === 'function')  gauges.synced.set({},  decoder.isSynced()  ? 1 : 0);
-        if (typeof decoder.isStalled === 'function') gauges.stalled.set({}, decoder.isStalled() ? 1 : 0);
-
-        // The dead-loop signal `stalled` is structurally blind to: isStalled() reports
-        // chain progress, which a caught-up decoder makes none of while perfectly
-        // healthy, so a loop that dies while caught up leaves stalled 0 forever. /live
-        // gates health on this one alongside stalled (api.js registerLiveRoute); a
-        // metrics-only deployment saw neither until now. Boolean always emits, matching
-        // isPollSilent()'s own "0 means not silent" answer before the first iteration;
-        // the timestamp stays absent until then, since 0 would read as 1970.
-        if (typeof decoder.isPollSilent === 'function') {
-            gauges.poll_silent.set({}, decoder.isPollSilent() ? 1 : 0);
-        }
-        if (decoder.lastPollAt > 0) {
-            setIf(gauges.last_poll_timestamp_seconds, decoder.lastPollAt / 1000);
-        }
-
-        // setMonotonic, not inc: these mirror lifetime counters the decoder already
-        // keeps, and a re-read must not double-count what the last scrape saw.
-        const rpcErrors = (decoder.rpcErrors || 0) + ((decoder.connector && decoder.connector.rpcErrors) || 0);
-        counters.rpc_errors_total.setMonotonic({}, rpcErrors);
-        counters.parse_errors_total.setMonotonic({}, decoder.parseErrors || 0);
-
-        // Reorg churn. The durable REORG rows and the indexer's reorgsProcessed cover
-        // the completed handshake, but neither is scrapeable when only Prometheus is
-        // deployed; these read the decoder's own lifetime counters at scrape time.
-        setIf(gauges.last_reorg_depth, decoder.lastReorgDepth);
-        counters.reorgs_total.setMonotonic({}, decoder.reorgCount || 0);
-    });
+    const collector = registry.addCollector(() => collectDecoderMetrics(decoder, gauges, counters));
 
     return { gauges, counters, collector };
 }

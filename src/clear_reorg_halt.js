@@ -86,6 +86,33 @@ function parseArgs(argv){
     return out
 }
 
+async function checkClearPreconditions(db, args, error){
+    // Check 1: the rollback has been re-synced. Not forceable: a halt with blocks
+    // still missing above the tip is a rollback in progress, and clearing it lets
+    // the next verifyReorg resume past the window.
+    const deletesAboveTip = await db.countReorgDeletesAboveTip()
+    if (deletesAboveTip > 0){
+        error('clear-reorg-halt: REFUSED. ' + deletesAboveTip + ' block(s) rolled back above the current tip have not been re-parsed yet. '
+            + 'Wait for the decoder to catch up past the halt height, then run this again. This check cannot be forced.')
+        return { exitCode: EXIT.NOT_RESYNCED }
+    }
+
+    // Check 2: nothing the purge could have lost.
+    const dispensers    = await db.countDispensers()
+    const dispenserTxs  = await db.hasDispenserTransactions()
+    const checks = { deletes_above_tip: deletesAboveTip, dispensers: dispensers, dispenser_transactions: dispenserTxs }
+    const dispenserClean = (dispensers === 0 && dispenserTxs === false)
+    if (!dispenserClean && !args.force){
+        error('clear-reorg-halt: REFUSED. This database has held dispenser state (' + dispensers + ' dispenser row(s) now, '
+            + (dispenserTxs ? 'DISPENSER actions decoded' : 'no DISPENSER action decoded') + '), so the purge the halt '
+            + 'protects against may have dropped rows that a resync would recover. Compare the dispensers table against a '
+            + 'known-good replica of this decoder; if it matches, run again with --force (the clear is recorded as forced). '
+            + 'If it does not, resync from a known-good snapshot instead.')
+        return { exitCode: EXIT.DISPENSER_STATE }
+    }
+    return { checks, dispenserClean, dispensers, dispenserTxs }
+}
+
 // The whole decision, with the database and the output injected so it can be
 // exercised without MariaDB. Returns the process exit code.
 async function run({ db, argv = [], log = console.log, error = console.error }){
@@ -107,29 +134,9 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
     log('clear-reorg-halt: live REORG_HALT marker' + (marker.at ? ' since ' + marker.at : '')
         + (marker.reason ? ': ' + marker.reason : ''))
 
-    // Check 1: the rollback has been re-synced. Not forceable: a halt with blocks
-    // still missing above the tip is a rollback in progress, and clearing it lets
-    // the next verifyReorg resume past the window.
-    const deletesAboveTip = await db.countReorgDeletesAboveTip()
-    if (deletesAboveTip > 0){
-        error('clear-reorg-halt: REFUSED. ' + deletesAboveTip + ' block(s) rolled back above the current tip have not been re-parsed yet. '
-            + 'Wait for the decoder to catch up past the halt height, then run this again. This check cannot be forced.')
-        return EXIT.NOT_RESYNCED
-    }
-
-    // Check 2: nothing the purge could have lost.
-    const dispensers    = await db.countDispensers()
-    const dispenserTxs  = await db.hasDispenserTransactions()
-    const checks = { deletes_above_tip: deletesAboveTip, dispensers: dispensers, dispenser_transactions: dispenserTxs }
-    const dispenserClean = (dispensers === 0 && dispenserTxs === false)
-    if (!dispenserClean && !args.force){
-        error('clear-reorg-halt: REFUSED. This database has held dispenser state (' + dispensers + ' dispenser row(s) now, '
-            + (dispenserTxs ? 'DISPENSER actions decoded' : 'no DISPENSER action decoded') + '), so the purge the halt '
-            + 'protects against may have dropped rows that a resync would recover. Compare the dispensers table against a '
-            + 'known-good replica of this decoder; if it matches, run again with --force (the clear is recorded as forced). '
-            + 'If it does not, resync from a known-good snapshot instead.')
-        return EXIT.DISPENSER_STATE
-    }
+    const preconditions = await checkClearPreconditions(db, args, error)
+    if (preconditions.exitCode !== undefined) return preconditions.exitCode
+    const { checks, dispenserClean, dispensers, dispenserTxs } = preconditions
 
     const verdict = 'checks: rolled-back blocks above tip = 0; dispensers = ' + dispensers + '; DISPENSER actions decoded = ' + dispenserTxs
         + (dispenserClean ? ' (clean)' : ' (FORCED by the operator)')

@@ -31,6 +31,58 @@ const LITECOIN_MWEB_SEGWIT_FLAG = 0x09
 // special block.
 const HANDLED_WIRE_FORMATS = new Set(['default', 'mweb', 'auxpow'])
 
+function readMwebTransactions(bufferReader, block) {
+    const readTransaction = () => {
+      const tx = transaction_js_1.Transaction.fromBuffer(
+        bufferReader.buffer.slice(bufferReader.offset),
+        true,
+      );
+      bufferReader.offset += tx.byteLength();
+      return tx;
+    };
+    const nTransactions = bufferReader.readVarInt();
+    // Sanity-bound the claimed tx count against the bytes actually
+    // present: the smallest possible serialized transaction is well
+    // over 10 bytes, so a varint claiming more than remaining/10
+    // transactions is structurally impossible. Without this, a forged
+    // count only failed later via a buffer over-read inside
+    // Transaction.fromBuffer, which has an unguarded loop with an incidental
+    // unnamed exit. (Block bytes come from the trusted node, so this
+    // is defense-in-depth, not a reachable DoS.)
+    const remainingBytes = bufferReader.buffer.length - bufferReader.offset;
+    if (nTransactions > remainingBytes / 10) {
+        throw new Error('Block declares ' + nTransactions + ' transactions but only ' +
+            remainingBytes + ' bytes remain (invalid transaction count)');
+    }
+    block.transactions = [];
+    for (let i = 0; i < nTransactions; ++i) {
+      try {
+        if (i == nTransactions - 1){//If it's the last transaction, then check if it's the HogEx
+            let nextTxBuffer = bufferReader.buffer.slice(bufferReader.offset)
+            let txVersion = nextTxBuffer.readUInt32LE();
+            let marker = nextTxBuffer.readUInt8(4);
+            let flag = nextTxBuffer.readUInt8(5);
+
+            if ((txVersion == 0x01 || txVersion == 0x02) && (marker == 0x00) && (flag == LITECOIN_HOGEX_FLAG || flag == LITECOIN_MWEB_SEGWIT_FLAG)){
+                let removeOffsetStart = bufferReader.offset + 4 //4 bytes for txVersion
+                let removeOffsetEnd = removeOffsetStart + 2 //2 bytes for marker + flag
+
+                //Remove the marker+flag (0x08 pure-MWEB, or 0x09 segwit+MWEB), so bitcoinjs-lib parses this tx as a normal transaction
+                let bufferReaderBeforeFlag = bufferReader.buffer.slice(0, removeOffsetStart)
+                let bufferReaderAfterFlag = bufferReader.buffer.slice(removeOffsetEnd)
+                bufferReader.buffer = Buffer.concat([bufferReaderBeforeFlag, bufferReaderAfterFlag])
+
+            }
+        }
+
+        let tx = readTransaction();
+        block.transactions.push(tx);
+      } catch (err){
+        throw err
+      }
+    }
+}
+
 class XChainBlockDecoder {
 
     constructor(networkName) {
@@ -92,55 +144,7 @@ class XChainBlockDecoder {
                 block.bits = bufferReader.readUInt32();
                 block.nonce = bufferReader.readUInt32();
                 if (buffer.length === 80) return block;
-                const readTransaction = () => {
-                  const tx = transaction_js_1.Transaction.fromBuffer(
-                    bufferReader.buffer.slice(bufferReader.offset),
-                    true,
-                  );
-                  bufferReader.offset += tx.byteLength();
-                  return tx;
-                };
-                const nTransactions = bufferReader.readVarInt();
-                // Sanity-bound the claimed tx count against the bytes actually
-                // present: the smallest possible serialized transaction is well
-                // over 10 bytes, so a varint claiming more than remaining/10
-                // transactions is structurally impossible. Without this, a forged
-                // count only failed later via a buffer over-read inside
-                // Transaction.fromBuffer, which has an unguarded loop with an incidental
-                // unnamed exit. (Block bytes come from the trusted node, so this
-                // is defense-in-depth, not a reachable DoS.)
-                const remainingBytes = bufferReader.buffer.length - bufferReader.offset;
-                if (nTransactions > remainingBytes / 10) {
-                    throw new Error('Block declares ' + nTransactions + ' transactions but only ' +
-                        remainingBytes + ' bytes remain (invalid transaction count)');
-                }
-                block.transactions = [];
-                for (let i = 0; i < nTransactions; ++i) {
-                  try {
-                    if (i == nTransactions - 1){//If it's the last transaction, then check if it's the HogEx
-                        let nextTxBuffer = bufferReader.buffer.slice(bufferReader.offset)   
-                        let txVersion = nextTxBuffer.readUInt32LE();
-                        let marker = nextTxBuffer.readUInt8(4);
-                        let flag = nextTxBuffer.readUInt8(5);
-                        
-                        if ((txVersion == 0x01 || txVersion == 0x02) && (marker == 0x00) && (flag == LITECOIN_HOGEX_FLAG || flag == LITECOIN_MWEB_SEGWIT_FLAG)){
-                            let removeOffsetStart = bufferReader.offset + 4 //4 bytes for txVersion
-                            let removeOffsetEnd = removeOffsetStart + 2 //2 bytes for marker + flag
-                        
-                            //Remove the marker+flag (0x08 pure-MWEB, or 0x09 segwit+MWEB), so bitcoinjs-lib parses this tx as a normal transaction
-                            let bufferReaderBeforeFlag = bufferReader.buffer.slice(0, removeOffsetStart)
-                            let bufferReaderAfterFlag = bufferReader.buffer.slice(removeOffsetEnd)
-                            bufferReader.buffer = Buffer.concat([bufferReaderBeforeFlag, bufferReaderAfterFlag])
-                        
-                        }
-                    }
-                    
-                    let tx = readTransaction();
-                    block.transactions.push(tx);
-                  } catch (err){
-                    throw err
-                  }
-                }
+                readMwebTransactions(bufferReader, block)
                 const witnessCommit = block.getWitnessCommit();
                 // This Block contains a witness commit
                 if (witnessCommit) block.witnessCommit = witnessCommit;
