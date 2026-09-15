@@ -10,5 +10,22 @@
       "test/unit/big_suite/writes.test.js"
     ]
   },
-  "splits": {}
+  "splits": {
+    "test/unit/batch_limits_vendoring.test.js": [
+      "test/unit/batch_limits_vendoring.test.js",
+      "test/unit/batch_limits_vendoring.test/tier_2_the_post_flag_rule_set_is_the_only_one_this_decoder_can_ever_see.test.js",
+      "test/unit/batch_limits_vendoring.test/tier_3_driven_against_the_real_indexer_batch_handler.test.js"
+    ],
+    "test/unit/batch_sub_command_name_gate.test.js": [
+      "test/unit/batch_sub_command_name_gate.test.js",
+      "test/unit/batch_sub_command_name_gate.test/a_provably_rejected_sub_command_suppresses_the_whole_capture_view.test.js",
+      "test/unit/batch_sub_command_name_gate.test/sub_command_action_names_are_alias_expanded_above_the_gate.test.js",
+      "test/unit/batch_sub_command_name_gate.test/the_indexer_side_of_the_argument_driven_not_asserted.test.js"
+    ],
+    "test/unit/batch_sub_command_output_capture_activation.test.js": [
+      "test/unit/batch_sub_command_output_capture_activation.test.js",
+      "test/unit/batch_sub_command_output_capture_activation.test/batch_sub_command_split.test.js",
+      "test/unit/batch_sub_command_output_capture_activation.test/capture_command_view.test.js"
+    ]
+  }
 }
