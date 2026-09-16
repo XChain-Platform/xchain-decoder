@@ -41,9 +41,14 @@ const PINNED_MAINNET_ACTIVATION = 1786060800;
 const DOCS_CONSTANTS = process.env.XCHAIN_DOCS_DIR
     ? path.join(process.env.XCHAIN_DOCS_DIR, 'protocol', 'constants.js')
     : path.join(__dirname, '..', '..', '..', 'xchain-documentation', 'protocol', 'constants.js');
-const INDEXER_CHANGES = process.env.XCHAIN_INDEXER_DIR
-    ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'protocol_changes.js')
-    : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'protocol_changes.js');
+const INDEXER_ROOT = process.env.XCHAIN_INDEXER_DIR
+    || path.join(__dirname, '..', '..', '..', 'xchain-indexer');
+// The indexer's protocol-change table is a loader (src/protocol_changes.js) over the
+// registry parts in src/protocol_changes/*.js, where the registration rows live since
+// the indexer structure pass moved them out of the single file. The loader is the
+// sibling marker; the corpus the guard reads is the loader plus every part.
+const INDEXER_CHANGES     = path.join(INDEXER_ROOT, 'src', 'protocol_changes.js');
+const INDEXER_CHANGES_DIR = path.join(INDEXER_ROOT, 'src', 'protocol_changes');
 const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
 function siblingOrSkip(ctx, file){
@@ -52,6 +57,20 @@ function siblingOrSkip(ctx, file){
         throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but sibling not found: ' + file);
     ctx.skip();
     return false;
+}
+
+// The loader plus every registry part, concatenated in filename order (stable across
+// checkouts), so a row registered in any part is found. A missing parts directory is
+// named in the failure rather than read as "nothing registered": a pre-split checkout
+// carries the rows in the loader itself, so the loader alone is the corpus there.
+function indexerChangesCorpus(){
+    const parts = fs.existsSync(INDEXER_CHANGES_DIR)
+        ? fs.readdirSync(INDEXER_CHANGES_DIR).filter(f => f.endsWith('.js')).sort()
+            .map(f => path.join(INDEXER_CHANGES_DIR, f))
+        : [];
+    if (!parts.length && REQUIRE_SIBLINGS)
+        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but no registry parts under ' + INDEXER_CHANGES_DIR);
+    return [INDEXER_CHANGES].concat(parts).map(f => fs.readFileSync(f, 'utf8')).join('\n');
 }
 
 describe('ORACLE_FEE_OUTPUT_ACTIVATION conformance', function () {
@@ -76,12 +95,16 @@ describe('ORACLE_FEE_OUTPUT_ACTIVATION conformance', function () {
 
     it('never precedes the indexer FIX_OUTPUT_FANOUT flag-day (capture below it halts blocks)', function () {
         if (!siblingOrSkip(this, INDEXER_CHANGES)) return;
-        // Read the arming line from source rather than instantiating ProtocolChanges, which
-        // needs a DB handle. addChange(name, version, mainnet_time, testnet_time,
-        // regtest_time, mainnet_block, testnet_block, regtest_block).
-        const src = fs.readFileSync(INDEXER_CHANGES, 'utf8');
-        const m = /addChange\(\s*'FIX_OUTPUT_FANOUT'\s*,\s*'[^']*'\s*,\s*(\d+)\s*,/.exec(src);
-        assert.ok(m, 'FIX_OUTPUT_FANOUT must be registered in xchain-indexer/src/protocol_changes.js');
+        // Read the arming row from source rather than instantiating ProtocolChanges, which
+        // needs a DB handle. The row is the addChange argument list (name, version,
+        // mainnet_time, testnet_time, regtest_time, mainnet_block, testnet_block,
+        // regtest_block), written either as the historical addChange(...) call or as the
+        // array literal the registry parts hold; both spellings are accepted so the guard
+        // reads the same row through either layout.
+        const src = indexerChangesCorpus();
+        const m = /(?:addChange\(|\[)\s*'FIX_OUTPUT_FANOUT'\s*,\s*'[^']*'\s*,\s*(\d+)\s*,/.exec(src);
+        assert.ok(m, 'FIX_OUTPUT_FANOUT must be registered in xchain-indexer/src/protocol_changes.js ' +
+            'or one of its registry parts under src/protocol_changes/');
         const fanoutMainnetTime = parseInt(m[1], 10);
         assert.ok(ORACLE_FEE_OUTPUT_ACTIVATION.mainnet >= fanoutMainnetTime,
             'oracle-fee capture (' + ORACLE_FEE_OUTPUT_ACTIVATION.mainnet + ') must not begin before ' +

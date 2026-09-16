@@ -52,11 +52,15 @@ const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
 const DOCS_CONSTANTS = process.env.XCHAIN_DOCS_DIR
     ? path.join(process.env.XCHAIN_DOCS_DIR, 'protocol', 'constants.js')
     : path.join(__dirname, '..', '..', '..', 'xchain-documentation', 'protocol', 'constants.js');
-const INDEXER_CHANGES = process.env.XCHAIN_INDEXER_DIR
-    ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'protocol_changes.js')
-    : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'protocol_changes.js');
 const INDEXER_ROOT = process.env.XCHAIN_INDEXER_DIR
     || path.join(__dirname, '..', '..', '..', 'xchain-indexer');
+// The indexer's protocol-change table is a loader (src/protocol_changes.js) over the
+// registry parts in src/protocol_changes/*.js, where the registration rows and the
+// named flag-day constants live since the indexer structure pass moved them out of
+// the single file. The loader is the sibling marker; the corpus the guards read is
+// the loader plus every part.
+const INDEXER_CHANGES     = path.join(INDEXER_ROOT, 'src', 'protocol_changes.js');
+const INDEXER_CHANGES_DIR = path.join(INDEXER_ROOT, 'src', 'protocol_changes');
 // Both spellings: the handler is src/actions/batch.js, or src/actions/batch/ once the
 // indexer split it, and the FORMAT registrations this mirrors can sit in any part of it.
 const INDEXER_BATCH = handlerSource.entry(INDEXER_ROOT, 'batch');
@@ -92,21 +96,43 @@ function siblingOrSkip(ctx, file){
     return false;
 }
 
-// addChange(name, version, mainnet_time, testnet_time, regtest_time, ...): read the three
-// armed times off the registration line rather than instantiating ProtocolChanges, which
-// needs a DB handle.
+// The loader plus every registry part, concatenated in filename order (stable across
+// checkouts), so a row registered in any part, and a flag-day constant declared in any
+// part, is found. A missing parts directory is named in the failure rather than read as
+// "nothing registered": a pre-split checkout carries the rows in the loader itself, so
+// the loader alone is the corpus there.
+function indexerChangesCorpus(){
+    const parts = fs.existsSync(INDEXER_CHANGES_DIR)
+        ? fs.readdirSync(INDEXER_CHANGES_DIR).filter(f => f.endsWith('.js')).sort()
+            .map(f => path.join(INDEXER_CHANGES_DIR, f))
+        : [];
+    if (!parts.length && REQUIRE_SIBLINGS)
+        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but no registry parts under ' + INDEXER_CHANGES_DIR);
+    return [INDEXER_CHANGES].concat(parts).map(f => fs.readFileSync(f, 'utf8')).join('\n');
+}
+
+// Read the three armed times off the registration row rather than instantiating
+// ProtocolChanges, which needs a DB handle. The row is the addChange argument list
+// (name, version, mainnet_time, testnet_time, regtest_time, ...), written either as the
+// historical addChange(...) call or as the array literal the registry parts hold; both
+// spellings are accepted so the guard reads the same row through either layout.
 function indexerChangeTimes(name){
-    const src = fs.readFileSync(INDEXER_CHANGES, 'utf8');
-    const pattern = new RegExp("addChange\\(\\s*'" + name +
+    const src = indexerChangesCorpus();
+    const pattern = new RegExp("(?:addChange\\(|\\[)\\s*'" + name +
         "'\\s*,\\s*'[^']*'\\s*,\\s*([A-Za-z0-9_]+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,");
     const m = pattern.exec(src);
-    assert.ok(m, name + ' must be registered in xchain-indexer/src/protocol_changes.js');
-    // The mainnet slot may be a named constant (the house UNARMED sentinel); resolve it
-    // from its own `const NAME = <number>;` declaration in the same file.
+    assert.ok(m, name + ' must be registered in xchain-indexer/src/protocol_changes.js ' +
+        'or one of its registry parts under src/protocol_changes/');
+    // The mainnet slot may be a named constant (an armed instant such as
+    // BATCH_ISSUANCE_LIMITS_MAINNET_TIME, or the house UNARMED sentinel); resolve it from
+    // its own `const NAME = <number>;` declaration, which the registry keeps in a
+    // flag_times part of the same corpus. It must resolve to a number so the comparison
+    // below is numeric, never a string match on the constant's name.
     let mainnet = m[1];
     if (!/^\d+$/.test(mainnet)){
         const decl = new RegExp('const\\s+' + mainnet + '\\s*=\\s*(\\d+)\\s*;').exec(src);
-        assert.ok(decl, 'the mainnet arm ' + mainnet + ' must be a numeric const in protocol_changes.js');
+        assert.ok(decl, 'the mainnet arm ' + mainnet + ' must be a numeric const in ' +
+            'xchain-indexer/src/protocol_changes.js or one of its registry parts under src/protocol_changes/');
         mainnet = decl[1];
     }
     return { mainnet: parseInt(mainnet, 10),
