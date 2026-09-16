@@ -1,0 +1,356 @@
+'use strict';
+
+// Copyright © 2025-2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC - https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
+// BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION drift guard.
+//
+// The gate lets payment-output capture see a BATCH's SUB-COMMANDS, so a batched COINPAY
+// persists its settlement outputs and a batched Mode B DISPENSER its oracle-fee outputs.
+// That changes the set of rows written to transaction_outputs, which changes indexer
+// verdicts, which changes the ledger, so it is consensus-affecting in both directions:
+// arming it on a fleet that has not deployed forks the chain, and arming it in the past
+// makes a from-genesis re-decode capture outputs the live fleet never captured.
+//
+// Four tiers, so a one-sided edit fails somewhere no matter which checkout is present:
+//   1. PIN     - the vendored map carries the ratified mainnet instant and the genesis-on
+//                testnet/regtest shape, in this repo alone.
+//   2. FANOUT  - on every ARMED network it is >= the indexer's FIX_OUTPUT_FANOUT instant. A
+//                BATCH is a data-bearing, non-COINPAY row, so the extra captured outputs fan
+//                it out to several rows, and below that flag-day
+//                output_fanout.collapseOutputFanout treats that as a consensus-critical
+//                fault and HALTS the block.
+//   3. LEDGER  - on every network it is EQUAL to the indexer's BATCH_ISSUANCE_LIMITS instant,
+//                which carries the batch-cumulative settlement ledger: one decision, one
+//                boundary (xchain-documentation/protocol/constants.js). Capture without the
+//                ledger lets N COINPAY sub-commands settle N obligations from ONE payment;
+//                the ledger without capture makes a batched COINPAY spend the coin and
+//                settle nothing. Ordering alone (>=) would let a re-arm open that second
+//                window with every pin still green, so this tier is equality, not a floor.
+//   4. DOCS    - it is value-identical to the canonical map in
+//                xchain-documentation/protocol/constants.js, which must exist before mainnet
+//                may be armed.
+// Sibling tiers skip when the sibling checkout is absent (standalone deploy); set
+// XCHAIN_REQUIRE_SIBLINGS=1 in CI so a missing sibling hard-fails instead of green-by-skip.
+
+const assert = require('assert');
+const fs     = require('fs');
+const path   = require('path');
+const handlerSource = require('../../bin/indexer_handler_source.js');
+
+const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
+        BATCH_SUB_COMMAND_FORMATS,
+        isBatchSubCommandCaptureActive } = require('../../src/protocol/batch_sub_command_capture.js');
+
+const DOCS_CONSTANTS = process.env.XCHAIN_DOCS_DIR
+    ? path.join(process.env.XCHAIN_DOCS_DIR, 'protocol', 'constants.js')
+    : path.join(__dirname, '..', '..', '..', 'xchain-documentation', 'protocol', 'constants.js');
+const INDEXER_ROOT = process.env.XCHAIN_INDEXER_DIR
+    || path.join(__dirname, '..', '..', '..', 'xchain-indexer');
+// The indexer's protocol-change table is a loader (src/protocol_changes.js) over the
+// registry parts in src/protocol_changes/*.js, where the registration rows and the
+// named flag-day constants live since the indexer structure pass moved them out of
+// the single file. The loader is the sibling marker; the corpus the guards read is
+// the loader plus every part.
+const INDEXER_CHANGES     = path.join(INDEXER_ROOT, 'src', 'protocol_changes.js');
+const INDEXER_CHANGES_DIR = path.join(INDEXER_ROOT, 'src', 'protocol_changes');
+// Both spellings: the handler is src/actions/batch.js, or src/actions/batch/ once the
+// indexer split it, and the FORMAT registrations this mirrors can sit in any part of it.
+const INDEXER_BATCH = handlerSource.entry(INDEXER_ROOT, 'batch');
+const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
+
+// 2026-08-16 00:00:00 UTC, armed on mainnet by the operator on 2026-08-14 (pre-launch) at
+// the SAME instant the indexer carries for BATCH_ISSUANCE_LIMITS. Moving this number is a
+// consensus act and not a tidy-up: below it a from-genesis re-decode must reproduce the
+// top-level-only output set the live fleet wrote, and above it every decoder on mainnet must
+// already be running the armed value or the fleet splits on the first BATCH carrying a
+// COINPAY or a Mode B DISPENSER. A change here should be a deliberate edit, never a
+// side-effect of making a red test green.
+const PINNED_MAINNET_ACTIVATION = 1786838400;
+
+// A block time strictly below whatever mainnet carries, for the cases that pin pre-flag-day
+// inertness. Derived from the map rather than hardcoded, so this stays BELOW the gate if the
+// instant ever moves; a DISARMED mainnet is inactive at every block time, so an absurd one
+// serves there.
+const BELOW_MAINNET_GATE =
+    typeof BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet === 'number'
+        ? BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet - 1
+        : 4000000000;
+
+// 2100-01-01, the boundary the indexer's unarmed-gate suites use to tell a scheduled date
+// from the house UNARMED sentinel (9999999999): a ledger instant at or past it is unarmed.
+const YEAR_2100 = 4102444800;
+
+function siblingOrSkip(ctx, file){
+    if (fs.existsSync(file)) return true;
+    if (REQUIRE_SIBLINGS)
+        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but sibling not found: ' + file);
+    ctx.skip();
+    return false;
+}
+
+// The loader plus every registry part, concatenated in filename order (stable across
+// checkouts), so a row registered in any part, and a flag-day constant declared in any
+// part, is found. A missing parts directory is named in the failure rather than read as
+// "nothing registered": a pre-split checkout carries the rows in the loader itself, so
+// the loader alone is the corpus there.
+function indexerChangesCorpus(){
+    const parts = fs.existsSync(INDEXER_CHANGES_DIR)
+        ? fs.readdirSync(INDEXER_CHANGES_DIR).filter(f => f.endsWith('.js')).sort()
+            .map(f => path.join(INDEXER_CHANGES_DIR, f))
+        : [];
+    if (!parts.length && REQUIRE_SIBLINGS)
+        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but no registry parts under ' + INDEXER_CHANGES_DIR);
+    return [INDEXER_CHANGES].concat(parts).map(f => fs.readFileSync(f, 'utf8')).join('\n');
+}
+
+// Read the three armed times off the registration row rather than instantiating
+// ProtocolChanges, which needs a DB handle. The row is the addChange argument list
+// (name, version, mainnet_time, testnet_time, regtest_time, ...), written either as the
+// historical addChange(...) call or as the array literal the registry parts hold; both
+// spellings are accepted so the guard reads the same row through either layout.
+function indexerChangeTimes(name){
+    const src = indexerChangesCorpus();
+    const pattern = new RegExp("(?:addChange\\(|\\[)\\s*'" + name +
+        "'\\s*,\\s*'[^']*'\\s*,\\s*([A-Za-z0-9_]+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,");
+    const m = pattern.exec(src);
+    assert.ok(m, name + ' must be registered in xchain-indexer/src/protocol_changes.js ' +
+        'or one of its registry parts under src/protocol_changes/');
+    // The mainnet slot may be a named constant (an armed instant such as
+    // BATCH_ISSUANCE_LIMITS_MAINNET_TIME, or the house UNARMED sentinel); resolve it from
+    // its own `const NAME = <number>;` declaration, which the registry keeps in a
+    // flag_times part of the same corpus. It must resolve to a number so the comparison
+    // below is numeric, never a string match on the constant's name.
+    let mainnet = m[1];
+    if (!/^\d+$/.test(mainnet)){
+        const decl = new RegExp('const\\s+' + mainnet + '\\s*=\\s*(\\d+)\\s*;').exec(src);
+        assert.ok(decl, 'the mainnet arm ' + mainnet + ' must be a numeric const in ' +
+            'xchain-indexer/src/protocol_changes.js or one of its registry parts under src/protocol_changes/');
+        mainnet = decl[1];
+    }
+    return { mainnet: parseInt(mainnet, 10),
+             testnet: parseInt(m[2], 10),
+             regtest: parseInt(m[3], 10) };
+}
+
+describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
+
+    it('pins the ratified mainnet flag-day and keeps testnet/regtest genesis-on', function () {
+        // Teeth for the ratified instant: any OTHER value on mainnet, null included, means
+        // someone moved a consensus boundary the operator armed. Moving it forward strands
+        // every decoder already running the armed value; moving it back rewrites agreed
+        // history on a re-decode.
+        assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet,
+            PINNED_MAINNET_ACTIVATION);
+        assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.testnet, 0);
+        assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.regtest, 0);
+    });
+
+    it('is off below the ratified mainnet instant and on from it, through the real helper', function () {
+        // The number above only matters through the predicate the decoder actually calls, so
+        // the boundary is driven rather than asserted: mainnet history below the instant must
+        // re-decode with the legacy top-level-only view, and the block AT the instant is the
+        // first one that sees sub-commands (>=, as every protocol_changes gate reads).
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 0), false);
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 1786060800), false,
+            'the ORACLE_FEE_OUTPUT_ACTIVATION flag-day is below this one and must stay off here');
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', PINNED_MAINNET_ACTIVATION - 1),
+            false, 'the block one second below the instant keeps top-level-only capture');
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', PINNED_MAINNET_ACTIVATION),
+            true, 'the block AT the instant sees sub-commands');
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', PINNED_MAINNET_ACTIVATION + 1),
+            true);
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 4000000000), true);
+    });
+
+    it('covers exactly the networks the sibling capture gates cover', function () {
+        assert.deepStrictEqual(Object.keys(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION).sort(),
+            ['mainnet', 'regtest', 'testnet']);
+    });
+
+    it('never precedes the indexer FIX_OUTPUT_FANOUT flag-day (extra rows below it halt blocks)', function () {
+        if (!siblingOrSkip(this, INDEXER_CHANGES)) return;
+        const fanout = indexerChangeTimes('FIX_OUTPUT_FANOUT');
+        for (const network of Object.keys(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION)) {
+            const gate = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION[network];
+            if (gate === null) continue;
+            assert.ok(gate >= fanout[network],
+                network + ' sub-command capture (' + gate + ') must not begin before ' +
+                'FIX_OUTPUT_FANOUT (' + fanout[network] + '): a BATCH is a data-bearing ' +
+                'non-COINPAY row, so a second stored output below that flag-day is a ' +
+                'consensus-critical fan-out fault that halts the block');
+        }
+    });
+});
+
+describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
+
+    it('arms at exactly the indexer BATCH_ISSUANCE_LIMITS instant on every network (one boundary)', function () {
+        if (!siblingOrSkip(this, INDEXER_CHANGES)) return;
+        // Equality, not ordering. The canonical map states this as ONE decision: capture and
+        // the settlement ledger flip together. A gap in either direction is a consensus
+        // window: capture before the ledger lets N COINPAY sub-commands settle N obligations
+        // from one payment; the ledger before capture makes a batched COINPAY spend the coin
+        // and settle nothing. A >= leg plus two independent literal pins stayed green while
+        // a re-arm moved either side, which is exactly the edit this must refuse.
+        const limits = indexerChangeTimes('BATCH_ISSUANCE_LIMITS');
+        for (const network of Object.keys(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION)) {
+            const gate = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION[network];
+            if (gate === null) {
+                // A DISARMED capture gate may only sit under a DISARMED ledger: the indexer
+                // parks an unarmed mainnet on a far-future sentinel, never a real date.
+                assert.ok(limits[network] >= YEAR_2100,
+                    network + ' sub-command capture is disarmed (null) while the indexer ' +
+                    'arms BATCH_ISSUANCE_LIMITS at ' + limits[network] + ': the settlement ' +
+                    'ledger would run with capture reading only the top-level ACTION name, so ' +
+                    'a batched COINPAY spends the coin and settles nothing');
+                continue;
+            }
+            assert.strictEqual(gate, limits[network],
+                network + ' sub-command capture (' + gate + ') must equal the indexer ' +
+                'BATCH_ISSUANCE_LIMITS instant (' + limits[network] + '): the canonical map ' +
+                'states them as one boundary, and the window [' +
+                Math.min(gate, limits[network]) + ', ' + Math.max(gate, limits[network]) +
+                ') either double-settles one payment or settles nothing from it');
+        }
+    });
+
+    it('never precedes the indexer BATCH_SUBACTION_NORMALIZATION flag-day (sub-command aliases)', function () {
+        if (!siblingOrSkip(this, INDEXER_CHANGES)) return;
+        // captureCommands alias-expands a BATCH's SUB-COMMAND names, because that is the
+        // name the indexer DISPATCHES on at/after this flag-day. BELOW it an aliased
+        // sub-command is an unregistered name, so the indexer's activation scan
+        // whole-batch-rejects and runs nothing: expanding there would capture for a batch
+        // that never executed. The ordering is what makes the expansion faithful rather
+        // than merely convenient, and nothing in code enforces it.
+        const normalization = indexerChangeTimes('BATCH_SUBACTION_NORMALIZATION');
+        for (const network of Object.keys(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION)) {
+            const gate = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION[network];
+            if (gate === null) continue;
+            assert.ok(gate >= normalization[network],
+                network + ' sub-command capture (' + gate + ') must not begin before ' +
+                'BATCH_SUBACTION_NORMALIZATION (' + normalization[network] + '): below that ' +
+                'flag-day a batched alias is an unknown ACTION that invalidates the whole ' +
+                'batch, so the sub-command view must not resolve it to its canonical name');
+        }
+    });
+});
+
+describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
+
+    it('mirrors the BATCH FORMAT versions the indexer registers', function () {
+        if (!siblingOrSkip(this, INDEXER_BATCH)) return;
+        // Capture must see sub-commands in exactly the FORMATs the indexer dispatches. A
+        // format listed here but not there captures for commands nothing executes; one
+        // listed there but not here leaves the original defect open for that format.
+        const src = handlerSource.source(INDEXER_ROOT, 'batch');
+        const registered = [...src.matchAll(/this\.formats\[(\d+)\]\s*=/g)]
+            .map(m => parseInt(m[1], 10)).sort((a, b) => a - b);
+        assert.ok(registered.length > 0, 'xchain-indexer/src/actions/batch.js must register a FORMAT');
+        assert.deepStrictEqual([...BATCH_SUB_COMMAND_FORMATS].sort((a, b) => a - b), registered);
+    });
+
+    it('is value-identical to the canonical map in xchain-documentation, or mainnet is DISARMED', function () {
+        if (!siblingOrSkip(this, DOCS_CONSTANTS)) return;
+        const canon = require(DOCS_CONSTANTS).BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION;
+        if (canon === undefined) {
+            // The vendored copy leads the canonical one while the gate is inert everywhere a
+            // fleet reads it. This is the ONE state where the mirror may be missing, and it
+            // ends the moment mainnet carries an instant: from then on a decoder fleet is
+            // acting on a value no canonical document records.
+            assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, null,
+                'mainnet may not be armed before BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION is ' +
+                'mirrored into xchain-documentation/protocol/constants.js');
+            return;
+        }
+        assert.deepStrictEqual(
+            { mainnet: BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet,
+              testnet: BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.testnet,
+              regtest: BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.regtest },
+            { mainnet: canon.mainnet, testnet: canon.testnet, regtest: canon.regtest },
+            'the vendored map drifted from the canonical one; a one-sided flag-day edit forks ' +
+            'the decoder fleet at the first BATCH carrying a COINPAY or a Mode B DISPENSER');
+    });
+
+    it('a DISARMED network is inactive at every block time, including absurd ones', function () {
+        // Every network in this map is armed today, so the null branch needs a fixture: disarm
+        // mainnet in place for the length of the test and drive the REAL helper (it reads the
+        // map per call, so the mutation is visible). The branch has to stay covered because it
+        // is the fail-closed default protecting every gate no operator has ratified yet - a
+        // null that read as "no gate" would widen the persisted output set on an unarmed chain.
+        const saved = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet;
+        BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = null;
+        try {
+            assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 0), false);
+            assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 1786060800), false);
+            assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', 4000000000), false);
+        } finally {
+            BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = saved;
+        }
+        assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, saved,
+            'the probe must put back whatever the map held before it');
+    });
+});
+
+describe('BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance', function () {
+
+    it('testnet and regtest are active from genesis so the venues exercise the sub-command path', function () {
+        assert.strictEqual(isBatchSubCommandCaptureActive('testnet', 0), true);
+        assert.strictEqual(isBatchSubCommandCaptureActive('regtest', 0), true);
+        assert.strictEqual(isBatchSubCommandCaptureActive('regtest', 1700000000), true);
+    });
+
+    it('fails closed on an unrecognized network name', function () {
+        // An unknown network must read as "legacy top-level-only capture", never as "no
+        // gate": the latter would widen the persisted output set on an unarmed chain.
+        assert.strictEqual(isBatchSubCommandCaptureActive('signet', 4000000000), false);
+        assert.strictEqual(isBatchSubCommandCaptureActive(undefined, 4000000000), false);
+        assert.strictEqual(isBatchSubCommandCaptureActive('', 4000000000), false);
+    });
+
+    it('fails closed on a non-finite block time', function () {
+        assert.strictEqual(isBatchSubCommandCaptureActive('regtest', NaN), false);
+        assert.strictEqual(isBatchSubCommandCaptureActive('regtest', undefined), false);
+        assert.strictEqual(isBatchSubCommandCaptureActive('regtest', 'not-a-time'), false);
+    });
+
+    it('flips exactly at the armed instant once a network IS armed (>= semantics)', function () {
+        // The >= boundary itself, driven at an instant NOBODY has ratified, so it stays a
+        // statement about the comparison rather than about today's mainnet value: arm mainnet
+        // onto a synthetic instant for the length of this test and drive the REAL helper (the
+        // module reads the map per call, so the mutation is visible). The block AT the instant
+        // already captures, matching every protocol_changes gate.
+        const ARMED = 1789430400;
+        const saved = BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet;
+        BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = ARMED;
+        try {
+            assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', ARMED - 1), false,
+                'the block below the instant keeps top-level-only capture');
+            assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', ARMED), true,
+                'the block AT the instant sees sub-commands');
+            assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', ARMED + 1), true,
+                'and it stays on above it');
+        } finally {
+            BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = saved;
+        }
+        // Restore to whatever was there BEFORE the probe, never to a baseline written into
+        // this test: hardcoding one made an operator arming mainnet fail here, which is the
+        // one place the arming must not be re-litigated.
+        assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, saved,
+            'the map must be back to its pre-probe value');
+        // Behavioural half: the helper answers under the RESTORED map again. A leaked
+        // mutation (the synthetic instant is LATER than the real one) reads as inactive at
+        // the real instant, so it cannot pass here.
+        assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', BELOW_MAINNET_GATE), false);
+        if (typeof saved === 'number')
+            assert.strictEqual(isBatchSubCommandCaptureActive('mainnet', saved), true,
+                'the restored map governs again, not the probe value');
+    });
+});

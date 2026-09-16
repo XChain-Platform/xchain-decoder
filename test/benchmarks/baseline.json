@@ -48,8 +48,8 @@
         }
       }
     },
-    "parse-transaction": {
-      "scenario": "parse-transaction",
+    "parse_transaction": {
+      "scenario": "parse_transaction",
       "results": {
         "opreturn": {
           "iterations": 5000,
@@ -71,8 +71,8 @@
         }
       }
     },
-    "block-processing": {
-      "scenario": "block-processing",
+    "block_processing": {
+      "scenario": "block_processing",
       "blockCount": 100,
       "results": {
         "empty": {
@@ -217,8 +217,8 @@
         }
       }
     },
-    "sustained-sync": {
-      "scenario": "sustained-sync",
+    "sustained_sync": {
+      "scenario": "sustained_sync",
       "blockCount": 500,
       "totalTxs": 5524,
       "totalXchn": 2253,
@@ -311,8 +311,8 @@
         "getBlockByIndex": 0
       }
     },
-    "spike-load": {
-      "scenario": "spike-load",
+    "spike_load": {
+      "scenario": "spike_load",
       "calm": {
         "blocks": 50,
         "txs": 300,
@@ -360,8 +360,8 @@
         "getBlockByIndex": 0
       }
     },
-    "large-payload": {
-      "scenario": "large-payload",
+    "large_payload": {
+      "scenario": "large_payload",
       "payloadSizes": [
         100,
         500,
@@ -424,8 +424,8 @@
         }
       }
     },
-    "mempool-stress": {
-      "scenario": "mempool-stress",
+    "mempool_stress": {
+      "scenario": "mempool_stress",
       "xchnRatio": 0.1,
       "results": {
         "100_txs": {

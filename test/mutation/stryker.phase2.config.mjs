@@ -17,24 +17,24 @@ export default {
 
   mutate: [
     'src/XChainDecoder.js',
-    'src/XChainBlockDecoder.js',
-    'src/BlockchainConnector.js',
-    'src/CryptoNetworks.js',
+    'src/chain/XChainBlockDecoder.js',
+    'src/chain/blockchain_connector.js',
+    'src/chain/crypto_networks.js',
     'src/util.js',
   ],
 
   testRunner: 'mocha',
   mochaOptions: {
-    // test/unit/setup.js is sufficient for BOTH unit and security tests;
+    // test/unit/support/setup.js is sufficient for BOTH unit and security tests;
     // both setup files install the same Module._resolveFilename patch.
-    require: ['test/unit/setup.js'],
+    require: ['test/unit/support/setup.js'],
     spec: [
       'test/unit/**/*.test.js',
-      'test/security/**/*.security.test.js',
+      'test/security/**/*.test.js',
     ],
     // See stryker.config.mjs: this one greps src/XChainDecoder.js as text and
     // cannot run against Stryker's instrumented sandbox copy.
-    ignore: ['test/unit/ActionManifestConformance.test.js'],
+    ignore: ['test/unit/action_manifest_conformance.test.js'],
     config: 'test/mutation/.mocharc.mutation-phase2.yml',
     'no-package': true,
   },

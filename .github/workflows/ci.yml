@@ -71,12 +71,22 @@ jobs:
             console.log("consensus pin conformance OK (testnet, regtest)");
           '
 
+      # Identity pin: bin/pins/identity.json records the sha256 of the vendored
+      # coin files and the two twin fixtures. Re-hash the tree against it and
+      # fail on any moved, missing or unreadable file, so a stale pin cannot
+      # reach develop or master green through a direct push or a release pull
+      # request. bin/ci-full.sh runs the same command before a push; the tool
+      # uses only node builtins, so this job needs no install.
+      - name: Identity pin (vendored coins, twin fixtures)
+        working-directory: xchain-decoder
+        run: node bin/pin-identity.js --check
+
   # Docker-gated tiers: the integration and e2e suites each bring up their own
   # throwaway regtest node and MariaDB with docker compose, so they cannot run
   # inside `npm run ci`. They get their own job on a runner that has docker, so a
   # slow or flaky venue cannot hold up the fast tier's signal. The map of which
   # tier is gated where lives in test/tier-manifest.json and is enforced by
-  # test/unit/tierManifest.test.js.
+  # test/unit/tier_manifest.test.js.
   docker-suites:
     runs-on: ubuntu-latest
     timeout-minutes: 30

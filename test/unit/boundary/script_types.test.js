@@ -1,0 +1,363 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
+const assert = require('assert')
+const sinon = require('sinon')
+const crypto = require('crypto')
+const bitcoin = require('bitcoinjs-lib')
+const ecc = require('tiny-secp256k1')
+const XChainDecoder = require('../../../src/XChainDecoder')
+
+bitcoin.initEccLib(ecc)
+
+// Same prevout hash used in parseTransaction tests
+const PREV_HASH = Buffer.from('aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011', 'hex')
+
+function getKeyIv() {
+    const display = Buffer.from(PREV_HASH).reverse().toString('hex')
+    return { key: display.substr(0, 16), iv: display.substr(16, 16) }
+}
+
+function encryptBuf(plainBuf) {
+    const { key, iv } = getKeyIv()
+    const cipher = crypto.createCipheriv('aes-128-ctr', key, iv)
+    return Buffer.concat([cipher.update(plainBuf), cipher.final()])
+}
+
+// Build encrypted XCHN payload: data after XCHN prefix must be a compiled bitcoin script
+function buildXchnPayload(data) {
+    const parts = [Buffer.from(data)]
+    const scriptPayload = bitcoin.script.compile(parts)
+    const plainBuf = Buffer.concat([Buffer.from('XCHN'), scriptPayload])
+    return encryptBuf(plainBuf)
+}
+
+// Build encrypted marker (e.g., XCHNp2sh or XCHNp2wsh)
+function buildXchnMarker(marker) {
+    return encryptBuf(Buffer.from('XCHN' + marker))
+}
+
+function addStandardInput(tx) {
+    tx.addInput(PREV_HASH, 1)
+    tx.ins[0].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
+}
+
+function addP2PKHOutput(tx, value) {
+    tx.addOutput(Buffer.from('76a914' + 'aa'.repeat(20) + '88ac', 'hex'), value || 100000000)
+}
+
+function createDecoder() {
+    const decoder = new XChainDecoder(
+        'bitcoin-regtest', null, null, null, null, null,
+        '127.0.0.1', 18443, 'rpc', 'rpc', false
+    )
+    decoder.db = {
+        isThereADispenserForAddress: sinon.stub().resolves(false)
+    }
+    decoder.connector = {
+        getRawTransaction: sinon.stub().rejects(new Error('mocked'))
+    }
+    // A failed prevout lookup now throws (tagged rpcLookupFailure) instead of
+    // resolving a null source; stub source resolution to the deterministic
+    // null these decode-focused tests rely on.
+    decoder.getSourceFromOutput = sinon.stub().resolves(null)
+    return decoder
+}
+
+let decoder
+
+function resetDecoder() {
+    decoder = createDecoder()
+}
+
+function restoreSinon() {
+    sinon.restore()
+}
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
+
+    // S-1: OP_RETURN with empty push data
+    it('[REGRESSION P0] R-SCR-001 S-1: OP_RETURN with 0-byte push: removeObfuscation receives empty buffer', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+
+        // OP_RETURN followed by empty push (OP_0 = 0x00)
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, Buffer.alloc(0)]), 0)
+        addP2PKHOutput(tx)
+
+        const result = await decoder.parseTransaction(tx)
+        assert.ok(result)
+        // Empty buffer decrypts to empty (won't match XCHN prefix)
+        assert.strictEqual(result.data.length, 0)
+    })
+
+    // S-1b: XCHN payload whose inner compiled script is a single OP_0 byte ([0x00]).
+    // bitcoin.script.decompile([0x00]) returns [0]: the integer zero, NOT a Buffer.
+    // The decompile result must be normalized to an empty Buffer so the integer never
+    // propagates into downstream consumers (length guards that silently drop the tx,
+    // or hex-encoding paths that throw on a non-Buffer value).
+    it('[REGRESSION P0] R-SCR-004 S-1b: XCHN payload decompiling to OP_0: data is an empty Buffer, not integer 0', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+
+        // buildXchnPayload compiles the inner data with bitcoin.script.compile.
+        // An empty buffer compiles to OP_0 (0x00), so after the XCHN prefix is stripped
+        // the decoder runs bitcoin.script.decompile([0x00]) → [0] (integer zero).
+        const cipher = buildXchnPayload(Buffer.alloc(0))
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
+        addP2PKHOutput(tx)
+
+        const result = await decoder.parseTransaction(tx)
+        assert.ok(result)
+        // The integer 0 must have been normalized to an empty Buffer.
+        assert.ok(Buffer.isBuffer(result.data), 'result.data must be a Buffer, not the integer 0')
+        assert.strictEqual(result.data.length, 0)
+    })
+})
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
+
+    // Same non-Buffer branch as S-1b, but the empty leading push is followed by a
+    // second push (the rawData the sender paid to carry). The decoder still blanks the
+    // payload and never reads that push; the reporting here makes that loss observable
+    // (parse_errors + a distinct log line) without changing what the decoder accepts,
+    // because widening acceptance of this wire shape needs a cross-service flag-day
+    // that also moves xchain-encoder's validator.
+    it('[REGRESSION P1] R-SCR-005 S-1c: empty leading push with a trailing rawData push is reported, not silently blanked', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+
+        const rawDataPush = Buffer.from('rawData the decoder never reads')
+        const scriptPayload = bitcoin.script.compile([Buffer.alloc(0), rawDataPush])
+        const cipher = encryptBuf(Buffer.concat([Buffer.from('XCHN'), scriptPayload]))
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
+        addP2PKHOutput(tx)
+
+        const errorLog = sinon.stub(console, 'error')
+        const parseErrorsBefore = decoder.parseErrors
+        const result = await decoder.parseTransaction(tx)
+        const messages = errorLog.getCalls().map(call => String(call.args[0]))
+        errorLog.restore()
+
+        // Reported distinctly: monitoring counter bumped and the shape named in the log.
+        assert.strictEqual(decoder.parseErrors, parseErrorsBefore + 1, 'parse_errors must count the empty leading push')
+        const reported = messages.filter(message => message.includes('empty leading push (OP_0)'))
+        assert.strictEqual(reported.length, 1, `expected one empty-leading-push report, got: ${JSON.stringify(messages)}`)
+        assert.ok(reported[0].includes(tx.getId()), 'report must name the transaction')
+        assert.ok(reported[0].includes(String(rawDataPush.length)), 'report must name the dropped push size')
+
+        // Acceptance unchanged: payload still blanked, rawData still never read.
+        assert.ok(result)
+        assert.ok(Buffer.isBuffer(result.data), 'result.data must stay a Buffer')
+        assert.strictEqual(result.data.length, 0, 'acceptance must not change: payload stays blanked')
+        assert.strictEqual(result.rawData, null, 'acceptance must not change: rawData stays unread')
+    })
+})
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
+
+    // S-1d: the inert case the blanking was written for (a lone OP_0 payload, S-1b's
+    // shape) must stay silent, so the new report cannot become monitoring noise.
+    it('[REGRESSION P1] R-SCR-006 S-1d: a lone OP_0 payload stays silent (no false parse error)', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+
+        const cipher = buildXchnPayload(Buffer.alloc(0))
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
+        addP2PKHOutput(tx)
+
+        const errorLog = sinon.stub(console, 'error')
+        const parseErrorsBefore = decoder.parseErrors
+        const result = await decoder.parseTransaction(tx)
+        const messages = errorLog.getCalls().map(call => String(call.args[0]))
+        errorLog.restore()
+
+        assert.strictEqual(decoder.parseErrors, parseErrorsBefore, 'a lone OP_0 payload must not bump parse_errors')
+        assert.strictEqual(messages.filter(message => message.includes('empty leading push (OP_0)')).length, 0,
+            `lone OP_0 must not be reported, got: ${JSON.stringify(messages)}`)
+        assert.ok(Buffer.isBuffer(result.data))
+        assert.strictEqual(result.data.length, 0)
+    })
+
+    // S-2: OP_RETURN with 76-byte push (max single-byte push opcode)
+    it('S-2: OP_RETURN with 76-byte push: full deobfuscation path', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+
+        // 76-byte encrypted XCHN payload
+        const plaintext = 'A'.repeat(72) // 72 data + 4 XCHN prefix = 76 won't work due to script compile overhead
+        const cipher = buildXchnPayload(plaintext)
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
+        addP2PKHOutput(tx)
+
+        const result = await decoder.parseTransaction(tx)
+        assert.ok(result)
+        // Should decode successfully if cipher fits in 76 bytes
+        assert.ok(result.data.length >= 0)
+    })
+})
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
+
+    // S-3: OP_RETURN with opcode instead of buffer (decompiledScript[1] is integer)
+    it('S-3: OP_RETURN with opcode instead of buffer: removeObfuscation returns null', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+
+        // Manually build script: OP_RETURN OP_1
+        // OP_RETURN = 0x6a, OP_1 = 0x51
+        tx.addOutput(Buffer.from([0x6a, 0x51]), 0)
+        addP2PKHOutput(tx)
+
+        const result = await decoder.parseTransaction(tx)
+        assert.ok(result)
+        // OP_1 decompiles to a number (81), not a Buffer. removeObfuscation returns null
+        assert.strictEqual(result.data.length, 0)
+    })
+
+    // S-4: Multisig with 1-byte pubkeys; non-Buffer elements skipped gracefully
+    it('S-4: multisig with 1-byte pubkeys: skipped (non-Buffer pubkeys)', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+
+        // bitcoin.script.compile turns 1-byte buffers into opcode integers
+        const script = bitcoin.script.compile([
+            bitcoin.opcodes.OP_1,
+            Buffer.from([0x02]),           // becomes opcode 0x02 (integer)
+            Buffer.from([0x03]),           // becomes opcode 0x03 (integer)
+            Buffer.alloc(33, 0x03),        // real pubkey3
+            bitcoin.opcodes.OP_3,
+            bitcoin.opcodes.OP_CHECKMULTISIG
+        ])
+        tx.addOutput(script, 1000)
+        addP2PKHOutput(tx)
+
+        const result = await decoder.parseTransaction(tx)
+        assert.ok(result)
+        // Non-Buffer pubkeys are now detected and the output is skipped
+        assert.strictEqual(result.data.length, 0)
+    })
+})
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
+
+    // S-5: Multisig with pubkeys whose stripped bytes are all zeros
+    it('S-5: multisig with all-zero data: zero-trim loop removes everything', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+
+        // 33-byte pubkeys where byte 0 is stripped, rest are all 0x00
+        const pubkey1 = Buffer.alloc(33, 0x00)
+        pubkey1[0] = 0x02
+        const pubkey2 = Buffer.alloc(33, 0x00)
+        pubkey2[0] = 0x02
+
+        const script = bitcoin.script.compile([
+            bitcoin.opcodes.OP_1,
+            pubkey1,
+            pubkey2,
+            Buffer.alloc(33, 0x03),
+            bitcoin.opcodes.OP_3,
+            bitcoin.opcodes.OP_CHECKMULTISIG
+        ])
+        tx.addOutput(script, 1000)
+        addP2PKHOutput(tx)
+
+        const result = await decoder.parseTransaction(tx)
+        assert.ok(result)
+        // After stripping first byte and zero-trimming: the for-loop never finds
+        // a non-zero byte, so data is never sliced. The full zero buffer is passed
+        // to removeObfuscation. It won't match XCHN prefix.
+        assert.strictEqual(result.data.length, 0)
+    })
+})
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
+
+    // S-6: P2SH marker but transaction has 0 additional inputs to process
+    // (In practice the marker is in OP_RETURN, and the data is in inputs' scriptSigs)
+    it('[REGRESSION P0] R-SCR-002 S-6: XCHNp2sh marker with single input: data from that input\'s scriptSig', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+
+        // OP_RETURN that decrypts to "XCHNp2sh"
+        const cipher = buildXchnMarker('p2sh')
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
+        addP2PKHOutput(tx)
+
+        const result = await decoder.parseTransaction(tx)
+        assert.ok(result)
+        // The loop processes all inputs including the one with the standard scriptSig.
+        // decodedScriptSig[2] may not be a valid redeem script, so the try/catch
+        // catches and logs an error. No data extracted → empty dataBuffer.
+        assert.strictEqual(result.data.length, 0)
+    })
+
+    // S-7: P2WSH marker with input that has no witness field
+    it('[REGRESSION P0] R-SCR-003 S-7: XCHNp2wsh marker with input missing witness: caught by try/catch', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+        // Explicitly remove witness from input
+        delete tx.ins[0].witness
+
+        const cipher = buildXchnMarker('p2wsh')
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
+        addP2PKHOutput(tx)
+
+        const result = await decoder.parseTransaction(tx)
+        assert.ok(result)
+        // Accessing nextInput["witness"][2] on undefined throws TypeError (caught)
+        assert.strictEqual(result.data.length, 0)
+    })
+})
+
+describe('Boundary: Script Type Detection (S-1 through S-7)', () => {
+    beforeEach(resetDecoder)
+    afterEach(restoreSinon)
+
+    // P2WSH with witness array having < 3 elements
+    it('XCHNp2wsh with witness having only 1 element: caught by try/catch', async () => {
+        const tx = new bitcoin.Transaction()
+        tx.version = 2
+        addStandardInput(tx)
+        tx.ins[0].witness = [Buffer.from('00', 'hex')]
+
+        const cipher = buildXchnMarker('p2wsh')
+        tx.addOutput(bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, cipher]), 0)
+        addP2PKHOutput(tx)
+
+        const result = await decoder.parseTransaction(tx)
+        assert.ok(result)
+        // witness[2] is undefined → decompile(undefined) throws
+        assert.strictEqual(result.data.length, 0)
+    })
+})

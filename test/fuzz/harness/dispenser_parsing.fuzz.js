@@ -1,0 +1,398 @@
+/*********************************************************************
+ *
+ * Copyright © 2025–2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md. A commercial
+ * license (without AGPL source-disclosure terms) is available -
+ * contact legal@dankest.llc.
+ *
+ **********************************************************************
+ * Fuzz harness for DISPENSER pipe-delimited string parsing.
+ *
+ * The DISPENSER parsing logic is inline in XChainDecoder.start() (lines 661-679).
+ * This harness extracts and tests that logic directly without needing the full
+ * decoder pipeline.
+ */
+
+const assert = require('assert')
+const { checkDispenserParse, withTimeout } = require('../support/invariants')
+const { V0_REQUIRED_FIELD_COUNT } = require('../../../src/protocol/oracle_fee_output')
+const FuzzReporter = require('../support/reporter')
+
+const ITERATIONS = parseInt(process.env.FUZZ_ITERATIONS) || 5000
+
+// Deterministic PRNG for this harness's own inputs, seeded from FUZZ_SEED (a
+// fixed default keeps a bare run reproducible too), so a failing input can be
+// replayed with `FUZZ_SEED=<n> npx mocha ...`.
+const FUZZ_SEED = parseInt(process.env.FUZZ_SEED, 10) || 424242
+
+function mulberry32(seed) {
+    let a = seed >>> 0
+    return function () {
+        a |= 0; a = (a + 0x6D2B79F5) | 0
+        let t = Math.imul(a ^ (a >>> 15), 1 | a)
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+}
+
+const rng = mulberry32(FUZZ_SEED)
+
+/** Seeded stand-in for crypto.randomInt(maxExclusive): [0, maxExclusive). */
+function randInt(maxExclusive) {
+    return Math.floor(rng() * maxExclusive)
+}
+
+/** Seeded stand-in for crypto.randomBytes(n).toString('hex'). */
+function randHex(n) {
+    let s = ''
+    for (let i = 0; i < n; i++) s += randInt(256).toString(16).padStart(2, '0')
+    return s
+}
+
+// Mirrors mutators/structure_aware.js's randomDispenserString() field-type
+// distribution, on the seeded RNG above so this harness stays reproducible
+// on its own without reseeding the shared mutator other harnesses also use.
+function seededRandomDispenserString() {
+    const fieldCount = randInt(20)
+    const fields = ['DISPENSER']
+    for (let i = 0; i < fieldCount; i++) {
+        const type = randInt(5)
+        switch (type) {
+            case 0: fields.push(''); break
+            case 1: fields.push(String(randInt(1000000))); break
+            case 2: fields.push(randHex(randInt(20) + 1)); break
+            case 3: fields.push(String(-randInt(1000))); break
+            case 4: fields.push('TICK' + randInt(100)); break
+        }
+    }
+    return fields.join('|')
+}
+
+/**
+ * Extracted DISPENSER parsing logic from XChainDecoder.start().
+ * Returns { shouldInsert, fields } or throws on unexpected errors.
+ *
+ * v0 wire layout (0-indexed after split on "|"):
+ *   0 DISPENSER  1 version  2 GIVE_COIN  3 GIVE_TICK  4 GIVE_AMOUNT
+ *   5 GIVE_OWNERSHIP  6 GIVE_ESCROW  7 GET_COIN  8 GET_TICK  9 GET_AMOUNT
+ *   10 GET_ADDRESS  11 FIAT_CODE  12 FIAT_AMOUNT  13 ORACLE_ADDRESS
+ *   14 EXPIRATION  15 ALLOW_LIST  16 BLOCK_LIST  17 MEMO
+ *
+ * Required fields end at GET_AMOUNT (index 9), so the gate is length >=
+ * V0_REQUIRED_FIELD_COUNT (10). GET_ADDRESS (index 10) and EXPIRATION (index 14)
+ * are both OPTIONAL: an omitted or empty value is defaulted (GET_ADDRESS falls
+ * back to the tx source, EXPIRATION substitutes getDefaultExpiration), never
+ * treated as a skip. This gate reads the same constant production does; see
+ * hasRequiredDispenserCreateFields in XChainDecoder.js for the field map.
+ */
+const DEFAULT_EXPIRATION = 999999999
+
+function parseDispenserData(decodedData) {
+    if (!decodedData.startsWith('DISPENSER')) {
+        return { shouldInsert: false, fields: null }
+    }
+
+    const decodedDataSplit = decodedData.split('|')
+    const commandVersion = decodedDataSplit[1]
+
+    if (parseInt(commandVersion) === 0 && decodedDataSplit.length >= V0_REQUIRED_FIELD_COUNT) {
+        const giveCoin = decodedDataSplit[2]
+        const getCoin = decodedDataSplit[7]
+        const getAddress = decodedDataSplit[10]
+
+        // Omitted or empty EXPIRATION is defaulted, not skipped.
+        const expirationToken = decodedDataSplit[14]
+        const expiration = (expirationToken === undefined || expirationToken === '')
+            ? DEFAULT_EXPIRATION
+            : Number(expirationToken)
+
+        // Mirrors the create guard, which requires a SAFE INTEGER: the column is
+        // BIGINT UNSIGNED and the indexer rejects a fractional EXPIRATION outright.
+        // Number.isSafeInteger subsumes the isNaN test it replaces, and carries no
+        // u32 ceiling (the indexer escrows any non-negative integer EXPIRATION).
+        if (!Number.isSafeInteger(expiration) || expiration < 0) {
+            return { shouldInsert: false, fields: null }
+        }
+
+        if ((getCoin !== '') || (giveCoin !== '')) {
+            // operatingAddress = GET_ADDRESS when delegated, else tx source.
+            const operatingAddress = (getAddress && getAddress.length > 0) ? getAddress : null
+            return {
+                shouldInsert: true,
+                fields: { giveCoin, getCoin, getAddress, operatingAddress, expiration }
+            }
+        }
+    }
+
+    return { shouldInsert: false, fields: null }
+}
+
+let reporter
+
+function addReporterHooks() {
+    before(() => {
+        reporter = new FuzzReporter('dispenserParsing')
+    })
+
+    after(() => {
+        reporter.printSummary()
+        const s = reporter.getSummary()
+        if (s.crashes > 0 || s.invariantViolations > 0 || s.timeouts > 0) {
+            // Reproduce with: FUZZ_SEED=<n> npx mocha --no-config test/fuzz/harness/dispenser_parsing.fuzz.js
+            console.log(`FUZZ_SEED=${FUZZ_SEED} (rerun with this value to reproduce the inputs above)`)
+        }
+        assert.strictEqual(s.crashes, 0, `${s.crashes} crashes found; see test/fuzz/crashes/dispenserParsing/`)
+        assert.strictEqual(s.invariantViolations, 0, `${s.invariantViolations} invariant violations found`)
+        assert.strictEqual(s.timeouts, 0, `${s.timeouts} timeouts found`)
+    })
+}
+
+// --- Random DISPENSER strings ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
+    describe('random DISPENSER strings', () => {
+        it(`should handle ${ITERATIONS} random DISPENSER strings`, async () => {
+            for (let i = 0; i < ITERATIONS; i++) {
+                const input = seededRandomDispenserString()
+                try {
+                    const result = await withTimeout(() => parseDispenserData(input), 1000)
+                    const check = checkDispenserParse(input)
+                    if (!check.ok) {
+                        reporter.recordInvariantViolation(input, check.violations, 'random_dispenser')
+                    } else {
+                        reporter.recordSuccess()
+                    }
+                } catch (err) {
+                    if (err.message.startsWith('Timeout:')) {
+                        reporter.recordTimeout(input, 'random_dispenser')
+                    } else {
+                        reporter.recordCrash(input, err, 'random_dispenser')
+                    }
+                }
+            }
+        })
+    })
+})
+
+// --- Hypothesis H5: edge-case pipe counts ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
+    describe('H5: boundary pipe counts', () => {
+        const cases = [
+            'DISPENSER',
+            'DISPENSER|',
+            'DISPENSER|0',
+            'DISPENSER|0|',
+            'DISPENSER|0||',
+            'DISPENSER|0|||||||||||',   // 11 pipes (12 fields): below minimum
+            'DISPENSER|0||||||||||||',  // 12 pipes (13 fields): still below minimum
+            'DISPENSER|0|||||||||||||', // 13 pipes (14 fields): minimum valid
+            'DISPENSER|0||||||||||||||||||||||', // many empty fields
+            'DISPENSER|0|a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p', // all populated
+        ]
+
+        for (const input of cases) {
+            it(`should handle "${input.substring(0, 50)}${input.length > 50 ? '...' : ''}"`, async () => {
+                try {
+                    const result = await withTimeout(() => parseDispenserData(input), 1000)
+                    reporter.recordSuccess()
+                } catch (err) {
+                    reporter.recordCrash(input, err, 'boundary_pipes')
+                }
+            })
+        }
+    })
+})
+
+// --- Malformed version field ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
+    describe('malformed version field', () => {
+        const versions = [
+            '', '0', '1', '-1', '999', 'abc', 'null', 'undefined', 'NaN',
+            'Infinity', '-Infinity', '0x0', '0.5', '1e10',
+            '0'.repeat(1000), // very long number string
+            '\x00', '\n', '\t'
+        ]
+
+        for (const version of versions) {
+            const label = JSON.stringify(version).substring(0, 30)
+            it(`should handle version=${label}`, async () => {
+                const input = `DISPENSER|${version}|GIVE||||||GET||||||||3600`
+                try {
+                    const result = await withTimeout(() => parseDispenserData(input), 1000)
+                    reporter.recordSuccess()
+                } catch (err) {
+                    reporter.recordCrash(input, err, 'malformed_version')
+                }
+            })
+        }
+    })
+})
+
+// --- Fields containing pipe characters and special chars ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
+    describe('fields with special characters', () => {
+        it(`should handle ${ITERATIONS} strings with special chars in fields`, async () => {
+            for (let i = 0; i < ITERATIONS; i++) {
+                const specialChars = ['|', '\\', '\n', '\r', '\t', '\x00', '\xFF',
+                    '||', '|||', 'DISPENSER', 'null', 'undefined',
+                    '<script>', '${eval}', '__proto__', 'constructor']
+
+                // Build a DISPENSER string with 13+ fields, some containing special chars
+                const fields = ['DISPENSER', '0']
+                for (let j = 0; j < 15; j++) {
+                    if (randInt(3) === 0) {
+                        fields.push(specialChars[randInt(specialChars.length)])
+                    } else {
+                        fields.push(randHex(randInt(10)))
+                    }
+                }
+                const input = fields.join('|')
+
+                try {
+                    const result = await withTimeout(() => parseDispenserData(input), 1000)
+                    reporter.recordSuccess()
+                } catch (err) {
+                    if (err.message.startsWith('Timeout:')) {
+                        reporter.recordTimeout(input, 'special_chars')
+                    } else {
+                        reporter.recordCrash(input, err, 'special_chars')
+                    }
+                }
+            }
+        })
+    })
+})
+
+// --- Expiration field edge values ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
+    describe('expiration field edge values', () => {
+        const expirations = [
+            '0', '-1', '-999999', String(Number.MAX_SAFE_INTEGER),
+            String(Number.MAX_SAFE_INTEGER + 1), 'Infinity', '-Infinity', 'NaN',
+            '', '   ', '1.5', '1e18', '0x1000',
+            String(2 ** 32 - 1), String(2 ** 32), String(2 ** 53),
+            'abc', '\x00'
+        ]
+
+        for (const exp of expirations) {
+            it(`should handle expiration=${JSON.stringify(exp)}`, async () => {
+                const input = `DISPENSER|0|GIVE||||||GET|||||${exp}`
+                try {
+                    const result = await withTimeout(() => parseDispenserData(input), 1000)
+                    reporter.recordSuccess()
+                } catch (err) {
+                    reporter.recordCrash(input, err, 'expiration_edge')
+                }
+            })
+        }
+    })
+})
+
+// --- Non-DISPENSER prefixes that are close ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
+    describe('near-miss DISPENSER prefixes', () => {
+        // These do NOT start with 'DISPENSER', so insert should never trigger
+        const nonMatching = [
+            'DISPENSAR', 'DISPENSE', 'dispenser',
+            'Dispenser', ' DISPENSER', 'XDISPENSER', 'DISPENSEr'
+        ]
+        // These DO start with 'DISPENSER'; insert behavior depends on field contents
+        const matching = [
+            'DISPENSERR', 'DISPENSER\x00', 'DISPENSER '
+        ]
+
+        for (const prefix of nonMatching) {
+            it(`should not trigger insert for prefix="${prefix}"`, async () => {
+                const input = `${prefix}|0|GIVE||||||GET|||||3600`
+                try {
+                    const result = await withTimeout(() => parseDispenserData(input), 1000)
+                    assert.strictEqual(result.shouldInsert, false, 'Non-matching prefix should not trigger insert')
+                    reporter.recordSuccess()
+                } catch (err) {
+                    reporter.recordCrash(input, err, 'near_miss_prefix')
+                }
+            })
+        }
+
+        for (const prefix of matching) {
+            it(`should not crash for prefix="${JSON.stringify(prefix)}"`, async () => {
+                const input = `${prefix}|0|GIVE||||||GET|||||3600`
+                try {
+                    await withTimeout(() => parseDispenserData(input), 1000)
+                    reporter.recordSuccess()
+                } catch (err) {
+                    reporter.recordCrash(input, err, 'near_miss_prefix_matching')
+                }
+            })
+        }
+    })
+})
+
+// --- BATCH with embedded DISPENSER ---
+describe('Fuzz: DISPENSER parsing', function () {
+    this.timeout(120000)
+    addReporterHooks()
+
+    describe('BATCH-like strings with embedded DISPENSER', () => {
+        const batchCases = [
+            'DISPENSER|0|A||||||B|||||3600;SEND|0|XCHAIN|1000',
+            'SEND|0|XCHAIN|1000;DISPENSER|0|A||||||B|||||3600',
+            'DISPENSER|0|A||||||B|||||3600;DISPENSER|0|C||||||D|||||7200',
+        ]
+
+        for (const input of batchCases) {
+            it(`should handle batch: "${input.substring(0, 60)}..."`, async () => {
+                try {
+                    const result = await withTimeout(() => parseDispenserData(input), 1000)
+                    reporter.recordSuccess()
+                } catch (err) {
+                    reporter.recordCrash(input, err, 'batch_embedded')
+                }
+            })
+        }
+    })
+
+    // --- Extremely long strings ---
+    describe('extremely long DISPENSER strings', () => {
+        const lengths = [1000, 10000, 100000]
+
+        for (const len of lengths) {
+            it(`should handle ${len}-char DISPENSER string`, async () => {
+                const longField = 'A'.repeat(len)
+                const input = `DISPENSER|0|${longField}||||||${longField}|||||3600`
+                try {
+                    const result = await withTimeout(() => parseDispenserData(input), 5000)
+                    reporter.recordSuccess()
+                } catch (err) {
+                    if (err.message.startsWith('Timeout:')) {
+                        reporter.recordTimeout(input, 'long_string')
+                    } else {
+                        reporter.recordCrash(input, err, 'long_string')
+                    }
+                }
+            })
+        }
+    })
+})

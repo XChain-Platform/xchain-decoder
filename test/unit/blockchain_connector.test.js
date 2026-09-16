@@ -1,0 +1,347 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
+const assert = require('assert')
+const sinon = require('sinon')
+const axios = require('axios')
+const BlockchainConnector = require('../../src/chain/blockchain_connector')
+
+let connector
+let axiosStub
+
+function registerConnectorHooks() {
+    beforeEach(() => {
+        connector = new BlockchainConnector('127.0.0.1', 8332, 'testuser', 'testpass')
+        axiosStub = sinon.stub(axios, 'post')
+    })
+
+    afterEach(() => {
+        sinon.restore()
+    })
+}
+
+describe('BlockchainConnector', () => {
+    registerConnectorHooks()
+
+    describe('constructor', () => {
+        it('should construct the URL from host and port', () => {
+            assert.strictEqual(connector.url, 'http://127.0.0.1:8332')
+        })
+
+        it('should store rpc credentials', () => {
+            assert.strictEqual(connector.rpcUser, 'testuser')
+            assert.strictEqual(connector.rpcPassword, 'testpass')
+        })
+    })
+})
+
+describe('BlockchainConnector', () => {
+    registerConnectorHooks()
+
+    describe('#getBlockchainInfo()', () => {
+        it('[REGRESSION P2] R-RPC-001: should return the result on success', async () => {
+            const mockResult = { blocks: 100, verificationprogress: 1.0 }
+            axiosStub.resolves({ data: { result: mockResult } })
+
+            const result = await connector.getBlockchainInfo()
+            assert.deepStrictEqual(result, mockResult)
+        })
+
+        it('should throw when response has no result', async () => {
+            axiosStub.resolves({ data: { result: null } })
+
+            await assert.rejects(
+                () => connector.getBlockchainInfo(),
+                { message: 'Error getting blockchain info' }
+            )
+        })
+
+        it('should send correct JSON-RPC method', async () => {
+            axiosStub.resolves({ data: { result: {} } })
+            await connector.getBlockchainInfo()
+
+            const callData = axiosStub.firstCall.args[1]
+            assert.strictEqual(callData.method, 'getblockchaininfo')
+            assert.strictEqual(callData.jsonrpc, '2.0')
+        })
+
+        it('should use auth credentials', async () => {
+            axiosStub.resolves({ data: { result: {} } })
+            await connector.getBlockchainInfo()
+
+            const callConfig = axiosStub.firstCall.args[2]
+            assert.strictEqual(callConfig.auth.username, 'testuser')
+            assert.strictEqual(callConfig.auth.password, 'testpass')
+        })
+    })
+})
+
+describe('BlockchainConnector', () => {
+    registerConnectorHooks()
+
+    describe('#getNetworkInfo()', () => {
+        it('should return the result on success', async () => {
+            const mockResult = { version: 210000 }
+            axiosStub.resolves({ data: { result: mockResult } })
+
+            const result = await connector.getNetworkInfo()
+            assert.deepStrictEqual(result, mockResult)
+        })
+
+        it('should throw when response has no result', async () => {
+            axiosStub.resolves({ data: { result: null } })
+
+            await assert.rejects(
+                () => connector.getNetworkInfo(),
+                { message: 'Error getting network info' }
+            )
+        })
+    })
+})
+
+describe('BlockchainConnector', () => {
+    registerConnectorHooks()
+
+    describe('#getBlockHash()', () => {
+        it('should return the block hash on success', async () => {
+            axiosStub.resolves({ data: { result: 'abcdef1234' } })
+
+            const result = await connector.getBlockHash(100)
+            assert.strictEqual(result, 'abcdef1234')
+        })
+
+        it('should pass the block index as params', async () => {
+            axiosStub.resolves({ data: { result: 'hash' } })
+            await connector.getBlockHash(42)
+
+            const callData = axiosStub.firstCall.args[1]
+            assert.deepStrictEqual(callData.params, [42])
+        })
+
+        // Regression: BIGINT UNSIGNED columns (block_index) decode as JS BigInt. A BigInt
+        // param makes axios' JSON.stringify of the request body throw "Do not know how to
+        // serialize a BigInt", which previously wedged verifyReorg in an infinite retry loop
+        // (decoder never wrote the REORG event → indexer never rolled back). getBlockHash must
+        // coerce the height to a Number so the JSON-RPC params are serializable.
+        it('should coerce a BigInt block index to a Number param (serializable JSON-RPC body)', async () => {
+            axiosStub.resolves({ data: { result: 'hash' } })
+            await connector.getBlockHash(199n)
+
+            const callData = axiosStub.firstCall.args[1]
+            assert.deepStrictEqual(callData.params, [199])
+            assert.strictEqual(typeof callData.params[0], 'number')
+            // The whole body must round-trip through JSON without throwing.
+            assert.doesNotThrow(() => JSON.stringify(callData))
+        })
+
+        it('should throw when response has no result', async () => {
+            axiosStub.resolves({ data: { result: null } })
+
+            await assert.rejects(() => connector.getBlockHash(0))
+        })
+
+        it('should propagate network errors', async () => {
+            axiosStub.rejects(new Error('ECONNREFUSED'))
+
+            await assert.rejects(
+                () => connector.getBlockHash(0),
+                { message: 'ECONNREFUSED' }
+            )
+        })
+    })
+})
+
+describe('BlockchainConnector', () => {
+    registerConnectorHooks()
+
+    describe('#getBlock()', () => {
+        it('should return block hex on success', async () => {
+            axiosStub.resolves({ data: { result: 'deadbeef' } })
+
+            const result = await connector.getBlock('somehash')
+            assert.strictEqual(result, 'deadbeef')
+        })
+
+        it('should request raw hex format by default (hexFormat=true means verbose=false)', async () => {
+            axiosStub.resolves({ data: { result: 'hex' } })
+            await connector.getBlock('hash', true)
+
+            const callData = axiosStub.firstCall.args[1]
+            // hexFormat=true means we pass !hexFormat=false as the verbose param
+            assert.deepStrictEqual(callData.params, ['hash', false])
+        })
+
+        it('should throw when response has no result', async () => {
+            axiosStub.resolves({ data: { result: null } })
+            await assert.rejects(() => connector.getBlock('hash'))
+        })
+    })
+})
+
+describe('BlockchainConnector', () => {
+    registerConnectorHooks()
+
+    describe('#getBlockHeader()', () => {
+        it('should return block header on success', async () => {
+            axiosStub.resolves({ data: { result: 'headerdata' } })
+
+            const result = await connector.getBlockHeader('blockhash')
+            assert.strictEqual(result, 'headerdata')
+        })
+
+        it('[REGRESSION P2] R-RPC-001: should retry on timeout (ECONNABORTED)', async () => {
+            const timeoutError = new Error('timeout')
+            timeoutError.code = 'ECONNABORTED'
+
+            // Fail 2 times, succeed on 3rd
+            axiosStub.onCall(0).rejects(timeoutError)
+            axiosStub.onCall(1).rejects(timeoutError)
+            axiosStub.onCall(2).resolves({ data: { result: 'headerdata' } })
+
+            const result = await connector.getBlockHeader('hash')
+            assert.strictEqual(result, 'headerdata')
+            assert.strictEqual(axiosStub.callCount, 3)
+        })
+
+        it('should throw immediately on non-timeout errors', async () => {
+            const otherError = new Error('auth failed')
+            otherError.code = 'ERR_BAD_REQUEST'
+
+            axiosStub.rejects(otherError)
+
+            await assert.rejects(
+                () => connector.getBlockHeader('hash'),
+                { message: 'auth failed' }
+            )
+            assert.strictEqual(axiosStub.callCount, 1)
+        })
+
+        it('[REGRESSION P2] R-RPC-001: should throw after exhausting all 10 timeout retries', async () => {
+            const timeoutError = new Error('timeout')
+            timeoutError.code = 'ECONNABORTED'
+            axiosStub.rejects(timeoutError)
+
+            await assert.rejects(
+                () => connector.getBlockHeader('hash'),
+                { message: /problems getting a block header/ }
+            )
+            assert.strictEqual(axiosStub.callCount, 10)
+        })
+    })
+})
+
+describe('BlockchainConnector', () => {
+    registerConnectorHooks()
+
+    describe('#getRawMempool()', () => {
+        it('should return mempool txids on success', async () => {
+            const txids = ['tx1', 'tx2', 'tx3']
+            axiosStub.resolves({ data: { result: txids } })
+
+            const result = await connector.getRawMempool()
+            assert.deepStrictEqual(result, txids)
+        })
+
+        it('should throw when response has no result', async () => {
+            axiosStub.resolves({ data: { result: null } })
+            await assert.rejects(() => connector.getRawMempool())
+        })
+    })
+})
+
+describe('BlockchainConnector', () => {
+    registerConnectorHooks()
+
+    describe('#getRawTransaction()', () => {
+        it('should return raw tx hex on success', async () => {
+            axiosStub.resolves({ data: { result: 'rawtxhex' } })
+
+            const result = await connector.getRawTransaction('txid123')
+            assert.strictEqual(result, 'rawtxhex')
+        })
+
+        it('should resolve null when response has no result (tx mined/evicted)', async () => {
+            // A mempool tx can be mined or evicted between getRawMempool and this fetch.
+            // Resolving null (rather than rejecting) lets the caller filter out the one
+            // missing tx instead of failing the whole Promise.all batch.
+            axiosStub.resolves({ data: { result: null, error: { message: 'tx not found' } } })
+
+            const result = await connector.getRawTransaction('txid123')
+            assert.strictEqual(result, null)
+        })
+
+        it('should retry on network failure up to 10 times', async () => {
+            axiosStub.rejects(new Error('network error'))
+
+            await assert.rejects(
+                () => connector.getRawTransaction('txid123'),
+                { message: /failed after 10 attempts/ }
+            )
+            assert.strictEqual(axiosStub.callCount, 10)
+        }).timeout(10000) // retries include 500ms sleeps
+
+        it('should resolve on success after retries', async () => {
+            axiosStub.onCall(0).rejects(new Error('fail'))
+            axiosStub.onCall(1).rejects(new Error('fail'))
+            axiosStub.onCall(2).resolves({ data: { result: 'txhex' } })
+
+            const result = await connector.getRawTransaction('txid')
+            assert.strictEqual(result, 'txhex')
+        }).timeout(5000)
+
+        it('[REGRESSION P2] R-RPC-002: should back off longer on -429 work queue depth exceeded', async () => {
+            const queueError = new Error('queue full')
+            // Bitcoin/Litecoin Core signal work-queue exhaustion with HTTP 500 +
+            // a JSON body whose error.code === -429 (NOT an actual HTTP 429 response).
+            queueError.response = { data: { error: { code: -429, message: 'Work queue depth exceeded' } } }
+            axiosStub.onCall(0).rejects(queueError)
+            axiosStub.onCall(1).resolves({ data: { result: 'txhex' } })
+
+            const start = Date.now()
+            const result = await connector.getRawTransaction('txid')
+            const elapsed = Date.now() - start
+
+            assert.strictEqual(result, 'txhex')
+            // -429 backoff is 5000ms vs normal 500ms
+            assert.ok(elapsed >= 4000, `Expected >= 4000ms backoff, got ${elapsed}ms`)
+        }).timeout(10000)
+    })
+})
+
+describe('BlockchainConnector', () => {
+    registerConnectorHooks()
+
+    describe('#getRawTransactions()', () => {
+        it('should batch multiple getRawTransaction calls', async () => {
+            axiosStub.resolves({ data: { result: 'txhex' } })
+
+            const results = await connector.getRawTransactions(['tx1', 'tx2', 'tx3'])
+            assert.strictEqual(results.length, 3)
+            assert.strictEqual(results[0], 'txhex')
+        })
+
+        it('should return empty array for empty input', async () => {
+            const results = await connector.getRawTransactions([])
+            assert.deepStrictEqual(results, [])
+        })
+
+        it('should not fail the whole batch when one tx is mined/evicted (resolves null)', async () => {
+            // tx2 was evicted between getRawMempool and the fetch: empty RPC result.
+            // The batch must still return the other txs with a null hole for the missing one,
+            // rather than rejecting and dropping every txid in the batch.
+            axiosStub.onCall(0).resolves({ data: { result: 'txhex1' } })
+            axiosStub.onCall(1).resolves({ data: { result: null, error: { message: 'tx not found' } } })
+            axiosStub.onCall(2).resolves({ data: { result: 'txhex3' } })
+
+            const results = await connector.getRawTransactions(['tx1', 'tx2', 'tx3'])
+            assert.deepStrictEqual(results, ['txhex1', null, 'txhex3'])
+        })
+    })
+})

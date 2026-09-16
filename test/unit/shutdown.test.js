@@ -28,6 +28,20 @@ async function waitUntil(predicate, timeoutMs = 5000, intervalMs = 10){
 
 const silentLog = { log(){}, warn(){}, error(){} };
 
+// Manual hard-exit timer. It records what was armed and every handle passed to
+// clear, so deleting a clear call fails an assertion instead of passing silently
+// on the `finished` guard alone.
+function makeTimerFake(){
+    const armed = [];
+    const cleared = [];
+    return {
+        armed,
+        cleared,
+        setTimer(fn, ms){ const handle = { id: armed.length }; armed.push({ fn, ms, handle }); return handle; },
+        clearTimer(handle){ cleared.push(handle); }
+    };
+}
+
 // Minimal XChainDecoder stand-in: records call ORDER, because the ordering is the
 // contract (health flag before stop, pools closed last).
 function makeDecoder(order){
@@ -90,6 +104,11 @@ describe('graceful shutdown', function(){
             assert.strictEqual(calls, 1, 'drain must run exactly once');
             assert.deepStrictEqual(codes, [0]);
         });
+    });
+});
+
+describe('graceful shutdown', function(){
+    describe('createShutdown', function(){
 
         // The reason the handler is safe to install at all: registering one REMOVES
         // node's default terminate, so without this bound a hung drain turns every
@@ -108,33 +127,55 @@ describe('graceful shutdown', function(){
         });
 
         it('exits non-zero when the drain throws, and only once', async function(){
-            const codes = [];
+            const codes  = [];
+            const timers = makeTimerFake();
             const shutdown = createShutdown({
                 drain: async () => { throw new Error('pool refused to close'); },
                 timeoutMs: 50,
                 exit: (c) => codes.push(c),
-                log: silentLog
+                log: silentLog,
+                setTimer: timers.setTimer,
+                clearTimer: timers.clearTimer
             });
             shutdown('SIGTERM');
-            // Outlive the 50ms hard-exit timer to prove it was cleared.
-            await sleep(120);
+            assert.ok(await waitUntil(() => codes.length > 0), 'the drain rejection never reached the exit seam');
             assert.deepStrictEqual(codes, [1]);
+            assert.strictEqual(timers.armed.length, 1, 'exactly one hard-exit timer must be armed');
+            assert.strictEqual(timers.armed[0].ms, 50, 'the hard-exit timer was armed with the wrong budget');
+            assert.deepStrictEqual(timers.cleared, [timers.armed[0].handle], 'the hard-exit timer was never cleared');
+            // Fire the stale callback by hand: the window the old sleep(120) waited out.
+            timers.armed[0].fn();
+            assert.deepStrictEqual(codes, [1], 'a cleared timer must not add a second exit');
         });
+    });
+});
+
+describe('graceful shutdown', function(){
+    describe('createShutdown', function(){
 
         it('does not fire the hard-exit timer after a clean drain', async function(){
-            const codes = [];
+            const codes  = [];
+            const timers = makeTimerFake();
             const shutdown = createShutdown({
                 drain: async () => {},
                 timeoutMs: 20,
                 exit: (c) => codes.push(c),
-                log: silentLog
+                log: silentLog,
+                setTimer: timers.setTimer,
+                clearTimer: timers.clearTimer
             });
             shutdown('SIGTERM');
-            await sleep(80);
+            assert.ok(await waitUntil(() => codes.length > 0), 'the clean drain never reached the exit seam');
+            assert.deepStrictEqual(codes, [0]);
+            assert.strictEqual(timers.armed[0].ms, 20, 'the hard-exit timer was armed with the wrong budget');
+            assert.deepStrictEqual(timers.cleared, [timers.armed[0].handle], 'the hard-exit timer was never cleared');
+            timers.armed[0].fn();
             assert.deepStrictEqual(codes, [0], 'a cleared timer must not add a second exit');
         });
     });
+});
 
+describe('graceful shutdown', function(){
     describe('resolveTimeoutMs', function(){
         it('prefers an explicit budget, then the env var, then the default', function(){
             assert.strictEqual(resolveTimeoutMs(1234, {}), 1234);
@@ -177,7 +218,9 @@ describe('graceful shutdown', function(){
             assert.strictEqual(closes, 1);
         });
     });
+});
 
+describe('graceful shutdown', function(){
     describe('createDecoderDrain', function(){
 
         it('flips health, stops the decoder, drains the server and loop, then closes both pools', async function(){
@@ -218,7 +261,9 @@ describe('graceful shutdown', function(){
             let settled = false;
             const running = drain().then(() => { settled = true; });
 
-            await sleep(30);
+            // Wait on the positive marker, not a clock: past server.close the drain has
+            // nothing left but the loop promise, so non-settlement here is structural.
+            assert.ok(await waitUntil(() => order.includes('server.close')), 'the drain never reached the parse-loop wait');
             assert.strictEqual(settled, false, 'the drain must not finish while the parse loop is mid-block');
             assert.strictEqual(decoder.db.closed, false, 'closing a pool under an open block transaction is the exact abort this fix removes');
 
@@ -226,6 +271,11 @@ describe('graceful shutdown', function(){
             await running;
             assert.strictEqual(decoder.db.closed, true);
         });
+    });
+});
+
+describe('graceful shutdown', function(){
+    describe('createDecoderDrain', function(){
 
         it('survives a rejected loop promise', async function(){
             const order   = [];

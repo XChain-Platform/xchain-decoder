@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-16
+
+### Added
+- Consensus: the XBRIDGE action name and its escrow role addresses are recognized.
+
+### Changed
+- Audited transitive packages move to their patched releases (lockfile only).
+- Restructured under the platform code-structure standard (feature directories, snake_case files, split test suites, restored comments); consensus identity byte-identical and pinned.
+
 ## [0.18.0] - 2026-09-11
 
 ### Fixed

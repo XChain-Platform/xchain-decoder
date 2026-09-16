@@ -70,10 +70,13 @@ run_tier() {
   fi
 }
 need_sib() {
-  local s
+  local s missing
   for s in "$@"; do
-    if [ ! -d "$SIB/$s" ]; then
-      echo "ci:full: MISSING SIBLING $SIB/$s" >&2
+    missing=""
+    [ -e "$SIB/$s/package.json" ] || missing="$missing package.json"
+    [ -e "$SIB/$s/.git" ] || missing="$missing .git"
+    if [ -n "$missing" ]; then
+      echo "ci:full: MISSING SIBLING $SIB/$s (missing:$missing)" >&2
       echo "ci:full: GitHub CI checks this sibling out and runs steps against it," >&2
       echo "ci:full: so skipping here would gate green on a subset. Declare it in" >&2
       echo "ci:full: .ci-siblings (venue) or clone it beside this repo (hand run)." >&2
@@ -106,6 +109,13 @@ run_tier "drift: coin consensus-pin conformance" node -e '
   }
   console.log("consensus pin conformance OK (testnet, regtest)");
 '
+
+# --- identity pin (this gate only; no ci.yml job runs it) ------------------
+# bin/pins/identity.json holds the sha256 of the vendored coin files and the
+# two twin fixtures. Nothing else reads it, so this tier re-hashes the tree
+# against it and fails on any moved, missing or unreadable file instead of
+# letting the pin go stale.
+run_tier "identity pin (vendored coins, twin fixtures)" node bin/pin-identity.js --check
 
 # --- job: docker-suites ----------------------------------------------------
 # Both tiers own their venue lifecycle inside their npm script (compose up

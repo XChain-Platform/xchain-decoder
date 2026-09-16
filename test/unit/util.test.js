@@ -59,7 +59,9 @@ describe('util', () => {
             assert.strictEqual(hash.length, 64)
         })
     })
+})
 
+describe('util', () => {
     describe('#millisecondsToTimeString()', () => {
         it('should return empty string for 0ms', () => {
             assert.strictEqual(util.millisecondsToTimeString(0), '')

@@ -14,6 +14,9 @@
 /* XChain Decoder Utility Class */
 
 const crypto = require('crypto');
+const { format: formatLogLine } = require('node:util');
+const { getLogger } = require('./observability');
+const logger = getLogger();
 
 module.exports = {
 
@@ -22,7 +25,7 @@ module.exports = {
     },
 
     throwError: function(error){
-        console.error('throwError:', error);
+        logger.error(formatLogLine('throwError:', error));
         throw error;
     },
 
@@ -49,7 +52,7 @@ module.exports = {
         niceString += "\t: " + ms + 'ms';
         if(timeString!='')
             niceString += ' (' + timeString + ')';
-        console.log(niceString);
+        logger.info(niceString);
     },
 
     // Human-readable duration. `milliseconds` below is really TENTHS of a second

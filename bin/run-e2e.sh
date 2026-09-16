@@ -57,7 +57,7 @@ if ! docker compose -f "$COMPOSE_FILE" up -d --wait; then
 fi
 
 node ./node_modules/.bin/mocha --timeout 0 --exit \
-  --require ./test/e2e/setup.js 'test/e2e/**/*.e2e.js'
+  --require ./test/e2e/support/setup.js 'test/e2e/**/*.test.js'
 status=$?
 
 exit $status

@@ -4,7 +4,7 @@
         "Before this file existed, `npm run ci` ran the unit and security tiers only, so the",
         "e2e, integration, chaos, fuzz and regression suites were gated by nothing: they could",
         "rot red for months without any gate noticing. Each tier below is now either wired into",
-        "a gate or carries a written reason it is not, and test/unit/tierManifest.test.js proves",
+        "a gate or carries a written reason it is not, and test/unit/tier_manifest.test.js proves",
         "the mapping still matches package.json, the workflow, and the files on disk.",
         "Adding a tier means adding an entry here, or the enforcement test fails."
     ],
@@ -28,17 +28,17 @@
         "security": {
             "gate": "ci:security",
             "gateKind": "fast",
-            "specs": ["test/security/**/*.security.test.js"]
+            "specs": ["test/security/**/*.test.js"]
         },
         "smoke": {
             "gate": "ci:smoke",
             "gateKind": "fast",
-            "specs": ["test/smoke/**/*.smoke.js"]
+            "specs": ["test/smoke/**/*.test.js"]
         },
         "chaos": {
             "gate": "ci:chaos",
             "gateKind": "fast",
-            "specs": ["test/chaos/**/*.chaos.js"]
+            "specs": ["test/chaos/**/*.test.js"]
         },
         "fuzz": {
             "gate": "ci:fuzz",
@@ -60,11 +60,11 @@
         "e2e": {
             "gate": "test:e2e",
             "gateKind": "docker",
-            "specs": ["test/e2e/**/*.e2e.js"]
+            "specs": ["test/e2e/**/*.test.js"]
         },
         "benchmarks": {
             "ungated": true,
-            "reason": "Performance measurement, not a pass/fail suite: test/benchmarks/harness.js reports throughput and latency against test/benchmarks/baseline.json on the machine that runs it. Shared CI runners have no stable performance floor, so a gate on these numbers would fail on runner noise rather than on a regression. Run npm run test:bench:compare on a fixed box when changing the parse or block path."
+            "reason": "Performance measurement, not a pass/fail suite: test/benchmarks/support/harness.js reports throughput and latency against test/benchmarks/baseline.json on the machine that runs it. Shared CI runners have no stable performance floor, so a gate on these numbers would fail on runner noise rather than on a regression. Run npm run test:bench:compare on a fixed box when changing the parse or block path."
         },
         "mutation": {
             "ungated": true,
