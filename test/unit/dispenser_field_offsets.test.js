@@ -17,9 +17,10 @@
 // address the dispenser row is registered under), ORACLE_ADDRESS (the token oracle-fee
 // capture keys on), the v0 create EXPIRATION and the v2 edit EXPIRATION. The
 // authoritative layout is the indexer's own format strings
-// (xchain-indexer/src/actions/dispenser.js this.formats), and until this guard existed the
-// only thing binding the two was a prose comment, while every comparable dependency at this
-// seam already had a mechanical gate (indexerBatchLimits.js vendoring,
+// (xchain-indexer/src/actions/dispenser/index.js this.formats, moved there from the former
+// single-file src/actions/dispenser.js by the indexer M3 directory split), and until this
+// guard existed the only thing binding the two was a prose comment, while every comparable
+// dependency at this seam already had a mechanical gate (indexerBatchLimits.js vendoring,
 // oracleFeeOutputActivationConformance.js).
 //
 // Drift is money-bearing in both directions: a field inserted ahead of ORACLE_ADDRESS makes
@@ -64,8 +65,8 @@ const PINNED = {
 const ACTION_TOKEN_OFFSET = 1;
 
 const INDEXER_DISPENSER = process.env.XCHAIN_INDEXER_DIR
-    ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'actions', 'dispenser.js')
-    : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'actions', 'dispenser.js');
+    ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'actions', 'dispenser', 'index.js')
+    : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'actions', 'dispenser', 'index.js');
 const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
 function siblingOrSkip(ctx, file){
