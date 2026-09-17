@@ -28,7 +28,7 @@ jobs:
       # touch neither the guard nor the file it reads. Empty everywhere
       # else, which keeps the existing behaviour. Same expression as
       # xchain-indexer and xchain-explorer.
-      siblings-ref: ${{ (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')) && github.head_ref || '' }}
+      siblings-ref: ${{ (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')) && github.head_ref || github.base_ref || '' }}
 
   # Cross-repo drift guards: this repo vendors the canonical coin registry from
   # xchain-hub, and per-repo CI cannot see sibling repos, so a drifted vendored
@@ -47,7 +47,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-hub
-          ref: ${{ github.ref == 'refs/heads/master' && 'master' || 'develop' }}
+          ref: ${{ github.base_ref || (github.ref == 'refs/heads/master' && 'master' || 'develop') }}
           ssh-key: ${{ secrets.XCHAIN_HUB_DEPLOY_KEY }}
           path: xchain-hub
 
@@ -134,7 +134,7 @@ jobs:
         # whose cross-repo guards disagree with the gate for a reason that exists
         # nowhere but in CI.
         with:
-          ref: ${{ (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')) && github.head_ref || '' }}
+          ref: ${{ (startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')) && github.head_ref || github.base_ref || '' }}
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4
