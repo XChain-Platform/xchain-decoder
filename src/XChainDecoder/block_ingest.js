@@ -221,7 +221,8 @@ async function commitBlockBatch(loop, nextBlockHeight, nextBlockHash){
     // AFTER the block transaction commits (a transient failure here
     // must not roll back committed block data) and is deterministic
     // across nodes (keyed off canonical height, not wall clock).
-    await this.db.purgeExpiredDispensers(nextBlockHeight - DISPENSER_EXPIRE_SAFE_DEPTH)
+    const safeDepth = this.dispenserExpireSafeDepth || DISPENSER_EXPIRE_SAFE_DEPTH
+    await this.db.purgeExpiredDispensers(nextBlockHeight - safeDepth)
 
     loop.blocksCount = 0
     loop.transactionsCount = 0

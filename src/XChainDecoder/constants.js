@@ -90,17 +90,21 @@ const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // so every node purges identically. This MUST stay >= the deepest per-chain
 // reorg-recovery window, or a row is deleted before a legal in-window reorg can
 // restore it (deleteBlockByIndex then matches zero rows), permanently losing a
-// money-bearing dispenser on the reorged node. The platform's deepest window is
-// 120, and TWO chains now sit on it (xchain-utxo-tracker DEFAULT_UNDO_BLOCKS:
-// BTC 12 / LTC 120 / DOGE 120; LTC was 48 until a 2026-09-01 testnet fork walked
-// past it); the previous flat 100 sat BELOW that window. Invariant: SAFE_DEPTH >=
-// deepest undo window + margin. The +6 margin means a small undo-window re-tune
+// money-bearing dispenser on the reorged node. Standard networks use 126 and
+// Litecoin testnet uses 5006. Invariant: SAFE_DEPTH >= matching undo window +
+// margin. The +6 margin means a small undo-window re-tune
 // cannot land exactly at the purge threshold; dispenserSafeDepth.test.js
-// enforces the invariant with a conformance read of undo-blocks.js, so raising
-// any chain's window past the margin fails the suite until this is bumped.
+// enforces the invariant with a conformance read of undo-blocks.js.
 // Purging deeper is the conservative direction (rows are merely retained longer
 // before hard-purge; expiry semantics and action evaluation are unchanged).
-const DISPENSER_EXPIRE_SAFE_DEPTH = 126 // 120 (deepest undo window, LTC and DOGE) + 6 margin
+const DISPENSER_EXPIRE_SAFE_DEPTH = 126 // 120 (deepest standard window) + 6 margin
+const LTC_TESTNET_DISPENSER_EXPIRE_SAFE_DEPTH = 5006
+
+function resolveDispenserExpireSafeDepth(coin, network){
+    return String(coin).toUpperCase() === 'LTC' && String(network).toLowerCase() === 'testnet'
+        ? LTC_TESTNET_DISPENSER_EXPIRE_SAFE_DEPTH
+        : DISPENSER_EXPIRE_SAFE_DEPTH
+}
 
 // There is deliberately no DISPENSER_CLOSE_DELAY twin of the indexer's here: the decoder
 // does not mirror dispenser cancels, so it never needs to close a row at the height the
@@ -171,6 +175,7 @@ module.exports = {
     FUNDING_VOUT_BASE,
     SYNCED_THRESHOLD,
     DISPENSER_EXPIRE_SAFE_DEPTH,
+    resolveDispenserExpireSafeDepth,
     MIN_VERIFICATION_PROGRESS_TO_PARSE,
     TAPROOT_LEAF_VERSION,
     TAPROOT_ANNEX_MARKER,

@@ -19,7 +19,7 @@
  * xchain-utxo-tracker/src/chain/undo_blocks.js when that sibling repo is checked
  * out (conformance read, skip-if-absent per the ConsensusPrimitiveConformance
  * convention), with a hand-copied floor kept as the always-on baseline.
- * It also pins the tracker's own MAX_SAFE_UNDO_BLOCKS equal to this constant,
+ * It also pins the tracker's network-specific safe ceiling to the decoder resolver,
  * which the one-directional runtime warning in resolveUndoBlocks() cannot do.
  */
 
@@ -32,7 +32,7 @@ const XChainDecoder = require('../../src/XChainDecoder.js');
 
 // Baseline floor (always asserted, even without the sibling checkout).
 // Mirrors xchain-utxo-tracker/src/chain/undo_blocks.js DEFAULT_UNDO_BLOCKS.
-const DEEPEST_UNDO_WINDOW = 120; // LTC and DOGE (BTC 12 / LTC 120 / DOGE 120)
+const DEFAULT_UNDO_WINDOW = 120;
 
 // Headroom above the deepest window so a small undo-window re-tune can never
 // land exactly at the purge threshold. Matches the margin baked into
@@ -40,12 +40,11 @@ const DEEPEST_UNDO_WINDOW = 120; // LTC and DOGE (BTC 12 / LTC 120 / DOGE 120)
 const SAFETY_MARGIN = 6;
 
 describe('DISPENSER_EXPIRE_SAFE_DEPTH', function () {
-    it('is at least as deep as the deepest per-chain reorg window (LTC and DOGE = 120) + margin', function () {
-        assert.ok(
-            XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH >= DEEPEST_UNDO_WINDOW + SAFETY_MARGIN,
-            `SAFE_DEPTH (${XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH}) must be >= ${DEEPEST_UNDO_WINDOW + SAFETY_MARGIN} ` +
-            'so a soft-expired dispenser survives every in-window reorg with headroom'
-        );
+    it('raises only litecoin testnet to the 5000-block window plus margin', function () {
+        assert.strictEqual(XChainDecoder.resolveDispenserExpireSafeDepth('LTC', 'testnet'), 5006);
+        assert.strictEqual(XChainDecoder.resolveDispenserExpireSafeDepth('LTC', 'mainnet'), 126);
+        assert.strictEqual(XChainDecoder.resolveDispenserExpireSafeDepth('LTC', 'regtest'), 126);
+        assert.strictEqual(XChainDecoder.resolveDispenserExpireSafeDepth('BTC', 'testnet'), 126);
     });
 
     // CONFORMANCE: read the canonical per-chain undo windows instead of
@@ -61,34 +60,38 @@ describe('DISPENSER_EXPIRE_SAFE_DEPTH', function () {
 
         it('SAFE_DEPTH exceeds every canonical per-chain undo window by the margin', function () {
             const { DEFAULT_UNDO_BLOCKS } = require(UNDO);
-            const deepest = Math.max(...Object.values(DEFAULT_UNDO_BLOCKS));
-            assert.ok(
-                XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH >= deepest + SAFETY_MARGIN,
-                `SAFE_DEPTH (${XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH}) must be >= canonical deepest ` +
-                `undo window (${deepest}) + margin (${SAFETY_MARGIN}); a chain's undo window was raised ` +
-                'without bumping DISPENSER_EXPIRE_SAFE_DEPTH in XChainDecoder.js'
-            );
+            const cases = [
+                ['BTC', 'mainnet'], ['BTC', 'testnet'], ['BTC', 'regtest'],
+                ['LTC', 'mainnet'], ['LTC', 'testnet'], ['LTC', 'regtest'],
+                ['DOGE', 'mainnet'], ['DOGE', 'testnet'], ['DOGE', 'regtest']
+            ];
+            for (const [coin, network] of cases) {
+                const window = DEFAULT_UNDO_BLOCKS[coin + '_' + network.toUpperCase()];
+                const safeDepth = XChainDecoder.resolveDispenserExpireSafeDepth(coin, network);
+                assert.ok(safeDepth >= window + SAFETY_MARGIN,
+                    `${coin}/${network} SAFE_DEPTH (${safeDepth}) must be >= undo window (${window}) + margin (${SAFETY_MARGIN})`);
+            }
         });
 
-        it('the hand-copied baseline floor still matches the canonical deepest window', function () {
+        it('the hand-copied standard floor still matches the unchanged mainnet window', function () {
             const { DEFAULT_UNDO_BLOCKS } = require(UNDO);
-            const deepest = Math.max(...Object.values(DEFAULT_UNDO_BLOCKS));
             assert.strictEqual(
-                DEEPEST_UNDO_WINDOW, deepest,
-                'update DEEPEST_UNDO_WINDOW in this test to match undo_blocks.js'
+                DEFAULT_UNDO_WINDOW, DEFAULT_UNDO_BLOCKS.LTC_MAINNET,
+                'update DEFAULT_UNDO_WINDOW in this test to match the unchanged mainnet window'
             );
         });
 
         // Pins the tracker's hand-mirrored ceiling to the decoder's constant in BOTH
         // directions. resolveUndoBlocks() only warns when the resolved window EXCEEDS
-        // MAX_SAFE_UNDO_BLOCKS, so LOWERING DISPENSER_EXPIRE_SAFE_DEPTH alone is silent
+        // The tracker ceiling warning is one-directional, so lowering the decoder depth alone is silent
         // at runtime; this equality is the only thing that catches it.
-        it('tracker MAX_SAFE_UNDO_BLOCKS equals the decoder SAFE_DEPTH', function () {
-            const { MAX_SAFE_UNDO_BLOCKS } = require(UNDO);
+        it('tracker LTC testnet ceiling equals the decoder LTC testnet depth', function () {
+            const { safeUndoBlocksCeiling } = require(UNDO);
+            const decoderDepth = XChainDecoder.resolveDispenserExpireSafeDepth('LTC', 'testnet');
             assert.strictEqual(
-                MAX_SAFE_UNDO_BLOCKS, XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH,
-                `tracker MAX_SAFE_UNDO_BLOCKS (${MAX_SAFE_UNDO_BLOCKS}) must EQUAL ` +
-                `DISPENSER_EXPIRE_SAFE_DEPTH (${XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH}); ` +
+                safeUndoBlocksCeiling('litecoin-testnet'), decoderDepth,
+                `tracker safe ceiling (${safeUndoBlocksCeiling('litecoin-testnet')}) must EQUAL ` +
+                `decoder SAFE_DEPTH (${decoderDepth}); ` +
                 'a split lets the decoder abort reorg recovery at one depth while the tracker auto-recovers to another'
             );
         });
