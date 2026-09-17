@@ -221,17 +221,19 @@ describe('migrate.js operator CLI @regression', function () {
     beforeEach(prepareMigrateTest);
     afterEach(restoreMigrateTest);
 
-    it('--file with no value exits 2 before building a DB handle @regression', async function () {
+    it('--file with no value exits 2 before building a DB handle @regression', function () {
         process.env.DECODER_DB_HOST = 'db.test';
         process.env.DECODER_DB_NAME = 'decoder_test';
         process.env.DECODER_DB_USER = 'tester';
         process.argv = ['node', 'migrate.js', '--file'];
         const fake = makeFakeDb({ runMigrations: async () => ({ applied: [], pending: [] }) });
-        // process.exit is stubbed, so main() continues past the guard; assert the
-        // exit(2) signal and the actionable error fired before any migration ran.
+        // process.exit is stubbed, so the exit(2) does not end the process; main()
+        // must still bail rather than fall through to a blanket run. The refusal
+        // precedes main()'s first await, so it has run by the time require returns.
         loadMigrateWith(fake.FakeDatabase);
-        await fake.done;
         assert.strictEqual(exitStub.calledWith(2), true, 'expected process.exit(2) on a valueless --file');
+        assert.strictEqual(fake.runArgs, null, 'a refused argv must apply no migrations');
+        assert.strictEqual(fake.poolEnded, false, 'a refused argv must not open a DB handle');
         assert.match(consoleErrStub.getCalls().map((c) => c.args[0]).join('\n'),
             /--file requires a migration filename argument/);
     });
@@ -245,5 +247,70 @@ describe('migrate.js operator CLI @regression', function () {
         await fake.done;
         assert.deepStrictEqual(fake.runArgs, { includeManual: true },
             'a blanket run must NOT set opts.only');
+    });
+});
+
+// Unrecognized argv. An ignored token falls through to the no-argument meaning,
+// which is apply-everything, so `migrate.js --help` would apply every pending
+// manual migration. Each case pins the refusal by what it APPLIES, not what it says.
+
+describe('migrate.js operator CLI argv refusal @regression', function () {
+    beforeEach(prepareMigrateTest);
+    afterEach(restoreMigrateTest);
+
+    // The refusal (and --help) run synchronously ahead of main()'s first await, so
+    // a case that must prove nothing ran asserts right after the require rather
+    // than awaiting a pool.end() that a correct CLI never reaches.
+    function loadWithArgv(args) {
+        process.argv = ['node', 'migrate.js', ...args];
+        const fake = makeFakeDb({ runMigrations: async () => ({ applied: [], pending: [] }) });
+        loadMigrateWith(fake.FakeDatabase);
+        return fake;
+    }
+
+    it('an unknown flag applies nothing and exits 2', function () {
+        const fake = loadWithArgv(['--dry-run']);
+        assert.strictEqual(fake.runArgs, null, 'an unknown flag must not run migrations');
+        assert.strictEqual(fake.poolEnded, false, 'an unknown flag must not open a DB handle');
+        assert.strictEqual(exitStub.calledWith(2), true, 'expected process.exit(2)');
+    });
+
+    it('a bare positional applies nothing and exits 2 (it is not a --file value)', function () {
+        const fake = loadWithArgv(['2026-06-13-dispensers-expiration-bigint.sql']);
+        assert.strictEqual(fake.runArgs, null, 'a bare filename must not become a blanket run');
+        assert.strictEqual(exitStub.calledWith(2), true, 'expected process.exit(2)');
+    });
+
+    it('an empty --file= value applies nothing rather than widening to everything', function () {
+        const fake = loadWithArgv(['--file=']);
+        assert.strictEqual(fake.runArgs, null, 'an empty scope must not mean apply-everything');
+        assert.strictEqual(exitStub.calledWith(2), true, 'expected process.exit(2)');
+    });
+
+    it('--help and -h apply nothing and exit 0, with no DECODER_DB_* loaded', function () {
+        for (const flag of ['--help', '-h']) {
+            const fake = loadWithArgv([flag]);
+            assert.strictEqual(fake.runArgs, null, flag + ' must not run migrations');
+            assert.strictEqual(fake.poolEnded, false, flag + ' must not open a DB handle');
+            assert.strictEqual(exitStub.calledWith(0), true, flag + ' must exit 0');
+            assert.strictEqual(exitStub.calledWith(2), false, flag + ' is not an error');
+            exitStub.resetHistory();
+        }
+    });
+
+    it('the refusal prints both modes so an operator can tell them apart', function () {
+        loadWithArgv(['--dry-run']);
+        const printed = consoleErrStub.getCalls().map((c) => c.args[0]).join('\n');
+        assert.match(printed, /APPLY EVERYTHING/, 'the usage must name the blanket mode');
+        assert.match(printed, /APPLY ONE/, 'the usage must name the scoped mode');
+        assert.match(printed, /--file/, 'the usage must show the flag that scopes a run');
+    });
+
+    it('--help prints both modes and starts no run', function () {
+        loadWithArgv(['--help']);
+        const printed = consoleLogStub.getCalls().map((c) => c.args[0]).join('\n');
+        assert.match(printed, /APPLY EVERYTHING/);
+        assert.match(printed, /APPLY ONE/);
+        assert.ok(!/applying pending migrations/.test(printed), '--help must not start a run');
     });
 });
