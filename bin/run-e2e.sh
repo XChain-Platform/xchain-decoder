@@ -30,6 +30,7 @@ cd "$(dirname "$0")/.." || exit 1
 
 COMPOSE_FILE="test/e2e/fixtures/docker-compose.test.yml"
 KEEP_VENUE="${KEEP_VENUE:-0}"
+COMPOSE=(node bin/fixture-ports.js compose "$COMPOSE_FILE")
 
 teardown() {
   if [ "$KEEP_VENUE" = "1" ]; then
@@ -37,7 +38,7 @@ teardown() {
     return
   fi
   echo "[e2e] Tearing down the venue"
-  docker compose -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1
+  "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1
 }
 trap teardown EXIT
 
@@ -47,12 +48,12 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 # Start from a clean slate even if a previous run was killed before its teardown.
-docker compose -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1
+"${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1
 
 echo "[e2e] Bringing up the venue"
-if ! docker compose -f "$COMPOSE_FILE" up -d --wait; then
+if ! "${COMPOSE[@]}" up -d --wait; then
   echo "[e2e] Venue failed to become healthy" >&2
-  docker compose -f "$COMPOSE_FILE" ps
+  "${COMPOSE[@]}" ps
   exit 1
 fi
 

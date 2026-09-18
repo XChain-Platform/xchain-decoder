@@ -46,14 +46,15 @@ const BitcoinCore = require('bitcoin-core')
 const nodeHelper = require('../../helpers/node_helper')
 const XChainDecoder = require('../../../src/XChainDecoder')
 const Database = require('../../../src/db.js')
+const fixturePorts = require('../../../bin/fixture-ports.js')
 
 // Fixture venue. Must match fixtures/docker-compose.test.yml.
 const NODE_HOST = process.env.XCHAIN_E2E_NODE_HOST || '127.0.0.1'
-const NODE_PORT = process.env.XCHAIN_E2E_NODE_PORT || '18545'
+const NODE_PORT = String(fixturePorts.port('XCHAIN_E2E_NODE_PORT'))
 const NODE_USER = process.env.XCHAIN_E2E_NODE_USER || 'e2efixture'
 const NODE_PASSWORD = process.env.XCHAIN_E2E_NODE_PASS || 'e2efixture'
 const DB_HOST = process.env.XCHAIN_E2E_DB_HOST || '127.0.0.1'
-const DB_PORT = process.env.XCHAIN_E2E_DB_PORT || '13319'
+const DB_PORT = String(fixturePorts.port('XCHAIN_E2E_DB_PORT'))
 const DB_USER = process.env.XCHAIN_E2E_DB_USER || 'root'
 const DB_PASSWORD = process.env.XCHAIN_E2E_DB_PASS || 'e2efixture'
 const DB_NAME = 'xchain_decoder_e2e_regtest'

@@ -53,7 +53,7 @@ services:
       - -addresstype=legacy
       - -printtoconsole=1
     ports:
-      - "18544:18443"
+      - "${XCHAIN_TEST_NODE_PORT:-18544}:18443"
     tmpfs:
       - /home/bitcoin/.bitcoin
     healthcheck:
@@ -67,7 +67,7 @@ services:
     environment:
       MARIADB_ROOT_PASSWORD: itfixture
     ports:
-      - "13318:3306"
+      - "${XCHAIN_TEST_DB_PORT:-13318}:3306"
     tmpfs:
       - /var/lib/mysql
     healthcheck:
