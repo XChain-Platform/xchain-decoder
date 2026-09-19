@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-17
+
+### Fixed
+- The migration CLI refuses unrecognized arguments instead of applying every pending migration.
+
 ## [0.19.0] - 2026-09-16
 
 ### Added
