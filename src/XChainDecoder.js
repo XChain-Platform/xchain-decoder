@@ -55,9 +55,9 @@ bitcoin.initEccLib(ecc);
 // DROP -> AIRDROP 3 each), so a payload compiled to exactly 8192 bytes is stored as
 // an 8197-byte BROADCAST string. That is intended and harmless: transactions.data is
 // MEDIUMTEXT, so nothing truncates. It is deliberately not "fixed" by re-measuring
-// the canonical buffer at
-// the gate: tightening it would drop transactions whose on-chain push is legal and
-// that other nodes accept, forking the fleet and retroactively invalidating
+// the canonical buffer at the gate: tightening it would drop transactions whose
+// on-chain push is legal and that other nodes accept, forking the fleet and
+// retroactively invalidating
 // already-decoded near-cap alias history. Moving the measurement point is a
 // consensus change needing a flag-day (a *_ACTIVATION entry in
 // ./protocol/constants.js keyed on block height and network, deployed fleet-wide
