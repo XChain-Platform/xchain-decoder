@@ -88,10 +88,11 @@ describe('Taproot envelope recognition', function () {
             const DOCS_CONSTANTS = path.join(DOCS, 'protocol', 'constants.js')
             before(function () { if (!fs.existsSync(DOCS_CONSTANTS)) { if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-documentation sibling not found at ' + DOCS_CONSTANTS + ' but XCHAIN_REQUIRE_SIBLINGS=1'); this.skip(); } })
 
-            it('ENVELOPE_MAX_PAYLOAD and the activation map are byte-equal to the canonical copy', function () {
+            it('ENVELOPE_MAX_PAYLOAD and both activation maps are byte-equal to the canonical copy', function () {
                 const docs = require(DOCS_CONSTANTS)
                 assert.strictEqual(docs.ENVELOPE_MAX_PAYLOAD, CONSTANTS.ENVELOPE_MAX_PAYLOAD)
                 assert.deepStrictEqual(docs.ENVELOPE_RECOGNITION_ACTIVATION, CONSTANTS.ENVELOPE_RECOGNITION_ACTIVATION)
+                assert.deepStrictEqual(docs.ENVELOPE_CARRIER_RECOGNITION_ACTIVATION, CONSTANTS.ENVELOPE_CARRIER_RECOGNITION_ACTIVATION)
             })
 
             it('the inlined golden bytes match the frozen vector file', function () {

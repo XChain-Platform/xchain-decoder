@@ -239,8 +239,14 @@ describe('clear-reorg-halt CLI', function () {
 
     it('refuses, and cannot be forced, while rolled-back blocks are still missing above the tip', async function () {
         const { db, calls } = fakeDb({ deletesAboveTip: 5 })
-        assert.strictEqual(await run({ db, argv: ['--reason', REASON, '--force'], ...quiet }), EXIT.NOT_RESYNCED)
+        const errors = []
+        assert.strictEqual(await run({ db, argv: ['--reason', REASON, '--force'], log: () => {}, error: (l) => errors.push(l) }), EXIT.NOT_RESYNCED)
         assert.strictEqual(calls.clear.length, 0)
+        // Names the parked discriminator and the resync a parked decoder needs, not only a wait.
+        const refusal = errors.join('\n')
+        assert.match(refusal, /reorg_halt_parked: true/)
+        assert.match(refusal, /full resync from a known-good snapshot/)
+        assert.match(refusal, /cannot be forced/)
     })
 })
 

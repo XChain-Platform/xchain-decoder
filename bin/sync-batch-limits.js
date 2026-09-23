@@ -20,12 +20,13 @@
  *   node bin/sync-batch-limits.js --check   # exit 1 if it has drifted
  *
  * WHY A GENERATOR AND NOT A HAND COPY. src/protocol/indexer_batch_limits.js decides which
- * BATCHes the decoder refuses to capture for, and it must agree with
- * xchain-indexer/src/actions/batch.js exactly: a cap that exists here and not there
- * SUPPRESSES capture for a batch the indexer dispatches, which is the money-bearing
- * under-capture direction. Two hand-maintained copies of one consensus table can never
- * re-converge once they diverge (the platform's own coins-registry lesson), so the vendored
- * file is written FROM the sibling and a unit test re-derives it on every run.
+ * BATCHes the decoder refuses to capture for, and it must agree with the indexer's Batch
+ * handler (xchain-indexer/src/actions/batch/, caps installed by limits.js) exactly: a cap
+ * that exists here and not there SUPPRESSES capture for a batch the indexer dispatches,
+ * which is the money-bearing under-capture direction. Two hand-maintained copies of one
+ * consensus table can never re-converge once they diverge (the platform's own
+ * coins-registry lesson), so the vendored file is written FROM the sibling and a unit test
+ * re-derives it on every run.
  *
  * WHAT IT READS. The real Batch class, INSTANTIATED, not a regex over its source: the caps
  * live on `this` in the constructor, so a rename, a reformat or a move to a computed value
@@ -36,7 +37,7 @@
  * WHAT IT DELIBERATELY DOES NOT VENDOR: the BATCH_ISSUANCE_LIMITS activation INSTANT.
  * The decoder never evaluates that flag at runtime. Its own gate
  * (BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION) is required by
- * batchSubCommandOutputCaptureActivation.test.js to sit at or after the indexer's
+ * batch_sub_command_output_capture_activation.test.js to sit at or after the indexer's
  * BATCH_ISSUANCE_LIMITS instant on every ARMED network, so at every block time where this
  * module's rules run, that flag is provably already on. Copying the instant here would add a
  * second thing to drift and would answer a question the ordering invariant has already
@@ -45,12 +46,14 @@
  *
  * WHAT IT DOES VENDOR, AND WHY THE PARAGRAPH ABOVE DOES NOT COVER IT: the
  * BATCH_COST_WEIGHTING activation INSTANT. That ordering invariant is specific to
- * BATCH_ISSUANCE_LIMITS and it does NOT hold for the weighting flag: mainnet capture is
- * ARMED at 1786838400 while the weighting instant is still the 9999999999 house sentinel,
- * so mainnet is a live block time where this module's rules run and the weight budget does
- * NOT apply. Applying the budget there would suppress capture for batches the indexer
- * dispatches, which is the money-bearing under-capture direction. The instant is therefore
- * carried per network and the rule is gated on it, rather than assumed on.
+ * BATCH_ISSUANCE_LIMITS and does NOT bind the weighting flag, which may sit BELOW capture:
+ * mainnet's weighting instant is genesis (0) while capture is armed at 1786838400. That is
+ * safe because the indexer applies the budget only inside its BATCH_ISSUANCE_LIMITS guard,
+ * which shares capture's instant, so below it neither side weighs. The instant is still
+ * carried per network and the rule gated on it, rather than assumed on, because a network
+ * may be DISARMED (null): applying the budget where the indexer does not would suppress
+ * capture for batches the indexer dispatches, which is the money-bearing under-capture
+ * direction.
  *
  * Lives under bin/ as an operator tool rather than inside a suite file, because it is a
  * maintenance tool for the conformance suite that consumes it: batch_limits_vendoring.test.js
@@ -189,10 +192,11 @@ function renderModule(derived){
  *               unit run; skips only when the sibling checkout is absent, and
  *               XCHAIN_REQUIRE_SIBLINGS=1 turns that skip into a failure)
  *
- * SOURCE OF TRUTH: xchain-indexer/src/actions/batch.js, read by instantiating the real Batch
- * class. These are the tables whose breach makes the indexer reject a BATCH AS A WHOLE, so
- * that not one of its sub-commands runs. The decoder mirrors them to stop capturing outputs
- * for commands nothing will execute (batchSubCommandCapture.hasProvablyRejectedBatch).
+ * SOURCE OF TRUTH: xchain-indexer/src/actions/batch/ (entry index.js, caps in limits.js), read
+ * by instantiating the real Batch class. These are the tables whose breach makes the indexer
+ * reject a BATCH AS A WHOLE, so that not one of its sub-commands runs. The decoder mirrors
+ * them to stop capturing outputs for commands nothing will execute
+ * (batchSubCommandCapture.hasProvablyRejectedBatch).
  *
  * THE DIRECTION OF ERROR IS NOT SYMMETRIC, which is why this file is generated rather than
  * typed: a cap that is TIGHTER here than in the indexer suppresses capture for a batch the
@@ -202,9 +206,9 @@ function renderModule(derived){
  ********************************************************************/
 
 // Global per-BATCH command cap. Breached => 'invalid: COMMAND (limit)', whole batch.
-// GATED on BATCH_ISSUANCE_LIMITS in the indexer; see the module header of
-// batchSubCommandCapture.js for why that flag is provably active wherever the decoder's
-// own capture gate is.
+// GATED on BATCH_ISSUANCE_LIMITS in the indexer; see the WHICH FLAG STATE block in
+// batch_sub_command_capture/sub_commands.js for why that flag is provably active wherever
+// the decoder's own capture gate is.
 const COMMAND_LIMIT = ${literal(derived.COMMAND_LIMIT)};
 
 // Per-ACTION caps in force in BOTH flag states (indexer: this.actionLimits).
@@ -229,9 +233,10 @@ const WEIGHT_BUDGET = ${literal(derived.WEIGHT_BUDGET)};
 const COMMAND_WEIGHTS = ${renderTable(derived.COMMAND_WEIGHTS, 0)};
 
 // Per-network BATCH_COST_WEIGHTING activation instants (block TIME, >=), read off the
-// sibling's protocol-change registry. Unlike BATCH_ISSUANCE_LIMITS this flag is NOT provably
-// on wherever the decoder's capture gate is: mainnet capture is armed while this instant is
-// still the house sentinel. null means DISARMED, which is inactive at every block time.
+// sibling's protocol-change registry. Unlike BATCH_ISSUANCE_LIMITS this flag is NOT ordered
+// against the decoder's capture gate; an instant below capture is safe because the indexer
+// weighs only inside its BATCH_ISSUANCE_LIMITS guard, which shares capture's instant.
+// null means DISARMED, which is inactive at every block time.
 const COST_WEIGHTING_ACTIVATION = ${renderTable(derived.COST_WEIGHTING_ACTIVATION, 0)};
 
 module.exports = {

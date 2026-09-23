@@ -20,8 +20,8 @@
 // (xchain-indexer/src/actions/dispenser/index.js this.formats, moved there from the former
 // single-file src/actions/dispenser.js by the indexer M3 directory split), and until this
 // guard existed the only thing binding the two was a prose comment, while every comparable
-// dependency at this seam already had a mechanical gate (indexerBatchLimits.js vendoring,
-// oracleFeeOutputActivationConformance.js).
+// dependency at this seam already had a mechanical gate (indexer_batch_limits.js vendoring,
+// oracle_fee_output_activation_conformance.test.js).
 //
 // Drift is money-bearing in both directions: a field inserted ahead of ORACLE_ADDRESS makes
 // capture key on the wrong token, so the indexer rejects every fee-bearing Mode B create

@@ -21,10 +21,11 @@
  *               unit run; skips only when the sibling checkout is absent, and
  *               XCHAIN_REQUIRE_SIBLINGS=1 turns that skip into a failure)
  *
- * SOURCE OF TRUTH: xchain-indexer/src/actions/batch.js, read by instantiating the real Batch
- * class. These are the tables whose breach makes the indexer reject a BATCH AS A WHOLE, so
- * that not one of its sub-commands runs. The decoder mirrors them to stop capturing outputs
- * for commands nothing will execute (batchSubCommandCapture.hasProvablyRejectedBatch).
+ * SOURCE OF TRUTH: xchain-indexer/src/actions/batch/ (entry index.js, caps in limits.js), read
+ * by instantiating the real Batch class. These are the tables whose breach makes the indexer
+ * reject a BATCH AS A WHOLE, so that not one of its sub-commands runs. The decoder mirrors
+ * them to stop capturing outputs for commands nothing will execute
+ * (batchSubCommandCapture.hasProvablyRejectedBatch).
  *
  * THE DIRECTION OF ERROR IS NOT SYMMETRIC, which is why this file is generated rather than
  * typed: a cap that is TIGHTER here than in the indexer suppresses capture for a batch the
@@ -34,9 +35,9 @@
  ********************************************************************/
 
 // Global per-BATCH command cap. Breached => 'invalid: COMMAND (limit)', whole batch.
-// GATED on BATCH_ISSUANCE_LIMITS in the indexer; see the module header of
-// batchSubCommandCapture.js for why that flag is provably active wherever the decoder's
-// own capture gate is.
+// GATED on BATCH_ISSUANCE_LIMITS in the indexer; see the WHICH FLAG STATE block in
+// batch_sub_command_capture/sub_commands.js for why that flag is provably active wherever
+// the decoder's own capture gate is.
 const COMMAND_LIMIT = 250;
 
 // Per-ACTION caps in force in BOTH flag states (indexer: this.actionLimits).
@@ -73,9 +74,10 @@ const COMMAND_WEIGHTS = {
 };
 
 // Per-network BATCH_COST_WEIGHTING activation instants (block TIME, >=), read off the
-// sibling's protocol-change registry. Unlike BATCH_ISSUANCE_LIMITS this flag is NOT provably
-// on wherever the decoder's capture gate is: mainnet capture is armed while this instant is
-// still the house sentinel. null means DISARMED, which is inactive at every block time.
+// sibling's protocol-change registry. Unlike BATCH_ISSUANCE_LIMITS this flag is NOT ordered
+// against the decoder's capture gate; an instant below capture is safe because the indexer
+// weighs only inside its BATCH_ISSUANCE_LIMITS guard, which shares capture's instant.
+// null means DISARMED, which is inactive at every block time.
 const COST_WEIGHTING_ACTIVATION = {
     "mainnet": 0,
     "testnet": 0,

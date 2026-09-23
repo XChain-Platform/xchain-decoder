@@ -17,7 +17,7 @@
 const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION } = require('../constants.js')
 const { CHILD_ISSUE_KEY } = require('../indexer_batch_limits.js')
 
-// The BATCH FORMAT versions the indexer registers (xchain-indexer/src/actions/batch.js
+// The BATCH FORMAT versions the indexer registers (xchain-indexer/src/actions/batch/index.js
 // `this.formats`, which today holds only 0 = 'VERSION|COMMAND'). A BATCH whose FORMAT is
 // not registered is whole-batch rejected there with 'invalid: VERSION (unknown)' and no
 // sub-command ever runs, so capture must not see sub-commands in one either. Adding a
@@ -51,7 +51,8 @@ function isBatchSubCommandCaptureActive(consensusNetwork, blockTime){
 // The sub-commands of a BATCH action string, or null when the string is not a BATCH at all.
 // An empty array means "a BATCH, but one whose sub-commands never execute".
 //
-// EQUIVALENCE WITH THE INDEXER (xchain-indexer/src/actions/batch.js run()):
+// EQUIVALENCE WITH THE INDEXER (xchain-indexer/src/actions/batch/validate.js readCommands,
+// reached from parse() in batch/index.js):
 //
 //   let commands = String(data['TX_DATA']).split(';');
 //   commands[0] = commands[0].replace('BATCH|' + format + '|','');
@@ -66,7 +67,8 @@ function isBatchSubCommandCaptureActive(consensusNetwork, blockTime){
 //      head whose FORMAT token reads exactly as the derived integer. A token that derives
 //      to 0 by another spelling ('', '"0"', ' 0 ', '00') leaves the head intact.
 //   3. When the head is NOT stripped, element 0's action name is still BATCH, and
-//      actionLimits['BATCH'] is 0, so the scan sets 'invalid: BATCH (limit)' and again no
+//      actionLimits['BATCH'] is 0 (batch/limits.js), so the per-ACTION cap scan
+//      (batch/validate.js actionCapError) sets 'invalid: BATCH (limit)' and again no
 //      sub-command runs. (This also covers the case where the replace fires on a LATER
 //      'BATCH|0|' occurrence inside element 0: the head survives, so the action is BATCH.)
 //
@@ -107,7 +109,8 @@ function subCommandActionName(command){
 // Does this BATCH carry a sub-command whose ACTION NAME the indexer's activation scan
 // PROVABLY rejects, taking the whole batch down with it?
 //
-// WHY CAPTURE HAS TO CARE. batch.js runs, before any dispatch:
+// WHY CAPTURE HAS TO CARE. The indexer's activation scan (batch/validate.js activationError)
+// runs, before any dispatch:
 //
 //     for(let command of commands){
 //         let action = String(command).split('|')[0];
@@ -140,7 +143,7 @@ function subCommandActionName(command){
 // The rest of the class is now closed as far as it is provable, in hasProvablyRejectedBatch
 // below: the nested BATCH, the per-ACTION caps, the 250-command cap and the
 // BATCH_COST_WEIGHTING weight budget, against the indexer's tables vendored canonically in
-// src/protocol/indexerBatchLimits.js. The UNKNOWN NAME is still the one cause left open, and
+// src/protocol/indexer_batch_limits.js. The UNKNOWN NAME is still the one cause left open, and
 // deliberately, for the reason this paragraph gives: a vendored name LIST is not closed under
 // registry growth, so a stale one under-captures.
 //
@@ -152,7 +155,7 @@ function hasProvablyRejectedSubCommand(subCommands){
 }
 
 // Expand a short-form ACTION alias on a sub-command, mirroring the alias half of the
-// indexer's `batch.js normalizeSubAction`. Only the NAME is rewritten; every character
+// indexer's `batch/sub_command.js normalizeSubAction`. Only the NAME is rewritten; every character
 // from the first '|' onward is returned verbatim.
 //
 // The VERSION-0 injection normalizeSubAction also performs is deliberately NOT mirrored:
@@ -218,7 +221,7 @@ function expandAliasName(actionName, aliases){
 //
 //   1. Nothing here can run below BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION, and that gate
 //      is REQUIRED to sit at or after the indexer's BATCH_ISSUANCE_LIMITS instant on every
-//      armed network - the LEDGER tier of batchSubCommandOutputCaptureActivation.test.js,
+//      armed network - the LEDGER tier of batch_sub_command_output_capture_activation.test.js,
 //      which predates this change and exists for the settlement ledger. So at every block
 //      time these rules are evaluated, that flag is already on. batch_limits_vendoring.test.js
 //      completes the argument by pinning the other two halves of the indexer's own gate
@@ -270,7 +273,7 @@ function isLegacyActionFormat(params){
 //
 // `normalize` is not a parameter: every block time this module runs at is at/after
 // BATCH_SUBACTION_NORMALIZATION, asserted by the NORMALIZATION tier of
-// batchSubCommandOutputCaptureActivation.test.js, so the indexer's `normalize` is true.
+// batch_sub_command_output_capture_activation.test.js, so the indexer's `normalize` is true.
 // Returns '' when there is no TICK at all - never a token named the empty string.
 // Never throws: a classifier crash here would take down block decoding.
 function subCommandTick(action, command){

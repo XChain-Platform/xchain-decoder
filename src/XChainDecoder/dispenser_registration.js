@@ -73,7 +73,7 @@ const { isBatchSubCommandCaptureActive } = require('../protocol/batch_sub_comman
 // indexer's own default does), and the operating address from THIS
 // command's GET_ADDRESS. There is no per-sub-command DISPENSER_ACTION_INDEX
 // to reproduce: the indexer mints one per sub-command from its own
-// action_index sequence (actions/batch.js -> db.createActionIndex ->
+// action_index sequence (actions/batch/index.js -> db.createActionIndex ->
 // getNextActionIndex), an id space the decoder has never held for
 // top-level dispensers either. These rows are keyed on
 // (tx_index, operating address) and nothing here is keyed on an

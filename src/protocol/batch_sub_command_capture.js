@@ -39,8 +39,8 @@
  * split MUST agree with the indexer's, because a decoder
  * that disagrees about what the sub-commands ARE captures for actions the indexer never
  * runs (or misses ones it does) - a worse fault than the one being fixed. See
- * batchSubCommands below for the equivalence argument against
- * xchain-indexer/src/actions/batch.js.
+ * batchSubCommands in batch_sub_command_capture/sub_commands.js for the equivalence argument
+ * against xchain-indexer/src/actions/batch/validate.js readCommands.
  *
  ********************************************************************/
 
@@ -98,8 +98,8 @@ const { hasProvablyRejectedBatch,
 // or after BATCH_SUBACTION_NORMALIZATION. Below THAT flag an aliased sub-command is an
 // unregistered name and whole-batch-rejects instead of dispatching, so expanding it there
 // would over-capture. The ordering holds today (testnet/regtest genesis-on for both,
-// mainnet normalization active since 2026-08-07 with this gate still disarmed) and
-// batchSubCommandOutputCaptureActivation.test.js drives it against the sibling indexer
+// mainnet normalization at 2026-08-07, below this gate's 2026-08-16 instant) and
+// batch_sub_command_output_capture_activation.test.js drives it against the sibling indexer
 // rather than leaving it as a comment.
 function captureCommands(decodedData, consensusNetwork, blockTime){
     if (!isBatchSubCommandCaptureActive(consensusNetwork, blockTime))

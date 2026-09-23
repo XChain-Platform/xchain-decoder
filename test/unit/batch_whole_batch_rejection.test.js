@@ -55,7 +55,7 @@ const reject = (subCommands) => hasProvablyRejectedBatch(subCommands, ACTION_ALI
 // view the live fleet wrote. Derived from the map so it stays below the gate wherever the
 // operator ratified it; a DISARMED mainnet is inactive at every block time, so an absurd one
 // serves there. The instant itself is pinned in
-// test/unit/batchSubCommandOutputCaptureActivation.test.js.
+// test/unit/batch_sub_command_output_capture_activation.test.js.
 const BELOW_MAINNET_GATE =
     typeof BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet === 'number'
         ? BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet - 1
