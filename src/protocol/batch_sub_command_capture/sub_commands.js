@@ -345,7 +345,6 @@ module.exports = {
     hasProvablyRejectedSubCommand,
     expandSubCommandAlias,
     expandAliasName,
-    isNumeric,
     isLegacyActionFormat,
     subCommandTick,
     subCommandLimitKey,

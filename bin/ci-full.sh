@@ -119,7 +119,7 @@ need_docker() {
   }
 }
 
-need_sib xchain-encoder xchain-documentation xchain-hub xchain-indexer xchain-utxo-tracker
+need_sib xchain-encoder xchain-documentation xchain-hub xchain-indexer xchain-utxo-tracker xchain-node
 
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
 run_tier "ci" npm run ci

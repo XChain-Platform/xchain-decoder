@@ -14,7 +14,27 @@
 // and the pool kept the process alive, and every stop ended in SIGKILL (exit 137).
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const { createShutdown, createDecoderDrain, closeServer, closeDatabases, resolveTimeoutMs, DEFAULT_SHUTDOWN_TIMEOUT_MS } = require('../../src/shutdown');
+
+const NODE_DIR = process.env.XCHAIN_NODE_DIR || path.join(__dirname, '..', '..', '..', 'xchain-node');
+const NODE_STOP_BUDGET_SRC = path.join(NODE_DIR, 'src', 'services', 'stop_budget_service.js');
+const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
+
+// Read the budget xchain-node stops `module` with, from its source text (the
+// sibling's npm deps are not installed on the venue, so it is not required).
+// Throws on a shape it cannot read, so a moved table fails instead of skipping.
+function nodeStopBudgetSeconds(module){
+    const src = fs.readFileSync(NODE_STOP_BUDGET_SRC, 'utf8');
+    const table = /MODULE_STOP_TIMEOUT_SECONDS\s*=\s*Object\.freeze\(\{([\s\S]*?)\}\)/.exec(src);
+    if(!table) throw new Error('no MODULE_STOP_TIMEOUT_SECONDS table in ' + NODE_STOP_BUDGET_SRC);
+    const row = new RegExp("'" + module + "'\\s*:\\s*(\\d+)").exec(table[1]);
+    if(row) return parseInt(row[1], 10);
+    const fallback = /DEFAULT_MODULE_STOP_TIMEOUT_SECONDS\s*=\s*(\d+)/.exec(src);
+    if(!fallback) throw new Error('no DEFAULT_MODULE_STOP_TIMEOUT_SECONDS in ' + NODE_STOP_BUDGET_SRC);
+    return parseInt(fallback[1], 10);
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitUntil(predicate, timeoutMs = 5000, intervalMs = 10){
@@ -191,6 +211,19 @@ describe('graceful shutdown', function(){
                 'a budget at or above the container stop-timeout ends in the daemon\'s SIGKILL, which is what this replaces');
             assert.ok(DEFAULT_SHUTDOWN_TIMEOUT_MS > 10000,
                 'a block boundary on a mainnet chain is not reached in docker\'s ten seconds');
+        });
+
+        // The literal above is a copy of xchain-node's number; this holds the
+        // relation against the sibling's own table, so a one-sided edit goes red.
+        it('stays under the stop budget in xchain-node\'s own table when that checkout is beside this one', function(){
+            if(!fs.existsSync(NODE_STOP_BUDGET_SRC)){
+                if(REQUIRE_SIBLINGS) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but ' + NODE_STOP_BUDGET_SRC + ' is absent');
+                this.skip();
+            }
+            const budgetSeconds = nodeStopBudgetSeconds('xchain-decoder');
+            assert.ok(DEFAULT_SHUTDOWN_TIMEOUT_MS < budgetSeconds * 1000,
+                'xchain-decoder drains for ' + DEFAULT_SHUTDOWN_TIMEOUT_MS + ' ms but xchain-node stops it after '
+                + budgetSeconds + ' s (' + NODE_STOP_BUDGET_SRC + '), so every overrun ends in the daemon\'s SIGKILL');
         });
     });
 
