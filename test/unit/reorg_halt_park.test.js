@@ -211,7 +211,7 @@ function buildEqualHeightDecoder({ rpcThrows = false, halt = false, resetTip = S
 describe('REORG_HALT call-site coverage', function () {
     this.timeout(0)
     beforeEach(function (){ installSink(); clock.install() })
-    afterEach(function (){ clock.restore(); observability._resetObservability() })
+    afterEach(function (){ clock.restore(); observability['_resetObservability']() })
     it('parks and stays alive during a forward hash-mismatch reorg', async function () {
         const { decoder, sleepCount } = buildDecoder({
             nodeTips: [STORED_TIP + 5],
