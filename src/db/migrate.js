@@ -25,12 +25,22 @@
  *   node src/migrate.js          # apply ALL pending (auto + manual)
  *   node src/migrate.js --file 2026-06-13-dispensers-expiration-bigint.sql
  *                                # apply ONLY the named migration(s)
+ *   node src/migrate.js --status --json
+ *                                # REPORT ONLY: applied/pending file names. Applies nothing.
  *
  * The `--file <name>` flag scopes the run to specific migration filename(s), so a
  * single pending manual migration can be rolled out to a fleet DB WITHOUT also
  * applying every other pending manual migration in the committed tree (which a
  * blanket `node src/migrate.js` would). Repeat the flag (or comma-separate) to
  * target several files; an unknown name fails loudly instead of applying nothing.
+ *
+ * `--status` is the side-effect-free path: it lists which committed migration
+ * files are recorded in schema_migrations (applied) and which are not (pending)
+ * without acquiring the migration lock, reading a migration file's SQL, or
+ * writing anything - not even the ledger table itself, which the apply path
+ * creates on demand. `--json` (valid only with `--status`) prints the result as
+ * one JSON object `{"applied":[...],"pending":[...]}`, the schema also used by
+ * the indexer CLI's `--status --json`.
  *
  * Any argument this CLI does not recognize is REFUSED with the usage text and
  * exit 2. It is never ignored: a no-argument run means APPLY EVERYTHING, so an
@@ -41,6 +51,7 @@
  *
  ********************************************************************/
 
+const fs       = require('fs');
 const dotenv   = require('dotenv');
 dotenv.config();
 
@@ -51,12 +62,18 @@ const Database = require('../db.js');
 // says what it applies rather than naming a flag.
 const USAGE = [
     'Usage: node src/migrate.js [--file <name.sql> ...]',
+    '       node src/migrate.js --status [--json]',
     '',
     '  (no arguments)         APPLY EVERYTHING. Runs every pending migration, auto',
     '                         AND manual, against the database in DECODER_DB_NAME.',
     '                         Manual migrations are the destructive / backfill ones.',
     '  --file, -f <name.sql>  APPLY ONE. Runs only the named migration file(s).',
     '                         Repeat the flag or comma-separate to name several.',
+    '  --status               REPORT ONLY. Lists applied and pending migration file',
+    '                         names against DECODER_DB_NAME. Applies nothing.',
+    '  --json                 With --status, print one JSON object',
+    '                         {"applied":[...],"pending":[...]} instead of the',
+    '                         human-readable line. Refused without --status.',
     '  --help, -h             Print this usage and exit 0. Touches no database.',
     '',
     'Reads DECODER_DB_HOST / DECODER_DB_PORT / DECODER_DB_NAME / DECODER_DB_USER /',
@@ -73,11 +90,15 @@ function refuse(message){
     return null;
 }
 
-// Parse `--file <name>` / `--file=<name>` / `-f <name>` occurrences into a list of
-// migration filenames. Values may be comma-separated. [] means no targeting flag
-// (the apply-everything default); null means refused or served, so main() must stop.
-function parseFileTargets(argv){
+// Parse argv into { only, status, json }. `only` collects `--file <name>` /
+// `--file=<name>` / `-f <name>` occurrences (values may be comma-separated); []
+// means no targeting flag (the apply-everything default). `status` / `json`
+// mirror the `--status [--json]` report-only mode. Returns null when the run
+// was refused or already served (--help), so main() must stop either way.
+function parseArgs(argv){
     const targets = [];
+    let status = false;
+    let json = false;
     const push = (v) => {
         for(const part of String(v).split(',')){
             const name = part.trim();
@@ -93,6 +114,8 @@ function parseFileTargets(argv){
             process.exit(0);
             return null;  // (unreachable when exit is real; keeps a stubbed exit from applying)
         }
+        if(a === '--status'){ status = true; continue; }
+        if(a === '--json'){ json = true; continue; }
         const named = targets.length;
         if(a === '--file' || a === '-f'){
             const v = argv[i + 1];
@@ -115,14 +138,62 @@ function parseFileTargets(argv){
             return refuse(a + ' names no migration file.');
         }
     }
-    return targets;
+    // --json only has a meaning attached to --status; silently accepting it on an
+    // apply run would be the same "ignored token" hazard the refusals above exist
+    // to prevent, just for output shape instead of scope.
+    if(json && !status){
+        return refuse('--json requires --status (there is no JSON output for an apply run).');
+    }
+    if(status && targets.length){
+        return refuse('--status cannot be combined with --file; status reports on the whole migration tree.');
+    }
+    return { only: targets, status, json };
+}
+
+// Side-effect-free companion to the apply modes above. Lists which committed
+// migration files are recorded in schema_migrations (applied) and which are
+// not (pending), without the apply path's lock, file-content read, checksum
+// check, or ledger-table creation: a database that has never run a migration
+// simply has no schema_migrations table yet, and reading that absence is not
+// a reason to create it.
+async function migrationStatus(db){
+    const dir = db.sqlPath + '/migrations';
+    let files = [];
+    try { files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort(); }
+    catch(_){ /* no migrations dir: nothing to report */ }
+
+    const appliedNames = new Set();
+    if(files.length){
+        const conn = await db.getConnection();
+        try {
+            const rows = await conn.query('SELECT name FROM schema_migrations');
+            for(const row of rows) appliedNames.add(row.name);
+        } catch(err){
+            // A fresh database has no ledger table yet; that means nothing is
+            // applied, not a failure to report status.
+            if(!isNoSuchTableError(err)) throw err;
+        } finally {
+            if(db.transactionConnection == null){
+                try { await conn.release(); } catch(_){}
+            }
+        }
+    }
+    return {
+        applied: files.filter(f => appliedNames.has(f)),
+        pending: files.filter(f => !appliedNames.has(f)),
+    };
+}
+
+function isNoSuchTableError(err){
+    return !!err && (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146);
 }
 
 async function main(){
     // Argv is settled first so `--help` answers without a loaded .env, and so a
     // refused argument never reaches the database checks below.
-    const only = parseFileTargets(process.argv.slice(2));
-    if(only === null) return;
+    const parsed = parseArgs(process.argv.slice(2));
+    if(parsed === null) return;
+    const only = parsed.only;
 
     const host = process.env.DECODER_DB_HOST;
     const port = process.env.DECODER_DB_PORT;
@@ -137,6 +208,16 @@ async function main(){
     const db = new Database(host, port, name, user, pass);
 
     try {
+        if(parsed.status){
+            const status = await migrationStatus(db);
+            if(parsed.json){
+                console.log(JSON.stringify({ applied: status.applied, pending: status.pending }));
+            } else {
+                console.log('migrate: status. applied=' + JSON.stringify(status.applied) +
+                    ' pending=' + JSON.stringify(status.pending));
+            }
+            return;
+        }
         const runOpts = { includeManual: true };
         if(only.length){
             runOpts.only = only;
