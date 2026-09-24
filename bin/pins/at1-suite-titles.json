@@ -393,6 +393,14 @@
       "compiled-push-size arbiter conformance parity with the encoder compiledPushSize envelope push band (0xffff .. ENVELOPE_MAX_PAYLOAD) the decoder helper under-counts by exactly 2 above 0xffff, and not below",
       "compiled-push-size arbiter conformance the 8192 accept/drop boundary is where the encoder and the compiled script agree"
     ],
+    "15a40e4df3b0929a": [
+      "coverage ratchet floors documents the Docker-shipped non-owned bufferutils exclusion",
+      "coverage ratchet floors enforces every declared floor, at the declared value",
+      "coverage ratchet floors fails the job on a shortfall rather than only reporting it",
+      "coverage ratchet floors keeps every floor within 1.5 points of its measured value",
+      "coverage ratchet floors measures every owned source file in both coverage venues",
+      "coverage ratchet floors ships the coverage:check script the CI coverage job invokes"
+    ],
     "16017180b90fb091": [
       "Boundary: Script Type Detection (S-1 through S-7) [REGRESSION P0] R-SCR-001 S-1: OP_RETURN with 0-byte push: removeObfuscation receives empty buffer",
       "Boundary: Script Type Detection (S-1 through S-7) [REGRESSION P0] R-SCR-002 S-6: XCHNp2sh marker with single input: data from that input's scriptSig",
@@ -549,6 +557,10 @@
       "Database#hasPubkey() returns false on query error",
       "Database#hasPubkey() returns false when no rows found",
       "Database#hasPubkey() returns true when a row exists"
+    ],
+    "25603dbc161ae5b3": [
+      "dispenser protocol time persists raw time while every time-keyed block consumer receives protocol time",
+      "dispenser protocol time retries without writes when the protocol-time history read fails"
     ],
     "257661796fdac2ec": [
       "AuxPoW strip parity with xchain-utxo-tracker @regression cross-repo byte identity [REGRESSION P1] encodeVarintHex is byte-identical in both repos",
@@ -944,11 +956,6 @@
       "Smoke: AES-128-CTR Deobfuscation should return null for null input",
       "Smoke: AES-128-CTR Deobfuscation should round-trip an XCHN payload using fixture txid"
     ],
-    "4405034a199528ec": [
-      "coverage ratchet floors enforces every declared floor, at the declared value",
-      "coverage ratchet floors fails the job on a shortfall rather than only reporting it",
-      "coverage ratchet floors ships the coverage:check script the CI coverage job invokes"
-    ],
     "447b696129587817": [
       "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-005: should not drop a 0x00 final ciphertext byte on a full multisig chunk"
     ],
@@ -1067,6 +1074,14 @@
       "Boundary: isFutureSegwitScript additional edge cases should reject version byte 0x51 (OP_1 taproot, not future segwit)",
       "Boundary: isFutureSegwitScript additional edge cases should reject version byte 0x61 (above OP_16)"
     ],
+    "4fd0a29c075465f3": [
+      "migrate.js operator CLI --status/--json @regression --json without --status is refused: exit 2, no DB handle opened, no run",
+      "migrate.js operator CLI --status/--json @regression --status --json on a fresh database (no ledger table) reports everything pending",
+      "migrate.js operator CLI --status/--json @regression --status --json prints one JSON object with applied and pending arrays and applies nothing",
+      "migrate.js operator CLI --status/--json @regression --status combined with --file is refused: exit 2, no DB handle opened, no run",
+      "migrate.js operator CLI --status/--json @regression --status without --json prints a human-readable line instead of JSON",
+      "migrate.js operator CLI --status/--json @regression a real query failure during --status still fails loudly and closes the pool"
+    ],
     "50182eb99944526e": [
       "XChainDecoder#findFundingFeeOutputs() should return [] when feeDestination is null (disabled)",
       "XChainDecoder#findFundingFeeOutputs() should return [] when fundingTxId is null",
@@ -1078,6 +1093,28 @@
       "E2E: ACTION Decoding encoding types A2.1:should decode ACTION via direct OP_RETURN",
       "E2E: ACTION Decoding encoding types A2.2:should decode ACTION via 1-of-3 multisig",
       "E2E: ACTION Decoding encoding types A2.3:multisig should strip trailing zeros from short payload"
+    ],
+    "51c14bbdc7db5a0e": [
+      "Database.getReorgHaltMarker parses the JSON payload of the newest marker row",
+      "Database.getReorgHaltMarker returns halted:false when no marker row exists",
+      "Database.getReorgHaltMarker still reports halted when the payload is unreadable",
+      "Database.markReorgHalted reports the row, not the ack returns false rather than throwing when the read-back itself fails",
+      "Database.markReorgHalted reports the row, not the ack returns false when insertEvent swallowed the write error",
+      "Database.markReorgHalted reports the row, not the ack returns false when the insert claims success but no row is readable",
+      "Database.markReorgHalted reports the row, not the ack returns true when the row is readable after the insert",
+      "Database.markReorgHalted reports the row, not the ack stays idempotent: an existing marker is true without a second write",
+      "XChainDecoder latent REORG_HALT reporting a probe fault keeps the last known halt rather than clearing it",
+      "XChainDecoder latent REORG_HALT reporting caches within the TTL so a monitoring burst is not one DB query per request",
+      "XChainDecoder latent REORG_HALT reporting concurrent probes collapse onto one in-flight query",
+      "XChainDecoder latent REORG_HALT reporting declares the clear-history cache fields up front, so the shape is null and not undefined",
+      "XChainDecoder latent REORG_HALT reporting falls back to the boolean isReorgHalted probe when the detailed reader is absent",
+      "XChainDecoder latent REORG_HALT reporting force bypasses the TTL",
+      "XChainDecoder latent REORG_HALT reporting leaves checked_at null until the first probe, so \"never looked\" is distinguishable",
+      "XChainDecoder latent REORG_HALT reporting reports a dormant marker, with its reason, from the cached probe",
+      "XChainDecoder latent REORG_HALT reporting reports not-halted (and does not throw) before the db handle exists",
+      "XChainDecoder latent REORG_HALT reporting reports not-halted on a clean decoder",
+      "XChainDecoder latent REORG_HALT reporting verifyReorg entry guard mirrors a pre-existing durable marker into health state",
+      "XChainDecoder latent REORG_HALT reporting verifyReorg marks the decoder halted in memory even when the durable write fails"
     ],
     "51fbc60e4c509ae1": [
       "Database#hasDispenserTransactions() probes BOTH the top-level and the batch-carried shape",
@@ -1666,6 +1703,23 @@
       "DISPENSER_EXPIRY_REALIGN_ACTIVATION conformance regtest is active from genesis so the venues exercise the realigned path",
       "DISPENSER_EXPIRY_REALIGN_ACTIVATION conformance testnet is active from genesis, so the launch runs the realigned path"
     ],
+    "826dacd11ea07f42": [
+      "migrate.js operator CLI @regression --file with no value exits 2 before building a DB handle @regression",
+      "migrate.js operator CLI @regression --file: scopes the run to the named migration (passes opts.only) @regression",
+      "migrate.js operator CLI @regression --file=NAME and repeated flags accumulate (comma-separated too) @regression",
+      "migrate.js operator CLI @regression default run (no --file) still applies everything with includeManual only @regression",
+      "migrate.js operator CLI @regression env guard: exits 2 when DECODER_DB_HOST/NAME/USER are unset",
+      "migrate.js operator CLI @regression failure path: runMigrations rejection sets exitCode 1 and still closes the pool",
+      "migrate.js operator CLI @regression lock-skip path: reports SKIPPED and exits 2 instead of a false done @regression",
+      "migrate.js operator CLI @regression success path: applies with includeManual:true, reports, closes the pool, exit code stays clean",
+      "migrate.js operator CLI argv refusal @regression --help and -h apply nothing and exit 0, with no DECODER_DB_* loaded",
+      "migrate.js operator CLI argv refusal @regression --help documents --status and --json",
+      "migrate.js operator CLI argv refusal @regression --help prints both modes and starts no run",
+      "migrate.js operator CLI argv refusal @regression a bare positional applies nothing and exits 2 (it is not a --file value)",
+      "migrate.js operator CLI argv refusal @regression an empty --file= value applies nothing rather than widening to everything",
+      "migrate.js operator CLI argv refusal @regression an unknown flag applies nothing and exits 2",
+      "migrate.js operator CLI argv refusal @regression the refusal prints both modes so an operator can tell them apart"
+    ],
     "83cb7e9cd2340bd1": [
       "BlockchainConnector (extra coverage) #getBlock() ECONNABORTED handling should pass hexFormat=false as verbose=true to the RPC",
       "BlockchainConnector (extra coverage) #getBlock() ECONNABORTED handling should retry on ECONNABORTED and succeed on a later attempt",
@@ -2168,6 +2222,12 @@
       "Security: DISPENSER Field Validation Version parsing safety [REGRESSION P1] R-DSP-002: should verify parseInt uses radix 10 in source code",
       "Security: DISPENSER Field Validation Version parsing safety should verify Number() is used for expiration (not parseInt)"
     ],
+    "a712626ef67e3e03": [
+      "protocol time falls back to the raw clock at the history boundary",
+      "protocol time never resolves protocol time later than the block stamp",
+      "protocol time returns an immutable context without changing replay inputs",
+      "protocol time uses previous-block MTP only on the armed network"
+    ],
     "a7c7a6651942ddef": [
       "Database#getMempoolTransactionCount() returns the count as a Number (BigInt-safe) and 0 on an empty result",
       "Database#getMempoolTransactions() reads the raw-string columns + first_seen in tx_hash order with a clamped limit",
@@ -2386,27 +2446,6 @@
       "CE-07: Concurrent Instance Behavior insertTransaction should handle duplicate key error (errno 1062)",
       "CE-07: Concurrent Instance Behavior two database instances should have independent transaction locks"
     ],
-    "cc5b790679166dd5": [
-      "Database.getReorgHaltMarker parses the JSON payload of the newest marker row",
-      "Database.getReorgHaltMarker returns halted:false when no marker row exists",
-      "Database.getReorgHaltMarker still reports halted when the payload is unreadable",
-      "Database.markReorgHalted reports the row, not the ack returns false rather than throwing when the read-back itself fails",
-      "Database.markReorgHalted reports the row, not the ack returns false when insertEvent swallowed the write error",
-      "Database.markReorgHalted reports the row, not the ack returns false when the insert claims success but no row is readable",
-      "Database.markReorgHalted reports the row, not the ack returns true when the row is readable after the insert",
-      "Database.markReorgHalted reports the row, not the ack stays idempotent: an existing marker is true without a second write",
-      "XChainDecoder latent REORG_HALT reporting a probe fault keeps the last known halt rather than clearing it",
-      "XChainDecoder latent REORG_HALT reporting caches within the TTL so a monitoring burst is not one DB query per request",
-      "XChainDecoder latent REORG_HALT reporting concurrent probes collapse onto one in-flight query",
-      "XChainDecoder latent REORG_HALT reporting falls back to the boolean isReorgHalted probe when the detailed reader is absent",
-      "XChainDecoder latent REORG_HALT reporting force bypasses the TTL",
-      "XChainDecoder latent REORG_HALT reporting leaves checked_at null until the first probe, so \"never looked\" is distinguishable",
-      "XChainDecoder latent REORG_HALT reporting reports a dormant marker, with its reason, from the cached probe",
-      "XChainDecoder latent REORG_HALT reporting reports not-halted (and does not throw) before the db handle exists",
-      "XChainDecoder latent REORG_HALT reporting reports not-halted on a clean decoder",
-      "XChainDecoder latent REORG_HALT reporting verifyReorg entry guard mirrors a pre-existing durable marker into health state",
-      "XChainDecoder latent REORG_HALT reporting verifyReorg marks the decoder halted in memory even when the durable write fails"
-    ],
     "cd34fc82e2a951e6": [
       "BATCH dispenser registration batched v2 refill / v1 cancel a batched v2 edit does NOTHING below the gate",
       "BATCH dispenser registration batched v2 refill / v1 cancel a batched v2 edit extends open dispensers (it did nothing before)",
@@ -2443,22 +2482,6 @@
       "Security: DISPENSER Field Validation Expiration numeric validation [REGRESSION P1] R-DSP-001: should parse a valid numeric expiration",
       "Security: DISPENSER Field Validation Field injection resistance [REGRESSION P1] R-DSP-001: should handle extra pipe characters in DISPENSER payload",
       "Security: DISPENSER Field Validation Version parsing safety [REGRESSION P1] R-DSP-002: should verify parseInt uses radix 10 in source code"
-    ],
-    "ce87f3694a3075c6": [
-      "migrate.js operator CLI @regression --file with no value exits 2 before building a DB handle @regression",
-      "migrate.js operator CLI @regression --file: scopes the run to the named migration (passes opts.only) @regression",
-      "migrate.js operator CLI @regression --file=NAME and repeated flags accumulate (comma-separated too) @regression",
-      "migrate.js operator CLI @regression default run (no --file) still applies everything with includeManual only @regression",
-      "migrate.js operator CLI @regression env guard: exits 2 when DECODER_DB_HOST/NAME/USER are unset",
-      "migrate.js operator CLI @regression failure path: runMigrations rejection sets exitCode 1 and still closes the pool",
-      "migrate.js operator CLI @regression lock-skip path: reports SKIPPED and exits 2 instead of a false done @regression",
-      "migrate.js operator CLI @regression success path: applies with includeManual:true, reports, closes the pool, exit code stays clean",
-      "migrate.js operator CLI argv refusal @regression --help and -h apply nothing and exit 0, with no DECODER_DB_* loaded",
-      "migrate.js operator CLI argv refusal @regression --help prints both modes and starts no run",
-      "migrate.js operator CLI argv refusal @regression a bare positional applies nothing and exits 2 (it is not a --file value)",
-      "migrate.js operator CLI argv refusal @regression an empty --file= value applies nothing rather than widening to everything",
-      "migrate.js operator CLI argv refusal @regression an unknown flag applies nothing and exits 2",
-      "migrate.js operator CLI argv refusal @regression the refusal prints both modes so an operator can tell them apart"
     ],
     "cec1808fc0db7487": [
       "Boundary: Magic Prefix & Encoding Type Detection should concatenate data from multiple valid XCHN OP_RETURN outputs",
@@ -2986,8 +3009,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 175,
-      "titleCount": 1678,
+      "fileCount": 178,
+      "titleCount": 1695,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3041,7 +3064,7 @@
         "test/unit/coins_conformance.test.js": "63016c2f7cde007d",
         "test/unit/compiled_push_size_conformance.test.js": "155fe1323df6de21",
         "test/unit/consensus_pin_boot.test.js": "b3bae8599c655a50",
-        "test/unit/coverage_thresholds_sync.test.js": "4405034a199528ec",
+        "test/unit/coverage_thresholds_sync.test.js": "15a40e4df3b0929a",
         "test/unit/crypto_networks.test.js": "1f849fc3813cbd69",
         "test/unit/db.test.js": "5777938ee30b46ca",
         "test/unit/db.test/01_database_big_int_satoshi_to_decimals_string.test.js": "77e244a9a8af192c",
@@ -3094,6 +3117,7 @@
         "test/unit/dispenser_oracle_fee_output.test/01_set_membership_capture_over_a_sources_open_mode_b_dispensers.test.js": "7ee2a2792a651f8b",
         "test/unit/dispenser_oracle_fee_output.test/02_activation_gate.test.js": "f068ea30d6afb5a5",
         "test/unit/dispenser_oracle_fee_output.test/03_field_extraction.test.js": "df497991073677fa",
+        "test/unit/dispenser_protocol_time.test.js": "25603dbc161ae5b3",
         "test/unit/dispenser_safe_depth.test.js": "48dee2bb9f8949a5",
         "test/unit/fee_destination.test.js": "7198625d14f3da9d",
         "test/unit/jsonrpc_body_guard.test.js": "58706b2a54fa0008",
@@ -3101,7 +3125,8 @@
         "test/unit/mempool_api_surface.test.js": "a7c7a6651942ddef",
         "test/unit/mempool_isolation.test.js": "6207eebcc7c69c98",
         "test/unit/mempool_payload_representation.test.js": "7f339cce97ef3d87",
-        "test/unit/migrate.test.js": "ce87f3694a3075c6",
+        "test/unit/migrate.test.js": "826dacd11ea07f42",
+        "test/unit/migrate_status.test.js": "4fd0a29c075465f3",
         "test/unit/migration_preconditions.test.js": "3d54004868a9ce33",
         "test/unit/migration_runner.test.js": "dc9720d3655e4785",
         "test/unit/migration_runner.test/01_committed_migrations_declare_intent.test.js": "5ff1bf0b2da8703d",
@@ -3124,11 +3149,12 @@
         "test/unit/parse_transaction.test/04_get_source_from_output.test.js": "5bfafba200cdf61c",
         "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js": "6a95ee16117e8e38",
         "test/unit/protocol_constants.test.js": "13584cc3d862a5a2",
+        "test/unit/protocol_time.test.js": "a712626ef67e3e03",
         "test/unit/remove_obfuscation.test.js": "0eb0aadd100cef95",
         "test/unit/reorg_depth_across_restart.test.js": "0952dfb65faa59ba",
         "test/unit/reorg_halt_clear.test.js": "9b881b6b474e5b3d",
         "test/unit/reorg_halt_park.test.js": "b6be0fd71f5537fb",
-        "test/unit/reorg_halt_surface.test.js": "cc5b790679166dd5",
+        "test/unit/reorg_halt_surface.test.js": "51c14bbdc7db5a0e",
         "test/unit/repo/fixture_ports.test.js": "dc378898866ff01a",
         "test/unit/roundtrip.test.js": "319d38eebd8ba22a",
         "test/unit/roundtrip_conformance.test.js": "99f5849afe3a05b0",
@@ -3453,8 +3479,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 175,
-      "titleCount": 1678,
+      "fileCount": 178,
+      "titleCount": 1695,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3508,7 +3534,7 @@
         "test/unit/coins_conformance.test.js": "63016c2f7cde007d",
         "test/unit/compiled_push_size_conformance.test.js": "155fe1323df6de21",
         "test/unit/consensus_pin_boot.test.js": "b3bae8599c655a50",
-        "test/unit/coverage_thresholds_sync.test.js": "4405034a199528ec",
+        "test/unit/coverage_thresholds_sync.test.js": "15a40e4df3b0929a",
         "test/unit/crypto_networks.test.js": "1f849fc3813cbd69",
         "test/unit/db.test.js": "5777938ee30b46ca",
         "test/unit/db.test/01_database_big_int_satoshi_to_decimals_string.test.js": "77e244a9a8af192c",
@@ -3561,6 +3587,7 @@
         "test/unit/dispenser_oracle_fee_output.test/01_set_membership_capture_over_a_sources_open_mode_b_dispensers.test.js": "7ee2a2792a651f8b",
         "test/unit/dispenser_oracle_fee_output.test/02_activation_gate.test.js": "f068ea30d6afb5a5",
         "test/unit/dispenser_oracle_fee_output.test/03_field_extraction.test.js": "df497991073677fa",
+        "test/unit/dispenser_protocol_time.test.js": "25603dbc161ae5b3",
         "test/unit/dispenser_safe_depth.test.js": "48dee2bb9f8949a5",
         "test/unit/fee_destination.test.js": "7198625d14f3da9d",
         "test/unit/jsonrpc_body_guard.test.js": "58706b2a54fa0008",
@@ -3568,7 +3595,8 @@
         "test/unit/mempool_api_surface.test.js": "a7c7a6651942ddef",
         "test/unit/mempool_isolation.test.js": "6207eebcc7c69c98",
         "test/unit/mempool_payload_representation.test.js": "7f339cce97ef3d87",
-        "test/unit/migrate.test.js": "ce87f3694a3075c6",
+        "test/unit/migrate.test.js": "826dacd11ea07f42",
+        "test/unit/migrate_status.test.js": "4fd0a29c075465f3",
         "test/unit/migration_preconditions.test.js": "3d54004868a9ce33",
         "test/unit/migration_runner.test.js": "dc9720d3655e4785",
         "test/unit/migration_runner.test/01_committed_migrations_declare_intent.test.js": "5ff1bf0b2da8703d",
@@ -3591,11 +3619,12 @@
         "test/unit/parse_transaction.test/04_get_source_from_output.test.js": "5bfafba200cdf61c",
         "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js": "6a95ee16117e8e38",
         "test/unit/protocol_constants.test.js": "13584cc3d862a5a2",
+        "test/unit/protocol_time.test.js": "a712626ef67e3e03",
         "test/unit/remove_obfuscation.test.js": "0eb0aadd100cef95",
         "test/unit/reorg_depth_across_restart.test.js": "0952dfb65faa59ba",
         "test/unit/reorg_halt_clear.test.js": "9b881b6b474e5b3d",
         "test/unit/reorg_halt_park.test.js": "b6be0fd71f5537fb",
-        "test/unit/reorg_halt_surface.test.js": "cc5b790679166dd5",
+        "test/unit/reorg_halt_surface.test.js": "51c14bbdc7db5a0e",
         "test/unit/repo/fixture_ports.test.js": "dc378898866ff01a",
         "test/unit/roundtrip.test.js": "319d38eebd8ba22a",
         "test/unit/roundtrip_conformance.test.js": "99f5849afe3a05b0",
