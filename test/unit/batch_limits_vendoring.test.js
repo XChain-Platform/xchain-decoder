@@ -22,7 +22,7 @@
 //   2. FLAG STATE - the decoder applies the POST-flag rule set unconditionally, which is only
 //                   sound because its own capture gate cannot precede the indexer's
 //                   BATCH_ISSUANCE_LIMITS activation. That ordering is checked on TIME by
-//                   batchSubCommandOutputCaptureActivation.test.js; the other two legs of the
+//                   batch_sub_command_output_capture_activation.test.js; the other two legs of the
 //                   indexer's own gate (block-index thresholds, consensus version) are checked
 //                   here, because "the time has passed" only means "the flag is on" when
 //                   those two cannot independently hold it off.

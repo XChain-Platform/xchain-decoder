@@ -17,7 +17,7 @@
  * Lives in its own module because TWO decode-time readers need it and one of
  * them cannot require the other. XChainDecoder.js expands the alias on the
  * TOP-LEVEL action name (canonicalizeActionPayload), and
- * batchSubCommandCapture.js expands it on a BATCH's SUB-COMMAND names; the
+ * batch_sub_command_capture.js expands it on a BATCH's SUB-COMMAND names; the
  * capture module is required BY XChainDecoder.js, so reaching back for the
  * table would be a require cycle. XChainDecoder.js re-exports this object
  * under its historical name, so every existing reader
@@ -36,8 +36,8 @@
 // payload to the canonical form, so the decoder DB never holds aliased names and
 // every downstream consumer sees one spelling per action.
 //
-// The indexer's twin is `actions.js actionAliases`, applied to a BATCH's
-// sub-actions by `batch.js normalizeSubAction` at/after the
+// The indexer's twin is `actions/index.js actionAliases`, applied to a BATCH's
+// sub-actions by `batch/sub_command.js normalizeSubAction` at/after the
 // BATCH_SUBACTION_NORMALIZATION flag-day. Both tables are pinned to the same
 // canonical manifest, which is what makes the decoder's sub-command view and the
 // indexer's dispatch agree about what a batched `TRANSFER` IS.

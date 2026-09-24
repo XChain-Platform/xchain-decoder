@@ -183,6 +183,74 @@ describe('the parse loop parks on a REORG_HALT instead of exiting', function () 
 
 })
 
+function reorgHaltError(message){ const error = new Error(message); error.reorgHalt = true; return error }
+function buildEqualHeightDecoder({ rpcThrows = false, halt = false, resetTip = STORED_TIP } = {}){
+    let initialTipRead = true
+    const calls = { verifyReorg: 0 }
+    const dbOverrides = {
+        getLastBlockIndex: async () => {
+            const tip = initialTipRead ? STORED_TIP : resetTip
+            initialTipRead = false
+            return tip
+        },
+        getBlockByIndex: async () => ({ block_hash: 'stored-tip-hash' })
+    }
+    if (halt) dbOverrides.isReorgHalted = async () => true
+    const built = buildDecoder({ nodeTips: [STORED_TIP], dbOverrides })
+    built.decoder.mempoolInterval = 'test-placeholder'
+    built.decoder.connector.getBlockHash = async () => {
+        if (rpcThrows) throw new Error('rpc: connection reset')
+        return 'node-tip-hash'
+    }
+    built.decoder.verifyReorg = async () => {
+        calls.verifyReorg++
+        if (halt) throw reorgHaltError('equal-height refusal')
+    }
+    return { ...built, calls }
+}
+describe('REORG_HALT call-site coverage', function () {
+    this.timeout(0)
+    beforeEach(function (){ installSink(); clock.install() })
+    afterEach(function (){ clock.restore(); observability['_resetObservability']() })
+    it('parks and stays alive during a forward hash-mismatch reorg', async function () {
+        const { decoder, sleepCount } = buildDecoder({
+            nodeTips: [STORED_TIP + 5],
+            dbOverrides: {
+                getBlockByIndex: async () => ({ block_hash: 'ff'.repeat(32) }),
+                isReorgHalted: async () => true
+            }
+        })
+        let verifyReorgCalls = 0
+        decoder.fetchBlockHex = async () => 'deadbeef'
+        decoder.xchainBlockDecoder = { blockFromHex: () => ({ prevHash: Buffer.alloc(32, 0x11) }) }
+        decoder.verifyReorg = async () => { verifyReorgCalls++; throw reorgHaltError('forward refusal') }
+        await decoder.start()
+        assert.strictEqual(verifyReorgCalls, 1)
+        assert.strictEqual(decoder.reorgHaltParked, true)
+        assert.ok(sleepCount() > 1, 'the parked loop must stay alive')
+    })
+    it('resets the cursor after an equal-height tip replacement', async function () {
+        const { decoder, calls } = buildEqualHeightDecoder({ resetTip: STORED_TIP - 3 })
+        await decoder.start()
+        assert.strictEqual(calls.verifyReorg, 1)
+        assert.strictEqual(decoder.lastProcessedBlockIndex, STORED_TIP - 3)
+    })
+    it('skips an equal-height reconcile when its RPC read throws', async function () {
+        const { decoder, calls } = buildEqualHeightDecoder({ rpcThrows: true })
+        await decoder.start()
+        assert.strictEqual(calls.verifyReorg, 0)
+        assert.strictEqual(decoder.lastProcessedBlockIndex, STORED_TIP)
+        assert.ok(linesMatching(/equal-height tip-hash detection reads, skipping/).length > 0)
+    })
+    it('parks during an equal-height reconcile refusal', async function () {
+        const { decoder, calls, sleepCount } = buildEqualHeightDecoder({ halt: true })
+        await decoder.start()
+        assert.strictEqual(calls.verifyReorg, 1)
+        assert.strictEqual(decoder.reorgHaltParked, true)
+        assert.ok(sleepCount() > 1, 'the parked loop must stay alive')
+    })
+})
+
 describe('a failure that is not a halt refusal still escapes start()', function () {
     this.timeout(0)
 

@@ -73,6 +73,9 @@ const SIBLINGS = [
     { repo: 'xchain-utxo-tracker', envs: ['XCHAIN_UTXO_TRACKER_DIR'],
       marker: path.join('src', 'chain', 'blockchain_connector.js'),
       guards: 'AuxPoW strip parity and the dispenser safe-depth twin' },
+    { repo: 'xchain-node', envs: ['XCHAIN_NODE_DIR'],
+      marker: path.join('src', 'services', 'stop_budget_service.js'),
+      guards: 'the shutdown drain staying under the stop budget xchain-node gives a decoder' },
 ];
 
 function resolve(entry) {

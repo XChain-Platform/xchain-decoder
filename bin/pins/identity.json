@@ -9,7 +9,7 @@
     "src/coins/index.js": "dd350bc0ec999849fe302ac4381f37b7be3eaa866f019a35cbcceebb4d5ebd4b"
   },
   "twinFixtures": {
-    "test/fixtures/action-manifest.json": "93ac85b4d76f078951a2e95eb3ca303f39fb9f18d0fb91b1ae16693716bef72f",
+    "test/fixtures/action-manifest.json": "05813d667976ec49bdeb001fc7f5aea41fce4f343a37576a2716d176b334a823",
     "test/fixtures/roundtrip-conformance.json": "d9963ac7c35bdcfab99595fec040d7791d73119cb62fef20db136f8ea56236ed"
   }
 }

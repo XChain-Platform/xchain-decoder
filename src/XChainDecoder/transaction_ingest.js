@@ -177,7 +177,8 @@ async function storeDispenseOutput(loop, nextOutput, nextBlockHeight){
 // this list is exactly [decodedData] and both tests reduce to the
 // startsWith they replace; at/above the gate a BATCH yields its
 // SUB-COMMANDS instead, split to agree with
-// xchain-indexer/src/actions/batch.js (see batchSubCommandCapture).
+// xchain-indexer/src/actions/batch/validate.js readCommands (see
+// src/protocol/batch_sub_command_capture.js).
 async function capturePaymentOutputs(loop, block, parseResult, nextTransactionHash, nextBlockHeight, decodedData){
     let commands = captureCommands(decodedData, this.consensusNetwork, block.timestamp)
     let isCoinpay = commands.some(nextCommand => nextCommand.startsWith("COINPAY|"))

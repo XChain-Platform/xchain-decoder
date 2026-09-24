@@ -120,12 +120,12 @@ module.exports = {
     // marker are atomic, so the marker rows above the tip ARE the rollback depth.
     //
     // Distinct heights, not a row count: a height deleted, re-synced and deleted
-    // again writes two markers and is one block of depth. Bounded scan: the ceiling
-    // is 126, so the newest few thousand REORG rows cover every reachable depth, and
+    // again writes two markers and is one block of depth. Bounded scan: the largest
+    // configured ceiling is 5006, so the newest 10000 REORG rows cover every reachable depth, and
     // (code, id) is indexed (src/sql/events.sql). THROWS on an unreadable or
     // unparseable result - "we could not tell" must never reach the caller as "no
     // prior rollback", which is the exact collapse this whole guard exists to stop.
-    async countReorgDeletesAboveTip(scanLimit = 5000){
+    async countReorgDeletesAboveTip(scanLimit = 10000){
         // Throws (after its own retries) rather than returning a sentinel, so an
         // unknown tip cannot silently become "everything is above it" or "nothing is".
         const tip = await this.getLastBlockIndex()

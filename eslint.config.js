@@ -77,7 +77,7 @@ const src = {
 };
 
 const configAndEntry = {
-    files: ['src/config.js', 'src/api.js', 'src/migrate.js', 'src/index.js', 'src/clear_reorg_halt.js', 'bin/**/*.js'],
+    files: ['src/config.js', 'src/api.js', 'src/db/migrate.js', 'src/index.js', 'src/clear_reorg_halt.js', 'bin/**/*.js'],
     rules: {
         'no-console': 'off',
         'no-restricted-syntax': ['error',

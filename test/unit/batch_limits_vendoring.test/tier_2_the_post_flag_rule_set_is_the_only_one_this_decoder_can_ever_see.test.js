@@ -148,7 +148,7 @@ describe(OUTER_TITLE, function () {
             // merely being a fact about two numbers:
             //
             //   * the indexer's budget is a strict refinement of BATCH_ISSUANCE_LIMITS.
-            //     src/actions/batch.js reads its BATCH_COST_WEIGHTING verdict ONLY inside
+            //     src/actions/batch/ reads its BATCH_COST_WEIGHTING verdict ONLY inside
             //     `if(limitsActive)` blocks, so below that gate's mainnet instant no bound
             //     runs at all, whatever the weighting instant says;
             //   * this decoder cannot suppress there either, because captureCommands exits

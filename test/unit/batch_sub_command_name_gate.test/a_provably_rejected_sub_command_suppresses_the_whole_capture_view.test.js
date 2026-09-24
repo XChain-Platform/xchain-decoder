@@ -23,7 +23,8 @@
 // file's two halves:
 //
 //   1. WHOLE-BATCH REJECTION, live today. The indexer's activation scan
-//      (batch.js parse(): isEnabled(split('|')[0]) over every command) invalidates the
+//      (batch/validate.js activationError: isEnabled(split('|')[0]) over every command)
+//      invalidates the
 //      ENTIRE batch as one record when any sub-command name is unregistered, so NO
 //      sub-command runs - not the bad one and not its well-formed siblings. Capture kept
 //      reading those siblings. `BATCH|0|DISPENSER|0|...;` - one trailing semicolon -

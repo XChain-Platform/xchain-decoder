@@ -234,6 +234,13 @@ describe('Database#countReorgDeletesAboveTip()', function () {
         await assert.rejects(() => db.countReorgDeletesAboveTip(0), /out-of-range scan limit/)
     })
 
+    it('scans beyond the 5006-block litecoin testnet ceiling by default', async function () {
+        const { db, query } = dbWith([{ max_height: 200n }], [])
+        await db.countReorgDeletesAboveTip()
+        const scan = query.getCalls().map(c => String(c.args[0])).find(s => /code = 'REORG'/.test(s))
+        assert.match(scan, /ORDER BY id DESC LIMIT 10000;/)
+    })
+
     it('propagates a tip read that could not be answered, rather than counting against a guess', async function () {
         const db = new Database('127.0.0.1', 3306, 'xchain_btc_mainnet', 'u', 'p')
         db.sleep = async () => {}

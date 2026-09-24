@@ -44,7 +44,7 @@
 const dotenv   = require('dotenv');
 dotenv.config();
 
-const Database = require('./db.js');
+const Database = require('../db.js');
 
 // Spelled out for an operator reading it mid-incident: the difference between a
 // blanket run and a scoped one is the whole risk of this command, so each mode

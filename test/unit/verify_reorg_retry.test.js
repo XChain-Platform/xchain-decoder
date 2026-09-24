@@ -104,9 +104,9 @@ const SAFE_DEPTH = XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH
 
 // Decoder whose DB disagrees with the node for `divergentBlocks` blocks below
 // the tip; below that the hashes match and the backward walk stops.
-function buildDeepReorgDecoder(divergentBlocks) {
+function buildDeepReorgDecoder(divergentBlocks, network = 'bitcoin-regtest') {
   const decoder = new XChainDecoder(
-    'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+    network, 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
   )
   decoder.startBlockIndex = 0
   decoder.sleep = async () => {}
@@ -133,6 +133,16 @@ describe('XChainDecoder.verifyReorg depth guard', function () {
     const { decoder, deleted } = buildDeepReorgDecoder(SAFE_DEPTH - 1)
     assert.strictEqual(await decoder.verifyReorg(), true)
     assert.strictEqual(deleted.length, SAFE_DEPTH - 1)
+  })
+
+  it('recovers a 134-block litecoin testnet reorg without changing standard networks', async function () {
+    const { decoder, deleted } = buildDeepReorgDecoder(134, 'litecoin-testnet')
+    assert.strictEqual(decoder.dispenserExpireSafeDepth, 5006)
+    assert.strictEqual(await decoder.verifyReorg(), true)
+    assert.strictEqual(deleted.length, 134)
+    assert.strictEqual(new XChainDecoder(
+      'litecoin-mainnet', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+    ).dispenserExpireSafeDepth, SAFE_DEPTH)
   })
 
   it('aborts fail-closed once the walk reaches the safe depth instead of deleting past purged dispenser rows', async function () {

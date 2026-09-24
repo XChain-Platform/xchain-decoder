@@ -26,3 +26,5 @@ xchain-hub
 xchain-indexer
 # AuxPoW strip parity and the dispenser safe-depth twin.
 xchain-utxo-tracker
+# The shutdown drain staying under the stop budget xchain-node gives a decoder.
+xchain-node

@@ -30,17 +30,20 @@ const {
     resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS
 } = require('../../src/api')
 const observability = require('../../src/observability')
+const registerReorgHaltRecords = require('./decoder_halt_diagnostics.test/01_reorg_halt_records.test')
+const registerHealthProbeRecords = require('./decoder_halt_diagnostics.test/02_health_probe_records.test')
+const registerDbCleanupRecord = require('./decoder_halt_diagnostics.test/03_db_cleanup_record.test')
 
 // DISPENSER_EXPIRE_SAFE_DEPTH, the rollback ceiling verifyReorg aborts at.
 const SAFE_DEPTH = 126
 
-let sink
+const sink = { lines: [] }
 
 // getLogger() routes to whatever shipper the process installed, so a capture
 // sink on that shipper sees the formatted line with its fields.
 function installSink() {
     observability._resetObservability()
-    sink = { lines: [] }
+    sink.lines = []
     const push = (m) => sink.lines.push(m)
     observability.installObservability(null, {
         service: 'xchain-decoder', env: {},
@@ -87,110 +90,7 @@ describe('REORG_HALT: a halt the marker cannot record still leaves a record', fu
     beforeEach(function () { installSink() })
     afterEach(function () { observability._resetObservability() })
 
-    it('emits REORG_HALT with reason and depth when db.markReorgHalted is missing', async function () {
-        // The db deliberately has no markReorgHalted: this is the bare return.
-        const decoder = haltingDecoder({})
-        await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/)
-
-        const halts = linesFor('REORG_HALT')
-        assert.strictEqual(halts.length, 1, 'the halt must produce exactly one record')
-        const line = halts[0]
-        assert.ok(line.includes(' error '), 'REORG_HALT is an error-level event: ' + line)
-        assert.ok(line.includes('coin=BTC'), 'the record must name the coin: ' + line)
-        assert.ok(line.includes('network=regtest'), 'the record must name the network: ' + line)
-        assert.ok(line.includes('depth=' + SAFE_DEPTH),
-            'the record must carry the depth it was about to persist: ' + line)
-        assert.ok(/reason="[^"]*safe-depth[^"]*"/.test(line),
-            'the record must carry the reason it was about to persist: ' + line)
-        assert.ok(line.includes('marker_write=unavailable'),
-            'the record must say the marker could not be written: ' + line)
-        assert.ok(line.includes('/status') && line.includes('/live'),
-            'the record must say which surfaces will NOT report the halt: ' + line)
-        // Nothing was attempted, so nothing may report an outcome.
-        assert.strictEqual(linesFor('REORG_HALT_MARKER').length, 0)
-        assert.strictEqual(decoder.getReorgHaltStatus().marker_persisted, false)
-    })
-
-    it('still emits REORG_HALT on the normal path, and says the marker was written', async function () {
-        let marked = null
-        // The db contract markReorgHalted answers on: TRUE only once a REORG_HALT row
-        // is readable. A stub returning undefined would be a stub asserting a write it
-        // never confirmed, which is the exact defect these cases exist for.
-        const decoder = haltingDecoder({ markReorgHalted: async (r) => { marked = r; return true } })
-        await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/)
-
-        const halts = linesFor('REORG_HALT')
-        assert.strictEqual(halts.length, 1)
-        assert.ok(halts[0].includes('marker_write=attempting'), halts[0])
-        // The pre-write record cannot know the outcome, so it must not claim one.
-        assert.ok(!halts[0].includes('marker_persisted='),
-            'the pre-write record must not assert persistence: ' + halts[0])
-
-        const outcome = linesFor('REORG_HALT_MARKER')
-        assert.strictEqual(outcome.length, 1, 'the write outcome must produce exactly one record')
-        assert.ok(outcome[0].includes('marker_persisted=true'), outcome[0])
-        assert.ok(outcome[0].includes('attempts=1'), outcome[0])
-        assert.ok(marked && /safe-depth/.test(marked), 'the durable marker is still written')
-        assert.strictEqual(decoder.getReorgHaltStatus().marker_persisted, true)
-    })
-
-    // The failure the bootstrap gate exists to stop: the marker write fails, the
-    // process exits, the restart policy recycles the container, the entry guard reads
-    // a row that was never written, and the gate counts zero markers and publishes the
-    // database as known-good. Before this, insertEvent swallowed the write error and
-    // returned false, markReorgHalted handed that straight back, haltReorg discarded
-    // it, and the one structured record said marker_persisted=true regardless.
-    it('reports marker_persisted=false when the durable write is refused, and still aborts', async function () {
-        let attempts = 0
-        const decoder = haltingDecoder({ markReorgHalted: async () => { attempts++; return false } })
-        await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/,
-            'a marker failure must never mask or replace the abort')
-
-        const outcome = linesFor('REORG_HALT_MARKER')
-        assert.strictEqual(outcome.length, 1)
-        assert.ok(outcome[0].includes('marker_persisted=false'),
-            'a refused write must never report as persisted: ' + outcome[0])
-        assert.strictEqual(attempts, 2, 'a refused write is retried once on a fresh connection')
-        assert.ok(outcome[0].includes('attempts=2'), outcome[0])
-        assert.strictEqual(decoder.getReorgHaltStatus().marker_persisted, false)
-        assert.strictEqual(decoder.getReorgHaltStatus().halted, true)
-
-        // Read the operator line off the SINK, not off console.error. The halt
-        // path now goes through the one logger like everything else, so the
-        // shipper this suite already installs is where the line lands; a
-        // console capture would see nothing and report the line as missing.
-        const critical = sink.lines.filter((l) => l.includes('could NOT be persisted'))
-        assert.strictEqual(critical.length, 1,
-            'the only live evidence of an unrecorded halt must be logged: ' + JSON.stringify(sink.lines))
-        assert.ok(/full resync/i.test(critical[0]),
-            'the line must name the required operator action: ' + critical[0])
-        assert.ok(/not a valid bootstrap source/i.test(critical[0]), critical[0])
-    })
-
-    it('carries the cause when the marker write throws rather than returning false', async function () {
-        const realError = console.error
-        console.error = () => {}
-        try {
-            const decoder = haltingDecoder({
-                markReorgHalted: async () => { throw new Error('lost connection to server') }
-            })
-            await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/)
-            const outcome = linesFor('REORG_HALT_MARKER')
-            assert.strictEqual(outcome.length, 1)
-            assert.ok(outcome[0].includes('marker_persisted=false'), outcome[0])
-            assert.ok(outcome[0].includes('lost connection to server'),
-                'the cause must ride the record: ' + outcome[0])
-        } finally {
-            console.error = realError
-        }
-    })
-
-    it('reports the halt in memory even when nothing durable can be written', async function () {
-        const decoder = haltingDecoder({})
-        await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/)
-        assert.strictEqual(decoder.reorgHalted, true)
-        assert.match(decoder.reorgHaltReason, /safe-depth/)
-    })
+    registerReorgHaltRecords({ assert, haltingDecoder, NODE_TIP, SAFE_DEPTH, linesFor, sink })
 })
 
 describe('health probes: a failing probe stops being silent', function () {
@@ -234,91 +134,9 @@ describe('health probes: a failing probe stops being silent', function () {
         return decoder
     }
 
-    it('names the db_ping probe on /live when the ping throws', async function () {
-        const decoder = probeDecoder()
-        decoder.db = { ping: async () => { throw new Error('pool timeout acquiring connection') } }
-
-        const res = await getLive(liveApp(decoder))
-        // Control: the route still answers, with the code it always answered.
-        assert.strictEqual(res.status, 503)
-        assert.strictEqual(res.body.db, false)
-
-        const warned = linesFor('HEALTH_PROBE_FAILED')
-        assert.strictEqual(warned.length, 1, 'the failure must produce one record')
-        assert.ok(warned[0].includes(' warn '), warned[0])
-        assert.ok(warned[0].includes('probe=db_ping'), warned[0])
-        assert.ok(warned[0].includes('route=/live'), warned[0])
-        assert.ok(warned[0].includes('pool timeout'), 'the cause rides the record: ' + warned[0])
-    })
-
-    it('names the reorg_halt probe on /live, the failure that makes a halted decoder read clean', async function () {
-        const decoder = probeDecoder()
-        decoder.checkReorgHalt = async () => { throw new Error('events table is gone') }
-
-        const res = await getLive(liveApp(decoder))
-        // The wrong-but-alive shape this exists for: the route reports no halt
-        // because it could not ask, and that is now the difference between a
-        // silent lie and a warned one.
-        assert.strictEqual(res.status, 200)
-        assert.strictEqual(res.body.reorg_halted, false)
-
-        const warned = linesFor('HEALTH_PROBE_FAILED')
-        assert.strictEqual(warned.length, 1)
-        assert.ok(warned[0].includes('probe=reorg_halt'), warned[0])
-        assert.ok(warned[0].includes('route=/live'), warned[0])
-        assert.ok(warned[0].includes('events table is gone'), warned[0])
-    })
-
-    it('throttles a repeating probe failure to one line per window and counts the rest', async function () {
-        const decoder = probeDecoder()
-        decoder.db = { ping: async () => { throw new Error('pool timeout') } }
-        const app = liveApp(decoder)
-
-        for (let i = 0; i < 5; i++) await getLive(app)
-        assert.strictEqual(linesFor('HEALTH_PROBE_FAILED').length, 1,
-            'a caller-driven route must not turn one outage into one line per request')
-
-        // Age the window rather than sleeping through it, so the suppressed count
-        // the next line has to report survives.
-        ageProbeLogState()
-        await getLive(app)
-        const warned = linesFor('HEALTH_PROBE_FAILED')
-        assert.strictEqual(warned.length, 2)
-        assert.ok(warned[1].includes('suppressed=4'),
-            'a throttled flood must stay countable, not merely quiet: ' + warned[1])
-        assert.ok(PROBE_LOG_WINDOW_MS > 0, 'the window is a real duration, not a disabled guard')
-    })
-
-    it('carries a cause even when the probe threw something that is not an Error', function () {
-        noteProbeFailure('db_ping', '/status', 'ECONNREFUSED')
-        const warned = linesFor('HEALTH_PROBE_FAILED')
-        assert.strictEqual(warned.length, 1)
-        assert.ok(warned[0].includes('err=ECONNREFUSED'), warned[0])
-    })
-
-    it('answers null instead of throwing when the error itself cannot be read', function () {
-        // A diagnostic that throws inside a health route would turn a reportable
-        // probe failure into a 500 on the route the healthcheck polls.
-        const hostile = { get message() { throw new Error('unreadable') } }
-        assert.strictEqual(noteProbeFailure('db_ping', '/live', hostile), null)
-        assert.strictEqual(linesFor('HEALTH_PROBE_FAILED').length, 0)
-    })
-
-    it('keeps the two probes on separate throttles, so one failure cannot mask the other', async function () {
-        const decoder = probeDecoder()
-        decoder.db = { ping: async () => { throw new Error('pool timeout') } }
-        decoder.checkReorgHalt = async () => { throw new Error('events table is gone') }
-
-        await getLive(liveApp(decoder))
-        // db_ping fails first, so dbOk is false and the halt probe is not reached
-        // on this route. Drive the halt probe with a working ping.
-        decoder.db = { ping: async () => true }
-        await getLive(liveApp(decoder))
-
-        const warned = linesFor('HEALTH_PROBE_FAILED')
-        assert.strictEqual(warned.length, 2)
-        assert.ok(warned.some((l) => l.includes('probe=db_ping')))
-        assert.ok(warned.some((l) => l.includes('probe=reorg_halt')))
+    registerHealthProbeRecords({
+        assert, probeDecoder, getLive, liveApp, linesFor,
+        ageProbeLogState, PROBE_LOG_WINDOW_MS, noteProbeFailure
     })
 })
 
@@ -346,19 +164,7 @@ describe('db: a failed temp-table drop stops being silent', function () {
         return { getConnection: async () => conn }
     }
 
-    it('records the drop failure with the table and the cause', async function () {
-        const db = new Database('127.0.0.1', 3306, 'xchain_btc_regtest', 'u', 'p')
-        db.pool = poolWhoseDropFails()
-
-        // Control: the drop is cleanup, so the call still returns its result.
-        const r = await db.deleteAndCompareTxsNotInList([])
-        assert.strictEqual(r.transactionsDeleted, 0)
-
-        const warned = linesFor('DB_TEMP_TABLE_DROP_FAILED')
-        assert.strictEqual(warned.length, 1)
-        assert.ok(warned[0].includes('table=_mempool_node_snapshot'), warned[0])
-        assert.ok(warned[0].includes('lost connection to server'), warned[0])
-    })
+    registerDbCleanupRecord({ assert, Database, poolWhoseDropFails, linesFor })
 })
 
 // api.js registers GET /status inside startApi(), which builds a real decoder and

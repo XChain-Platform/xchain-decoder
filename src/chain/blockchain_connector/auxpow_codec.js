@@ -143,7 +143,7 @@ function skipAuxPow(buf, start) {
 // returns exactly 160 chars, requiring the AuxPoW size to be parsed structurally from
 // the block hex (skipAuxPow). Non-AuxPoW blocks pass through unchanged.
 // Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector.js stripAuxPowFromBlockHex.
-// test/unit/auxpowStripParity.test.js asserts byte identity of the two function bodies,
+// test/unit/auxpow_strip_parity.test.js asserts byte identity of the two function bodies,
 // so a strip correction cannot land in one repo alone.
 function stripAuxPowFromBlockHex(headerHex, blockHex) {
     const dataToRemove = headerHex.length - 160  // 160 hex chars = 80-byte standard header

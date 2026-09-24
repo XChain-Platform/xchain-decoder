@@ -23,6 +23,10 @@ const { chainTierMismatch } = require('../protocol/chain_identity')
 const { logger, DISPENSER_EXPIRE_SAFE_DEPTH } = require('./constants.js')
 const { haltReorg } = require('./reorg_halt.js')
 
+function safeDepthFor(decoder){
+    return decoder.dispenserExpireSafeDepth || DISPENSER_EXPIRE_SAFE_DEPTH
+}
+
 function refuseHaltedRollback(){
     // Mirror the durable marker into the in-memory health state so the health
     // surface agrees with the abort even before the next TTL probe.
@@ -30,7 +34,7 @@ function refuseHaltedRollback(){
     this.reorgHaltCheckedAt = Date.now()
     const msg = "verifyReorg: decoder is HALTED from a prior over-deep reorg abort. Refusing to "
         + "roll back further: a restart must not silently resume a rollback past the dispenser "
-        + "safe-depth window (DISPENSER_EXPIRE_SAFE_DEPTH=" + DISPENSER_EXPIRE_SAFE_DEPTH + "), which "
+        + "safe-depth window (DISPENSER_EXPIRE_SAFE_DEPTH=" + safeDepthFor(this) + "), which "
         + "would permanently lose money-bearing dispenser state. Recovery: perform a full resync "
         + "from a known-good snapshot."
     logger.error(msg)
@@ -47,7 +51,7 @@ async function readPriorRollbackDepth(){
     let seedErr = null
     for (let attempt = 1; attempt <= 3; attempt++){
         try {
-            priorDepth = await this.db.countReorgDeletesAboveTip()
+            priorDepth = await this.db.countReorgDeletesAboveTip(safeDepthFor(this) + 1)
             seedErr = null
             break
         } catch (err){
@@ -83,9 +87,10 @@ async function readPriorRollbackDepth(){
 // tip either way, and counting only the current invocation is what let a
 // restart finish an aborted over-deep rollback.
 async function assertWithinSafeDepth(lastBlockIndex, priorDepth, blocksDeleted){
-    if (priorDepth + blocksDeleted.length >= DISPENSER_EXPIRE_SAFE_DEPTH){
+    const safeDepth = safeDepthFor(this)
+    if (priorDepth + blocksDeleted.length >= safeDepth){
         const msg = "verifyReorg: reorg depth exceeds the dispenser safe-depth window "
-            + "(DISPENSER_EXPIRE_SAFE_DEPTH=" + DISPENSER_EXPIRE_SAFE_DEPTH + "). Already rolled back "
+            + "(DISPENSER_EXPIRE_SAFE_DEPTH=" + safeDepth + "). Already rolled back "
             + (priorDepth + blocksDeleted.length) + " blocks (" + blocksDeleted.length
             + " in this run, resumed from " + priorDepth + " already deleted above the tip); "
             + "soft-expired dispenser rows for block height "
@@ -122,12 +127,13 @@ async function deleteAboveTipBlock(lastBlockIndex, lastBlock, nodeTip, priorDept
     // instead of exiting into a restart loop.
     const aboveTip = lastBlockIndex - nodeTip
     const alreadyRolledBack = priorDepth + blocksDeleted.length
-    if (alreadyRolledBack + aboveTip > DISPENSER_EXPIRE_SAFE_DEPTH){
+    const safeDepth = safeDepthFor(this)
+    if (alreadyRolledBack + aboveTip > safeDepth){
         const msg = "verifyReorg: the node's tip (" + nodeTip + ") is " + aboveTip
             + " blocks below the stored tip (" + lastBlockIndex + "), which"
             + (alreadyRolledBack > 0 ? " with " + alreadyRolledBack + " block(s) already rolled back" : "")
             + " exceeds the dispenser safe-depth window (DISPENSER_EXPIRE_SAFE_DEPTH="
-            + DISPENSER_EXPIRE_SAFE_DEPTH + "). Refusing before any further delete: nothing has been "
+            + safeDepth + "). Refusing before any further delete: nothing has been "
             + "rolled back past the window, no REORG_HALT marker was written and this database needs "
             + "no resync. Either the node is still catching up (wait for it to pass " + lastBlockIndex
             + ") or it was rolled back below this database's tip (operator action)."

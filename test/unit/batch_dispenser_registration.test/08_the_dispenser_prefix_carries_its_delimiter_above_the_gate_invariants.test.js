@@ -60,7 +60,7 @@ describe('BATCH dispenser registration', function () {
                 BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet = saved
             }
             // Give the map back exactly what was borrowed; the value itself is pinned in
-            // test/unit/batchSubCommandOutputCaptureActivation.test.js, not re-litigated here.
+            // test/unit/batch_sub_command_output_capture_activation.test.js, not re-litigated here.
             assert.strictEqual(BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION.mainnet, saved,
                 'the map must be back to its pre-probe value')
             const belowRestored = typeof saved === 'number' ? saved - 1 : ARMED

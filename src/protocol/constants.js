@@ -497,9 +497,9 @@ const DISPENSER_CANCEL_GRACE_ACTIVATION = {
 // nothing ("COINPAY (skip): destination mismatch tx= payee=<seller>", witnessed on regtest), and
 // a batched Mode B DISPENSER is rejected for a missing oracle fee whether or not the payer paid.
 // Both are money-bearing: the payer's coin is spent and nothing settles. At/above the gate the
-// capture decision runs over the batch's sub-command list, split exactly as
-// xchain-indexer/src/actions/batch.js splits it, so a batched COINPAY captures the same outputs a
-// top-level COINPAY does.
+// capture decision runs over the batch's sub-command list, split exactly as the indexer's
+// xchain-indexer/src/actions/batch/validate.js readCommands splits it, so a batched COINPAY
+// captures the same outputs a top-level COINPAY does.
 //
 // THE OPEN-DISPENSER REGISTRY RIDES THE SAME INSTANT, deliberately, because it is the same
 // blindness and the same decision. `decodedData.startsWith("DISPENSER")` is false for
@@ -509,7 +509,7 @@ const DISPENSER_CANCEL_GRACE_ACTIVATION = {
 // user could open a dispenser in a batch, fund it, and it would never dispense. That registry IS
 // the address set the dispense half of output capture tests against, so splitting the two across
 // two flag-days would leave the decoder half-batch-aware for a stretch of chain with nothing
-// gained. One instant arms both; xchain-decoder/test/unit/batchDispenserRegistration.test.js
+// gained. One instant arms both; xchain-decoder/test/unit/batch_dispenser_registration.test.js
 // drives the coupling rather than asserting it in prose.
 //
 // CONSENSUS-AFFECTING: it changes the set of rows written to transaction_outputs, which changes
@@ -518,7 +518,7 @@ const DISPENSER_CANCEL_GRACE_ACTIVATION = {
 // BELOW the gate and pre-flag-day history re-decodes byte-identically.
 //
 // NEVER ARM IT BELOW two sibling instants, both asserted in
-// test/unit/batchSubCommandOutputCaptureActivation.test.js:
+// test/unit/batch_sub_command_output_capture_activation.test.js:
 //   * the indexer's FIX_OUTPUT_FANOUT. A BATCH is a data-bearing, non-COINPAY row, so the extra
 //     captured outputs fan it out to several rows, and BELOW that flag-day
 //     output_fanout.collapseOutputFanout treats that as a consensus-critical fault and HALTS the
@@ -527,12 +527,12 @@ const DISPENSER_CANCEL_GRACE_ACTIVATION = {
 //     Capture without that ledger lets N COINPAY sub-commands settle N obligations from ONE
 //     payment, which is the defect this spec's R5 closes; arming capture first would open it.
 //
-// null means DISARMED (never active), the fail-closed default: mainnet keeps the legacy
+// null means DISARMED (never active), the fail-closed default: a network keeps the legacy
 // top-level-only view until the operator ratifies an instant, chosen with the fleet's upgrade
 // state in hand, because arming it too early forks the chain and arming it in the past rewrites
-// agreed history. testnet and regtest are genesis-on, matching BOTH sibling gates there
-// (FIX_OUTPUT_FANOUT and BATCH_ISSUANCE_LIMITS are all-zeros off mainnet), so the venues exercise
-// the sub-command path from block 0.
+// agreed history. Mainnet is ARMED (below). testnet and regtest are genesis-on, matching BOTH
+// sibling gates there (FIX_OUTPUT_FANOUT and BATCH_ISSUANCE_LIMITS are all-zeros off mainnet),
+// so the venues exercise the sub-command path from block 0.
 //
 // DEPLOY DEADLINE, once an instant is armed: EVERY decoder on that network MUST be running the
 // armed value before the instant, or the fleet splits on the first BATCH carrying a COINPAY or a

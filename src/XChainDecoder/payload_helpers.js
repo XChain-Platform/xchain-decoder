@@ -65,7 +65,7 @@ function compiledPushSize(byteLength){
 // the returned buffer themselves, so U+FFFD substitution for invalid UTF-8 is
 // applied exactly once, at the call site.
 //
-// Returns { buffer, rawActionName, actionName, isKnown }:
+// The return object carries { buffer, rawActionName, actionName, isKnown }:
 //   buffer        - the payload with its name portion rewritten to the canonical
 //                   ASCII spelling when the name was a recognized alias; the
 //                   original reference, unmodified, otherwise, which includes

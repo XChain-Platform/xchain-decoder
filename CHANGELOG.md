@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-09-23
+
+### Fixed
+- Raised the Litecoin testnet rollback window and pinned decoder undo depth to the dispenser safe depth.
+
+
 ## [0.20.0] - 2026-09-17
 
 ### Fixed

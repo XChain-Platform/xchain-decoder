@@ -26,7 +26,7 @@ const BlockchainConnector = require('./chain/blockchain_connector')
 const CryptoNetworks = require('./chain/crypto_networks')
 const XChainBlockDecoder = require('./chain/XChainBlockDecoder')
 const { format: formatLogLine } = require('node:util');
-const { logger, FUNDING_VOUT_BASE, DISPENSER_EXPIRE_SAFE_DEPTH, VALID_ACTION_NAMES, AUXPOW_REASSEMBLE_AFTER } = require('./XChainDecoder/constants.js')
+const { logger, FUNDING_VOUT_BASE, DISPENSER_EXPIRE_SAFE_DEPTH, resolveDispenserExpireSafeDepth, VALID_ACTION_NAMES, AUXPOW_REASSEMBLE_AFTER } = require('./XChainDecoder/constants.js')
 const { nodeStillCatchingUp, compiledPushSize, canonicalizeActionPayload, bigIntBufferutilsActive } = require('./XChainDecoder/payload_helpers.js')
 const syncStatusMethods = require('./XChainDecoder/sync_status.js')
 const chainIntegrityMethods = require('./XChainDecoder/chain_integrity.js')
@@ -55,9 +55,9 @@ bitcoin.initEccLib(ecc);
 // DROP -> AIRDROP 3 each), so a payload compiled to exactly 8192 bytes is stored as
 // an 8197-byte BROADCAST string. That is intended and harmless: transactions.data is
 // MEDIUMTEXT, so nothing truncates. It is deliberately not "fixed" by re-measuring
-// the canonical buffer at
-// the gate: tightening it would drop transactions whose on-chain push is legal and
-// that other nodes accept, forking the fleet and retroactively invalidating
+// the canonical buffer at the gate: tightening it would drop transactions whose
+// on-chain push is legal and that other nodes accept, forking the fleet and
+// retroactively invalidating
 // already-decoded near-cap alias history. Moving the measurement point is a
 // consensus change needing a flag-day (a *_ACTIVATION entry in
 // ./protocol/constants.js keyed on block height and network, deployed fleet-wide
@@ -104,6 +104,7 @@ function initializeDecoderIdentity(decoder, network, dbUrl, dbPort, dbName, dbUs
     // getBitcoinJsNetwork call above already threw on an unknown key, so the
     // suffix is guaranteed to be a valid network name here.
     decoder.consensusNetwork = String(network).slice(String(network).lastIndexOf('-') + 1)
+    decoder.dispenserExpireSafeDepth = resolveDispenserExpireSafeDepth(decoder.coinTick, decoder.consensusNetwork)
 
     // Coin/network-prefixed loggers so cadence/reorg/stall lines are self-describing
     // even when a log pipeline strips container labels. Reads the fields at call time.
@@ -311,6 +312,7 @@ Object.assign(XChainDecoder, {
     OP_RETURN_PUSH_OVERHEAD,
     // Exported so a regression test can pin it >= the deepest per-chain reorg window.
     DISPENSER_EXPIRE_SAFE_DEPTH,
+    resolveDispenserExpireSafeDepth,
     nodeStillCatchingUp,
     // Exported so the funding-fee-output collision regression test can assert attributed
     // funding outputs are stored at vout + FUNDING_VOUT_BASE (never colliding with real vouts).

@@ -63,6 +63,12 @@
       "test/unit/dispenser_cancel_grace.test.js",
       "test/unit/dispenser_cancel_grace.test/01_database_get_all_open_dispenser_addresses_grace_floor.test.js"
     ],
+    "test/unit/decoder_halt_diagnostics.test.js": [
+      "test/unit/decoder_halt_diagnostics.test.js",
+      "test/unit/decoder_halt_diagnostics.test/01_reorg_halt_records.test.js",
+      "test/unit/decoder_halt_diagnostics.test/02_health_probe_records.test.js",
+      "test/unit/decoder_halt_diagnostics.test/03_db_cleanup_record.test.js"
+    ],
     "test/e2e/action_decoding.test.js": [
       "test/e2e/action_decoding.test.js",
       "test/e2e/action_decoding.test/01_encoding_types.test.js",

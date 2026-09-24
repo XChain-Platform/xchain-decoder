@@ -31,7 +31,7 @@ const assert = require('assert');
 const sinon  = require('sinon');
 
 const DB_PATH      = require.resolve('../../src/db.js');
-const MIGRATE_PATH = require.resolve('../../src/migrate.js');
+const MIGRATE_PATH = require.resolve('../../src/db/migrate.js');
 const DOTENV_PATH  = require.resolve('dotenv');
 
 const ENV_KEYS = ['DECODER_DB_HOST', 'DECODER_DB_PORT', 'DECODER_DB_NAME',

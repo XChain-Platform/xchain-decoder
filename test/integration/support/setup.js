@@ -41,14 +41,15 @@ const BitcoinCore = require('bitcoin-core')
 const nodeHelper = require('../../helpers/node_helper')
 const XChainDecoder = require('../../../src/XChainDecoder')
 const Database = require('../../../src/db.js')
+const fixturePorts = require('../../../bin/fixture-ports.js')
 
 // Fixture venue. Must match fixtures/docker-compose.test.yml.
 const NODE_HOST = process.env.XCHAIN_TEST_NODE_HOST || '127.0.0.1'
-const NODE_PORT = process.env.XCHAIN_TEST_NODE_PORT || '18544'
+const NODE_PORT = String(fixturePorts.port('XCHAIN_TEST_NODE_PORT'))
 const NODE_USER = process.env.XCHAIN_TEST_NODE_USER || 'itfixture'
 const NODE_PASSWORD = process.env.XCHAIN_TEST_NODE_PASS || 'itfixture'
 const DB_HOST = process.env.XCHAIN_TEST_DB_HOST || '127.0.0.1'
-const DB_PORT = process.env.XCHAIN_TEST_DB_PORT || '13318'
+const DB_PORT = String(fixturePorts.port('XCHAIN_TEST_DB_PORT'))
 const DB_USER = process.env.XCHAIN_TEST_DB_USER || 'root'
 const DB_PASSWORD = process.env.XCHAIN_TEST_DB_PASS || 'itfixture'
 const DB_NAME = 'xchain_decoder_integration_regtest'

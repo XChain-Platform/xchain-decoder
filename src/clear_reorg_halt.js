@@ -30,8 +30,9 @@
  * supersedes, and db.readReorgHaltState lets the newest row decide. Preconditions:
  *
  *   1. no block is still missing above the tip (countReorgDeletesAboveTip == 0):
- *      the rolled-back range has been re-parsed. Cannot be forced; wait for the
- *      decoder to catch up.
+ *      the rolled-back range has been re-parsed. Cannot be forced. A decoder still
+ *      parsing forward on a dormant marker catches up on its own; a PARKED one
+ *      (reorg_halt_parked) never re-parses the range, so its recovery is a full resync.
  *   2. the database holds no dispenser state and never decoded a DISPENSER
  *      action, so the purge cannot have lost anything. --force overrides this one
  *      for an operator who has compared the dispensers table against a known-good
@@ -93,7 +94,10 @@ async function checkClearPreconditions(db, args, error){
     const deletesAboveTip = await db.countReorgDeletesAboveTip()
     if (deletesAboveTip > 0){
         error('clear-reorg-halt: REFUSED. ' + deletesAboveTip + ' block(s) rolled back above the current tip have not been re-parsed yet. '
-            + 'Wait for the decoder to catch up past the halt height, then run this again. This check cannot be forced.')
+            + 'This check cannot be forced. If the decoder is parked on this halt (reorg_halt_parked: true on health, '
+            + '/status or /live), it parses nothing and will never re-parse this range: recover with a full resync from '
+            + 'a known-good snapshot. If it is still parsing forward on a dormant marker (reorg_halt_parked: false), wait '
+            + 'for it to pass the halt height, then run this again.')
         return { exitCode: EXIT.NOT_RESYNCED }
     }
 
