@@ -18,6 +18,7 @@
 const crypto = require('crypto')
 const bitcoinCrypto = require('crypto')
 const bitcoin = require('bitcoinjs-lib')
+require('./seeded_rng')
 
 const PREV_HASH = Buffer.from('aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011', 'hex')
 
