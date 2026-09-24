@@ -11,6 +11,10 @@
     ]
   },
   "splits": {
+    "test/unit/migrate.test.js": [
+      "test/unit/migrate.test.js",
+      "test/unit/migrate_status.test.js"
+    ],
     "test/unit/batch_limits_vendoring.test.js": [
       "test/unit/batch_limits_vendoring.test.js",
       "test/unit/batch_limits_vendoring.test/tier_2_the_post_flag_rule_set_is_the_only_one_this_decoder_can_ever_see.test.js",

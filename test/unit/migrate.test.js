@@ -29,9 +29,6 @@
 
 const assert = require('assert');
 const sinon  = require('sinon');
-const fs     = require('fs');
-const os     = require('os');
-const path   = require('path');
 
 const DB_PATH      = require.resolve('../../src/db.js');
 const MIGRATE_PATH = require.resolve('../../src/db/migrate.js');
@@ -90,50 +87,6 @@ function makeFakeDb({ runMigrations }) {
     return state;
 }
 
-// Fake Database for the --status path: exposes sqlPath/getConnection (what
-// migrationStatus() actually calls) instead of runMigrations, so a test can
-// pin exactly what SQL --status issues and prove runMigrations is never
-// reached. `appliedNames` seeds the rows a real `SELECT name FROM
-// schema_migrations` would return; `queryError`, when set, makes the fake
-// connection's query() reject with it instead (a fresh-DB / real-failure probe).
-function makeFakeDbForStatus({ sqlPath, appliedNames, queryError }) {
-    let resolveDone;
-    const done = new Promise((res) => { resolveDone = res; });
-    const state = {
-        constructed: [], poolEnded: false, done,
-        getConnectionCalls: 0, queries: [], releaseCalls: 0,
-        runMigrationsCalled: false, runArgs: null,
-    };
-    class FakeDatabase {
-        constructor(host, port, name, user, pass) {
-            state.constructed.push({ host, port, name, user, pass });
-            this.sqlPath = sqlPath;
-            this.transactionConnection = null;
-            this.pool = {
-                end: async () => { state.poolEnded = true; resolveDone(); }
-            };
-        }
-        async getConnection() {
-            state.getConnectionCalls++;
-            return {
-                query: async (sql) => {
-                    state.queries.push(sql);
-                    if (queryError) throw queryError;
-                    return (appliedNames || []).map((n) => ({ name: n }));
-                },
-                release: async () => { state.releaseCalls++; }
-            };
-        }
-        async runMigrations(opts) {
-            state.runMigrationsCalled = true;
-            state.runArgs = opts;
-            return { applied: [], pending: [] };
-        }
-    }
-    state.FakeDatabase = FakeDatabase;
-    return state;
-}
-
 function loadMigrateWith(fakeDbClass) {
     delete require.cache[MIGRATE_PATH];
     require.cache[DB_PATH] = {
@@ -147,6 +100,13 @@ function loadMigrateWith(fakeDbClass) {
         exports: { config: () => ({ parsed: {} }) }
     };
     require(MIGRATE_PATH);
+}
+
+function loadWithArgv(args) {
+    process.argv = ['node', 'migrate.js', ...args];
+    const fake = makeFakeDb({ runMigrations: async () => ({ applied: [], pending: [] }) });
+    loadMigrateWith(fake.FakeDatabase);
+    return fake;
 }
 
 describe('migrate.js operator CLI @regression', function () {
@@ -305,16 +265,6 @@ describe('migrate.js operator CLI argv refusal @regression', function () {
     beforeEach(prepareMigrateTest);
     afterEach(restoreMigrateTest);
 
-    // The refusal (and --help) run synchronously ahead of main()'s first await, so
-    // a case that must prove nothing ran asserts right after the require rather
-    // than awaiting a pool.end() that a correct CLI never reaches.
-    function loadWithArgv(args) {
-        process.argv = ['node', 'migrate.js', ...args];
-        const fake = makeFakeDb({ runMigrations: async () => ({ applied: [], pending: [] }) });
-        loadMigrateWith(fake.FakeDatabase);
-        return fake;
-    }
-
     it('an unknown flag applies nothing and exits 2', function () {
         const fake = loadWithArgv(['--dry-run']);
         assert.strictEqual(fake.runArgs, null, 'an unknown flag must not run migrations');
@@ -345,6 +295,12 @@ describe('migrate.js operator CLI argv refusal @regression', function () {
         }
     });
 
+});
+
+describe('migrate.js operator CLI argv refusal @regression', function () {
+    beforeEach(prepareMigrateTest);
+    afterEach(restoreMigrateTest);
+
     it('the refusal prints both modes so an operator can tell them apart', function () {
         loadWithArgv(['--dry-run']);
         const printed = consoleErrStub.getCalls().map((c) => c.args[0]).join('\n');
@@ -366,116 +322,5 @@ describe('migrate.js operator CLI argv refusal @regression', function () {
         const printed = consoleLogStub.getCalls().map((c) => c.args[0]).join('\n');
         assert.match(printed, /--status/);
         assert.match(printed, /--json/);
-    });
-});
-
-describe('migrate.js operator CLI --status/--json @regression', function () {
-    let tmpDir, migrationsDir, fileA, fileB, fileC;
-
-    beforeEach(function () {
-        prepareMigrateTest();
-        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decoder-migrate-status-'));
-        migrationsDir = path.join(tmpDir, 'migrations');
-        fs.mkdirSync(migrationsDir);
-        fileA = '2026-01-01-a.sql';
-        fileB = '2026-01-02-b.sql';
-        fileC = '2026-01-03-c.sql';
-        for (const f of [fileA, fileB, fileC]) {
-            fs.writeFileSync(path.join(migrationsDir, f), '-- xchain:migration mode=auto\nSELECT 1;\n');
-        }
-    });
-
-    afterEach(function () {
-        restoreMigrateTest();
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-    });
-
-    function setEnv() {
-        process.env.DECODER_DB_HOST = 'db.test';
-        process.env.DECODER_DB_NAME = 'decoder_test';
-        process.env.DECODER_DB_USER = 'tester';
-    }
-
-    it('--status --json prints one JSON object with applied and pending arrays and applies nothing', async function () {
-        setEnv();
-        process.argv = ['node', 'migrate.js', '--status', '--json'];
-        const fake = makeFakeDbForStatus({ sqlPath: tmpDir, appliedNames: [fileA] });
-        loadMigrateWith(fake.FakeDatabase);
-        await fake.done;
-
-        assert.strictEqual(exitStub.called, false, 'a successful status run must not hard-exit');
-        assert.strictEqual(process.exitCode, savedExitCode, 'exitCode must stay clean');
-        assert.strictEqual(fake.runMigrationsCalled, false, '--status must never call runMigrations (applies nothing)');
-        assert.strictEqual(fake.getConnectionCalls, 1);
-        assert.strictEqual(fake.queries.length, 1, 'exactly one query: the status SELECT');
-        assert.match(fake.queries[0], /SELECT\s+name\s+FROM\s+schema_migrations/i);
-        assert.ok(!/INSERT|UPDATE|DELETE|CREATE\s+TABLE|GET_LOCK/i.test(fake.queries[0]),
-            'status must issue no write and take no lock');
-        assert.strictEqual(fake.releaseCalls, 1, 'the status connection must be released');
-        assert.strictEqual(fake.poolEnded, true);
-
-        const jsonLine = consoleLogStub.getCalls().map((c) => c.args[0]).find((l) => l.startsWith('{'));
-        assert.ok(jsonLine, 'expected a JSON object line on stdout');
-        assert.deepStrictEqual(JSON.parse(jsonLine), { applied: [fileA], pending: [fileB, fileC] });
-    });
-
-    it('--status --json on a fresh database (no ledger table) reports everything pending', async function () {
-        setEnv();
-        process.argv = ['node', 'migrate.js', '--status', '--json'];
-        const noSuchTable = Object.assign(new Error('no such table'), { code: 'ER_NO_SUCH_TABLE', errno: 1146 });
-        const fake = makeFakeDbForStatus({ sqlPath: tmpDir, queryError: noSuchTable });
-        loadMigrateWith(fake.FakeDatabase);
-        await fake.done;
-
-        assert.strictEqual(fake.runMigrationsCalled, false);
-        assert.strictEqual(fake.releaseCalls, 1, 'release must still run when the query rejects');
-        const jsonLine = consoleLogStub.getCalls().map((c) => c.args[0]).find((l) => l.startsWith('{'));
-        assert.deepStrictEqual(JSON.parse(jsonLine), { applied: [], pending: [fileA, fileB, fileC] });
-    });
-
-    it('--status without --json prints a human-readable line instead of JSON', async function () {
-        setEnv();
-        process.argv = ['node', 'migrate.js', '--status'];
-        const fake = makeFakeDbForStatus({ sqlPath: tmpDir, appliedNames: [fileA, fileB] });
-        loadMigrateWith(fake.FakeDatabase);
-        await fake.done;
-
-        assert.strictEqual(fake.runMigrationsCalled, false);
-        const out = consoleLogStub.getCalls().map((c) => c.args[0]).join('\n');
-        assert.match(out, /migrate: status\. applied=\["2026-01-01-a\.sql","2026-01-02-b\.sql"\] pending=\["2026-01-03-c\.sql"\]/);
-        assert.ok(!out.split('\n').some((l) => l.startsWith('{')), '--status alone must not print a JSON line');
-    });
-
-    it('a real query failure during --status still fails loudly and closes the pool', async function () {
-        setEnv();
-        process.argv = ['node', 'migrate.js', '--status', '--json'];
-        const fake = makeFakeDbForStatus({ sqlPath: tmpDir, queryError: new Error('connection refused') });
-        loadMigrateWith(fake.FakeDatabase);
-        await fake.done;
-
-        assert.strictEqual(process.exitCode, 1, 'a real status failure must set exitCode 1');
-        assert.strictEqual(fake.poolEnded, true, 'pool closed in finally even on status failure');
-        const err = consoleErrStub.getCalls().map((c) => c.args[0]).join('\n');
-        assert.match(err, /migrate: FAILED: .*connection refused/);
-    });
-
-    it('--json without --status is refused: exit 2, no DB handle opened, no run', function () {
-        process.argv = ['node', 'migrate.js', '--json'];
-        const fake = makeFakeDb({ runMigrations: async () => ({ applied: [], pending: [] }) });
-        loadMigrateWith(fake.FakeDatabase);
-        assert.strictEqual(exitStub.calledWith(2), true);
-        assert.strictEqual(fake.runArgs, null, '--json alone must not run migrations');
-        assert.strictEqual(fake.constructed.length, 0, '--json alone must never construct a DB handle');
-        assert.match(consoleErrStub.getCalls().map((c) => c.args[0]).join('\n'), /--json requires --status/);
-    });
-
-    it('--status combined with --file is refused: exit 2, no DB handle opened, no run', function () {
-        process.argv = ['node', 'migrate.js', '--status', '--file', 'a.sql'];
-        const fake = makeFakeDb({ runMigrations: async () => ({ applied: [], pending: [] }) });
-        loadMigrateWith(fake.FakeDatabase);
-        assert.strictEqual(exitStub.calledWith(2), true);
-        assert.strictEqual(fake.runArgs, null);
-        assert.strictEqual(fake.constructed.length, 0);
-        assert.match(consoleErrStub.getCalls().map((c) => c.args[0]).join('\n'), /--status cannot be combined with --file/);
     });
 });

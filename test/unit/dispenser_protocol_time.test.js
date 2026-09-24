@@ -15,15 +15,8 @@ const RAW_TIME = 500
 const PREVIOUS_TIMES = Array.from({ length: 11 }, (_, index) => 100 + index)
 const PROTOCOL_TIME = 105
 
-function buildDecoder(){
-    const decoder = new XChainDecoder(
-        'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
-    )
-    decoder.consensusNetwork = 'testnet'
-    decoder.startBlockIndex = 11
-    decoder.sleep = async () => {}
-
-    const calls = {
+function makeCalls(){
+    return {
         previous: [],
         insertedBlocks: [],
         expirations: [],
@@ -31,7 +24,9 @@ function buildDecoder(){
         oracleTimes: [],
         registrations: [],
     }
+}
 
+function configureDecoderSource(decoder, calls){
     decoder.connector = {
         getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: 11 }),
         getBlockHash: async () => 'block-11',
@@ -60,7 +55,9 @@ function buildDecoder(){
         calls.oracleTimes.push(blockTime)
         return []
     }
+}
 
+function configureDecoderDatabase(decoder, calls){
     decoder.db = {
         createDatabase: async () => true,
         verifyDatabase: async () => true,
@@ -99,6 +96,19 @@ function buildDecoder(){
         DUPLICATED_TRANSACTION: 1,
         POISON_ROW: 2,
     }
+}
+
+function buildDecoder(){
+    const decoder = new XChainDecoder(
+        'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+    )
+    decoder.consensusNetwork = 'testnet'
+    decoder.startBlockIndex = 11
+    decoder.sleep = async () => {}
+
+    const calls = makeCalls()
+    configureDecoderSource(decoder, calls)
+    configureDecoderDatabase(decoder, calls)
 
     return { decoder, calls }
 }

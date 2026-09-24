@@ -71,6 +71,10 @@ describe('XChainDecoder latent REORG_HALT reporting', function () {
             'both clear fields must be declared on a fresh decoder, before any probe')
     })
 
+})
+
+describe('XChainDecoder latent REORG_HALT reporting', function () {
+
     it('caches within the TTL so a monitoring burst is not one DB query per request', async function () {
         const decoder = makeDecoder()
         let queries = 0
