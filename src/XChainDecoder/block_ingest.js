@@ -22,6 +22,7 @@ const util = require('../util')
 const { format: formatLogLine } = require('node:util')
 const { isDispenserExpiryRealignActive } = require('../protocol/dispenser_expiry_realign')
 const { cancelGraceFloor } = require('../protocol/dispenser_cancel_grace')
+const protocolTime = require('../protocol/protocol_time')
 const { logger, SYNCED_THRESHOLD, DB_TRANSACTION_BLOCKS_QUANTITY, LOG_BLOCK_INTERVAL, DISPENSER_EXPIRE_SAFE_DEPTH } = require('./constants.js')
 const { parkOrRethrow } = require('./sync_loop.js')
 const { ingestTransaction } = require('./transaction_ingest.js')
@@ -166,7 +167,7 @@ async function loadOpenDispenserAddresses(block, nextBlockHeight){
     // a cancel while the decoder's soft-expire knows nothing about cancels. Below
     // the gate the floor is null and the set is the unwidened one, so a
     // from-genesis re-decode reproduces what the fleet wrote. The floor derives
-    // only from this block's header time, so every honest node loads the same set.
+    // only from this block's protocol time, so every honest node loads the same set.
     let openDispenserAddresses = await this.db.getAllOpenDispenserAddresses(
         cancelGraceFloor(this.consensusNetwork, block.timestamp))
     if (openDispenserAddresses == null){
@@ -291,16 +292,54 @@ async function finishBlock(loop, block, nextBlockHeight, nextBlockHash, openDisp
     this.lastAdvanceAt = Date.now()
 }
 
+async function fetchPreviousBlockTimes(nextBlockHeight, span){
+    // MTP walks strictly backward from the block being resolved, oldest call
+    // last, so a failure partway through never mixes heights from two
+    // different reorg states. getBlockByIndex already retries transient
+    // failures internally and only THROWS once it gives up (see its own
+    // comment); a missing row (null, chain exhausted below genesis) is not a
+    // failure and just ends the walk early, same as protocolTime.medianTimePast
+    // mediating a short window rather than refusing.
+    let previousBlockTimes = []
+    for (let height = nextBlockHeight - 1; height >= 0 && previousBlockTimes.length < span; height--){
+        let previousBlock
+        try {
+            previousBlock = await this.db.getBlockByIndex(height)
+        } catch (err){
+            logger.error(formatLogLine(`Could not resolve protocol time for block ${nextBlockHeight} (previous block ${height} lookup failed); block rolled back, retrying`, err))
+            return null
+        }
+        if (!previousBlock) break
+        previousBlockTimes.push(previousBlock.block_time)
+    }
+    return previousBlockTimes
+}
+
 async function storeBlock(loop, block, nextBlockHeight, nextBlockHash, previousBlockHash){
     if (loop.blocksQuantity == 0){
         await this.db.beginTransaction()
     }
 
+    // Resolve protocol time BEFORE anything below reads block.timestamp: MTP
+    // networks (protocol_time.js) key every downstream time-keyed gate off the
+    // median of the previous MEDIAN_TIME_SPAN blocks rather than this block's own
+    // (possibly future-dated) header stamp. Only armed networks pay the previous-
+    // block lookup at all.
+    let previousBlockTimes = []
+    if (protocolTime.isProtocolTimeMtpActive(this.consensusNetwork)){
+        previousBlockTimes = await fetchPreviousBlockTimes.call(this, nextBlockHeight, protocolTime.MEDIAN_TIME_SPAN)
+        if (previousBlockTimes === null){
+            await this.db.endTransaction()
+            return 'rollback'
+        }
+    }
+    const blockTimeContext = protocolTime.createBlockTimeContext(this.consensusNetwork, block.timestamp, previousBlockTimes)
+
     if (!(await this.db.insertBlock(
         {
             block_index:nextBlockHeight,
             block_hash:nextBlockHash,
-            block_time:block.timestamp,
+            block_time:blockTimeContext.rawBlockTime,
             previous_block_hash:previousBlockHash
         }
     ))){
@@ -309,12 +348,22 @@ async function storeBlock(loop, block, nextBlockHeight, nextBlockHash, previousB
         return 'rollback'
     }
 
+    // Every site below this line, and everything downstream of finishBlock
+    // (transaction_ingest.js, dispenser_registration.js), reads block.timestamp
+    // for its own time-keyed gates. Re-stamping it here to the resolved protocol
+    // time - after the raw stamp above is durably persisted - is the ONE seam
+    // that threads protocolBlockTime through every one of those sites without
+    // having to pass it call site by call site, mirroring how the indexer's own
+    // protocol_time.stampProtocolTime re-stamps decoded rows at its own single
+    // seam (xchain-indexer/src/XChainIndexer/block_parse.js).
+    block.timestamp = blockTimeContext.protocolBlockTime
+
     // WHERE the dispenser soft-expire runs is a consensus decision, so it rides a
     // flag-day (DISPENSER_EXPIRY_REALIGN_ACTIVATION, keyed on block TIME).
     //
     // LEGACY (below the gate): here, at block START, before the transaction loop.
     // The open-dispenser address set loaded just below therefore excludes anything
-    // this block's header time expired, so payments to it are not captured. The
+    // this block's protocol time expired, so payments to it are not captured. The
     // INDEXER expires at block END (utility.processExpirations), so for every tx in
     // this same block it still treats that dispenser as open, and since it only sees
     // outputs the decoder persisted, the boundary block pays coin with no DISPENSE.
