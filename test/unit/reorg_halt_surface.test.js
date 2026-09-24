@@ -61,6 +61,16 @@ describe('XChainDecoder latent REORG_HALT reporting', function () {
         assert.strictEqual(status.checked_at, null)
     })
 
+    it('declares the clear-history cache fields up front, so the shape is null and not undefined', function () {
+        const decoder = makeDecoder()
+        // These are written by the probe; the constructor is what makes them part of
+        // the declared halt shape rather than properties that spring into existence.
+        assert.strictEqual(decoder.reorgHaltClearedAt, null)
+        assert.strictEqual(decoder.reorgHaltClearedReason, null)
+        assert.ok('reorgHaltClearedAt' in decoder && 'reorgHaltClearedReason' in decoder,
+            'both clear fields must be declared on a fresh decoder, before any probe')
+    })
+
     it('caches within the TTL so a monitoring burst is not one DB query per request', async function () {
         const decoder = makeDecoder()
         let queries = 0

@@ -240,6 +240,12 @@ function initializeDecoderReorg(decoder) {
     decoder.reorgHaltReason = null
     decoder.reorgHaltAt = null
     decoder.reorgHaltCheckedAt = 0
+    // Newest REORG_HALT_CLEARED row's at/reason, as read by checkReorgHalt. An
+    // operator clear supersedes the halt; declared here, beside the fields
+    // above, so the reported shape is the same before and after the first
+    // probe instead of springing into existence only inside the probe.
+    decoder.reorgHaltClearedAt = null
+    decoder.reorgHaltClearedReason = null
     // Whether a REORG_HALT row is known to be READABLE, as distinct from
     // whether this decoder is halted. null = no halt has been raised or read
     // yet; false = a halt exists in memory whose durable write could not be

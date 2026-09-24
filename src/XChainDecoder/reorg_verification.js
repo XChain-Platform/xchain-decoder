@@ -35,8 +35,9 @@ function refuseHaltedRollback(){
     const msg = "verifyReorg: decoder is HALTED from a prior over-deep reorg abort. Refusing to "
         + "roll back further: a restart must not silently resume a rollback past the dispenser "
         + "safe-depth window (DISPENSER_EXPIRE_SAFE_DEPTH=" + safeDepthFor(this) + "), which "
-        + "would permanently lose money-bearing dispenser state. Recovery: perform a full resync "
-        + "from a known-good snapshot."
+        + "would permanently lose money-bearing dispenser state. Recovery: a full resync from a "
+        + "known-good snapshot, or once the rolled-back range is re-parsed and the database is "
+        + "verified intact, `xchain-node clear-reorg-halt <coin> <network> --reason \"...\"`."
     logger.error(msg)
     // Tagged so the parse loop parks on this refusal instead of exiting into a
     // restart loop: the marker outlives every restart and is released only by
@@ -95,8 +96,9 @@ async function assertWithinSafeDepth(lastBlockIndex, priorDepth, blocksDeleted){
             + " in this run, resumed from " + priorDepth + " already deleted above the tip); "
             + "soft-expired dispenser rows for block height "
             + lastBlockIndex + " and below have already been hard-purged, so continuing would "
-            + "silently lose money-bearing dispenser state. Aborting. Recovery: perform a full "
-            + "resync from a known-good snapshot."
+            + "silently lose money-bearing dispenser state. Aborting. Recovery: a full resync from "
+            + "a known-good snapshot, or once the rolled-back range is re-parsed and the database "
+            + "is verified intact, `xchain-node clear-reorg-halt <coin> <network> --reason \"...\"`."
         logger.error(msg)
         await haltReorg.call(this, msg, blocksDeleted)
         // Same tag as the entry guard above, and for the same reason: the marker
@@ -305,8 +307,9 @@ module.exports = {
         // rollback past the dispenser purge window (permanent, money-bearing
         // dispenser-state divergence). Every abort path now persists a durable
         // REORG_HALT marker (markReorgHalted); on entry we refuse to proceed while it
-        // is set, so a restart cannot resume an over-deep rollback. Recovery is the
-        // full resync the abort message demands (rebuilding the schema clears it).
+        // is set, so a restart cannot resume an over-deep rollback. Recovery is one of
+        // the two the abort message names: a full resync (rebuilding the schema clears
+        // the marker), or the audited `xchain-node clear-reorg-halt` once its checks pass.
         // Feature-detected so the minimal-mock verifyReorg tests stay unaffected.
         if (typeof this.db.isReorgHalted === 'function' && await this.db.isReorgHalted()){
             refuseHaltedRollback.call(this)

@@ -71,7 +71,9 @@ module.exports = {
                     logger.error('XChainDecoder: LATENT REORG_HALT MARKER PRESENT - this decoder carries a durable ' +
                         'REORG_HALT row from an aborted rollback. It will keep parsing forward and look healthy, but ' +
                         'the NEXT reorg will refuse to roll back and stop the decoder. This database is NOT a valid ' +
-                        'bootstrap source. REQUIRED OPERATOR ACTION: full resync from a known-good snapshot.' +
+                        'bootstrap source. REQUIRED OPERATOR ACTION: a full resync from a known-good snapshot, or ' +
+                        'once the rolled-back range is re-parsed and the database is verified intact, ' +
+                        '`xchain-node clear-reorg-halt <coin> <network> --reason "..."`.' +
                         (this.reorgHaltReason ? ' Marker detail: ' + this.reorgHaltReason : ''))
                 } else if (!this.reorgHalted && wasHalted){
                     logger.warn('XChainDecoder: REORG_HALT marker is gone; halt cleared.')
