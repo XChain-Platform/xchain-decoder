@@ -156,7 +156,7 @@ describe('Database.STARTUP_ASSERTED_MIGRATIONS @regression @tier1', function () 
                 '2026-08-10-action-data-utf8mb4.sql');
         });
         it('throws on an unregistered assertion rather than yielding undefined', function () {
-            // "node src/migrate.js --file undefined" is worse than useless in the middle
+            // "node src/db/migrate.js --file undefined" is worse than useless in the middle
             // of an outage; the lookup must fail where the registry is wrong.
             assert.throws(() => Database.startupAssertedMigrationFile('_assertSomethingNobodyRegistered'),
                 /STARTUP_ASSERTED_MIGRATIONS/);
