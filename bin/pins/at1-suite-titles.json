@@ -1843,6 +1843,12 @@
       "BlockchainConnector constructor should construct the URL from host and port",
       "BlockchainConnector constructor should store rpc credentials"
     ],
+    "8a87ff6abaa5f1be": [
+      "installCrashHandlers installs one handler per event with the required log and exit behavior",
+      "reportStartFailure exits exactly once when the logger throws",
+      "reportStartFailure logs an Error with reorg halt context and exits once",
+      "reportStartFailure normalizes a non-Error without a stack or halt context"
+    ],
     "8b70a95f87f4b7d8": [
       "Fuzz: parseTransaction P2WSH with missing/corrupt witness should handle 500 P2WSH txs with corrupt witness"
     ],
@@ -3009,8 +3015,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 178,
-      "titleCount": 1695,
+      "fileCount": 179,
+      "titleCount": 1699,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3065,6 +3071,7 @@
         "test/unit/compiled_push_size_conformance.test.js": "155fe1323df6de21",
         "test/unit/consensus_pin_boot.test.js": "b3bae8599c655a50",
         "test/unit/coverage_thresholds_sync.test.js": "15a40e4df3b0929a",
+        "test/unit/crash_reporting.test.js": "8a87ff6abaa5f1be",
         "test/unit/crypto_networks.test.js": "1f849fc3813cbd69",
         "test/unit/db.test.js": "5777938ee30b46ca",
         "test/unit/db.test/01_database_big_int_satoshi_to_decimals_string.test.js": "77e244a9a8af192c",
@@ -3479,8 +3486,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 178,
-      "titleCount": 1695,
+      "fileCount": 179,
+      "titleCount": 1699,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3535,6 +3542,7 @@
         "test/unit/compiled_push_size_conformance.test.js": "155fe1323df6de21",
         "test/unit/consensus_pin_boot.test.js": "b3bae8599c655a50",
         "test/unit/coverage_thresholds_sync.test.js": "15a40e4df3b0929a",
+        "test/unit/crash_reporting.test.js": "8a87ff6abaa5f1be",
         "test/unit/crypto_networks.test.js": "1f849fc3813cbd69",
         "test/unit/db.test.js": "5777938ee30b46ca",
         "test/unit/db.test/01_database_big_int_satoshi_to_decimals_string.test.js": "77e244a9a8af192c",
