@@ -58,7 +58,6 @@ function createEncoder(XChainEncoder, pub){
     const encoder = new XChainEncoder('bitcoin-regtest', endpoint, '8333', 'rpc', 'rpc', '', '')
     encoder.connector = {
         getFeePerKilobyte: async () => 0.00001,
-        getNetworkInfo: async () => ({ relayfee: 0.00001 }),
         getTransactionHex: async () => { throw new Error('unit test: no node') }
     }
     encoder.utxoTrackerConnector = {
