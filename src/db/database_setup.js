@@ -190,7 +190,7 @@ module.exports = {
     // on existing data must be `manual`.
     //
     // opts.includeManual=true also applies pending `manual` migrations (the operator path,
-    // node src/migrate.js). The run holds a DB-scoped advisory lock so concurrent processes
+    // node src/db/migrate.js). The run holds a DB-scoped advisory lock so concurrent processes
     // cannot apply the same file twice. Returns { applied, pending }.
     //
     // opts.only (string | string[]) scopes the run to specific filenames: the per-file fleet
@@ -241,7 +241,7 @@ module.exports = {
                         String(row.tbl) + '.data uses charset ' + cs + ' but utf8mb4 is required; a non-BMP ' +
                         'ACTION (e.g. an emoji MEMO) is rejected with errno 1366 and the fee-paid transaction ' +
                         'is quarantined with no ACTION row, diverging this node from a migrated one. ' +
-                        'Run the pending migration: node src/migrate.js --file ' +
+                        'Run the pending migration: node src/db/migrate.js --file ' +
                         Database.startupAssertedMigrationFile('assertActionDataIsUtf8mb4') +
                         '. If that migration is ALREADY recorded in schema_migrations, the runner will not re-run it: a later ' +
                         'rebuild re-created the table at utf8mb3, so convert the column directly with the decoder stopped - ' +

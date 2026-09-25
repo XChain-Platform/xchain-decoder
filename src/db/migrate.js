@@ -22,16 +22,16 @@
  * ones that must not run unattended. Idempotent and ledger-tracked
  * (schema_migrations), so re-running only applies what's pending.
  *
- *   node src/migrate.js          # apply ALL pending (auto + manual)
- *   node src/migrate.js --file 2026-06-13-dispensers-expiration-bigint.sql
+ *   node src/db/migrate.js          # apply ALL pending (auto + manual)
+ *   node src/db/migrate.js --file 2026-06-13-dispensers-expiration-bigint.sql
  *                                # apply ONLY the named migration(s)
- *   node src/migrate.js --status --json
+ *   node src/db/migrate.js --status --json
  *                                # REPORT ONLY: applied/pending file names. Applies nothing.
  *
  * The `--file <name>` flag scopes the run to specific migration filename(s), so a
  * single pending manual migration can be rolled out to a fleet DB WITHOUT also
  * applying every other pending manual migration in the committed tree (which a
- * blanket `node src/migrate.js` would). Repeat the flag (or comma-separate) to
+ * blanket `node src/db/migrate.js` would). Repeat the flag (or comma-separate) to
  * target several files; an unknown name fails loudly instead of applying nothing.
  *
  * `--status` is the side-effect-free path: it lists which committed migration
@@ -61,8 +61,8 @@ const Database = require('../db.js');
 // blanket run and a scoped one is the whole risk of this command, so each mode
 // says what it applies rather than naming a flag.
 const USAGE = [
-    'Usage: node src/migrate.js [--file <name.sql> ...]',
-    '       node src/migrate.js --status [--json]',
+    'Usage: node src/db/migrate.js [--file <name.sql> ...]',
+    '       node src/db/migrate.js --status [--json]',
     '',
     '  (no arguments)         APPLY EVERYTHING. Runs every pending migration, auto',
     '                         AND manual, against the database in DECODER_DB_NAME.',

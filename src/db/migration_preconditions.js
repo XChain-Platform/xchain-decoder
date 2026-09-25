@@ -25,7 +25,7 @@ const Database = require('../db.js')
 // that needs a MIGRATION_CHECKSUM_REBASELINES entry whose documented contract is that the
 // executable SQL is byte-identical across pinned revisions. A runner-side predicate keeps
 // both properties intact and covers every invocation route (startup, blanket
-// `node src/migrate.js`, and a targeted `--file` rollout), since all three funnel through
+// `node src/db/migrate.js`, and a targeted `--file` rollout), since all three funnel through
 // this loop.
 Database.MIGRATION_PRECONDITIONS = {
     // DATETIME -> BIGINT UNSIGNED converter. It is mode=manual, so it stays PENDING on a
@@ -158,7 +158,7 @@ Database.MIGRATION_PRECONDITIONS = {
 // correctness argument rather than an optimization. A mode=manual file legitimately
 // sits unapplied behind the frontier for as long as the operator defers it (seven of
 // the nine files here are manual), so it is indistinguishable at runtime from a
-// backdated one and guarding it would hard-fail `node src/migrate.js` on every aged
+// backdated one and guarding it would hard-fail `node src/db/migrate.js` on every aged
 // fleet DB. An auto file has no such state: it applies unattended at the first startup
 // that sees it, so an unapplied auto file behind the frontier is always newly backdated.
 //
