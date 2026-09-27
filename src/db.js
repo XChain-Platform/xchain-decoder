@@ -53,8 +53,8 @@ class Database {
             password: this.pass,
             database: this.dbName,
             port:     this.port,
-            // MariaDB sets time_zone='+00:00' per connection and encodes/decodes Dates
-            // as UTC, aligning NOW(), CURRENT_TIMESTAMP, DATETIME, and first_seen.
+            // mariadb 3.5.3 issues SET time_zone='+00:00' on every connection and
+            // encodes/decodes Dates as UTC, aligning SQL timestamps and first_seen.
             timezone:          'Z',
             connectionLimit:  10,
             insertIdAsNumber: true,
