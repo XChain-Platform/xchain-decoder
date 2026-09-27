@@ -672,6 +672,12 @@
       "test-tier gate map this.timeout(0) ceiling leaves an explicit non-zero timeout alone",
       "test-tier gate map this.timeout(0) ceiling substitutes the ceiling for a bare Runnable asked for no timeout"
     ],
+    "2a6097257b0a2986": [
+      "Database#ensureMigrationsLedger() applied_at type creates the ledger with a DATETIME applied_at column",
+      "Database#ensureMigrationsLedger() applied_at type does not alter an existing DATETIME applied_at column",
+      "Database#ensureMigrationsLedger() applied_at type does not alter when the applied_at column metadata is absent",
+      "Database#ensureMigrationsLedger() applied_at type retypes an existing TIMESTAMP applied_at column"
+    ],
     "2c50360ec142d262": [
       "Taproot envelope recognition envelopeRecognitionHeight() / envelopeActiveAt() BTC regtest is genesis-active (height 0)",
       "Taproot envelope recognition envelopeRecognitionHeight() / envelopeActiveAt() BTC/LTC mainnet activate at their armed cohort heights, exclusive below",
@@ -3029,8 +3035,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 181,
-      "titleCount": 1706,
+      "fileCount": 182,
+      "titleCount": 1710,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3159,6 +3165,7 @@
         "test/unit/migration_runner.test/05_run_migrations_migration_preconditions.test.js": "4044805d7869c790",
         "test/unit/migration_runner.test/06_database_split_sql_statements.test.js": "45857eb89566bdb3",
         "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "90ab87a9e38be026",
+        "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
         "test/unit/node_catch_up_wait.test.js": "4763aa60db951190",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
         "test/unit/node_reachability_status.test.js": "09f6b21d4c9c4493",
@@ -3503,8 +3510,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 181,
-      "titleCount": 1706,
+      "fileCount": 182,
+      "titleCount": 1710,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3633,6 +3640,7 @@
         "test/unit/migration_runner.test/05_run_migrations_migration_preconditions.test.js": "4044805d7869c790",
         "test/unit/migration_runner.test/06_database_split_sql_statements.test.js": "45857eb89566bdb3",
         "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "90ab87a9e38be026",
+        "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
         "test/unit/node_catch_up_wait.test.js": "4763aa60db951190",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
         "test/unit/node_reachability_status.test.js": "09f6b21d4c9c4493",
