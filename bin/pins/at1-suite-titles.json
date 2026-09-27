@@ -1981,9 +1981,6 @@
       "Smoke: Multisig Transaction Parsing should return empty dispenseOutputs",
       "Smoke: Multisig Transaction Parsing should return non-empty data from a multisig tx"
     ],
-    "95b9a69144b6d40d": [
-      "migration operator hints [REGRESSION P1] points every source hint at the existing migration entrypoint"
-    ],
     "973dda09a83b0b1a": [
       "decoder stability fixes @regression DOGE large-output bufferutils-patch self-check reports active when the reader tolerates a > 2^53 value (BigInt-safe patch)",
       "decoder stability fixes @regression DOGE large-output bufferutils-patch self-check reports inactive when the module has no BufferReader (fail-safe)",
@@ -3434,11 +3431,10 @@
       }
     },
     "test:regression:full": {
-      "fileCount": 27,
-      "titleCount": 127,
+      "fileCount": 26,
+      "titleCount": 126,
       "files": {
         "test/regression/bugfix.test.js": "6076549f252b92c9",
-        "test/regression/migrate_hints.test.js": "95b9a69144b6d40d",
         "test/security/action_validation.test.js": "d42bb5a9f837d16a",
         "test/security/connection_handling.test.js": "f9ea8bf6004987f7",
         "test/security/connector_security.test.js": "bae7607a36a3fca7",
