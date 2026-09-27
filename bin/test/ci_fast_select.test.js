@@ -82,8 +82,14 @@ describe('ci fast selector', function() {
 
     it('keeps the fast gate wiring and Docker tier names pinned', function() {
         const script = fs.readFileSync('bin/ci-full.sh', 'utf8');
-        assert(script.includes('ci_fast_select.js --plan'));
-        assert(script.includes('CI_TIER'));
+        const plan_invocations = script.match(/^.*ci_fast_select\.js --plan.*$/gm) || [];
+        assert.deepStrictEqual(plan_invocations, [
+            '  if FAST_CI_PLAN="$(node bin/ci_fast_select.js --plan 2>&1)"; then'
+        ]);
+        assert(script.includes(
+            'if [ "${CI_TIER:-full}" = "fast" ]; then\n' +
+            '  if FAST_CI_PLAN="$(node bin/ci_fast_select.js --plan 2>&1)"; then'
+        ));
         assert(script.includes('run_tier "docker: integration tier (test:integration)"'));
     });
 });
