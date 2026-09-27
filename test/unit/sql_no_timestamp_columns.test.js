@@ -53,7 +53,7 @@ describe('SQL DATETIME completeness', function () {
             .replace(/\/\*[\s\S]*?\*\//g, '')
             .replace(/\/\/.*$/gm, '');
 
-        assert.match(statements, /\bapplied_at\s+DATETIME\b/i);
+        assert.match(statements, /^\s*['"]applied_at\s+DATETIME\b/im);
         assert.doesNotMatch(statements, /\bapplied_at\s+TIMESTAMP\b/i);
     });
 
