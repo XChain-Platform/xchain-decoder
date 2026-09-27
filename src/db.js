@@ -44,7 +44,8 @@ class Database {
             user:     this.user,
             password: this.pass,
             database: this.dbName,
-            port:     this.port
+            port:     this.port,
+            timezone: 'Z'
         };
         this.connectionPoolParams = {
             host:     this.host,
@@ -52,6 +53,9 @@ class Database {
             password: this.pass,
             database: this.dbName,
             port:     this.port,
+            // mariadb 3.5.3 issues SET time_zone='+00:00' on every connection and
+            // encodes/decodes Dates as UTC, aligning SQL timestamps and first_seen.
+            timezone:          'Z',
             connectionLimit:  10,
             insertIdAsNumber: true,
             queryTimeout:     resolveQueryTimeout(config.DB_QUERY_TIMEOUT)

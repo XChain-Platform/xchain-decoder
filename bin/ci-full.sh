@@ -122,11 +122,33 @@ need_docker() {
   }
 }
 
+fast_defer() {
+  DEFERRED="$DEFERRED [$1]"
+  echo; echo "ci:full ===== $1 DEFERRED (CI_TIER=fast, runs in the full sweep) ====="
+}
+
 need_sib xchain-encoder xchain-documentation xchain-hub xchain-indexer xchain-utxo-tracker xchain-node
 export XCHAIN_REQUIRE_SIBLINGS=1
 
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
-run_tier "ci" npm run ci
+FAST_CI_PLAN=""
+if [ "${CI_TIER:-full}" = "fast" ]; then
+  if FAST_CI_PLAN="$(node bin/ci_fast_select.js --plan 2>&1)"; then
+    echo "$FAST_CI_PLAN"
+  else
+    echo "ci:full: fast selector unavailable ($FAST_CI_PLAN); running the full unit tier"
+    FAST_CI_PLAN="consensus 1"
+  fi
+fi
+if [ "${CI_TIER:-full}" != "fast" ] || printf '%s\n' "$FAST_CI_PLAN" | grep -qx 'consensus 1'; then
+  run_tier "ci" npm run ci
+else
+  run_tier "ci (changed tests)" node bin/ci_fast_select.js --run
+  fast_defer "ci"
+fi
+if [ "${CI_TIER:-full}" = "fast" ]; then
+  run_tier "fast-tier selector self-test" ./node_modules/.bin/mocha --no-config --timeout 20000 --exit bin/test/ci_fast_select.test.js
+fi
 
 # --- job: drift-guards -----------------------------------------------------
 # Run FROM the parent so sync-coins.sh sees the canonical + vendored pair the
@@ -165,9 +187,14 @@ run_tier "suite-title pin (at1)" node bin/suite-title-map.js \
 # Both tiers own their venue lifecycle inside their npm script (compose up
 # --wait, mocha, down -v on any exit), so this transcribes the two run-steps
 # and nothing else. The gate is docker itself, checked once before either.
-need_docker "docker-suites (test:integration, test:e2e)"
-run_tier "docker: integration tier (test:integration)" npm run test:integration
-run_tier "docker: end-to-end tier (test:e2e)" npm run test:e2e
+if [ "${CI_TIER:-full}" = "fast" ]; then
+  fast_defer "docker: integration tier (test:integration)"
+  fast_defer "docker: end-to-end tier (test:e2e)"
+else
+  need_docker "docker-suites (test:integration, test:e2e)"
+  run_tier "docker: integration tier (test:integration)" npm run test:integration
+  run_tier "docker: end-to-end tier (test:e2e)" npm run test:e2e
+fi
 
 # --- job: coverage ---------------------------------------------------------
 run_tier "coverage ratchet (coverage:check)" npm run coverage:check
