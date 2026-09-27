@@ -234,7 +234,7 @@ describe('Database#ensureMigrationsLedger()', () => {
         const queryStub = sinon.stub().resolves([]);
         const conn = { query: queryStub, release: sinon.stub().resolves() };
         await db.ensureMigrationsLedger(conn);
-        assert.ok(queryStub.calledOnce);
+        assert.ok(queryStub.called);
         assert.ok(/CREATE TABLE IF NOT EXISTS schema_migrations/i.test(queryStub.firstCall.args[0]));
     });
 });

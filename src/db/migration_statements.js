@@ -127,6 +127,18 @@ function isDestructiveAlter(stmt, safeAlterDrop){
     return false;
 }
 
+async function ensureLedgerAppliedAtDatetime(conn){
+    const rows = await conn.query(
+        'SELECT DATA_TYPE AS dataType FROM information_schema.COLUMNS ' +
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schema_migrations' " +
+        "AND COLUMN_NAME = 'applied_at'"
+    );
+    if(String(rows[0]?.dataType || '').toLowerCase() !== 'timestamp') return;
+    await conn.query(
+        'ALTER TABLE schema_migrations MODIFY applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
+    );
+}
+
 module.exports = {
     // Read a migration file's `-- xchain:migration mode=auto|manual` header tag.
     // Defaults to 'manual' when absent (conservative: unknown DDL never auto-runs).
@@ -252,9 +264,10 @@ module.exports = {
             "name VARCHAR(255) NOT NULL PRIMARY KEY, " +
             "checksum VARCHAR(64) NOT NULL, " +
             "mode VARCHAR(10) NOT NULL DEFAULT 'manual', " +
-            'applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP' +
+            'applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP' +
             ') ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci'
         );
+        await ensureLedgerAppliedAtDatetime(conn);
     },
 
     // Remove SQL line comments while respecting quoted strings, so a ';'
