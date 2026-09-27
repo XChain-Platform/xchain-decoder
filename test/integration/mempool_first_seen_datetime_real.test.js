@@ -122,20 +122,16 @@ async function dropDatabases(databases) {
 
 describe('mempool first_seen DATETIME migration on MariaDB', function () {
     this.timeout(180000)
-
     let agedDb
     let freshDb
     let migratedShapes
-
     before(async function () {
         agedDb = makeDatabase(AGED_DB)
         await prepareAgedDatabase(agedDb)
     })
-
     after(async function () {
         await dropDatabases([agedDb, freshDb])
     })
-
     it('reproduces session-dependent reads on the aged TIMESTAMP columns', async function () {
         const values = await readStoredTimes(AGED_DB, '-06:00')
         assert.deepStrictEqual(values, {
@@ -143,11 +139,9 @@ describe('mempool first_seen DATETIME migration on MariaDB', function () {
             appliedAt: '2026-01-15 06:34:56'
         })
     })
-
     it('retypes the observation and ledger columns without shifting their values', async function () {
         const result = await agedDb.runMigrations({ includeManual: true, only: [MIGRATION] })
         assert.ok(result.applied.includes(MIGRATION))
-
         migratedShapes = await readMigrationShapes(agedDb)
         assert.strictEqual(migratedShapes.firstSeen.DATA_TYPE, 'datetime')
         assert.strictEqual(migratedShapes.appliedAt.DATA_TYPE, 'datetime')
@@ -156,16 +150,13 @@ describe('mempool first_seen DATETIME migration on MariaDB', function () {
             appliedAt: OBSERVED_AT
         })
     })
-
     it('leaves both migrated column definitions unchanged on a targeted rerun', async function () {
         const beforeShapes = await readMigrationShapes(agedDb)
         const result = await agedDb.runMigrations({ includeManual: true, only: [MIGRATION] })
         const afterShapes = await readMigrationShapes(agedDb)
-
         assert.ok(!result.applied.includes(MIGRATION))
         assert.deepStrictEqual(afterShapes, beforeShapes)
     })
-
     it('baselines a fresh schema and preserves its matching first_seen definition', async function () {
         freshDb = makeDatabase(FRESH_DB)
         await freshDb.createDatabase()
@@ -177,7 +168,6 @@ describe('mempool first_seen DATETIME migration on MariaDB', function () {
         const recorded = await withPoolConnection(freshDb, conn => conn.query(
             'SELECT name FROM schema_migrations WHERE name = ?', [MIGRATION]
         ))
-
         assert.ok(result.baselined.includes(MIGRATION))
         assert.deepStrictEqual(recorded.map(row => row.name), [MIGRATION])
         assert.deepStrictEqual(afterShape, beforeShape)
