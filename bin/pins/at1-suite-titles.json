@@ -423,6 +423,42 @@
       "/live gates on the poll-loop heartbeat stays 200 through a node-tip outage, so containers are not restarted",
       "/live gates on the poll-loop heartbeat still answers 200 while halted, so autoheal cannot restart-loop a resync case"
     ],
+    "19e73caaa9b7c73f": [
+      "committed migrations declare intent @regression 2026-05-28-unique-index-tables.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
+      "committed migrations declare intent @regression 2026-05-28-unique-index-tables.sql: if tagged mode=auto, contains no destructive DDL",
+      "committed migrations declare intent @regression 2026-05-28-unique-index-tables.sql: is named with the YYYY-MM-DD- dated prefix",
+      "committed migrations declare intent @regression 2026-06-02-fix-previous-block-hash-byte-order.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
+      "committed migrations declare intent @regression 2026-06-02-fix-previous-block-hash-byte-order.sql: if tagged mode=auto, contains no destructive DDL",
+      "committed migrations declare intent @regression 2026-06-02-fix-previous-block-hash-byte-order.sql: is named with the YYYY-MM-DD- dated prefix",
+      "committed migrations declare intent @regression 2026-06-02-widen-ids-to-bigint.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
+      "committed migrations declare intent @regression 2026-06-02-widen-ids-to-bigint.sql: if tagged mode=auto, contains no destructive DDL",
+      "committed migrations declare intent @regression 2026-06-02-widen-ids-to-bigint.sql: is named with the YYYY-MM-DD- dated prefix",
+      "committed migrations declare intent @regression 2026-06-13-dispensers-expiration-bigint.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
+      "committed migrations declare intent @regression 2026-06-13-dispensers-expiration-bigint.sql: if tagged mode=auto, contains no destructive DDL",
+      "committed migrations declare intent @regression 2026-06-13-dispensers-expiration-bigint.sql: is named with the YYYY-MM-DD- dated prefix",
+      "committed migrations declare intent @regression 2026-06-15-events-data-mediumtext.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
+      "committed migrations declare intent @regression 2026-06-15-events-data-mediumtext.sql: if tagged mode=auto, contains no destructive DDL",
+      "committed migrations declare intent @regression 2026-06-15-events-data-mediumtext.sql: is named with the YYYY-MM-DD- dated prefix",
+      "committed migrations declare intent @regression 2026-06-15-mempool-raw-strings.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
+      "committed migrations declare intent @regression 2026-06-15-mempool-raw-strings.sql: if tagged mode=auto, contains no destructive DDL",
+      "committed migrations declare intent @regression 2026-06-15-mempool-raw-strings.sql: is named with the YYYY-MM-DD- dated prefix",
+      "committed migrations declare intent @regression 2026-06-17-pubkeys-add-monotonic-id.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
+      "committed migrations declare intent @regression 2026-06-17-pubkeys-add-monotonic-id.sql: if tagged mode=auto, contains no destructive DDL",
+      "committed migrations declare intent @regression 2026-06-17-pubkeys-add-monotonic-id.sql: is named with the YYYY-MM-DD- dated prefix",
+      "committed migrations declare intent @regression 2026-07-24-pubkeys-widen-uncompressed.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
+      "committed migrations declare intent @regression 2026-07-24-pubkeys-widen-uncompressed.sql: if tagged mode=auto, contains no destructive DDL",
+      "committed migrations declare intent @regression 2026-07-24-pubkeys-widen-uncompressed.sql: is named with the YYYY-MM-DD- dated prefix",
+      "committed migrations declare intent @regression 2026-08-10-action-data-utf8mb4.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
+      "committed migrations declare intent @regression 2026-08-10-action-data-utf8mb4.sql: if tagged mode=auto, contains no destructive DDL",
+      "committed migrations declare intent @regression 2026-08-10-action-data-utf8mb4.sql: is named with the YYYY-MM-DD- dated prefix",
+      "committed migrations declare intent @regression 2026-08-22-mempool-first-seen.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
+      "committed migrations declare intent @regression 2026-08-22-mempool-first-seen.sql: if tagged mode=auto, contains no destructive DDL",
+      "committed migrations declare intent @regression 2026-08-22-mempool-first-seen.sql: is named with the YYYY-MM-DD- dated prefix",
+      "committed migrations declare intent @regression 2026-09-27-mempool-first-seen-datetime.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
+      "committed migrations declare intent @regression 2026-09-27-mempool-first-seen-datetime.sql: if tagged mode=auto, contains no destructive DDL",
+      "committed migrations declare intent @regression 2026-09-27-mempool-first-seen-datetime.sql: is named with the YYYY-MM-DD- dated prefix",
+      "committed migrations declare intent @regression migrations directory is present"
+    ],
     "1a4f796bc14f8692": [
       "Fuzz: parseTransaction H8: empty data buffer after output loop should handle txs where all OP_RETURN outputs decrypt to non-XCHN data"
     ],
@@ -1317,39 +1353,6 @@
       "XChainBlockDecoder litecoin blockFromBuffer: forged tx count rejects a varint tx count structurally impossible for the remaining bytes",
       "XChainBlockDecoder litecoin blockFromBuffer: forged tx count still parses an honest single-tx block"
     ],
-    "5ff1bf0b2da8703d": [
-      "committed migrations declare intent @regression 2026-05-28-unique-index-tables.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
-      "committed migrations declare intent @regression 2026-05-28-unique-index-tables.sql: if tagged mode=auto, contains no destructive DDL",
-      "committed migrations declare intent @regression 2026-05-28-unique-index-tables.sql: is named with the YYYY-MM-DD- dated prefix",
-      "committed migrations declare intent @regression 2026-06-02-fix-previous-block-hash-byte-order.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
-      "committed migrations declare intent @regression 2026-06-02-fix-previous-block-hash-byte-order.sql: if tagged mode=auto, contains no destructive DDL",
-      "committed migrations declare intent @regression 2026-06-02-fix-previous-block-hash-byte-order.sql: is named with the YYYY-MM-DD- dated prefix",
-      "committed migrations declare intent @regression 2026-06-02-widen-ids-to-bigint.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
-      "committed migrations declare intent @regression 2026-06-02-widen-ids-to-bigint.sql: if tagged mode=auto, contains no destructive DDL",
-      "committed migrations declare intent @regression 2026-06-02-widen-ids-to-bigint.sql: is named with the YYYY-MM-DD- dated prefix",
-      "committed migrations declare intent @regression 2026-06-13-dispensers-expiration-bigint.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
-      "committed migrations declare intent @regression 2026-06-13-dispensers-expiration-bigint.sql: if tagged mode=auto, contains no destructive DDL",
-      "committed migrations declare intent @regression 2026-06-13-dispensers-expiration-bigint.sql: is named with the YYYY-MM-DD- dated prefix",
-      "committed migrations declare intent @regression 2026-06-15-events-data-mediumtext.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
-      "committed migrations declare intent @regression 2026-06-15-events-data-mediumtext.sql: if tagged mode=auto, contains no destructive DDL",
-      "committed migrations declare intent @regression 2026-06-15-events-data-mediumtext.sql: is named with the YYYY-MM-DD- dated prefix",
-      "committed migrations declare intent @regression 2026-06-15-mempool-raw-strings.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
-      "committed migrations declare intent @regression 2026-06-15-mempool-raw-strings.sql: if tagged mode=auto, contains no destructive DDL",
-      "committed migrations declare intent @regression 2026-06-15-mempool-raw-strings.sql: is named with the YYYY-MM-DD- dated prefix",
-      "committed migrations declare intent @regression 2026-06-17-pubkeys-add-monotonic-id.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
-      "committed migrations declare intent @regression 2026-06-17-pubkeys-add-monotonic-id.sql: if tagged mode=auto, contains no destructive DDL",
-      "committed migrations declare intent @regression 2026-06-17-pubkeys-add-monotonic-id.sql: is named with the YYYY-MM-DD- dated prefix",
-      "committed migrations declare intent @regression 2026-07-24-pubkeys-widen-uncompressed.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
-      "committed migrations declare intent @regression 2026-07-24-pubkeys-widen-uncompressed.sql: if tagged mode=auto, contains no destructive DDL",
-      "committed migrations declare intent @regression 2026-07-24-pubkeys-widen-uncompressed.sql: is named with the YYYY-MM-DD- dated prefix",
-      "committed migrations declare intent @regression 2026-08-10-action-data-utf8mb4.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
-      "committed migrations declare intent @regression 2026-08-10-action-data-utf8mb4.sql: if tagged mode=auto, contains no destructive DDL",
-      "committed migrations declare intent @regression 2026-08-10-action-data-utf8mb4.sql: is named with the YYYY-MM-DD- dated prefix",
-      "committed migrations declare intent @regression 2026-08-22-mempool-first-seen.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
-      "committed migrations declare intent @regression 2026-08-22-mempool-first-seen.sql: if tagged mode=auto, contains no destructive DDL",
-      "committed migrations declare intent @regression 2026-08-22-mempool-first-seen.sql: is named with the YYYY-MM-DD- dated prefix",
-      "committed migrations declare intent @regression migrations directory is present"
-    ],
     "6076549f252b92c9": [
       "fuzz seeding [REGRESSION P1] accounts for every top-level fuzz harness",
       "fuzz seeding [REGRESSION P1] block_decoder.fuzz.js prints the FUZZ_SEED it ran with",
@@ -1980,6 +1983,9 @@
       "Smoke: Multisig Transaction Parsing should parse a 1-of-3 multisig tx without throwing",
       "Smoke: Multisig Transaction Parsing should return empty dispenseOutputs",
       "Smoke: Multisig Transaction Parsing should return non-empty data from a multisig tx"
+    ],
+    "95b9a69144b6d40d": [
+      "migration operator hints [REGRESSION P1] points every source hint at the existing migration entrypoint"
     ],
     "973dda09a83b0b1a": [
       "decoder stability fixes @regression DOGE large-output bufferutils-patch self-check reports active when the reader tolerates a > 2^53 value (BigInt-safe patch)",
@@ -2710,6 +2716,11 @@
       "Database.migrationMode() @regression reads mode=manual from the header tag",
       "Database.migrationMode() @regression reads the tag past a multi-line comment banner (banner does not push it out of view)"
     ],
+    "dde536d960f1a1a5": [
+      "mempool first_seen DATETIME migration @regression baselines only when first_seen is already DATETIME",
+      "mempool first_seen DATETIME migration @regression declares no TIMESTAMP column and declares first_seen DATETIME NOT NULL",
+      "mempool first_seen DATETIME migration @regression is manual without a deploy precondition and orders the conversion statements"
+    ],
     "df1a7438428d2073": [
       "BlockchainConnector NODE_URL_FALLBACK failover endpoint parsing has a single endpoint when NODE_URL_FALLBACK is unset",
       "BlockchainConnector NODE_URL_FALLBACK failover endpoint parsing ignores an empty NODE_URL_FALLBACK value",
@@ -3018,8 +3029,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 180,
-      "titleCount": 1700,
+      "fileCount": 181,
+      "titleCount": 1706,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3134,13 +3145,14 @@
         "test/unit/jsonrpc_body_guard.test.js": "58706b2a54fa0008",
         "test/unit/litecoin_block.test.js": "5ecf90a69618e860",
         "test/unit/mempool_api_surface.test.js": "a7c7a6651942ddef",
+        "test/unit/mempool_first_seen_datetime.test.js": "dde536d960f1a1a5",
         "test/unit/mempool_isolation.test.js": "6207eebcc7c69c98",
         "test/unit/mempool_payload_representation.test.js": "7f339cce97ef3d87",
         "test/unit/migrate.test.js": "826dacd11ea07f42",
         "test/unit/migrate_status.test.js": "4fd0a29c075465f3",
         "test/unit/migration_preconditions.test.js": "3d54004868a9ce33",
         "test/unit/migration_runner.test.js": "dc9720d3655e4785",
-        "test/unit/migration_runner.test/01_committed_migrations_declare_intent.test.js": "5ff1bf0b2da8703d",
+        "test/unit/migration_runner.test/01_committed_migrations_declare_intent.test.js": "19e73caaa9b7c73f",
         "test/unit/migration_runner.test/02_database_migration_checksum_rebaselines.test.js": "35cbf8a92b2e7c36",
         "test/unit/migration_runner.test/03_run_migrations_checksum_re_bless_path.test.js": "f45010ff7d50d33a",
         "test/unit/migration_runner.test/04_run_migrations_file_opts_only_scoping.test.js": "9427161b3e973b0e",
@@ -3431,10 +3443,11 @@
       }
     },
     "test:regression:full": {
-      "fileCount": 26,
-      "titleCount": 126,
+      "fileCount": 27,
+      "titleCount": 127,
       "files": {
         "test/regression/bugfix.test.js": "6076549f252b92c9",
+        "test/regression/migrate_hints.test.js": "95b9a69144b6d40d",
         "test/security/action_validation.test.js": "d42bb5a9f837d16a",
         "test/security/connection_handling.test.js": "f9ea8bf6004987f7",
         "test/security/connector_security.test.js": "bae7607a36a3fca7",
@@ -3490,8 +3503,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 180,
-      "titleCount": 1700,
+      "fileCount": 181,
+      "titleCount": 1706,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3606,13 +3619,14 @@
         "test/unit/jsonrpc_body_guard.test.js": "58706b2a54fa0008",
         "test/unit/litecoin_block.test.js": "5ecf90a69618e860",
         "test/unit/mempool_api_surface.test.js": "a7c7a6651942ddef",
+        "test/unit/mempool_first_seen_datetime.test.js": "dde536d960f1a1a5",
         "test/unit/mempool_isolation.test.js": "6207eebcc7c69c98",
         "test/unit/mempool_payload_representation.test.js": "7f339cce97ef3d87",
         "test/unit/migrate.test.js": "826dacd11ea07f42",
         "test/unit/migrate_status.test.js": "4fd0a29c075465f3",
         "test/unit/migration_preconditions.test.js": "3d54004868a9ce33",
         "test/unit/migration_runner.test.js": "dc9720d3655e4785",
-        "test/unit/migration_runner.test/01_committed_migrations_declare_intent.test.js": "5ff1bf0b2da8703d",
+        "test/unit/migration_runner.test/01_committed_migrations_declare_intent.test.js": "19e73caaa9b7c73f",
         "test/unit/migration_runner.test/02_database_migration_checksum_rebaselines.test.js": "35cbf8a92b2e7c36",
         "test/unit/migration_runner.test/03_run_migrations_checksum_re_bless_path.test.js": "f45010ff7d50d33a",
         "test/unit/migration_runner.test/04_run_migrations_file_opts_only_scoping.test.js": "9427161b3e973b0e",
