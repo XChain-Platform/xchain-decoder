@@ -105,6 +105,18 @@ Database.MIGRATION_PRECONDITIONS = {
         }
     },
 
+    '2026-09-27-mempool-first-seen-datetime.sql': {
+        sql: "SELECT DATA_TYPE AS dataType FROM information_schema.columns " +
+             "WHERE table_schema = ? AND table_name = 'mempool_transactions' AND column_name = 'first_seen'",
+        skipWhen: (rows) => {
+            if(!rows.length || !rows[0].dataType) return null;
+            if(String(rows[0].dataType).toLowerCase() === 'datetime') {
+                return 'mempool_transactions.first_seen is already DATETIME.';
+            }
+            return null;
+        }
+    },
+
     // FK-id -> raw-string rebuild of mempool_transactions (tx_hash_id -> tx_hash, and
     // the two address ids likewise). It DROPs the table and recreates six columns at
     // `DEFAULT CHARSET=utf8`, which is a pure loss against the current
