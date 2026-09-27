@@ -49,7 +49,9 @@ describe('SQL DATETIME completeness', function () {
     });
 
     it('declares the migration ledger applied_at column as DATETIME', function () {
-        const statements = fs.readFileSync(MIGRATION_STATEMENTS, 'utf8');
+        const statements = fs.readFileSync(MIGRATION_STATEMENTS, 'utf8')
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/\/\/.*$/gm, '');
 
         assert.match(statements, /\bapplied_at\s+DATETIME\b/i);
         assert.doesNotMatch(statements, /\bapplied_at\s+TIMESTAMP\b/i);
