@@ -47,7 +47,9 @@ function rawTransactionResponse(response, txid) {
     // not fail the whole Promise.all batch. Callers filter nulls. Surface the
     // node's own error object if it sent one rather than swallowing it.
     const rpcError = response.data?.error
-    if (rpcError) {
+    if (rpcError?.code === -5) {
+        logger.warn(`getRawTransaction: node error for txid ${txid}: code ${rpcError.code} ${rpcError.message}`)
+    } else if (rpcError) {
         logger.error(`getRawTransaction: node error for txid ${txid}: code ${rpcError.code} ${rpcError.message}`)
     } else {
         logger.info(`getRawTransaction: no result for txid ${txid} (evicted/confirmed?)`)

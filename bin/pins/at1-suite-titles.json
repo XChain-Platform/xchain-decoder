@@ -1484,6 +1484,10 @@
       "Security: Error Log Sanitization db.js error logging should not log full error objects in commitTransaction",
       "Security: Error Log Sanitization db.js error logging should not log full error objects in verifyTables"
     ],
+    "6a7f97b3844dc74d": [
+      "BlockchainConnector HTTP-200 transaction error logging keeps a code-less body error at error and resolves null",
+      "BlockchainConnector HTTP-200 transaction error logging warns once and resolves null for a body error with code -5"
+    ],
     "6a95ee16117e8e38": [
       "XChainDecoder#parseTransaction() P2WSH per-chain segwit gate a non-segwit chain extracts nothing from the same bytes and does not throw",
       "XChainDecoder#parseTransaction() P2WSH per-chain segwit gate a segwit chain still extracts the witness payload (control)",
@@ -3035,8 +3039,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 182,
-      "titleCount": 1710,
+      "fileCount": 183,
+      "titleCount": 1712,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3075,6 +3079,7 @@
         "test/unit/blockchain_connector.test/01_get_block_without_aux_pow.test.js": "f036a06a88e895c5",
         "test/unit/blockchain_connector.test/02_blockchain_connector_get_raw_transactions_bounded_concurrency.test.js": "55b018a2603be435",
         "test/unit/blockchain_connector_extra.test.js": "83cb7e9cd2340bd1",
+        "test/unit/blockchain_connector_minus5_log_level.test.js": "6a7f97b3844dc74d",
         "test/unit/blockchain_connector_review_fixes.test.js": "d8358f57dc7696b7",
         "test/unit/boundary/deobfuscation.test.js": "880ad25ba40b77cf",
         "test/unit/boundary/dispenser_parsing.test.js": "1a90ec267e5f8034",
@@ -3510,8 +3515,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 182,
-      "titleCount": 1710,
+      "fileCount": 183,
+      "titleCount": 1712,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3550,6 +3555,7 @@
         "test/unit/blockchain_connector.test/01_get_block_without_aux_pow.test.js": "f036a06a88e895c5",
         "test/unit/blockchain_connector.test/02_blockchain_connector_get_raw_transactions_bounded_concurrency.test.js": "55b018a2603be435",
         "test/unit/blockchain_connector_extra.test.js": "83cb7e9cd2340bd1",
+        "test/unit/blockchain_connector_minus5_log_level.test.js": "6a7f97b3844dc74d",
         "test/unit/blockchain_connector_review_fixes.test.js": "d8358f57dc7696b7",
         "test/unit/boundary/deobfuscation.test.js": "880ad25ba40b77cf",
         "test/unit/boundary/dispenser_parsing.test.js": "1a90ec267e5f8034",
