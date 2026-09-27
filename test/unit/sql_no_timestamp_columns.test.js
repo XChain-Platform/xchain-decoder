@@ -22,9 +22,7 @@ const FIRST_SEEN_MIGRATION = path.join(
     '2026-09-27-mempool-first-seen-datetime.sql'
 );
 
-const inventoryOnly = process.argv.includes('--dry-run');
-
-if(!inventoryOnly) describe('SQL DATETIME completeness', function () {
+describe('SQL DATETIME completeness', function () {
     it('declares no TIMESTAMP columns in top-level SQL definitions', function () {
         const offenders = [];
         const definitions = fs.readdirSync(SQL_DIR, { withFileTypes: true })

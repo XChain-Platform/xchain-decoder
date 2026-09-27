@@ -381,6 +381,12 @@
     "154009859620f098": [
       "Fuzz: parseTransaction edge: transaction with many outputs should handle transaction with 100 random outputs"
     ],
+    "1554a102f8ef603f": [
+      "SQL DATETIME completeness declares no TIMESTAMP columns in top-level SQL definitions",
+      "SQL DATETIME completeness declares the migration ledger applied_at column as DATETIME",
+      "SQL DATETIME completeness pins direct and pooled database connections to UTC",
+      "SQL DATETIME completeness sets UTC before converting mempool first_seen to DATETIME"
+    ],
     "155fe1323df6de21": [
       "compiled-push-size arbiter conformance OP_RETURN_PUSH_OVERHEAD is name-keyed and value-identical equals the vendored canonical protocol constant",
       "compiled-push-size arbiter conformance OP_RETURN_PUSH_OVERHEAD is name-keyed and value-identical is exactly what compiledPushSize adds above the OP_PUSHDATA1 ceiling",
@@ -3039,8 +3045,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 183,
-      "titleCount": 1712,
+      "fileCount": 184,
+      "titleCount": 1716,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3202,6 +3208,7 @@
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",
         "test/unit/shutdown.test.js": "b7c40222c7ba54aa",
         "test/unit/sibling_coverage.test.js": "d8d1e52267ea606f",
+        "test/unit/sql_no_timestamp_columns.test.js": "1554a102f8ef603f",
         "test/unit/sql_quote_backslash_escapes.test.js": "b72d4e6d05233677",
         "test/unit/sql_schema_parse_coverage.test.js": "094df283a0e43bcb",
         "test/unit/status_lag_field.test.js": "418aa8572442df90",
@@ -3515,8 +3522,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 183,
-      "titleCount": 1712,
+      "fileCount": 184,
+      "titleCount": 1716,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3678,6 +3685,7 @@
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",
         "test/unit/shutdown.test.js": "b7c40222c7ba54aa",
         "test/unit/sibling_coverage.test.js": "d8d1e52267ea606f",
+        "test/unit/sql_no_timestamp_columns.test.js": "1554a102f8ef603f",
         "test/unit/sql_quote_backslash_escapes.test.js": "b72d4e6d05233677",
         "test/unit/sql_schema_parse_coverage.test.js": "094df283a0e43bcb",
         "test/unit/status_lag_field.test.js": "418aa8572442df90",
