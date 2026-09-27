@@ -576,6 +576,9 @@
       "Database#insertEvent() returns true on success",
       "Database#insertEvent() serialises a BigInt field instead of throwing"
     ],
+    "2a1f796a2739fb5e": [
+      "Database session timezone pins connection parameters to UTC without changing pool safeguards"
+    ],
     "2a2b9d37b8ca008a": [
       "Fuzz: XChainBlockDecoder bitcoin: blockFromBuffer with random buffers should handle 2000 random buffers",
       "Fuzz: XChainBlockDecoder bitcoin: mutated valid header should handle 2000 mutated headers",
@@ -1978,6 +1981,9 @@
       "Smoke: Multisig Transaction Parsing should return empty dispenseOutputs",
       "Smoke: Multisig Transaction Parsing should return non-empty data from a multisig tx"
     ],
+    "95b9a69144b6d40d": [
+      "migration operator hints [REGRESSION P1] points every source hint at the existing migration entrypoint"
+    ],
     "973dda09a83b0b1a": [
       "decoder stability fixes @regression DOGE large-output bufferutils-patch self-check reports active when the reader tolerates a > 2^53 value (BigInt-safe patch)",
       "decoder stability fixes @regression DOGE large-output bufferutils-patch self-check reports inactive when the module has no BufferReader (fail-safe)",
@@ -3015,8 +3021,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 179,
-      "titleCount": 1699,
+      "fileCount": 180,
+      "titleCount": 1700,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3104,6 +3110,7 @@
         "test/unit/db_queries.test/19_verify_database.test.js": "b9f5fe3686fa1924",
         "test/unit/db_queries.test/20_error_path_transaction_connection_branches.test.js": "054fdd1916b39a5f",
         "test/unit/db_query_helpers.test.js": "6fa21ab5be3abe7a",
+        "test/unit/db_session_timezone_utc.test.js": "2a1f796a2739fb5e",
         "test/unit/decoder_halt_diagnostics.test.js": "7c29a82e0acc9544",
         "test/unit/decoder_live_heartbeat.test.js": "19ce1efea7b5f1f0",
         "test/unit/decoder_stress_sweep.test.js": "973dda09a83b0b1a",
@@ -3427,10 +3434,11 @@
       }
     },
     "test:regression:full": {
-      "fileCount": 26,
-      "titleCount": 126,
+      "fileCount": 27,
+      "titleCount": 127,
       "files": {
         "test/regression/bugfix.test.js": "6076549f252b92c9",
+        "test/regression/migrate_hints.test.js": "95b9a69144b6d40d",
         "test/security/action_validation.test.js": "d42bb5a9f837d16a",
         "test/security/connection_handling.test.js": "f9ea8bf6004987f7",
         "test/security/connector_security.test.js": "bae7607a36a3fca7",
@@ -3486,8 +3494,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 179,
-      "titleCount": 1699,
+      "fileCount": 180,
+      "titleCount": 1700,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3575,6 +3583,7 @@
         "test/unit/db_queries.test/19_verify_database.test.js": "b9f5fe3686fa1924",
         "test/unit/db_queries.test/20_error_path_transaction_connection_branches.test.js": "054fdd1916b39a5f",
         "test/unit/db_query_helpers.test.js": "6fa21ab5be3abe7a",
+        "test/unit/db_session_timezone_utc.test.js": "2a1f796a2739fb5e",
         "test/unit/decoder_halt_diagnostics.test.js": "7c29a82e0acc9544",
         "test/unit/decoder_live_heartbeat.test.js": "19ce1efea7b5f1f0",
         "test/unit/decoder_stress_sweep.test.js": "973dda09a83b0b1a",
