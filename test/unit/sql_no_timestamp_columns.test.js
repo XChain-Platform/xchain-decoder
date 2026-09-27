@@ -16,7 +16,6 @@ const Database = require('../../src/db.js');
 
 const ROOT_DIR = path.join(__dirname, '..', '..');
 const SQL_DIR = path.join(ROOT_DIR, 'src', 'sql');
-const MIGRATION_STATEMENTS = path.join(ROOT_DIR, 'src', 'db', 'migration_statements.js');
 const FIRST_SEEN_MIGRATION = path.join(
     SQL_DIR,
     'migrations',
@@ -48,11 +47,20 @@ describe('SQL DATETIME completeness', function () {
         );
     });
 
-    it('declares the migration ledger applied_at column as DATETIME', function () {
-        const source = fs.readFileSync(MIGRATION_STATEMENTS, 'utf8');
+    it('declares the migration ledger applied_at column as DATETIME', async function () {
+        const statements = [];
+        const conn = {
+            query: async statement => {
+                statements.push(statement);
+                return /^SELECT DATA_TYPE/i.test(statement) ? [{ dataType: 'timestamp' }] : [];
+            }
+        };
+        await Database.prototype.ensureMigrationsLedger(conn);
+        const create = statements.find(statement => /^CREATE TABLE IF NOT EXISTS schema_migrations/i.test(statement));
 
-        assert.match(source, /\bapplied_at\s+DATETIME\b/i);
-        assert.doesNotMatch(source, /\bapplied_at\s+TIMESTAMP\b/i);
+        assert.ok(create, 'missing schema_migrations CREATE TABLE statement');
+        assert.match(create, /\bapplied_at\s+DATETIME\b/i);
+        assert.doesNotMatch(statements.join('\n'), /\bapplied_at\s+TIMESTAMP\b/i);
     });
 
     it('sets UTC before converting mempool first_seen to DATETIME', function () {
