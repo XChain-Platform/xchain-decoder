@@ -39,7 +39,7 @@ CREATE TABLE mempool_transactions (
     -- explorer's pending-actions feed renders it as the row's Time column.
     -- Server-side default so updateMempool's insert-once/delete-on-departure
     -- cycle stamps it with no writer change. Migration: 2026-08-22-mempool-first-seen.sql.
-    first_seen  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    first_seen  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
 -- Mempool rows hold raw strings rather than index_addresses/index_transactions ids.
