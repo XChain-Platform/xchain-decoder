@@ -2421,6 +2421,11 @@
       "Security: BlockchainConnector Credential handling [REGRESSION P0] R-SEC-001: should not include credentials in the URL",
       "Security: BlockchainConnector Protocol handling [REGRESSION P0] R-SEC-001: should preserve https:// when specified"
     ],
+    "bea80fd3971653d5": [
+      "protocol time parity with indexer @regression keeps medianTimePast behavior identical across value vectors",
+      "protocol time parity with indexer @regression keeps protocolTime behavior identical across value vectors",
+      "protocol time parity with indexer @regression keeps the consensus constants identical"
+    ],
     "c3dab6aacd71c13e": [
       "BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance a DISARMED network is inactive at every block time, including absurd ones",
       "BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance arms at exactly the indexer BATCH_ISSUANCE_LIMITS instant on every network (one boundary)",
@@ -3045,8 +3050,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 184,
-      "titleCount": 1716,
+      "fileCount": 185,
+      "titleCount": 1719,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3191,6 +3196,7 @@
         "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js": "6a95ee16117e8e38",
         "test/unit/protocol_constants.test.js": "13584cc3d862a5a2",
         "test/unit/protocol_time.test.js": "a712626ef67e3e03",
+        "test/unit/protocol_time_parity.test.js": "bea80fd3971653d5",
         "test/unit/remove_obfuscation.test.js": "0eb0aadd100cef95",
         "test/unit/reorg_depth_across_restart.test.js": "0952dfb65faa59ba",
         "test/unit/reorg_halt_clear.test.js": "9b881b6b474e5b3d",
@@ -3522,8 +3528,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 184,
-      "titleCount": 1716,
+      "fileCount": 185,
+      "titleCount": 1719,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3668,6 +3674,7 @@
         "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js": "6a95ee16117e8e38",
         "test/unit/protocol_constants.test.js": "13584cc3d862a5a2",
         "test/unit/protocol_time.test.js": "a712626ef67e3e03",
+        "test/unit/protocol_time_parity.test.js": "bea80fd3971653d5",
         "test/unit/remove_obfuscation.test.js": "0eb0aadd100cef95",
         "test/unit/reorg_depth_across_restart.test.js": "0952dfb65faa59ba",
         "test/unit/reorg_halt_clear.test.js": "9b881b6b474e5b3d",
