@@ -19,35 +19,28 @@ const CANONICAL_PATH = path.join(
     __dirname,
     '../../../xchain-indexer/src/consensus/protocol_time.js'
 )
-const PREVIOUS_BLOCK_TIMES = Array.from({ length: 12 }, (_, index) => 1700000000 + index)
+const ASCENDING_TIMES = Array.from({ length: 12 }, (_, index) => 1700000000 + index)
+const MEDIAN_TIME_VECTORS = [
+    ['non-array input', 42],
+    ['empty input', []],
+    ['non-finite and zero times', [0, NaN, Infinity, -Infinity, 'not-a-time']],
+    ['fewer than the median span', [1700000002, 1700000000, 1700000001]],
+    ['twelve ascending times', ASCENDING_TIMES],
+    ['unsorted input', [12, 1, 11, 2, 10, 3, 9, 4, 8, 5, 7, 6]],
+]
+const PROTOCOL_TIME_VECTORS = [
+    ['armed network', 'testnet', 1700000100, ASCENDING_TIMES],
+    ['unarmed network', 'mainnet', 1700000100, ASCENDING_TIMES],
+    ['empty history', 'testnet', 1700000100, []],
+    ['future median clamp', 'testnet', 5, [6, 7, 8]],
+    ['false raw-time sentinel', 'testnet', false, ASCENDING_TIMES],
+    ['null raw-time sentinel', 'testnet', null, ASCENDING_TIMES],
+    ['undefined raw-time sentinel', 'testnet', undefined, ASCENDING_TIMES],
+    ['non-finite raw time', 'testnet', Infinity, ASCENDING_TIMES],
+]
 
-function stripComments(src){
-    return src.split('\n').map(line => {
-        let quote = null
-        for (let index = 0; index < line.length; index++){
-            const character = line[index]
-            if (quote){
-                if (character === quote && line[index - 1] !== '\\') quote = null
-                continue
-            }
-            if (character === "'" || character === '"' || character === '`'){
-                quote = character
-                continue
-            }
-            if (character === '/' && line[index + 1] === '/') return line.slice(0, index)
-        }
-        return line
-    }).join('\n')
-}
-
-function codeOnly(src){
-    return stripComments(src.replace(/\/\*[\s\S]*?\*\//g, ''))
-        .split('\n').map(line => line.trim()).filter(Boolean).join('\n')
-}
-
-function functionBody(fn){
-    const source = fn.toString()
-    return source.slice(source.indexOf('{') + 1, source.lastIndexOf('}'))
+function copyInput(value){
+    return Array.isArray(value) ? value.slice() : value
 }
 
 describe('protocol time parity with indexer @regression', function () {
@@ -70,20 +63,23 @@ describe('protocol time parity with indexer @regression', function () {
         )
     })
 
-    for (const name of ['medianTimePast', 'protocolTime']){
-        it('keeps ' + name + ' code-identical after comment normalization', function () {
-            assert.strictEqual(
-                codeOnly(functionBody(local[name])),
-                codeOnly(functionBody(canonical[name])),
-                name + ' drifted from the xchain-indexer consensus-clock twin'
+    it('keeps medianTimePast behavior identical across value vectors', function () {
+        for (const [label, previousBlockTimes] of MEDIAN_TIME_VECTORS){
+            assert.deepStrictEqual(
+                local.medianTimePast(copyInput(previousBlockTimes)),
+                canonical.medianTimePast(copyInput(previousBlockTimes)),
+                label
             )
-        })
-    }
+        }
+    })
 
-    it('returns the same median for a twelve-block fixture', function () {
-        assert.strictEqual(
-            local.medianTimePast(PREVIOUS_BLOCK_TIMES),
-            canonical.medianTimePast(PREVIOUS_BLOCK_TIMES)
-        )
+    it('keeps protocolTime behavior identical across value vectors', function () {
+        for (const [label, network, rawBlockTime, previousBlockTimes] of PROTOCOL_TIME_VECTORS){
+            assert.deepStrictEqual(
+                local.protocolTime(network, rawBlockTime, copyInput(previousBlockTimes)),
+                canonical.protocolTime(network, rawBlockTime, copyInput(previousBlockTimes)),
+                label
+            )
+        }
     })
 })
