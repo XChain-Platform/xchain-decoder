@@ -3013,6 +3013,12 @@
       "ORACLE_FEE_SET_CAPTURE_ACTIVATION conformance is value-identical to the canonical map in xchain-documentation",
       "ORACLE_FEE_SET_CAPTURE_ACTIVATION conformance never precedes the base oracle-fee capture gate on any network"
     ],
+    "f826f2a2639c2bf3": [
+      "mempool first_seen DATETIME migration on MariaDB baselines a fresh schema and preserves its matching first_seen definition",
+      "mempool first_seen DATETIME migration on MariaDB leaves both migrated column definitions unchanged on a targeted rerun",
+      "mempool first_seen DATETIME migration on MariaDB reproduces session-dependent reads on the aged TIMESTAMP columns",
+      "mempool first_seen DATETIME migration on MariaDB retypes the observation and ledger columns without shifting their values"
+    ],
     "f9ea8bf6004987f7": [
       "Security: Connection Handling Transaction lock mechanism [REGRESSION P0] R-SEC-003: should acquire lock on first call",
       "Security: Connection Handling deleteBlockByIndex failure handling [REGRESSION P1] R-BUG-001: a subsequent call does not deadlock after a failure",
@@ -3401,12 +3407,13 @@
       "skipped": "not a mocha command (runs node)"
     },
     "test:integration:mocha": {
-      "fileCount": 5,
-      "titleCount": 30,
+      "fileCount": 6,
+      "titleCount": 34,
       "files": {
         "test/integration/dispensers.test.js": "4ddee0a65a60fc97",
         "test/integration/indexer_contract.test.js": "577e505c41e8c55b",
         "test/integration/malformed.test.js": "a1f7b506ab91b517",
+        "test/integration/mempool_first_seen_datetime_real.test.js": "f826f2a2639c2bf3",
         "test/integration/multisig.test.js": "2ee2031083237da3",
         "test/integration/op_return.test.js": "7530468e8b9c8c69"
       }
