@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-29
+
+### Added
+- Added read-only JSON migration status for operational checks.
+
+### Changed
+- Used protocol time for decoder decisions that must remain deterministic across nodes.
+
 ## [0.20.1] - 2026-09-23
 
 ### Fixed
