@@ -172,16 +172,12 @@ run_tier "drift: coin consensus-pin conformance" node -e '
 run_tier "identity pin (vendored coins, twin fixtures)" node bin/pin-identity.js --check
 
 # --- suite-title pin (this gate only; no ci.yml job runs it) -----------
-# Guards that the test:unit tier still collects the same test titles it did
-# at the pin, through the declared rename and split maps. The pin only ever
-# covered test:unit (see bin/pins/at1-suite-titles.json's own history), so
-# --script narrows the compare to that tier; without it every other test*
-# script in package.json reads as "script added" noise.
+# Guards that every supported test script still collects the same test titles
+# it did at the pin, through the declared rename and split maps.
 run_tier "suite-title pin (at1)" node bin/suite-title-map.js \
   --compare bin/pins/at1-suite-titles.json \
   --rename-map bin/pins/suite-title-renames.json \
-  --split-map bin/pins/suite-title-splits.json \
-  --script test:unit
+  --split-map bin/pins/suite-title-splits.json
 
 # --- job: docker-suites ----------------------------------------------------
 # Both tiers own their venue lifecycle inside their npm script (compose up
