@@ -81,6 +81,16 @@ function isSimpleDestructiveStatement(stmt){
     return /^LOAD\s+DATA\b/i.test(stmt);
 }
 
+// True for any CREATE other than a table or an index. A trigger, event, routine or view
+// carries SQL this classifier never reads, and the server runs it later (a trigger on every
+// row write), the same blind spot as CALL above.
+function createOutsideAllowList(stmt){
+    if(!/^CREATE\b/i.test(stmt)) return false;
+    // Allow the additive forms committed auto migrations use: [TEMPORARY] TABLE and INDEX.
+    if(/^CREATE\s+(?:TEMPORARY\s+)?TABLE\b/i.test(stmt)) return false;
+    return !/^CREATE\s+(?:(?:UNIQUE|FULLTEXT|SPATIAL)\s+)?INDEX\b/i.test(stmt);
+}
+
 function isDestructiveAlter(stmt, safeAlterDrop){
     // Partition and tablespace clauses move or discard row data while carrying
     // none of the keywords the checks below look for: TRUNCATE PARTITION empties
@@ -165,8 +175,8 @@ module.exports = {
     // statement list (already line-comment-stripped and ';'-split), returns the
     // first statement that can lose, truncate, or rename data - or null when the
     // file is safe to auto-run. Pure string logic (no DB), unit-tested directly.
-    // Byte-for-byte the same classifier as xchain-indexer/src/db/index.js so the two
-    // migration runners stay legible as a pair.
+    // Byte-for-byte the same classifier as xchain-indexer/src/db/database/migration_scan.js
+    // so the two migration runners stay legible as a pair.
     //
     // Flagged as destructive: DROP TABLE/DATABASE/SCHEMA, TRUNCATE, RENAME TABLE,
     // DELETE (any form), REPLACE INTO (atomic DELETE+INSERT), INSERT ... ON DUPLICATE
@@ -177,14 +187,18 @@ module.exports = {
     // ALTER TABLE ... RENAME (except RENAME INDEX/KEY), ALTER TABLE ... CHANGE
     // (rename+retype), MODIFY ... NOT NULL (the statically detectable
     // narrowing; a width reduction cannot be seen without the live schema and
-    // stays covered by the manual-tag convention), and any ALTER TABLE PARTITION or
-    // TABLESPACE clause.
+    // stays covered by the manual-tag convention), any ALTER TABLE PARTITION or
+    // TABLESPACE clause, ALTER IGNORE TABLE (deletes duplicate-key rows), any other
+    // ALTER than ALTER [ONLINE] TABLE, and any CREATE other than [TEMPORARY] TABLE and
+    // [UNIQUE|FULLTEXT|SPATIAL] INDEX (triggers, events, routines and views run SQL
+    // the scanner cannot read).
     //
     // Deliberately NOT flagged (legitimate existing auto patterns): DROP INDEX/KEY,
     // DROP FOREIGN KEY/CONSTRAINT/CHECK/DEFAULT/PRIMARY KEY (structural, no row
     // data lost), ADD ..., plain CREATE TABLE / CREATE TABLE IF NOT EXISTS (additive;
-    // but CREATE OR REPLACE TABLE IS flagged - it is an atomic DROP+CREATE), and
-    // MODIFY that widens/nullables a column.
+    // but CREATE OR REPLACE TABLE IS flagged - it is an atomic DROP+CREATE), CREATE
+    // [UNIQUE] INDEX, MODIFY that widens/nullables a column, and ALTER ONLINE TABLE
+    // under the same clause rules as plain ALTER TABLE.
     destructiveAutoStatement(statements){
         // Drops that remove metadata only; anything else after DROP inside an
         // ALTER (COLUMN, PARTITION, or a bare column identifier) loses data.
@@ -216,7 +230,14 @@ module.exports = {
             // touches only the sentinel id=0 row; carve exactly that shape out and
             // flag every other UPDATE.
             if(/^UPDATE\b/i.test(stmt) && !this.isIdRepairUpdate(stmt)) return raw;
-            if(/^ALTER\s+TABLE\b/i.test(stmt) && isDestructiveAlter(stmt, SAFE_ALTER_DROP)) return raw;
+            if(createOutsideAllowList(stmt)) return raw;
+            // MariaDB spells it ALTER [ONLINE] [IGNORE] TABLE. ONLINE only picks the lock mode, so
+            // it gets the plain clause checks; IGNORE silently deletes duplicate-key rows, so never.
+            const alterHead = /^ALTER\s+((?:(?:ONLINE|IGNORE)\s+)*)TABLE\b/i.exec(stmt);
+            if(alterHead && /\bIGNORE\b/i.test(alterHead[1])) return raw;
+            if(alterHead && isDestructiveAlter(stmt, SAFE_ALTER_DROP)) return raw;
+            // Any other ALTER (EVENT, VIEW, DATABASE, ...) is outside the allow-list, like CREATE.
+            if(!alterHead && /^ALTER\b/i.test(stmt)) return raw;
         }
         return null;
     },

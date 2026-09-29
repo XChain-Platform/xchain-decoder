@@ -263,6 +263,10 @@
       "Fuzz: removeObfuscation random data, valid txid should handle 100 random buffers",
       "Fuzz: removeObfuscation random txid + random data should handle 100 fully random inputs"
     ],
+    "0c5f9fce59434a2d": [
+      "Taproot envelope source pubkey capture records nothing when the commit input exposes no key (key-path spend)",
+      "Taproot envelope source pubkey capture records the commit funder key, never the 65-byte tapscript, for a 20-byte payload"
+    ],
     "0d5d819b92bebe35": [
       "Boundary: Multisig Zero-Trim Edge Cases should keep all bytes when no trailing zeros exist",
       "Boundary: Multisig Zero-Trim Edge Cases should remove single trailing zero from multisig data"
@@ -417,17 +421,6 @@
       "Boundary: Combinatorial DISPENSER Scenarios BATCH with DISPENSER as first command: decoder does parse it",
       "Boundary: Combinatorial DISPENSER Scenarios BATCH with DISPENSER as second command: decoder does not parse it",
       "Boundary: Combinatorial DISPENSER Scenarios DISPENSER payload but getSourceFromOutput returns null: tx skipped"
-    ],
-    "19ce1efea7b5f1f0": [
-      "/live gates on the poll-loop heartbeat answers 200 while the loop is iterating, caught up and quiet",
-      "/live gates on the poll-loop heartbeat answers 503 the moment the running flag drops, ahead of the silence window",
-      "/live gates on the poll-loop heartbeat answers 503 when the DB ping fails, which the heartbeat must not mask",
-      "/live gates on the poll-loop heartbeat answers 503 when the loop stops iterating, with nothing else having changed",
-      "/live gates on the poll-loop heartbeat is not silent before the loop has iterated once, so a booting decoder stays 200",
-      "/live gates on the poll-loop heartbeat reports a latent REORG_HALT marker on the surface that is actually polled",
-      "/live gates on the poll-loop heartbeat reports the halt as a stable false, not an absent key, when there is no marker",
-      "/live gates on the poll-loop heartbeat stays 200 through a node-tip outage, so containers are not restarted",
-      "/live gates on the poll-loop heartbeat still answers 200 while halted, so autoheal cannot restart-loop a resync case"
     ],
     "19e73caaa9b7c73f": [
       "committed migrations declare intent @regression 2026-05-28-unique-index-tables.sql: carries a runner-visible `-- xchain:migration mode=auto|manual` tag",
@@ -886,20 +879,6 @@
       "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-001: should decode a dynamically built OP_RETURN transaction",
       "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-001: should return an object with data, rawData, source, destination, and dispenseOutputs"
     ],
-    "3a2b94700182a205": [
-      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [ADVERSARIAL] an envelope anywhere but ins[0]: no action (\u00a73.5 pins the commit outpoint at input 0)",
-      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [ADVERSARIAL] envelope + MULTISIGN outputs: no action post-flag, the multisig action pre-flag",
-      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [ADVERSARIAL] envelope + OP_RETURN action: no action post-flag, RPC-free rejection",
-      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [ADVERSARIAL] envelope + chunk-lane marker: no action post-flag",
-      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [ADVERSARIAL] envelope + marker-only XCHN OP_RETURN: no action once carrier recognition is active",
-      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [ADVERSARIAL] two envelope inputs: no action, RPC-free",
-      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [REPLAY] the carrier-recognition boundary is exact: height H-1 replays shipped, height H rejects",
-      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [REPLAY] the flag boundary is exact: height H-1 replays shipped, height H rejects",
-      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [REPLAY] the same marker-only tx below the carrier-recognition height parses EXACTLY as shipped: the envelope action",
-      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [REPLAY] the same mixed tx below the flag height parses EXACTLY as shipped: the OP_RETURN action",
-      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated a rejected envelope clears the ACTION only: dispense outputs stay recorded",
-      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated additional reveal inputs (index >= 1) and change outputs are legal and ignored (\u00a73.5)"
-    ],
     "3a87e525ae152e17": [
       "util#logTimer() should log without throwing for a null label",
       "util#logTimer() should log without throwing for a past timer with a label",
@@ -915,14 +894,6 @@
     "3abae033a7d98a61": [
       "Database.verifyTables() file filtering @regression completes without choking on the migrations/ directory (no EISDIR)",
       "Database.verifyTables() file filtering @regression src/sql contains a non-.sql entry (the migrations dir): the regression trigger"
-    ],
-    "3af93dc7b226afa4": [
-      "Taproot envelope recognition constants conformance parity with the canonical xchain-documentation copy ENVELOPE_MAX_PAYLOAD and both activation maps are byte-equal to the canonical copy",
-      "Taproot envelope recognition constants conformance parity with the canonical xchain-documentation copy the golden tapleaf hash reproduces from the frozen script bytes",
-      "Taproot envelope recognition constants conformance parity with the canonical xchain-documentation copy the inlined golden bytes match the frozen vector file",
-      "Taproot envelope recognition constants conformance parity with the encoder validator ENVELOPE_MAX_PAYLOAD stays equal across the two services",
-      "Taproot envelope recognition constants conformance the decoder exports the vendored constants unchanged",
-      "Taproot envelope recognition constants conformance the recognition map is exactly the \u00a77 shape: BTC/LTC armed mainnet cohorts, genesis-active test networks, DOGE never"
     ],
     "3cd3e6e6d28f4e3a": [
       "E2E: Multi-Block Processing bulk catch-up processing C2.1: decoder should catch up after being stopped and restarted",
@@ -1081,6 +1052,21 @@
       "endpoint chain-tier identity gate @regression the two deliberate fail-open holes an absent chain field is not a mismatch (a trimmed RPC proxy must not stall the fleet)",
       "endpoint chain-tier identity gate @regression the two deliberate fail-open holes an unrecognized chain string is not a mismatch (a future Core tier must not halt a healthy node)",
       "endpoint chain-tier identity gate @regression the two deliberate fail-open holes chainFieldMissing reports the unchecked state so silence is never read as agreement"
+    ],
+    "4ba2e505b3f4a9a0": [
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [ADVERSARIAL] an envelope anywhere but ins[0]: no action (\u00a73.5 pins the commit outpoint at input 0)",
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [ADVERSARIAL] envelope + MULTISIGN outputs: no action post-flag, the multisig action pre-flag",
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [ADVERSARIAL] envelope + OP_RETURN action: no action post-flag, RPC-free rejection",
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [ADVERSARIAL] envelope + chunk-lane marker: no action post-flag",
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [ADVERSARIAL] envelope + marker-only XCHN OP_RETURN: no action once carrier recognition is active",
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [ADVERSARIAL] two envelope inputs: no action, RPC-free",
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [REPLAY] the carrier-recognition boundary is exact: height H-1 replays shipped, height H rejects",
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [REPLAY] the flag boundary is exact: height H-1 replays shipped, height H rejects",
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [REPLAY] the same marker-only tx below the carrier-recognition height parses EXACTLY as shipped: the envelope action",
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [REPLAY] the same mixed tx below the flag height parses EXACTLY as shipped: the OP_RETURN action",
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated [REPLAY] the same non-ins[0] envelope below the flag height parses as shipped: no action and no refusal",
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated a rejected envelope clears the ACTION only: dispense outputs stay recorded",
+      "Taproot envelope recognition carrier arbitration (\u00a73.8), height-gated additional reveal inputs (index >= 1) and change outputs are legal and ignored (\u00a73.5)"
     ],
     "4c9a4aedcd3fdf21": [
       "Database#deleteOpenDispensers() compares expiration against the raw unix value without FROM_UNIXTIME (Y2038 safe)",
@@ -1622,22 +1608,6 @@
       "Boundary: DISPENSER Field Extraction Logic (A-4, A-7 through A-11) [REGRESSION P1] R-DSP-002 A-7: DISPENSER with version \"abc\": parseInt returns NaN (not equal to 0)",
       "Boundary: Dispenser Expiration Values (E-1 through E-7) [REGRESSION P1] R-DSP-002 E-1: expiration \"0\": valid timestamp, FROM_UNIXTIME(0) = 1970-01-01"
     ],
-    "7c29a82e0acc9544": [
-      "REORG_HALT: a halt the marker cannot record still leaves a record carries the cause when the marker write throws rather than returning false",
-      "REORG_HALT: a halt the marker cannot record still leaves a record emits REORG_HALT with reason and depth when db.markReorgHalted is missing",
-      "REORG_HALT: a halt the marker cannot record still leaves a record reports marker_persisted=false when the durable write is refused, and still aborts",
-      "REORG_HALT: a halt the marker cannot record still leaves a record reports the halt in memory even when nothing durable can be written",
-      "REORG_HALT: a halt the marker cannot record still leaves a record still emits REORG_HALT on the normal path, and says the marker was written",
-      "api.js GET /status halt surface (source pin) publishes reorg_halt_checked_at beside reorg_halted",
-      "api.js GET /status halt surface (source pin) spells the key exactly as the JSON-RPC health surface does",
-      "db: a failed temp-table drop stops being silent records the drop failure with the table and the cause",
-      "health probes: a failing probe stops being silent answers null instead of throwing when the error itself cannot be read",
-      "health probes: a failing probe stops being silent carries a cause even when the probe threw something that is not an Error",
-      "health probes: a failing probe stops being silent keeps the two probes on separate throttles, so one failure cannot mask the other",
-      "health probes: a failing probe stops being silent names the db_ping probe on /live when the ping throws",
-      "health probes: a failing probe stops being silent names the reorg_halt probe on /live, the failure that makes a halted decoder read clean",
-      "health probes: a failing probe stops being silent throttles a repeating probe failure to one line per window and counts the rest"
-    ],
     "7d5dc72476b4d580": [
       "BATCH dispenser registration several DISPENSER sub-commands in one BATCH defaults expiration PER SUB-COMMAND while a sibling keeps its explicit one",
       "BATCH dispenser registration several DISPENSER sub-commands in one BATCH gives each sub-command its OWN expiration, not the transaction one",
@@ -1741,6 +1711,17 @@
       "migrate.js operator CLI argv refusal @regression an empty --file= value applies nothing rather than widening to everything",
       "migrate.js operator CLI argv refusal @regression an unknown flag applies nothing and exits 2",
       "migrate.js operator CLI argv refusal @regression the refusal prints both modes so an operator can tell them apart"
+    ],
+    "82f18e9dded2dd48": [
+      "Taproot envelope recognition constants conformance parity with the canonical xchain-documentation copy ENVELOPE_MAX_PAYLOAD and both activation maps are byte-equal to the canonical copy",
+      "Taproot envelope recognition constants conformance parity with the canonical xchain-documentation copy every adversarial entry is either executed above or mapped to a local test that still exists",
+      "Taproot envelope recognition constants conformance parity with the canonical xchain-documentation copy every adversarial entry that carries bytes runs against the decoder and meets its expect",
+      "Taproot envelope recognition constants conformance parity with the canonical xchain-documentation copy the envelope_not_input_0 witness IS an action at input 0, so its refusal comes from the index alone",
+      "Taproot envelope recognition constants conformance parity with the canonical xchain-documentation copy the golden tapleaf hash reproduces from the frozen script bytes",
+      "Taproot envelope recognition constants conformance parity with the canonical xchain-documentation copy the inlined golden bytes match the frozen vector file",
+      "Taproot envelope recognition constants conformance parity with the encoder validator ENVELOPE_MAX_PAYLOAD stays equal across the two services",
+      "Taproot envelope recognition constants conformance the decoder exports the vendored constants unchanged",
+      "Taproot envelope recognition constants conformance the recognition map is exactly the \u00a77 shape: BTC/LTC armed mainnet cohorts, genesis-active test networks, DOGE never"
     ],
     "83cb7e9cd2340bd1": [
       "BlockchainConnector (extra coverage) #getBlock() ECONNABORTED handling should pass hexFormat=false as verbose=true to the RPC",
@@ -2116,34 +2097,6 @@
       "roundtrip conformance fixture: every case reaches the stored record reassembles the envelope payload as the encoder compiled it, chunk boundaries included",
       "roundtrip conformance fixture: every case reaches the stored record recognizes each envelope as the carrier, with the envelope ceiling"
     ],
-    "9b881b6b474e5b3d": [
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides a clear newer than the halt reads as not halted, and says when and why it was cleared",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides a halt row with an unreadable code or payload still counts as live (fail-closed)",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides a halt with no clear is live",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides a later halt after a clear is live again",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides asks for the newest of BOTH codes in one query",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt clears when the pinned halt is still the live one",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt is a no-op on a database that is not halted",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt refuses a missing or trivial reason before touching the database",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt refuses a pinned clear when the live halt id is unreadable (fail-closed)",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt refuses when the live halt is not the one the checks were taken against",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt reports not-cleared when the write does not land",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt writes a REORG_HALT_CLEARED row that supersedes the halt and confirms by read-back",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clears when the driver returns the halt row id as a BigInt",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides getReorgHaltMarker surfaces the live halt id the clear pins to",
-      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides no row at all is not halted",
-      "clear-reorg-halt CLI --dry-run reports the verdict and writes nothing",
-      "clear-reorg-halt CLI --dry-run without --reason prints the verdict, writes nothing and exits 0",
-      "clear-reorg-halt CLI clears a clean database and records the checks",
-      "clear-reorg-halt CLI is a no-op when no halt is live",
-      "clear-reorg-halt CLI parses --reason, --force and --dry-run",
-      "clear-reorg-halt CLI pins the halt its checks were measured against",
-      "clear-reorg-halt CLI refuses a database that has held dispenser state unless forced, and records the force",
-      "clear-reorg-halt CLI refuses when the decoder halted again while the checks ran, and says to re-run",
-      "clear-reorg-halt CLI refuses without a substantive reason and writes nothing",
-      "clear-reorg-halt CLI refuses, and cannot be forced, while rolled-back blocks are still missing above the tip",
-      "clear-reorg-halt CLI reports failure when the clear row does not land"
-    ],
     "9c60729c4afc15d8": [
       "BATCH sub-command ACTION-name gate and alias expansion the indexer side of the argument, driven not asserted enables names this decoder does not know, which is why the gate stops at the empty one",
       "BATCH sub-command ACTION-name gate and alias expansion the indexer side of the argument, driven not asserted really does reject the EMPTY ACTION name, which is what suppression rests on",
@@ -2304,6 +2257,14 @@
       "CE-03: Database Connection Pool Exhaustion getConnection should return transactionConnection when available",
       "CE-03: Database Connection Pool Exhaustion transaction lock queue should serialize concurrent callers"
     ],
+    "ace818c6415f144e": [
+      "Database.destructiveAutoStatement() prefix forms @regression catches ALTER IGNORE and CREATE TRIGGER end to end from raw file text",
+      "Database.destructiveAutoStatement() prefix forms @regression flags CREATE TRIGGER / EVENT / routine / view and any non-table ALTER",
+      "Database.destructiveAutoStatement() prefix forms @regression flags every ALTER IGNORE TABLE (IGNORE deletes duplicate-key rows)",
+      "Database.destructiveAutoStatement() prefix forms @regression runs the ALTER clause checks on ALTER ONLINE TABLE",
+      "Database.destructiveAutoStatement() prefix forms @regression still allows additive ALTER ONLINE TABLE and a table merely named ignore",
+      "Database.destructiveAutoStatement() prefix forms @regression still allows the committed CREATE TABLE / CREATE INDEX forms"
+    ],
     "b14912241cdeb24d": [
       "dispenser-open gate - optional-tail creates [REGRESSION P1] accepts a create that ends at GET_AMOUNT",
       "dispenser-open gate: coin parity with the indexer [REGRESSION P1] R-DSP-002 opens only when BOTH coin fields equal the local coin",
@@ -2386,6 +2347,23 @@
       "XChainDecoder.verifyReorg mid-walk tip regression refuses a same-tier foreign endpoint tip refresh (genesis pin mismatch) and deletes no local blocks",
       "XChainDecoder.verifyReorg mid-walk tip regression still accepts the refreshed tip when block 0 agrees, so the self-heal happy path is unchanged"
     ],
+    "b93099e3142675e4": [
+      "REORG_HALT: a halt the marker cannot record still leaves a record carries the cause when the marker write throws rather than returning false",
+      "REORG_HALT: a halt the marker cannot record still leaves a record emits REORG_HALT with reason and depth when db.markReorgHalted is missing",
+      "REORG_HALT: a halt the marker cannot record still leaves a record reports marker_persisted=false when the durable write is refused, and still aborts",
+      "REORG_HALT: a halt the marker cannot record still leaves a record reports the halt in memory even when nothing durable can be written",
+      "REORG_HALT: a halt the marker cannot record still leaves a record still emits REORG_HALT on the normal path, and says the marker was written",
+      "api.js GET /status halt surface (source pin) publishes reorg_halt_checked_at beside reorg_halted",
+      "api.js GET /status halt surface (source pin) publishes the operator-clear pair the health method carries",
+      "api.js GET /status halt surface (source pin) spells the key exactly as the JSON-RPC health surface does",
+      "db: a failed temp-table drop stops being silent records the drop failure with the table and the cause",
+      "health probes: a failing probe stops being silent answers null instead of throwing when the error itself cannot be read",
+      "health probes: a failing probe stops being silent carries a cause even when the probe threw something that is not an Error",
+      "health probes: a failing probe stops being silent keeps the two probes on separate throttles, so one failure cannot mask the other",
+      "health probes: a failing probe stops being silent names the db_ping probe on /live when the ping throws",
+      "health probes: a failing probe stops being silent names the reorg_halt probe on /live, the failure that makes a halted decoder read clean",
+      "health probes: a failing probe stops being silent throttles a repeating probe failure to one line per window and counts the rest"
+    ],
     "b97f08cbf07b98ec": [
       "CE-09: Unhandled Promise Rejection api.js catch handler should track decoder crash state",
       "CE-09: Unhandled Promise Rejection decoder.start() should throw when database creation fails",
@@ -2426,6 +2404,22 @@
       "protocol time parity with indexer @regression keeps protocolTime behavior identical across value vectors",
       "protocol time parity with indexer @regression keeps the consensus constants identical"
     ],
+    "bf2c76cad3b8a7fc": [
+      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] a payload push that canonicalizes to a bare opcode breaks the walk (encoder rebalance exists for this)",
+      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] an annex-bearing reveal is never recognized (BIP341 end-indexed parsing)",
+      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] bad magic is not recognized",
+      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] foreign ord-style inscriptions are not recognized",
+      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] frozen vectors: a bare OP_7 and an explicit 01 07 push as the last payload element are both refused",
+      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] fuzzed witness stacks never throw and never false-positive",
+      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] structural violations are all rejected without throwing",
+      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] the rebalanced form of the same payload IS recognized and reassembles identically",
+      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] unknown format byte (0x01) is invisible by design",
+      "Taproot envelope recognition detectEnvelopeWitness() accepts the odd-parity control block first byte (0xc1)",
+      "Taproot envelope recognition detectEnvelopeWitness() recognition is framing-agnostic: a fat-framed (PUSHDATA1) payload push reassembles identically",
+      "Taproot envelope recognition detectEnvelopeWitness() recognition reads only the top two stack items: the signature slot is opaque to it",
+      "Taproot envelope recognition detectEnvelopeWitness() recognizes a multi-push envelope and concatenates pushes in order",
+      "Taproot envelope recognition detectEnvelopeWitness() recognizes the golden witness and reassembles the exact payload bytes"
+    ],
     "c3dab6aacd71c13e": [
       "BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance a DISARMED network is inactive at every block time, including absurd ones",
       "BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance arms at exactly the indexer BATCH_ISSUANCE_LIMITS instant on every network (one boundary)",
@@ -2445,6 +2439,36 @@
       "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-001: should decode an OP_RETURN transaction with XCHN payload",
       "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-001: should return null for a coinbase transaction",
       "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-004: should decode a 1-of-3 multisig transaction"
+    ],
+    "c7bb56e0e47bab3f": [
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides a clear newer than the halt reads as not halted, and says when and why it was cleared",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides a halt row with an unreadable code or payload still counts as live (fail-closed)",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides a halt with no clear is live",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides a later halt after a clear is live again",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides asks for the newest of BOTH codes in one query",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt clears when the pinned halt is still the live one",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt is a no-op on a database that is not halted",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt refuses a missing or trivial reason before touching the database",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt refuses a pinned clear when the live halt id is unreadable (fail-closed)",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt refuses an unpinned clear when the live halt id is unreadable (fail-closed)",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt refuses when the live halt is not the one the checks were taken against",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt reports not-cleared when the write does not land",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clearReorgHalt writes a REORG_HALT_CLEARED row that supersedes the halt and confirms by read-back",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides clears when the driver returns the halt row id as a BigInt",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides getReorgHaltMarker surfaces the live halt id the clear pins to",
+      "Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides no row at all is not halted",
+      "clear-reorg-halt CLI --dry-run reports the verdict and writes nothing",
+      "clear-reorg-halt CLI --dry-run without --reason prints the verdict, writes nothing and exits 0",
+      "clear-reorg-halt CLI clears a clean database and records the checks",
+      "clear-reorg-halt CLI is a no-op when no halt is live",
+      "clear-reorg-halt CLI parses --reason, --force and --dry-run",
+      "clear-reorg-halt CLI pins the halt its checks were measured against",
+      "clear-reorg-halt CLI refuses a database that has held dispenser state unless forced, and records the force",
+      "clear-reorg-halt CLI refuses a live halt whose events id is unreadable, dry run included, and never clears",
+      "clear-reorg-halt CLI refuses when the decoder halted again while the checks ran, and says to re-run",
+      "clear-reorg-halt CLI refuses without a substantive reason and writes nothing",
+      "clear-reorg-halt CLI refuses, and cannot be forced, while rolled-back blocks are still missing above the tip",
+      "clear-reorg-halt CLI reports failure when the clear row does not land"
     ],
     "c907290d04418767": [
       "Boundary: bigIntSatoshiToDecimalsString (DB-6 through DB-8) -1 \u2192 \"-0.00000001\"",
@@ -2561,21 +2585,6 @@
       "DISPENSER PRICE v1 oracle-fee output capture captures BOTH the protocol fee output and the oracle-fee output on one create",
       "DISPENSER PRICE v1 oracle-fee output capture captures a v2 refill oracle-fee output using the stored dispenser oracle address",
       "DISPENSER PRICE v1 oracle-fee output capture captures the oracle-fee output of a v0 Mode B create"
-    ],
-    "d392f35b47441600": [
-      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] a payload push that canonicalizes to a bare opcode breaks the walk (encoder rebalance exists for this)",
-      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] an annex-bearing reveal is never recognized (BIP341 end-indexed parsing)",
-      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] bad magic is not recognized",
-      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] foreign ord-style inscriptions are not recognized",
-      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] fuzzed witness stacks never throw and never false-positive",
-      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] structural violations are all rejected without throwing",
-      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] the rebalanced form of the same payload IS recognized and reassembles identically",
-      "Taproot envelope recognition detectEnvelopeWitness() [ADVERSARIAL] unknown format byte (0x01) is invisible by design",
-      "Taproot envelope recognition detectEnvelopeWitness() accepts the odd-parity control block first byte (0xc1)",
-      "Taproot envelope recognition detectEnvelopeWitness() recognition is framing-agnostic: a fat-framed (PUSHDATA1) payload push reassembles identically",
-      "Taproot envelope recognition detectEnvelopeWitness() recognition reads only the top two stack items: the signature slot is opaque to it",
-      "Taproot envelope recognition detectEnvelopeWitness() recognizes a multi-push envelope and concatenates pushes in order",
-      "Taproot envelope recognition detectEnvelopeWitness() recognizes the golden witness and reassembles the exact payload bytes"
     ],
     "d39e2dbb1562d76b": [
       "Database#insertTransactionOutput() converts BigInt amount to decimal string via bigIntSatoshiToDecimalsString",
@@ -2934,6 +2943,20 @@
       "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler suppresses an over-budget batch on regtest, where the handler rejects it whole",
       "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler under-charges DEPLOY rather than guessing its format, which is the safe direction"
     ],
+    "f271518050d7c3b9": [
+      "/live gates on the poll-loop heartbeat answers 200 while the loop is iterating, caught up and quiet",
+      "/live gates on the poll-loop heartbeat answers 503 the moment the running flag drops, ahead of the silence window",
+      "/live gates on the poll-loop heartbeat answers 503 when the DB ping fails, which the heartbeat must not mask",
+      "/live gates on the poll-loop heartbeat answers 503 when the loop stops iterating, with nothing else having changed",
+      "/live gates on the poll-loop heartbeat is not silent before the loop has iterated once, so a booting decoder stays 200",
+      "/live gates on the poll-loop heartbeat reports a latent REORG_HALT marker on the surface that is actually polled",
+      "/live gates on the poll-loop heartbeat reports the halt as a stable false, not an absent key, when there is no marker",
+      "/live gates on the poll-loop heartbeat stays 200 through a node-tip outage, so containers are not restarted",
+      "/live gates on the poll-loop heartbeat still answers 200 while halted, so autoheal cannot restart-loop a resync case",
+      "/live says whether the halt marker was ever read publishes a null reorg_halt_checked_at when no marker read has completed",
+      "/live says whether the halt marker was ever read publishes the read time once a marker read has completed",
+      "/live says whether the halt marker was ever read publishes who cleared a halt, so a cleared decoder is not read as never halted"
+    ],
     "f2b4a0f1e0a013b6": [
       "Database#createAddress() inserts and returns id when address does not exist",
       "Database#createAddress() returns 1 for empty string address",
@@ -3056,8 +3079,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 185,
-      "titleCount": 1719,
+      "fileCount": 187,
+      "titleCount": 1738,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3147,8 +3170,8 @@
         "test/unit/db_queries.test/20_error_path_transaction_connection_branches.test.js": "054fdd1916b39a5f",
         "test/unit/db_query_helpers.test.js": "6fa21ab5be3abe7a",
         "test/unit/db_session_timezone_utc.test.js": "2a1f796a2739fb5e",
-        "test/unit/decoder_halt_diagnostics.test.js": "7c29a82e0acc9544",
-        "test/unit/decoder_live_heartbeat.test.js": "19ce1efea7b5f1f0",
+        "test/unit/decoder_halt_diagnostics.test.js": "b93099e3142675e4",
+        "test/unit/decoder_live_heartbeat.test.js": "f271518050d7c3b9",
         "test/unit/decoder_stress_sweep.test.js": "973dda09a83b0b1a",
         "test/unit/decoder_tip_stale_surface.test.js": "cdab1aa16d30bd48",
         "test/unit/dispenser_cancel_edit_db.test.js": "80d233d9d6bb2811",
@@ -3187,6 +3210,7 @@
         "test/unit/migration_runner.test/05_run_migrations_migration_preconditions.test.js": "4044805d7869c790",
         "test/unit/migration_runner.test/06_database_split_sql_statements.test.js": "45857eb89566bdb3",
         "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "90ab87a9e38be026",
+        "test/unit/migration_runner.test/08_destructive_guard_prefix_forms.test.js": "ace818c6415f144e",
         "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
         "test/unit/node_catch_up_wait.test.js": "4763aa60db951190",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
@@ -3205,7 +3229,7 @@
         "test/unit/protocol_time_parity.test.js": "bea80fd3971653d5",
         "test/unit/remove_obfuscation.test.js": "0eb0aadd100cef95",
         "test/unit/reorg_depth_across_restart.test.js": "0952dfb65faa59ba",
-        "test/unit/reorg_halt_clear.test.js": "9b881b6b474e5b3d",
+        "test/unit/reorg_halt_clear.test.js": "c7bb56e0e47bab3f",
         "test/unit/reorg_halt_park.test.js": "b6be0fd71f5537fb",
         "test/unit/reorg_halt_surface.test.js": "51c14bbdc7db5a0e",
         "test/unit/repo/fixture_ports.test.js": "dc378898866ff01a",
@@ -3224,13 +3248,14 @@
         "test/unit/sql_quote_backslash_escapes.test.js": "b72d4e6d05233677",
         "test/unit/sql_schema_parse_coverage.test.js": "094df283a0e43bcb",
         "test/unit/status_lag_field.test.js": "418aa8572442df90",
-        "test/unit/taproot_envelope.test.js": "d392f35b47441600",
+        "test/unit/taproot_envelope.test.js": "bf2c76cad3b8a7fc",
         "test/unit/taproot_envelope.test/01_envelope_recognition_height_envelope_active_at.test.js": "2c50360ec142d262",
         "test/unit/taproot_envelope.test/02_parse_transaction_golden_envelope_reveal.test.js": "222d1bde1d8da99f",
         "test/unit/taproot_envelope.test/03_per_encoding_4_ceiling.test.js": "0ab9816c47311b1c",
-        "test/unit/taproot_envelope.test/04_carrier_arbitration_3_8_height_gated.test.js": "3a2b94700182a205",
-        "test/unit/taproot_envelope.test/05_constants_conformance.test.js": "3af93dc7b226afa4",
+        "test/unit/taproot_envelope.test/04_carrier_arbitration_3_8_height_gated.test.js": "4ba2e505b3f4a9a0",
+        "test/unit/taproot_envelope.test/05_constants_conformance.test.js": "82f18e9dded2dd48",
         "test/unit/taproot_envelope.test/06_wire_fidelity_with_the_shipped_encoder_sibling_gated.test.js": "41c7af9fde59dd5a",
+        "test/unit/taproot_envelope.test/07_envelope_source_pubkey_capture.test.js": "0c5f9fce59434a2d",
         "test/unit/tier_manifest.test.js": "2a3c25e6d0fc5dac",
         "test/unit/util.test.js": "81be8bb6cf1dea2f",
         "test/unit/util_extra.test.js": "3a87e525ae152e17",
@@ -3535,8 +3560,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 185,
-      "titleCount": 1719,
+      "fileCount": 187,
+      "titleCount": 1738,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3626,8 +3651,8 @@
         "test/unit/db_queries.test/20_error_path_transaction_connection_branches.test.js": "054fdd1916b39a5f",
         "test/unit/db_query_helpers.test.js": "6fa21ab5be3abe7a",
         "test/unit/db_session_timezone_utc.test.js": "2a1f796a2739fb5e",
-        "test/unit/decoder_halt_diagnostics.test.js": "7c29a82e0acc9544",
-        "test/unit/decoder_live_heartbeat.test.js": "19ce1efea7b5f1f0",
+        "test/unit/decoder_halt_diagnostics.test.js": "b93099e3142675e4",
+        "test/unit/decoder_live_heartbeat.test.js": "f271518050d7c3b9",
         "test/unit/decoder_stress_sweep.test.js": "973dda09a83b0b1a",
         "test/unit/decoder_tip_stale_surface.test.js": "cdab1aa16d30bd48",
         "test/unit/dispenser_cancel_edit_db.test.js": "80d233d9d6bb2811",
@@ -3666,6 +3691,7 @@
         "test/unit/migration_runner.test/05_run_migrations_migration_preconditions.test.js": "4044805d7869c790",
         "test/unit/migration_runner.test/06_database_split_sql_statements.test.js": "45857eb89566bdb3",
         "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "90ab87a9e38be026",
+        "test/unit/migration_runner.test/08_destructive_guard_prefix_forms.test.js": "ace818c6415f144e",
         "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
         "test/unit/node_catch_up_wait.test.js": "4763aa60db951190",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
@@ -3684,7 +3710,7 @@
         "test/unit/protocol_time_parity.test.js": "bea80fd3971653d5",
         "test/unit/remove_obfuscation.test.js": "0eb0aadd100cef95",
         "test/unit/reorg_depth_across_restart.test.js": "0952dfb65faa59ba",
-        "test/unit/reorg_halt_clear.test.js": "9b881b6b474e5b3d",
+        "test/unit/reorg_halt_clear.test.js": "c7bb56e0e47bab3f",
         "test/unit/reorg_halt_park.test.js": "b6be0fd71f5537fb",
         "test/unit/reorg_halt_surface.test.js": "51c14bbdc7db5a0e",
         "test/unit/repo/fixture_ports.test.js": "dc378898866ff01a",
@@ -3703,13 +3729,14 @@
         "test/unit/sql_quote_backslash_escapes.test.js": "b72d4e6d05233677",
         "test/unit/sql_schema_parse_coverage.test.js": "094df283a0e43bcb",
         "test/unit/status_lag_field.test.js": "418aa8572442df90",
-        "test/unit/taproot_envelope.test.js": "d392f35b47441600",
+        "test/unit/taproot_envelope.test.js": "bf2c76cad3b8a7fc",
         "test/unit/taproot_envelope.test/01_envelope_recognition_height_envelope_active_at.test.js": "2c50360ec142d262",
         "test/unit/taproot_envelope.test/02_parse_transaction_golden_envelope_reveal.test.js": "222d1bde1d8da99f",
         "test/unit/taproot_envelope.test/03_per_encoding_4_ceiling.test.js": "0ab9816c47311b1c",
-        "test/unit/taproot_envelope.test/04_carrier_arbitration_3_8_height_gated.test.js": "3a2b94700182a205",
-        "test/unit/taproot_envelope.test/05_constants_conformance.test.js": "3af93dc7b226afa4",
+        "test/unit/taproot_envelope.test/04_carrier_arbitration_3_8_height_gated.test.js": "4ba2e505b3f4a9a0",
+        "test/unit/taproot_envelope.test/05_constants_conformance.test.js": "82f18e9dded2dd48",
         "test/unit/taproot_envelope.test/06_wire_fidelity_with_the_shipped_encoder_sibling_gated.test.js": "41c7af9fde59dd5a",
+        "test/unit/taproot_envelope.test/07_envelope_source_pubkey_capture.test.js": "0c5f9fce59434a2d",
         "test/unit/tier_manifest.test.js": "2a3c25e6d0fc5dac",
         "test/unit/util.test.js": "81be8bb6cf1dea2f",
         "test/unit/util_extra.test.js": "3a87e525ae152e17",

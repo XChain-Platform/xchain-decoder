@@ -31,10 +31,13 @@ function decomment(src) {
 function manifestSlice(flag) {
     return Object.entries(MANIFEST.actions).filter(([, v]) => v[flag]).map(([k]) => k).sort();
 }
+// Name the files that hold the literals (XChainDecoder.js only re-exports them).
+const DECODER_CONSTANTS_REL = 'src/XChainDecoder/constants.js';
+const DECODER_ALIASES_REL = 'src/protocol/action_aliases.js';
 function localDecoderSet() {
-    const src = decomment(fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'XChainDecoder', 'constants.js'), 'utf8'));
+    const src = decomment(fs.readFileSync(path.join(__dirname, '..', '..', ...DECODER_CONSTANTS_REL.split('/')), 'utf8'));
     const m = src.match(/VALID_ACTION_NAMES = new Set\(\[([\s\S]*?)\]\)/);
-    assert.ok(m, 'could not locate VALID_ACTION_NAMES Set literal in src/XChainDecoder.js');
+    assert.ok(m, 'could not locate VALID_ACTION_NAMES Set literal in ' + DECODER_CONSTANTS_REL);
     return [...new Set([...m[1].matchAll(/'([A-Z_]+)'/g)].map(x => x[1]))].sort();
 }
 
@@ -48,7 +51,8 @@ describe('ACTION manifest conformance: decoder wireDecoded set @regression', fun
             'decoder VALID_ACTION_NAMES drifted from action-manifest.json wireDecoded set. ' +
             'MISSING (in manifest, not decoded -> on-chain instances silently dropped): ' + JSON.stringify(missing) +
             '. EXTRA (decoded, not in manifest -> add an entry): ' + JSON.stringify(extra) +
-            '. Edit xchain-documentation/protocol/action-manifest.json + re-vendor, or wire the decoder.');
+            '. Edit xchain-documentation/protocol/action-manifest.json + re-vendor, or wire the decoder' +
+            ' (VALID_ACTION_NAMES in ' + DECODER_CONSTANTS_REL + ').');
     });
 
     // The decoder is the on-chain arbiter that performs alias expansion
@@ -59,10 +63,11 @@ describe('ACTION manifest conformance: decoder wireDecoded set @regression', fun
         const { ACTION_ALIASES } = require('../../src/XChainDecoder.js');
         const expected = MANIFEST.aliases || {};
         assert.deepStrictEqual({ ...ACTION_ALIASES }, expected,
-            'decoder ACTION_ALIASES (src/XChainDecoder.js) drifted from action-manifest.json aliases. ' +
+            'decoder ACTION_ALIASES (literal in ' + DECODER_ALIASES_REL + ', re-exported by src/XChainDecoder.js)' +
+            ' drifted from action-manifest.json aliases. ' +
             'decoder=' + JSON.stringify({ ...ACTION_ALIASES }) +
             ' manifest=' + JSON.stringify(expected) +
-            '. Edit xchain-documentation/protocol/action-manifest.json + re-vendor, or wire src/XChainDecoder.js.');
+            '. Edit xchain-documentation/protocol/action-manifest.json + re-vendor, or wire ' + DECODER_ALIASES_REL + '.');
     });
 
     // IDENTITY: the vendored copy must match the canonical source. Refuses an

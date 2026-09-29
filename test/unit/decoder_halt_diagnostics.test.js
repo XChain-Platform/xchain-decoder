@@ -205,4 +205,15 @@ describe('api.js GET /status halt surface (source pin)', function () {
         assert.ok(occurrences.length >= 2,
             'reorg_halt_checked_at must appear on both the health result and GET /status')
     })
+
+    it('publishes the operator-clear pair the health method carries', function () {
+        // The node's status reader falls back to this route, and without the pair a
+        // cleared decoder reads exactly like one that was never halted.
+        const at = src.indexOf("app.get('/status'")
+        const body = src.slice(at, src.indexOf('function createJsonRpcController', at))
+        assert.ok(/reorg_halt_cleared_at:\s*reorgHalt\.cleared_at/.test(body),
+            'GET /status drops reorg_halt_cleared_at')
+        assert.ok(/reorg_halt_cleared_reason:\s*reorgHalt\.cleared_reason/.test(body),
+            'GET /status drops reorg_halt_cleared_reason')
+    })
 })

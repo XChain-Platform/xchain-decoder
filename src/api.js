@@ -173,7 +173,11 @@ function registerStatusRoute(app, decoder, isDecoderRunning){
             // True only once the parse loop has STOPPED on the halt. A latent marker on a
             // decoder still parsing forward reports false; see getReorgHaltStatus().
             reorg_halt_parked: reorgHalt.parked === true,
-            reorg_halt_parked_at: reorgHalt.parked_at || null
+            reorg_halt_parked_at: reorgHalt.parked_at || null,
+            // Set once an operator cleared a halt; the node's status reader falls back
+            // to this route and reads the pair to show a halt WAS here and who cleared it.
+            reorg_halt_cleared_at:     reorgHalt.cleared_at || null,
+            reorg_halt_cleared_reason: reorgHalt.cleared_reason || null
         })
     })
 }

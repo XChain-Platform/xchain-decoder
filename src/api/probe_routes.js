@@ -149,7 +149,7 @@ async function getLiveProbeState(decoder, isDecoderRunning) {
     // for a fault no restart touches. That holds in both halt shapes, latent (the
     // decoder keeps parsing forward and is doing useful work) and parked (it has
     // stopped on purpose and is waiting for the clear, which lands while it runs).
-    let reorgHalt = { halted: false, reason: null, at: null }
+    let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
     if (dbOk && typeof decoder.checkReorgHalt === 'function'){
         try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', '/live', e) }
     }
@@ -182,6 +182,12 @@ function sendLiveResponse(res, decoder, state) {
         // decoder answering 503 here would restart-loop it for a marker no restart
         // clears. isStalled() carries the matching gate.
         reorg_halt_parked: reorgHalt.parked === true,
+        // Ships beside the halt flag, as on /status and the health method: null means no
+        // marker probe has completed, so a false halt flag is not yet an answer.
+        reorg_halt_checked_at: reorgHalt.checked_at || null,
+        // Set once an operator cleared a halt; null while a halt is live or none was recorded.
+        reorg_halt_cleared_at:     reorgHalt.cleared_at || null,
+        reorg_halt_cleared_reason: reorgHalt.cleared_reason || null,
         // A frozen node tip, reported but deliberately NOT gating. isStalled()
         // returns false while the tip is stale on purpose: restarting the container
         // cannot fix an upstream node outage, and gating on it re-opens the
