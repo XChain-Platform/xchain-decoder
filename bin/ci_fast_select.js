@@ -55,12 +55,12 @@ function group_for(file) {
     return GROUPS.find((group) => group.pattern.test(file));
 }
 
-function has_consensus_prefix(file, consensusPrefixes = CONSENSUS) {
-    return consensusPrefixes.some((prefix) => file.startsWith(prefix));
+function has_consensus_prefix(file) {
+    return CONSENSUS.some((prefix) => file.startsWith(prefix));
 }
 
-function is_consensus_path(file, consensusPrefixes = CONSENSUS) {
-    return file === 'package.json' || has_consensus_prefix(file, consensusPrefixes)
+function is_consensus_path(file) {
+    return file === 'package.json' || has_consensus_prefix(file)
         || /^test\/[^/]+\/support\//.test(file)
         || file.startsWith('test/helpers/')
         || file.startsWith('test/fixtures/');
@@ -82,11 +82,11 @@ function resolved_require_matches(file, changed_file) {
     return false;
 }
 
-function indirect_consensus_reasons(changed_file, findRequirers, consensusPrefixes) {
+function indirect_consensus_reasons(changed_file, findRequirers) {
     if (!changed_file.startsWith('src/') || !changed_file.endsWith('.js')) return [];
     const basename = path.basename(changed_file, '.js');
     const importers = findRequirers(basename);
-    return importers.filter((file) => has_consensus_prefix(file, consensusPrefixes)
+    return importers.filter((file) => has_consensus_prefix(file)
         && resolved_require_matches(file, changed_file))
         .map((file) => `consensus importer: ${file} requires ${changed_file}`);
 }
@@ -111,16 +111,12 @@ function add_source_tests(source_file, candidates, selected, findRequirers) {
     }
 }
 
-function selectFastTests(
-    changedFiles,
-    { listTests, findRequirers },
-    { consensusPrefixes = CONSENSUS } = {}
-) {
+function selectFastTests(changedFiles, { listTests, findRequirers }) {
     const changed = [...new Set(changedFiles.filter(Boolean))];
     const reasons = [];
     for (const file of changed) {
-        if (is_consensus_path(file, consensusPrefixes)) reasons.push(`consensus: ${file}`);
-        reasons.push(...indirect_consensus_reasons(file, findRequirers, consensusPrefixes));
+        if (is_consensus_path(file)) reasons.push(`consensus: ${file}`);
+        reasons.push(...indirect_consensus_reasons(file, findRequirers));
     }
     if (reasons.length) {
         return { consensus: true, reasons: [...new Set(reasons)].sort(), tests: [] };
@@ -156,133 +152,6 @@ function find_requirers(needle) {
     }
 }
 
-function without_consensus_prefixes(prefixes) {
-    const removed = new Set(prefixes.flatMap((prefix) => {
-        const trimmed = prefix.trim();
-        if (!trimmed) return [];
-        return [trimmed, trimmed.endsWith('/') ? trimmed.slice(0, -1) : `${trimmed}/`];
-    }));
-    return CONSENSUS.filter((prefix) => !removed.has(prefix));
-}
-
-function changed_files_for_commit(commit) {
-    const revision = run_git(['rev-list', '--parents', '-n', '1', commit]);
-    const [, parent] = revision.split(' ');
-    if (parent) {
-        const output = run_git(['diff', '--name-only', `${parent}..${commit}`]);
-        return output ? output.split('\n') : [];
-    }
-    const output = run_git(['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', commit]);
-    return output ? output.split('\n') : [];
-}
-
-function empty_replay_counts() {
-    return { wholeUnit: 0, changedTests: 0, testOnly: 0, noTests: 0 };
-}
-
-function count_replay_plan(counts, changed, plan) {
-    if (plan.consensus) {
-        counts.wholeUnit++;
-    } else if (plan.tests.length && changed.every((file) => file.startsWith('test/'))) {
-        counts.testOnly++;
-    } else if (plan.tests.length) {
-        counts.changedTests++;
-    } else {
-        counts.noTests++;
-    }
-}
-
-function replay_plans(limit, narrowPrefixes) {
-    const output = run_git([
-        'log', '--first-parent', '-n', String(limit), '--format=%H', 'origin/develop'
-    ]);
-    const commits = output ? output.split('\n') : [];
-    const current = empty_replay_counts();
-    const narrowed = empty_replay_counts();
-    const consensusPrefixes = without_consensus_prefixes(narrowPrefixes);
-    const dependencies = { listTests: list_tests, findRequirers: find_requirers };
-    for (const commit of commits) {
-        const changed = changed_files_for_commit(commit);
-        count_replay_plan(current, changed, selectFastTests(changed, dependencies));
-        count_replay_plan(narrowed, changed, selectFastTests(changed, dependencies, {
-            consensusPrefixes
-        }));
-    }
-    return { commits, current, narrowed, consensusPrefixes, dependencies };
-}
-
-function fraction(value, total) {
-    return `${value}/${total}`;
-}
-
-function print_replay_row(name, total, counts) {
-    console.log([
-        name,
-        total,
-        fraction(counts.wholeUnit, total),
-        fraction(counts.changedTests, total),
-        fraction(counts.testOnly, total),
-        fraction(counts.noTests, total)
-    ].join(' '));
-}
-
-function parse_list(value) {
-    return value.split(',').map((item) => item.trim()).filter(Boolean);
-}
-
-function parse_must_select(value) {
-    return parse_list(value).map((pair) => {
-        const separator = pair.indexOf(':');
-        if (separator <= 0 || separator === pair.length - 1) {
-            throw new Error(`invalid --must-select pair: ${pair}`);
-        }
-        return { source: pair.slice(0, separator), test: pair.slice(separator + 1) };
-    });
-}
-
-function replay_options(args) {
-    const limit = Number(args[0]);
-    if (!Number.isSafeInteger(limit) || limit < 1) {
-        throw new Error('--replay requires a positive integer');
-    }
-    const options = { limit, narrowPrefixes: [], mustSelect: [] };
-    for (let index = 1; index < args.length; index += 2) {
-        const flag = args[index];
-        const value = args[index + 1];
-        if (!value || (flag !== '--narrow' && flag !== '--must-select')) {
-            throw new Error(`invalid replay option: ${flag || ''}`.trim());
-        }
-        if (flag === '--narrow') options.narrowPrefixes.push(...parse_list(value));
-        else options.mustSelect.push(...parse_must_select(value));
-    }
-    return options;
-}
-
-function run_replay(args) {
-    try {
-        const options = replay_options(args);
-        const result = replay_plans(options.limit, options.narrowPrefixes);
-        console.log('plan commits consensus-1 changed-tests test-only no-tests');
-        print_replay_row('current', result.commits.length, result.current);
-        if (options.narrowPrefixes.length) {
-            print_replay_row('narrowed', result.commits.length, result.narrowed);
-        }
-        let failed = false;
-        for (const pair of options.mustSelect) {
-            const plan = selectFastTests([pair.source], result.dependencies, {
-                consensusPrefixes: result.consensusPrefixes
-            });
-            const selected = plan.tests.some((test) => test.file === pair.test);
-            console.log(`must-select ${selected ? 'PASS' : 'FAIL'} ${pair.source}:${pair.test}`);
-            if (!selected) failed = true;
-        }
-        return failed ? 1 : 0;
-    } catch (error) {
-        console.error(`replay-error ${error.message}`);
-        return 2;
-    }
-}
-
 function build_plan() {
     const base = resolveBase({ env: process.env, git: run_git });
     if (!base) return { no_base: 'no valid push base or origin/develop merge base' };
@@ -314,11 +183,8 @@ function run_plan(plan) {
 }
 
 function main() {
-    const mode = process.argv[2];
-    if (mode === '--replay') return run_replay(process.argv.slice(3));
-    if (!['--plan', '--run'].includes(mode)) {
-        console.error('usage: node bin/ci_fast_select.js --plan|--run|--replay N ' +
-            '[--narrow prefix,...] [--must-select file:testfile,...]');
+    if (!['--plan', '--run'].includes(process.argv[2])) {
+        console.error('usage: node bin/ci_fast_select.js --plan|--run');
         return 2;
     }
     let plan;
@@ -332,13 +198,13 @@ function main() {
         console.log(`no-base ${plan.no_base}`);
         return 3;
     }
-    if (mode === '--plan') {
+    if (process.argv[2] === '--plan') {
         print_plan(plan);
         return 0;
     }
     return run_plan(plan);
 }
 
-module.exports = { replayPlans: replay_plans, resolveBase, selectFastTests };
+module.exports = { resolveBase, selectFastTests };
 
 if (require.main === module) process.exitCode = main();
