@@ -42,6 +42,7 @@ const Database = require('../../../src/db');
             async query(sql, params) {
                 if (/GET_LOCK/.test(sql))       return [{ l: '1' }];
                 if (/RELEASE_LOCK/.test(sql))   return [];
+                if (/^SET SESSION max_statement_time/.test(sql)) return [];
                 if (/CREATE TABLE/.test(sql))   return [];
                 if (/SELECT name, checksum FROM schema_migrations/.test(sql)) return ledgerRows;
                 // Post-run schema-contract assertion (dispensers.expiration BIGINT UNSIGNED).

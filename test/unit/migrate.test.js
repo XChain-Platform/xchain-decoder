@@ -13,7 +13,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Operator migration CLI (src/migrate.js) contract tests (no live DB).
+ * Operator migration CLI (src/db/migrate.js) contract tests (no live DB).
  *
  * migrate.js is the ONLY path that applies manual/destructive migrations,
  * so these pin its operator-facing contract: the env guard exits 2 before

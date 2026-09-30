@@ -42,15 +42,18 @@ unattended. Re-tag such a file `mode=manual` and apply it deliberately.
 - **`manual`** migrations apply only via the operator CLI:
 
   ```sh
-  npm run migrate        # node src/migrate.js - applies pending auto + manual
+  npm run migrate        # node src/db/migrate.js - applies pending auto + manual
+  npm run migrate -- --file <name.sql>   # scopes the run to one migration
   ```
 
   Reads `DECODER_DB_*` from the service environment. Run with the decoder stopped
-  if a migration's header says so.
+  if a migration's header says so. Some older migration headers name the runner's
+  former location; those files are checksummed and stay as written, so use the
+  commands above.
 
 Migrations are immutable once applied - editing an applied file is detected via a
-checksum mismatch and never silently re-run. On the operator path (`node
-src/migrate.js`) or with `MIGRATION_STRICT_CHECKSUM=1`, a mismatch fails closed
-(throws) so a diverged schema is caught in CI / by an operator; the passive
-decoder-startup path logs the mismatch at error level and continues, to avoid a
-surprise fleet-wide boot failure.
+checksum mismatch and never silently re-run. On the operator path (`npm run
+migrate`, i.e. `node src/db/migrate.js`) or with `MIGRATION_STRICT_CHECKSUM=1`, a
+mismatch fails closed (throws) so a diverged schema is caught in CI / by an
+operator; the passive decoder-startup path logs the mismatch at error level and
+continues, to avoid a surprise fleet-wide boot failure.

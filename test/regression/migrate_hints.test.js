@@ -22,12 +22,12 @@ const MIGRATE_RELATIVE = 'src/db/migrate.js'
 const LEGACY_MIGRATE_HINT = 'node src/migrate.js'
 const MIGRATE_HINT_PATTERN = /\bnode\s+([^\s`'"()]*migrate\.js)\b/g
 
-function javascriptFiles(dir) {
+function hintBearingFiles(dir) {
     const files = []
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const absolute = path.join(dir, entry.name)
-        if (entry.isDirectory()) files.push(...javascriptFiles(absolute))
-        else if (entry.isFile() && entry.name.endsWith('.js')) files.push(absolute)
+        if (entry.isDirectory()) files.push(...hintBearingFiles(absolute))
+        else if (entry.isFile() && /\.(js|md)$/.test(entry.name)) files.push(absolute)
     }
     return files
 }
@@ -38,7 +38,7 @@ describe('migration operator hints [REGRESSION P1]', () => {
 
         const hints = []
         const legacyHints = []
-        for (const file of javascriptFiles(SRC_ROOT)) {
+        for (const file of hintBearingFiles(SRC_ROOT)) {
             const source = fs.readFileSync(file, 'utf8')
             const relative = path.relative(REPO_ROOT, file).split(path.sep).join('/')
             if (source.includes(LEGACY_MIGRATE_HINT)) legacyHints.push(relative)

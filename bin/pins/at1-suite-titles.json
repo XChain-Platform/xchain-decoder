@@ -3011,6 +3011,18 @@
       "CE-02: RPC Timeout Storm getRawTransaction should retry up to 10 times on timeout",
       "CE-02: RPC Timeout Storm getRawTransactions should fail entire batch if one tx fails"
     ],
+    "f557b21579db13fd": [
+      "runMigrations() migration-scoped statement timeout @regression never touches the session when the lock is not acquired",
+      "runMigrations() migration-scoped statement timeout @regression raises the limit after GET_LOCK and restores it before RELEASE_LOCK",
+      "runMigrations() migration-scoped statement timeout @regression reads MIGRATE_QUERY_TIMEOUT=-5 as session values 3600, 30",
+      "runMigrations() migration-scoped statement timeout @regression reads MIGRATE_QUERY_TIMEOUT=0 as session values 0, 30",
+      "runMigrations() migration-scoped statement timeout @regression reads MIGRATE_QUERY_TIMEOUT=900000 as session values 900, 30",
+      "runMigrations() migration-scoped statement timeout @regression reads MIGRATE_QUERY_TIMEOUT=abc as session values 3600, 30",
+      "runMigrations() migration-scoped statement timeout @regression restores the limit before RELEASE_LOCK when a statement fails",
+      "runMigrations() migration-scoped statement timeout on scoped runs @regression destroys instead of pooling the connection when the restore fails",
+      "runMigrations() migration-scoped statement timeout on scoped runs @regression leaves the session alone for a scoped run with nothing to apply",
+      "runMigrations() migration-scoped statement timeout on scoped runs @regression raises and restores the limit for a scoped run that applies its file"
+    ],
     "f56486fd8ec9ad87": [
       "DISPENSER lifecycle mirror: advisory open-view a creator-issued lengthening edit still reaches the delegated dispenser",
       "DISPENSER lifecycle mirror: advisory open-view a delegated dispenser is NOT closed by a cancel from its original creator",
@@ -3079,8 +3091,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 187,
-      "titleCount": 1738,
+      "fileCount": 188,
+      "titleCount": 1748,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3211,6 +3223,7 @@
         "test/unit/migration_runner.test/06_database_split_sql_statements.test.js": "45857eb89566bdb3",
         "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "90ab87a9e38be026",
         "test/unit/migration_runner.test/08_destructive_guard_prefix_forms.test.js": "ace818c6415f144e",
+        "test/unit/migration_runner.test/09_migration_query_timeout.test.js": "f557b21579db13fd",
         "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
         "test/unit/node_catch_up_wait.test.js": "4763aa60db951190",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
@@ -3560,8 +3573,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 187,
-      "titleCount": 1738,
+      "fileCount": 188,
+      "titleCount": 1748,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3692,6 +3705,7 @@
         "test/unit/migration_runner.test/06_database_split_sql_statements.test.js": "45857eb89566bdb3",
         "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "90ab87a9e38be026",
         "test/unit/migration_runner.test/08_destructive_guard_prefix_forms.test.js": "ace818c6415f144e",
+        "test/unit/migration_runner.test/09_migration_query_timeout.test.js": "f557b21579db13fd",
         "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
         "test/unit/node_catch_up_wait.test.js": "4763aa60db951190",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",

@@ -166,7 +166,7 @@ module.exports = {
     // never roll back committed block data. At worst soft-expired rows linger a
     // little longer). Deterministic across nodes: keyed off canonical block height,
     // never wall clock. Bounds dispensers table growth (the reason streamed
-    // dispenser replication was disabled, see xchain-sync replicatedTables.js).
+    // dispenser replication was disabled, see xchain-sync src/schema/replicated_tables.js).
     async purgeExpiredDispensers(safeHeight) {
         if (safeHeight == null || safeHeight < 0) return true   // nothing reorg-safe yet (initial sync)
         const query = `
