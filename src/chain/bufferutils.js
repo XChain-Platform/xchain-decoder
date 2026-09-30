@@ -58,9 +58,12 @@ function writeUInt64LE(buffer, value, offset) {
 }
 exports.writeUInt64LE = writeUInt64LE;
 /**
- * Reverses the order of bytes in a buffer.
+ * Reverses the order of bytes in a buffer, IN PLACE. The upstream documentation
+ * for this function says it returns a new buffer; it does not, and a caller that
+ * believed it would find its own input reversed under it.
+ *
  * @param buffer - The buffer to reverse.
- * @returns A new buffer with the bytes reversed.
+ * @returns The same buffer, its bytes reversed.
  */
 function reverseBuffer(buffer) {
   if (buffer.length < 1) return buffer;

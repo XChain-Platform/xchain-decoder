@@ -31,7 +31,7 @@ const Database = require('../../../src/db');
 // fake connection whose ledger records a pinned historical checksum, and assert it
 // UPDATEs schema_migrations to the blessed hash instead of tripping the
 // immutability guard. The same code runs at decoder startup and under
-// `node src/migrate.js`, so a fleet-wide re-bless deploys through code rather
+// `node src/db/migrate.js`, so a fleet-wide re-bless deploys through code rather
 // than through direct SQL against each node.
     const crypto = require('crypto');
     const os     = require('os');

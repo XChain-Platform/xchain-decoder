@@ -18,8 +18,12 @@ export default {
 
   // ── What to mutate ─────────────────────────────────────────────────────────
   // Excludes db.js (requires real MariaDB) and api.js (requires running server).
+  // src/XChainDecoder.js is now a thin facade over src/XChainDecoder/**; both
+  // are mutated so coverage lands on the split implementation modules rather
+  // than stopping at the re-export layer.
   mutate: [
     'src/XChainDecoder.js',
+    'src/XChainDecoder/**',
     'src/chain/XChainBlockDecoder.js',
     'src/chain/blockchain_connector.js',
     'src/chain/crypto_networks.js',
@@ -35,13 +39,22 @@ export default {
     // the patch in each worker before any source file is loaded.
     require: ['test/unit/support/setup.js'],
     spec: ['test/unit/**/*.test.js'],
-    // ActionManifestConformance reads src/XChainDecoder.js as TEXT and greps it
-    // for a `VALID_ACTION_NAMES` Set literal. Stryker runs against an
-    // instrumented copy in its sandbox, where that literal no longer looks the
-    // way the regex expects, so the test fails on every mutation run including
-    // the dry run and takes the whole run down with it. It is a real guard on
-    // the real tree (npm test runs it); it just cannot participate here.
-    ignore: ['test/unit/action_manifest_conformance.test.js'],
+    // These tests read src/XChainDecoder.js and/or the src/XChainDecoder/**
+    // split modules as TEXT and grep them for source literals (e.g. a Set
+    // literal, an exact conditional string). Stryker runs against an
+    // instrumented copy of those files in its sandbox, where the literal no
+    // longer looks the way the regex expects, so the test fails on every
+    // mutation run including the dry run and takes the whole run down with
+    // it. Each is a real guard on the real tree (npm test runs it); it just
+    // cannot participate here now that the split modules are mutated too.
+    ignore: [
+      'test/unit/action_manifest_conformance.test.js',
+      'test/unit/chain_genesis_pin.test.js',
+      'test/unit/chain_identity_gate.test.js',
+      'test/unit/decoder_tip_stale_surface.test.js',
+      'test/unit/node_catch_up_wait.test.js',
+      'test/unit/node_catching_up_status.test.js',
+    ],
     config: 'test/mutation/.mocharc.mutation.yml',
     'no-package': true,
   },
@@ -62,9 +75,9 @@ export default {
   },
 
   // ── Quality thresholds ─────────────────────────────────────────────────────
-  // Overall score is low (~37%) due to 539 no-coverage mutants in XChainDecoder.js's
-  // start() method (requires running DB + bitcoind). The *covered code* score (~67%)
-  // is the meaningful metric for unit-test-only runs.
+  // Overall score is dragged down by no-coverage mutants in the paths that need a
+  // running DB + bitcoind (e.g. XChainDecoder.js's start()). The *covered code*
+  // score is the meaningful metric for unit-test-only runs.
   // "break: null" prevents exit-code failure; adjust upward as coverage improves.
   thresholds: {
     high: 80,

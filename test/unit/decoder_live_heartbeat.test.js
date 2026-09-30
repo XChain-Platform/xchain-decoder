@@ -194,3 +194,37 @@ describe('/live gates on the poll-loop heartbeat', function () {
         assert.strictEqual(res.body.db, false);
     });
 });
+
+describe('/live says whether the halt marker was ever read', function () {
+
+    it('publishes a null reorg_halt_checked_at when no marker read has completed', async function () {
+        // The probe is fail-soft, so a read that keeps failing leaves halted false;
+        // only the null timestamp separates that from a decoder that looked and is clean.
+        const decoder = caughtUpDecoder();
+        decoder.db.getReorgHaltMarker = async () => { throw new Error('events read denied'); };
+        const res = await getLive(liveApp(decoder));
+        assert.strictEqual(res.body.reorg_halted, false);
+        assert.ok('reorg_halt_checked_at' in res.body, '/live must carry the key, not omit it');
+        assert.strictEqual(res.body.reorg_halt_checked_at, null);
+    });
+
+    it('publishes the read time once a marker read has completed', async function () {
+        const decoder = caughtUpDecoder();
+        decoder.db.getReorgHaltMarker = async () => ({ halted: false, reason: null, at: null });
+        const res = await getLive(liveApp(decoder));
+        assert.strictEqual(res.body.reorg_halted, false);
+        assert.ok(Number(res.body.reorg_halt_checked_at) > 0, 'a completed read must stamp checked_at');
+    });
+
+    it('publishes who cleared a halt, so a cleared decoder is not read as never halted', async function () {
+        const decoder = caughtUpDecoder();
+        decoder.db.getReorgHaltMarker = async () => ({
+            halted: false, reason: null, at: null,
+            cleared_at: '2026-09-08T10:00:00.000Z', cleared_reason: 'range re-parsed and verified'
+        });
+        const res = await getLive(liveApp(decoder));
+        assert.strictEqual(res.body.reorg_halted, false);
+        assert.strictEqual(res.body.reorg_halt_cleared_at, '2026-09-08T10:00:00.000Z');
+        assert.strictEqual(res.body.reorg_halt_cleared_reason, 'range re-parsed and verified');
+    });
+});

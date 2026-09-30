@@ -151,6 +151,13 @@ describe('Database: the newest REORG_HALT / REORG_HALT_CLEARED row decides', fun
         assert.ok(!query.getCalls().some(c => /INSERT/.test(String(c.args[0]))), 'nothing written')
     })
 
+    it('clearReorgHalt refuses an unpinned clear when the live halt id is unreadable (fail-closed)', async function () {
+        const { db, query } = dbAnswering(() => [{ id: null, time: 't', code: 'REORG_HALT', data: '{not json' }])
+        const res = await db.clearReorgHalt({ reason: 'no pin, unreadable live id' })
+        assert.deepStrictEqual(res, { cleared: false, alreadyClear: false, superseded: true, liveHaltId: null })
+        assert.ok(!query.getCalls().some(c => /INSERT/.test(String(c.args[0]))), 'nothing written')
+    })
+
     it('getReorgHaltMarker surfaces the live halt id the clear pins to', async function () {
         const { db } = dbAnswering(() => [halt(7)])
         assert.strictEqual((await db.getReorgHaltMarker()).id, 7)
@@ -295,5 +302,18 @@ describe('clear-reorg-halt CLI', function () {
         const errors = []
         assert.strictEqual(await run({ db, argv: ['--reason', REASON], log: () => {}, error: (l) => errors.push(l) }), EXIT.HALT_SUPERSEDED)
         assert.ok(errors.some(l => /halted again/.test(l) && /events id 44/.test(l) && /run this again/.test(l)))
+    })
+})
+
+describe('clear-reorg-halt CLI', function () {
+    // A null marker id would skip the pin, so refuse before any check runs.
+    it('refuses a live halt whose events id is unreadable, dry run included, and never clears', async function () {
+        for (const argv of [['--reason', REASON], ['--dry-run']]) {
+            const { db, calls } = fakeDb({ haltId: null })
+            const errors = []
+            assert.strictEqual(await run({ db, argv, log: () => {}, error: (l) => errors.push(l) }), EXIT.FAILED)
+            assert.strictEqual(calls.clear.length, 0)
+            assert.ok(errors.some(l => /REFUSED/.test(l) && /events id could not be read/.test(l)))
+        }
     })
 })

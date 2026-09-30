@@ -88,6 +88,20 @@ function buildMarkerOnlyOpReturnTx(){
     tx.addOutput(bitcoin.script.compile([OP.OP_RETURN, cipher]), 0)
     return tx
 }
+
+// The frozen envelope_not_input_0 vector: an ordinary ins[0], and the golden envelope
+// witness alone at ins[1] spending the commit.
+function buildNotInput0Tx(){
+    const tx = new bitcoin.Transaction()
+    tx.version = 2
+    tx.addInput(FUNDING_PREV, 1)
+    tx.ins[0].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
+    tx.addInput(Buffer.from(commitTx.getId(), 'hex').reverse(), 0)
+    assert.strictEqual(tx.ins.length - 1, GOLDEN.notInput0Index)
+    tx.ins[GOLDEN.notInput0Index].witness = GOLDEN.notInput0WitnessHex.map(h => Buffer.from(h, 'hex'))
+    addP2pkhOutput(tx, 90000)
+    return tx
+}
 describe('Taproot envelope recognition', function () {
 
     afterEach(() => sinon.restore())
@@ -249,15 +263,12 @@ describe('Taproot envelope recognition', function () {
         })
 
         it('[ADVERSARIAL] an envelope anywhere but ins[0]: no action (§3.5 pins the commit outpoint at input 0)', async function () {
-            const tx = new bitcoin.Transaction()
-            tx.version = 2
-            tx.addInput(FUNDING_PREV, 1)  // ordinary first input
-            tx.ins[0].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
-            tx.addInput(Buffer.from(commitTx.getId(), 'hex').reverse(), 0)
-            tx.ins[1].witness = [DUMMY_SIG, GOLDEN_SCRIPT, CONTROL_BLOCK]
-            addP2pkhOutput(tx, 90000)
+            const tx = buildNotInput0Tx()
+            const before = decoder.parseErrors
             const result = await decoder.parseTransaction(tx, new Set(), null, POST_FLAG)
             assert.strictEqual(result.data.length, 0)
+            assert.strictEqual(result.envelope, false)
+            assert.strictEqual(decoder.parseErrors, before + 1, 'refused deterministically, not merely unmatched')
             assert.strictEqual(rpc.callCount, 0)
         })
 
@@ -279,6 +290,30 @@ describe('Taproot envelope recognition', function () {
             const result = await decoder.parseTransaction(tx, new Set(), null, POST_FLAG)
             assert.strictEqual(result.envelope, true)
             assert.strictEqual(result.data.toString('utf-8'), GOLDEN.action)
+        })
+    })
+})
+
+describe('Taproot envelope recognition', function () {
+    afterEach(() => sinon.restore())
+
+    describe('carrier arbitration (§3.8), height-gated', function () {
+
+        beforeEach(() => {
+            decoder = createDecoder()
+            fundingTx = buildFundingTx()
+            commitTx = buildCommitTx(fundingTx)
+            rpc = wireConnector(decoder, [fundingTx, commitTx])
+        })
+
+        it('[REPLAY] the same non-ins[0] envelope below the flag height parses as shipped: no action and no refusal', async function () {
+            const tx = buildNotInput0Tx()
+            const before = decoder.parseErrors
+            const result = await decoder.parseTransaction(tx, new Set())
+            assert.strictEqual(result.data.length, 0)
+            assert.strictEqual(result.envelope, false)
+            assert.strictEqual(decoder.parseErrors, before, 'the §3.8 refusal is inert below the flag')
+            assert.strictEqual(rpc.callCount, 0)
         })
     })
 })

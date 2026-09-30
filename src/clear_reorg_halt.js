@@ -117,6 +117,15 @@ async function checkClearPreconditions(db, args, error){
     return { checks, dispenserClean, dispensers, dispenserTxs }
 }
 
+// Refuse a live halt whose events id is unreadable (no identity to pin the checks to).
+function refuseUnpinnableHalt(marker, error){
+    if (marker.id != null) return false
+    error('clear-reorg-halt: REFUSED. The live REORG_HALT marker\'s events id could not be read, so this command '
+        + 'cannot pin the halt its checks would be measured against. Nothing was cleared. Inspect the newest '
+        + 'REORG_HALT / REORG_HALT_CLEARED row in the events table.')
+    return true
+}
+
 // The whole decision, with the database and the output injected so it can be
 // exercised without MariaDB. Returns the process exit code.
 async function run({ db, argv = [], log = console.log, error = console.error }){
@@ -139,6 +148,7 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
     }
     log('clear-reorg-halt: live REORG_HALT marker' + (marker.at ? ' since ' + marker.at : '')
         + (marker.reason ? ': ' + marker.reason : ''))
+    if (refuseUnpinnableHalt(marker, error)) return EXIT.FAILED
 
     const preconditions = await checkClearPreconditions(db, args, error)
     if (preconditions.exitCode !== undefined) return preconditions.exitCode

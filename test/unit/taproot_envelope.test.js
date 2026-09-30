@@ -182,6 +182,17 @@ describe('Taproot envelope recognition', function () {
             assert.strictEqual(decoder.detectEnvelopeWitness([DUMMY_SIG, script, CONTROL_BLOCK]), null)
         })
 
+        it('[ADVERSARIAL] frozen vectors: a bare OP_7 and an explicit 01 07 push as the last payload element are both refused', function () {
+            // The base script (annexWitnessHex[1]) IS recognized, so each refusal below
+            // is caused by the one inserted element and not by a broken base.
+            const base = Buffer.from(GOLDEN.annexWitnessHex[1], 'hex')
+            assert.ok(decoder.detectEnvelopeWitness([DUMMY_SIG, base, CONTROL_BLOCK]), 'base script recognized')
+            for (const hex of [GOLDEN.bareOpcodeScriptHex, GOLDEN.nonminimalPushScriptHex]){
+                const script = Buffer.from(hex, 'hex')
+                assert.strictEqual(decoder.detectEnvelopeWitness([DUMMY_SIG, script, CONTROL_BLOCK]), null)
+            }
+        })
+
         it('[ADVERSARIAL] the rebalanced form of the same payload IS recognized and reassembles identically', function () {
             const payload = Buffer.concat([Buffer.alloc(520, 0x61), Buffer.from([0x07])])
             const script = makeEnvelopeScript(payload)   // chunk520 rebalances (519, 2)

@@ -15,6 +15,7 @@
  */
 
 const crypto = require('crypto')
+require('./seeded_rng')
 
 const BOUNDARY_BYTES = [0x00, 0xFF, 0x80, 0x7F, 0x01, 0xFE]
 

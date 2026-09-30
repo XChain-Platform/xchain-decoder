@@ -102,6 +102,13 @@ function loadMigrateWith(fakeDbClass) {
     require(MIGRATE_PATH);
 }
 
+function loadWithArgv(args) {
+    process.argv = ['node', 'migrate.js', ...args];
+    const fake = makeFakeDb({ runMigrations: async () => ({ applied: [], pending: [] }) });
+    loadMigrateWith(fake.FakeDatabase);
+    return fake;
+}
+
 describe('migrate.js operator CLI @regression', function () {
     beforeEach(prepareMigrateTest);
     afterEach(restoreMigrateTest);
@@ -258,16 +265,6 @@ describe('migrate.js operator CLI argv refusal @regression', function () {
     beforeEach(prepareMigrateTest);
     afterEach(restoreMigrateTest);
 
-    // The refusal (and --help) run synchronously ahead of main()'s first await, so
-    // a case that must prove nothing ran asserts right after the require rather
-    // than awaiting a pool.end() that a correct CLI never reaches.
-    function loadWithArgv(args) {
-        process.argv = ['node', 'migrate.js', ...args];
-        const fake = makeFakeDb({ runMigrations: async () => ({ applied: [], pending: [] }) });
-        loadMigrateWith(fake.FakeDatabase);
-        return fake;
-    }
-
     it('an unknown flag applies nothing and exits 2', function () {
         const fake = loadWithArgv(['--dry-run']);
         assert.strictEqual(fake.runArgs, null, 'an unknown flag must not run migrations');
@@ -298,6 +295,12 @@ describe('migrate.js operator CLI argv refusal @regression', function () {
         }
     });
 
+});
+
+describe('migrate.js operator CLI argv refusal @regression', function () {
+    beforeEach(prepareMigrateTest);
+    afterEach(restoreMigrateTest);
+
     it('the refusal prints both modes so an operator can tell them apart', function () {
         loadWithArgv(['--dry-run']);
         const printed = consoleErrStub.getCalls().map((c) => c.args[0]).join('\n');
@@ -312,5 +315,12 @@ describe('migrate.js operator CLI argv refusal @regression', function () {
         assert.match(printed, /APPLY EVERYTHING/);
         assert.match(printed, /APPLY ONE/);
         assert.ok(!/applying pending migrations/.test(printed), '--help must not start a run');
+    });
+
+    it('--help documents --status and --json', function () {
+        loadWithArgv(['--help']);
+        const printed = consoleLogStub.getCalls().map((c) => c.args[0]).join('\n');
+        assert.match(printed, /--status/);
+        assert.match(printed, /--json/);
     });
 });

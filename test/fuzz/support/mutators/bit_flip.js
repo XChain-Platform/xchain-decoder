@@ -15,6 +15,7 @@
  */
 
 const crypto = require('crypto')
+require('./seeded_rng')
 
 /**
  * Flip between 1 and maxFlips random bits in the buffer.

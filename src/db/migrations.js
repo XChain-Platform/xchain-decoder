@@ -70,14 +70,14 @@ async function reconcileAppliedMigration(context, file, checksum){
     // diverges from what the committed file describes.
     const msg = 'runMigrations: ' + file + ' was already applied but its content CHANGED (checksum mismatch: recorded ' +
         recorded + ', current ' + checksum + '). Migrations are immutable once applied.';
-    // Operator path (`node src/migrate.js`, includeManual) and opt-in strict
+    // Operator path (`node src/db/migrate.js`, includeManual) and opt-in strict
     // mode fail closed so a diverged schema is caught in CI / by an operator
     // instead of silently continuing. Default auto-startup stays non-fatal
     // (console.error, not warn) to avoid a surprise fleet-wide boot failure.
     // Mirrors xchain-indexer/src/db/index.js.
     if(context.includeManual || config.MIGRATION_STRICT_CHECKSUM === '1'){
         // Tailor the remedy to which branch actually fired. The operator path
-        // (includeManual, `node src/migrate.js`) ALWAYS fails closed by design, so
+        // (includeManual, `node src/db/migrate.js`) ALWAYS fails closed by design, so
         // MIGRATION_STRICT_CHECKSUM has no effect there - telling the operator to
         // clear it just loops them back to the same error. Only the passive
         // startup path opted into strict mode via MIGRATION_STRICT_CHECKSUM=1 can
@@ -123,7 +123,7 @@ async function migrationModeOrSkip(database, context, file, raw, checksum){
         return null;
     }
     if(mode !== 'auto' && !context.includeManual){
-        logger.info('runMigrations: PENDING (gated, mode=' + mode + '): ' + file + '; apply with `node src/migrate.js`.');
+        logger.info('runMigrations: PENDING (gated, mode=' + mode + '): ' + file + '; apply with `node src/db/migrate.js`.');
         context.result.pending.push(file);
         return null;
     }
@@ -168,7 +168,7 @@ async function applyMigrationFile(database, context, file, raw, checksum, mode){
         if(offender){
             throw new Error('runMigrations: ' + file + ' is tagged mode=auto but contains destructive DDL: "' +
                 offender.slice(0, 160) + (offender.length > 160 ? '...' : '') + '". ' +
-                'Re-tag the file `-- xchain:migration mode=manual` and apply it deliberately via `node src/migrate.js`.');
+                'Re-tag the file `-- xchain:migration mode=manual` and apply it deliberately via `node src/db/migrate.js`.');
         }
     }
     logger.info('runMigrations: applying ' + file + ' (mode=' + mode + ', ' + statements.length + ' statement(s))...');
@@ -229,7 +229,7 @@ function assertDispenserExpirationType(rows){
         throw new Error(
             'dispensers.expiration has type ' + columnType.toUpperCase() + ' but BIGINT UNSIGNED is required ' +
             '(FROM_UNIXTIME/DATETIME silently NULLs any expiration past 2038, which the decoder then never expires). ' +
-            'Run the pending migration: node src/migrate.js --file ' +
+            'Run the pending migration: node src/db/migrate.js --file ' +
             Database.startupAssertedMigrationFile('assertDispenserExpirationIsBigintUnsigned')
         );
     }
@@ -290,7 +290,7 @@ module.exports = {
             try { await conn.release(); } catch(_){}
         }
         if(result.applied.length) logger.info('runMigrations: ' + result.applied.length + ' migration(s) applied to ' + this.dbName + '.');
-        if(result.pending.length) logger.info('runMigrations: ' + result.pending.length + ' manual migration(s) pending for ' + this.dbName + '; run `node src/migrate.js` to apply.');
+        if(result.pending.length) logger.info('runMigrations: ' + result.pending.length + ' manual migration(s) pending for ' + this.dbName + '; run `node src/db/migrate.js` to apply.');
         return result;
     },
     // Evaluate a migration's declared precondition against the live schema. Returns a
@@ -368,7 +368,7 @@ module.exports = {
                 throw new Error(
                     'pubkeys.pubkey holds ' + len + ' chars but VARCHAR(' + UNCOMPRESSED_PUBKEY_HEX_LENGTH + ') is required ' +
                     'for uncompressed keys; narrower silently NULLs or truncates the source_pubkey seam field. ' +
-                    'Run the pending migration: node src/migrate.js --file ' +
+                    'Run the pending migration: node src/db/migrate.js --file ' +
                     Database.startupAssertedMigrationFile('assertPubkeyColumnIsUncompressedWide')
                 );
             }

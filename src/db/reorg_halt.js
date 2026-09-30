@@ -83,15 +83,15 @@ module.exports = {
     // verifyReorg abort can raise a NEW halt inside that window; clearing on liveness
     // alone would write a clear that supersedes a halt nobody audited, carrying checks
     // taken before it existed. A mismatch refuses with { superseded: true } and the
-    // live id, so the operator re-runs the checks. An unreadable live id refuses too:
-    // "we could not tell" must never clear, the same fail-closed rule
-    // readReorgHaltState states.
+    // live id, so the operator re-runs the checks. An unreadable live id refuses too,
+    // pinned or not (a null id is also what an unpinnable caller would pass): "we
+    // could not tell" must never clear, the same fail-closed rule readReorgHaltState states.
     async clearReorgHalt({ reason, checks = {}, forced = false, expectedHaltId = null } = {}){
         if (typeof reason !== 'string' || reason.trim().length < 8)
             throw new Error('clearReorgHalt: a reason of at least 8 characters is required; it is recorded with the clear')
         const state = await this.readReorgHaltState()
         if (!state.halted) return { cleared: false, alreadyClear: true }
-        if (expectedHaltId != null && (state.id == null || String(state.id) !== String(expectedHaltId)))
+        if (state.id == null || (expectedHaltId != null && String(state.id) !== String(expectedHaltId)))
             return { cleared: false, alreadyClear: false, superseded: true, liveHaltId: (state.id != null ? state.id : null) }
         const written = await this.insertEvent('REORG_HALT_CLEARED', {
             reason: reason.trim(),

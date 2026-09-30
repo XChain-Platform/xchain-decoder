@@ -12,7 +12,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
-/**
+ *
  * XChain Decoder Performance Benchmark Harness
  *
  * Usage:
@@ -25,31 +25,6 @@
  *   node test/benchmarks/support/harness.js --quick            # reduced iterations
  */
 
-/*********************************************************************
-*
-* Copyright © 2025–2026 Dankest, LLC
-* Based on XChain Platform by Dankest, LLC – https://dankest.llc
-*
-* SPDX-License-Identifier: AGPL-3.0-or-later
-*
-* This file is part of XChain Platform. Licensed under the GNU Affero
-* General Public License v3.0 or later; see LICENSE.md. A commercial
-* license (without AGPL source-disclosure terms) is available -
-* contact legal@dankest.llc.
-*
-**********************************************************************
-/**
-* XChain Decoder Performance Benchmark Harness
-*
-* Usage:
-*   node test/benchmarks/harness.js                    # run all scenarios
-*   node test/benchmarks/harness.js --scenario NAME    # run one scenario
-*   node test/benchmarks/harness.js --list             # list available scenarios
-*   node test/benchmarks/harness.js --compare          # compare against baseline
-*   node test/benchmarks/harness.js --save-baseline    # save results as new baseline
-*   node test/benchmarks/harness.js --json             # output raw JSON
-*   node test/benchmarks/harness.js --quick            # reduced iterations
-*/
 // Must load setup BEFORE any decoder source to mock mariadb
 require('./setup')
 
@@ -134,14 +109,16 @@ function createDecoder() {
     const mockConnector = new MockBlockchainConnector()
     const mockDb = new MockDatabase()
 
-    // Create decoder with bitcoin-regtest config
+    // The endpoint only satisfies constructor validation and is never dialed.
     const decoder = new XChainDecoder(
-        'bitcoin-regtest', '', 0, 'bench', '', '', '', 0, '', '', false
+        'bitcoin-regtest', '', 0, 'bench', '', '', '127.0.0.1', 18443, 'rpc', 'rpc', false
     )
 
     // Replace internals with mocks
     decoder.connector = mockConnector
     decoder.db = mockDb
+    // Mempool benchmarks use the same in-memory database fixture.
+    decoder.mempoolDb = mockDb
 
     return decoder
 }
@@ -265,7 +242,7 @@ async function main() {
     // Suppress decoder console.log noise unless verbose
     const originalLog = console.log
     const originalError = console.error
-    let suppressLogs = !config.verbose && !config.json
+    const suppressLogs = !config.verbose
 
     // Determine which scenarios to run
     const scenariosToRun = config.scenario

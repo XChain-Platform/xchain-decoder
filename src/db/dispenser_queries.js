@@ -118,8 +118,8 @@ module.exports = {
     },
 
     async deleteOpenDispensers(blockIndex, minExpiration) {
-        // SOFT-EXPIRE, don't hard-delete. minExpiration is a raw unix timestamp
-        // (the block header time); expiration is a raw unix BIGINT, so compare
+        // SOFT-EXPIRE, don't hard-delete. minExpiration is the block's protocol
+        // unix timestamp; expiration is a unix BIGINT, so compare
         // integers directly. We stamp the expiring block height into
         // expired_block_index instead of deleting the row, so that a reorg's
         // deleteBlockByIndex can clear the mark (resurrecting a dispenser that an

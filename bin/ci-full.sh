@@ -86,17 +86,20 @@ ci_tier_deferred() {
   return 1
 }
 # <<< ci-tier <<<
+# >>> ci-tier timer (generated block; re-run the tier wirer to update) >>>
 run_tier() {
   ci_tier_deferred "$1" && return 0  # ci-tier guard (generated)
   local name="$1"; shift
+  local __ci_tier_t0=$SECONDS
   echo; echo "ci:full ===== $name ====="
   if "$@"; then
-    echo "ci:full ----- $name PASS"
+    echo "ci:full ----- $name PASS ($(( SECONDS - __ci_tier_t0 ))s)"
   else
     FAILED="$FAILED [$name]"
-    echo "ci:full ----- $name FAIL"
+    echo "ci:full ----- $name FAIL ($(( SECONDS - __ci_tier_t0 ))s)"
   fi
 }
+# <<< ci-tier timer <<<
 need_sib() {
   local s missing
   for s in "$@"; do
@@ -119,10 +122,33 @@ need_docker() {
   }
 }
 
+fast_defer() {
+  DEFERRED="$DEFERRED [$1]"
+  echo; echo "ci:full ===== $1 DEFERRED (CI_TIER=fast, runs in the full sweep) ====="
+}
+
 need_sib xchain-encoder xchain-documentation xchain-hub xchain-indexer xchain-utxo-tracker xchain-node
+export XCHAIN_REQUIRE_SIBLINGS=1
 
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
-run_tier "ci" npm run ci
+FAST_CI_PLAN=""
+if [ "${CI_TIER:-full}" = "fast" ]; then
+  if FAST_CI_PLAN="$(node bin/ci_fast_select.js --plan 2>&1)"; then
+    echo "$FAST_CI_PLAN"
+  else
+    echo "ci:full: fast selector unavailable ($FAST_CI_PLAN); running the full unit tier"
+    FAST_CI_PLAN="consensus 1"
+  fi
+fi
+if [ "${CI_TIER:-full}" != "fast" ] || printf '%s\n' "$FAST_CI_PLAN" | grep -qx 'consensus 1'; then
+  run_tier "ci" npm run ci
+else
+  run_tier "ci (changed tests)" node bin/ci_fast_select.js --run
+  fast_defer "ci"
+fi
+if [ "${CI_TIER:-full}" = "fast" ]; then
+  run_tier "fast-tier selector self-test" ./node_modules/.bin/mocha --no-config --timeout 20000 --exit bin/test/ci_fast_select.test.js
+fi
 
 # --- job: drift-guards -----------------------------------------------------
 # Run FROM the parent so sync-coins.sh sees the canonical + vendored pair the
@@ -145,13 +171,26 @@ run_tier "drift: coin consensus-pin conformance" node -e '
 # letting the pin go stale.
 run_tier "identity pin (vendored coins, twin fixtures)" node bin/pin-identity.js --check
 
+# --- suite-title pin (this gate only; no ci.yml job runs it) -----------
+# Guards that every supported test script still collects the same test titles
+# it did at the pin, through the declared rename and split maps.
+run_tier "suite-title pin (at1)" node bin/suite-title-map.js \
+  --compare bin/pins/at1-suite-titles.json \
+  --rename-map bin/pins/suite-title-renames.json \
+  --split-map bin/pins/suite-title-splits.json
+
 # --- job: docker-suites ----------------------------------------------------
 # Both tiers own their venue lifecycle inside their npm script (compose up
 # --wait, mocha, down -v on any exit), so this transcribes the two run-steps
 # and nothing else. The gate is docker itself, checked once before either.
-need_docker "docker-suites (test:integration, test:e2e)"
-run_tier "docker: integration tier (test:integration)" npm run test:integration
-run_tier "docker: end-to-end tier (test:e2e)" npm run test:e2e
+if [ "${CI_TIER:-full}" = "fast" ]; then
+  fast_defer "docker: integration tier (test:integration)"
+  fast_defer "docker: end-to-end tier (test:e2e)"
+else
+  need_docker "docker-suites (test:integration, test:e2e)"
+  run_tier "docker: integration tier (test:integration)" npm run test:integration
+  run_tier "docker: end-to-end tier (test:e2e)" npm run test:e2e
+fi
 
 # --- job: coverage ---------------------------------------------------------
 run_tier "coverage ratchet (coverage:check)" npm run coverage:check

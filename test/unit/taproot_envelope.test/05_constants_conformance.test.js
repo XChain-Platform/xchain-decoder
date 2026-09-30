@@ -48,8 +48,87 @@ const {
     bitcoin,
     XChainDecoder,
     CONSTANTS,
-    GOLDEN
+    GOLDEN,
+    POST_FLAG,
+    FUNDING_PREV,
+    addP2pkhOutput,
+    buildFundingTx,
+    buildCommitTx,
+    buildRevealTx,
+    createDecoder,
+    wireConnector
 } = require('./helpers/taproot_envelope.js')
+
+// Adversarial entries that carry no bytes of their own, each mapped to the local test
+// that executes its rule. The runner checks every text still appears in its file.
+const ADVERSARIAL_COVERED_ELSEWHERE = {
+    mixed_carrier_envelope_plus_op_return: ['04_carrier_arbitration_3_8_height_gated.test.js', '[ADVERSARIAL] envelope + OP_RETURN action: no action post-flag'],
+    mixed_carrier_envelope_plus_marker_only_op_return: ['04_carrier_arbitration_3_8_height_gated.test.js', '[ADVERSARIAL] envelope + marker-only XCHN OP_RETURN'],
+    mixed_carrier_envelope_plus_chunk_marker: ['04_carrier_arbitration_3_8_height_gated.test.js', 'CHUNK_CARRIER_TITLE = \'[ADVERSARIAL] envelope + chunk-'],
+    mixed_carrier_envelope_plus_multisign: ['04_carrier_arbitration_3_8_height_gated.test.js', '[ADVERSARIAL] envelope + MULTISIGN outputs: no action post-flag'],
+    two_envelope_inputs: ['04_carrier_arbitration_3_8_height_gated.test.js', '[ADVERSARIAL] two envelope inputs: no action'],
+    over_ceiling_payload: ['03_per_encoding_4_ceiling.test.js', '[ADVERSARIAL] a 390,001-byte payload measures OVER the ceiling'],
+    foreign_op_false_op_if: [path.join('..', 'taproot_envelope.test.js'), '[ADVERSARIAL] foreign ord-style inscriptions are not recognized']
+}
+
+// Build a tx whose ONLY envelope is the given witness at input `index`, every earlier
+// input an ordinary scriptSig spend, and no other carrier.
+function envelopeAtInputTx(commitTx, witness, index){
+    if (index === 0) return buildRevealTx(commitTx, null, { witness })
+    const tx = new bitcoin.Transaction()
+    tx.version = 2
+    for (let i = 0; i < index; i++){
+        tx.addInput(FUNDING_PREV, i + 1)
+        tx.ins[i].script = bitcoin.script.compile([Buffer.alloc(72, 0x30), Buffer.alloc(33, 0x02)])
+    }
+    tx.addInput(Buffer.from(commitTx.getId(), 'hex').reverse(), 0)
+    tx.ins[index].witness = witness
+    addP2pkhOutput(tx, 90000)
+    return tx
+}
+
+const DOCS_DIR = process.env.XCHAIN_DOCUMENTATION_DIR ||
+    path.join(__dirname, '..', '..', '..', '..', 'xchain-documentation')
+const VECTORS_PATH = path.join(DOCS_DIR, 'protocol', 'test-vectors', 'taproot_envelope.json')
+
+// Skip without the sibling checkout, unless XCHAIN_REQUIRE_SIBLINGS=1 makes absence a failure.
+function requireDocsSibling(){
+    if (fs.existsSync(VECTORS_PATH)) return
+    if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-documentation sibling not found at ' + VECTORS_PATH + ' but XCHAIN_REQUIRE_SIBLINGS=1')
+    this.skip()
+}
+
+function carriesBytes(adv){
+    return ('envelope_script_hex' in adv) || ('witness_stack_hex' in adv)
+}
+
+// Run one byte-carrying adversarial entry against the decoder and assert its expect.
+// An expect this runner has no executor for fails, so a new kind cannot land unrun.
+async function runAdversarialEntry(adv, control){
+    const witness = adv.witness_stack_hex
+        ? adv.witness_stack_hex.map(h => Buffer.from(h, 'hex'))
+        : [Buffer.alloc(64, 0x00), Buffer.from(adv.envelope_script_hex, 'hex'), control]
+    const decoder = createDecoder()
+    if (adv.expect === 'not_recognized' && !('envelope_input_index' in adv)){
+        assert.strictEqual(decoder.detectEnvelopeWitness(witness), null, adv.name)
+        return
+    }
+    if (adv.expect !== 'no_action_post_flag__shipped_behavior_pre_flag' || !Number.isInteger(adv.envelope_input_index)){
+        assert.fail(`no executor for adversarial entry ${adv.name} (expect ${adv.expect}): add one here`)
+    }
+    const commitTx = buildCommitTx(buildFundingTx())
+    const rpc = wireConnector(decoder, [commitTx])
+    const tx = envelopeAtInputTx(commitTx, witness, adv.envelope_input_index)
+    const before = decoder.parseErrors
+    const post = await decoder.parseTransaction(tx, new Set(), null, POST_FLAG)
+    assert.strictEqual(post.data.length, 0, adv.name + ' post-flag')
+    assert.strictEqual(post.envelope, false, adv.name + ' post-flag')
+    assert.strictEqual(decoder.parseErrors, before + 1, adv.name + ' is a deterministic refusal post-flag')
+    const pre = await decoder.parseTransaction(tx, new Set())
+    assert.strictEqual(pre.data.length, 0, adv.name + ' pre-flag')
+    assert.strictEqual(decoder.parseErrors, before + 1, adv.name + ' refusal is inert pre-flag')
+    assert.strictEqual(rpc.callCount, 0, adv.name + ' never fetches the commit')
+}
 
 describe('Taproot envelope recognition', function () {
 
@@ -108,6 +187,12 @@ describe('Taproot envelope recognition', function () {
                     if (adv.name === 'bad_magic') assert.strictEqual(adv.envelope_script_hex, GOLDEN.badMagicScriptHex)
                     if (adv.name === 'unknown_format_byte') assert.strictEqual(adv.envelope_script_hex, GOLDEN.unknownFormatScriptHex)
                     if (adv.name === 'annex_bearing_reveal') assert.deepStrictEqual(adv.witness_stack_hex, GOLDEN.annexWitnessHex)
+                    if (adv.name === 'envelope_not_input_0'){
+                        assert.strictEqual(adv.envelope_input_index, GOLDEN.notInput0Index)
+                        assert.deepStrictEqual(adv.witness_stack_hex, GOLDEN.notInput0WitnessHex)
+                    }
+                    if (adv.name === 'bare_opcode_payload_element') assert.strictEqual(adv.envelope_script_hex, GOLDEN.bareOpcodeScriptHex)
+                    if (adv.name === 'nonminimal_one_byte_payload_push') assert.strictEqual(adv.envelope_script_hex, GOLDEN.nonminimalPushScriptHex)
                 }
             })
 
@@ -119,6 +204,51 @@ describe('Taproot envelope recognition', function () {
                     : (() => { const b = Buffer.alloc(3); b[0] = 0xfd; b.writeUInt16LE(script.length, 1); return b })()
                 const leaf = bitcoin.crypto.taggedHash('TapLeaf', Buffer.concat([Buffer.from([0xc0]), lenPrefix, script]))
                 assert.strictEqual(leaf.toString('hex'), vectors.envelope_grammar.tapleaf_hash)
+            })
+        })
+    })
+})
+
+describe('Taproot envelope recognition', function () {
+    afterEach(() => sinon.restore())
+
+    describe('constants conformance', function () {
+        describe('parity with the canonical xchain-documentation copy', function () {
+            before(requireDocsSibling)
+
+            it('every adversarial entry that carries bytes runs against the decoder and meets its expect', async function () {
+                const vectors = require(VECTORS_PATH)
+                const control = Buffer.from(vectors.envelope_grammar.control_block_hex, 'hex')
+                let executed = 0
+                for (const adv of vectors.adversarial){
+                    if (!carriesBytes(adv)) continue
+                    await runAdversarialEntry(adv, control)
+                    executed++
+                }
+                assert.ok(executed >= 6, `only ${executed} byte-carrying adversarial entries executed`)
+            })
+
+            it('the envelope_not_input_0 witness IS an action at input 0, so its refusal comes from the index alone', async function () {
+                const adv = require(VECTORS_PATH).adversarial.find(a => a.name === 'envelope_not_input_0')
+                assert.ok(adv, 'envelope_not_input_0 present in the vector file')
+                const decoder = createDecoder()
+                const fundingTx = buildFundingTx()
+                const commitTx = buildCommitTx(fundingTx)
+                wireConnector(decoder, [fundingTx, commitTx])
+                const witness = adv.witness_stack_hex.map(h => Buffer.from(h, 'hex'))
+                const result = await decoder.parseTransaction(envelopeAtInputTx(commitTx, witness, 0), new Set(), null, POST_FLAG)
+                assert.strictEqual(result.envelope, true)
+                assert.strictEqual(result.data.toString('utf-8'), require(VECTORS_PATH).envelope_grammar.action_string)
+            })
+
+            it('every adversarial entry is either executed above or mapped to a local test that still exists', function () {
+                for (const adv of require(VECTORS_PATH).adversarial){
+                    if (carriesBytes(adv)) continue
+                    const covered = ADVERSARIAL_COVERED_ELSEWHERE[adv.name]
+                    assert.ok(covered, `adversarial entry ${adv.name} carries no bytes and maps to no local test`)
+                    const text = fs.readFileSync(path.join(__dirname, covered[0]), 'utf8')
+                    assert.ok(text.includes(covered[1]), `${adv.name}: ${covered[0]} no longer contains ${covered[1]}`)
+                }
             })
         })
     })

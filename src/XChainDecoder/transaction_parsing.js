@@ -80,8 +80,8 @@ function* arbitrateEnvelope(envelopeActive, envelopeInputs, blockHeight, nextTxI
     return { dataBuffer, p2shFundingTxId, envelopeCarrier, envelopeCommitTransaction }
 }
 
-function* capturePubkey(transaction, db, source){
-    //Extract and store public key from the first input if source was found
+function* capturePubkey(keyInput, db, source){
+    //Extract and store the public key from the input that spent the source's UTXO
     //
     // The opportunistic write below only fires for a source index_addresses
     // already holds, and the MEMPOOL lane depends on exactly that: it must never
@@ -90,8 +90,8 @@ function* capturePubkey(transaction, db, source){
     // carried out as sourcePubkey instead, and the confirmed-block path writes it
     // in db.insertTransaction once createAddress has allocated the id.
     let sourcePubkey = null
-    if (source){
-        let pubkey = this.extractPubkeyFromInput(transaction.ins[0])
+    if (source && keyInput){
+        let pubkey = this.extractPubkeyFromInput(keyInput)
         if (pubkey){
             sourcePubkey = pubkey
             let addressId = yield db.getAddressId(source)
@@ -184,7 +184,12 @@ function* resolveXChainTransaction(transaction, db, nextTxId, firstInputTxId, di
             : yield this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index, sourceCommitCapture)
     }
 
-    let sourcePubkey = yield* capturePubkey.call(this, transaction, db, source)
+    // Read the key from the input that spent the source's UTXO. For an envelope that
+    // is the commit's ins[0] (§3.4); the reveal's ins[0] witness[1] is the tapscript.
+    const keyInput = envelopeCarrier
+        ? ((envelopeCommitTransaction && envelopeCommitTransaction.ins && envelopeCommitTransaction.ins[0]) || null)
+        : transaction.ins[0]
+    let sourcePubkey = yield* capturePubkey.call(this, keyInput, db, source)
 
     yield* attributeFundingFees.call(this, p2shFundingTxId, firstInputTxId, envelopeCommitTransaction, sourceCommitCapture, paymentOutputs)
 
