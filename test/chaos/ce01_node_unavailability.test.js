@@ -59,13 +59,17 @@ describe('CE-01: Node Unavailability and Recovery', function () {
         })
         mockDb.getLastBlockIndex.resolves(0)
 
-        const { logs } = await captureConsole(async () => {
+        const { logs, errors } = await captureConsole(async () => {
             await decoder.start()
         })
 
         assert.ok(callCount >= 4, `Expected at least 4 calls, got ${callCount}`)
-        const retryLogs = logs.filter(l => l.includes('Error trying to get network info'))
-        assert.ok(retryLogs.length >= 1, 'Should log retry messages')
+        // One error-level line per failed tip read, and no info-level copy of the cause.
+        const retryLogs = errors.filter(l => l.includes('Error trying to get network info'))
+        assert.strictEqual(retryLogs.length, 3, 'Should log each tip-read failure once at error')
+        assert.ok(retryLogs.every(l => l.includes('ECONNREFUSED')), 'The retry line should carry its cause')
+        assert.strictEqual(logs.filter(l => l.includes('ECONNREFUSED')).length, 0,
+            'The failure should not also be logged at info')
     })
 
     it('should not crash or leak resources during extended node outage', async function () {

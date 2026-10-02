@@ -210,8 +210,7 @@ module.exports = {
                 this.nodeMempoolUpdatedAt = Date.now()
 
             } catch (error) {
-                logger.info(error)
-                logger.info(formatLogLine("There were problems getting the mempool, trying again later.", error))
+                logger.error(formatLogLine("There were problems getting the mempool, trying again later.", error))
                 this.mempoolBusy = false
                 return
             }
