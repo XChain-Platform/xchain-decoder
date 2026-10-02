@@ -209,7 +209,36 @@ module.exports = {
         await this.assertDispenserExpirationIsBigintUnsigned();
         await this.assertPubkeyColumnIsUncompressedWide();
         await this.assertActionDataIsUtf8mb4();
+        await this.assertStrictSqlMode();
         return result;
+    },
+
+    // Assert the session runs the strict sql_mode the pool pins (DECODER_SQL_MODE). Under a
+    // lax mode the DETERMINISTIC_WRITE_ERRNOS become warnings, so a row a strict peer
+    // quarantines is stored truncated here and the replicated transactions table diverges.
+    async assertStrictSqlMode(){
+        let conn;
+        try {
+            conn = await this.getConnection();
+            const rows = await conn.query('SELECT @@SESSION.sql_mode AS mode');
+            const mode = String((rows && rows[0] && rows[0].mode) || '');
+            const flags = mode.split(',').map((f) => f.trim().toUpperCase());
+            const strict = flags.includes('STRICT_TRANS_TABLES') || flags.includes('STRICT_ALL_TABLES');
+            if(!strict || flags.includes('NO_BACKSLASH_ESCAPES')){
+                throw new Error(
+                    "the decoder session runs sql_mode '" + mode + "', but it must be strict and must not carry " +
+                    'NO_BACKSLASH_ESCAPES. Under a lax mode errnos 1366/1406/1264/1265/1292 become warnings, so a ' +
+                    'row a strict node quarantines is stored truncated here and this node diverges on the replicated ' +
+                    'transactions table; NO_BACKSLASH_ESCAPES breaks the migration quote walkers. The pool pins ' +
+                    'DECODER_SQL_MODE on every connection, so something between the decoder and the server (a proxy ' +
+                    'or a server-side override) changed it.'
+                );
+            }
+        } finally {
+            if(conn && this.transactionConnection == null){
+                try { await conn.release(); } catch(_){}
+            }
+        }
     },
 
     // Assert that the decoded-ACTION text columns hold the full UTF-8 range. The encoder

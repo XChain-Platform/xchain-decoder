@@ -52,7 +52,9 @@ async function readPriorRollbackDepth(){
     let seedErr = null
     for (let attempt = 1; attempt <= 3; attempt++){
         try {
-            priorDepth = await this.db.countReorgDeletesAboveTip(safeDepthFor(this) + 1)
+            // Default scan bound, never the height ceiling: the bound counts ROWS and the
+            // method returns distinct HEIGHTS, so re-deleted heights would crowd out older ones.
+            priorDepth = await this.db.countReorgDeletesAboveTip()
             seedErr = null
             break
         } catch (err){

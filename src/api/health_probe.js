@@ -12,7 +12,7 @@
  *
  ********************************************************************/
 
-const { noteProbeFailure } = require('./probe_routes');
+const { noteProbeFailure, readReorgHaltForProbe } = require('./probe_routes');
 
 // Probe state for the JSON-RPC health method: the sync status, a live DB ping
 // and the REORG_HALT marker. The payload is built from it in src/api.js.
@@ -45,10 +45,7 @@ async function getHealthProbeState(decoder) {
     // nothing, whether the decoder is still parsing forward on a latent marker or
     // parked on the halt. Report it as its own field instead, with
     // reorg_halt_parked separating the two, and let the operator/watchdog act.
-    let reorgHalt = { halted: false, reason: null, at: null, cleared_at: null, cleared_reason: null, checked_at: null }
-    if (dbOk && typeof decoder.checkReorgHalt === 'function'){
-        try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', 'rpc:health', e) }
-    }
+    const reorgHalt = await readReorgHaltForProbe(decoder, dbOk, 'rpc:health')
     return { syncStatus, dbOk, dbPhase, reorgHalt }
 }
 

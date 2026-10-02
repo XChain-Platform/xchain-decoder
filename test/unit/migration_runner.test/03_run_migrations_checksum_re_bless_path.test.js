@@ -45,6 +45,7 @@ const Database = require('../../../src/db');
                 if (/^SET SESSION max_statement_time/.test(sql)) return [];
                 if (/CREATE TABLE/.test(sql))   return [];
                 if (/SELECT name, checksum FROM schema_migrations/.test(sql)) return ledgerRows;
+                if (/@@SESSION\.sql_mode/.test(sql)) return [{ mode: 'STRICT_TRANS_TABLES' }];
                 // Post-run schema-contract assertion (dispensers.expiration BIGINT UNSIGNED).
                 // Tested first: that query names information_schema.tables AND .columns.
                 if (/information_schema\.tables/.test(sql))  return [{ dataType: 'bigint', columnType: 'bigint(20) unsigned' }];

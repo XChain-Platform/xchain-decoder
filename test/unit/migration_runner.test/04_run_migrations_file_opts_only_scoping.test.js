@@ -50,6 +50,7 @@ const Database = require('../../../src/db');
                 if (/SELECT name, checksum FROM schema_migrations/.test(sql))  return ledgerRows.slice();
                 // The BIGINT UNSIGNED contract assertion names both tables, so it is
                 // matched first; the bare .columns lookup is the precondition probe.
+                if (/@@SESSION\.sql_mode/.test(sql))                           return [{ mode: 'STRICT_TRANS_TABLES' }];
                 if (/information_schema\.tables/.test(sql))                    return [{ dataType: 'bigint', columnType: 'bigint(20) unsigned' }];
                 if (/information_schema\.columns/.test(sql))                   return [{ dataType: 'bigint' }];
                 if (/^INSERT INTO schema_migrations/.test(sql)) { applied.push(params[0]); return []; }

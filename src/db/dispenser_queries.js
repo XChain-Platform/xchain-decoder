@@ -64,7 +64,7 @@ module.exports = {
     // THE FLOOR IS MEASURED AGAINST THE MARK BLOCK, NOT THE EXPIRATION. The indexer runs a
     // block's transactions BEFORE its expiration pass (xchain-indexer XChainIndexer.js, the
     // processTransaction loop ahead of util.processExpirations), and its cancel handler tests
-    // only that the dispenser status is 'open' (actions/dispenser.js). So a cancel landing in
+    // only that the dispenser status is 'open' (actions/dispenser/index.js). So a cancel landing in
     // the first block whose header time passes expiration E is ACCEPTED, and the indexer then
     // settles fills until that cancel's block time plus DISPENSER_CLOSE_DELAY. Anchoring
     // retention on E alone ends capture at E + grace and loses the buyer's coin in the window

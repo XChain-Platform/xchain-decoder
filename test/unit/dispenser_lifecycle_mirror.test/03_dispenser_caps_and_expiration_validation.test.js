@@ -89,7 +89,7 @@ describe("DISPENSER lifecycle mirror: advisory open-view", function () {
 
     // Fractional EXPIRATION. dispensers.expiration is BIGINT UNSIGNED on BOTH sides, and
     // the indexer rejects any non-integer EXPIRATION outright
-    // (xchain-indexer/src/actions/dispenser.js, isInteger). A decoder that accepts one
+    // (xchain-indexer/src/actions/dispenser/validate_format.js, isInteger). A decoder that accepts one
     // either wedges the block loop (a strict sql_mode fails the write, so the loop
     // retries the same deterministic tx forever) or truncates it, leaving an open row for
     // a dispenser the indexer never registered. Both write sites refuse it at parse time.

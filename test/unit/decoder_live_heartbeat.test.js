@@ -228,3 +228,59 @@ describe('/live says whether the halt marker was ever read', function () {
         assert.strictEqual(res.body.reorg_halt_cleared_reason, 'range re-parsed and verified');
     });
 });
+
+describe('a failed DB ping keeps the halt the decoder already knows', function () {
+    const { getHealthProbeState } = require('../../src/api/health_probe');
+
+    // A decoder that read a halt and parked on it, then lost its DB. The marker read is
+    // a spy so the cases can prove a dead pool is not queried again.
+    function haltedDecoderWithDeadDb(ping) {
+        const decoder = caughtUpDecoder();
+        decoder.reorgHalted = true;
+        decoder.reorgHaltReason = 'delete failed at 149';
+        decoder.reorgHaltCheckedAt = 1759300000000;
+        decoder.reorgHaltParked = true;
+        decoder.db = { ping };
+        let markerReads = 0;
+        const realCheck = decoder.checkReorgHalt;
+        decoder.checkReorgHalt = function (...args) { markerReads++; return realCheck.apply(this, args); };
+        return { decoder, markerReads: () => markerReads };
+    }
+
+    it('/live still reports the halt and the park while the ping throws', async function () {
+        const { decoder, markerReads } = haltedDecoderWithDeadDb(async () => { throw new Error('pool gone'); });
+        const res = await getLive(liveApp(decoder));
+        assert.strictEqual(res.status, 503);
+        assert.strictEqual(res.body.db, false);
+        assert.strictEqual(res.body.reorg_halted, true, 'a DB fault must never publish a known halt as clear');
+        assert.strictEqual(res.body.reorg_halt_parked, true);
+        assert.strictEqual(res.body.reorg_halt_reason, 'delete failed at 149');
+        assert.strictEqual(res.body.reorg_halt_checked_at, 1759300000000, 'the cached read time, not null');
+        assert.strictEqual(markerReads(), 0, 'a pool that just failed its ping is not queried for the marker');
+    });
+
+    it('the JSON-RPC health probe reports the cached halt while the ping throws', async function () {
+        const { decoder, markerReads } = haltedDecoderWithDeadDb(async () => { throw new Error('pool gone'); });
+        const state = await getHealthProbeState(decoder);
+        assert.strictEqual(state.dbOk, false);
+        assert.strictEqual(state.reorgHalt.halted, true);
+        assert.strictEqual(state.reorgHalt.parked, true);
+        assert.strictEqual(state.reorgHalt.checked_at, 1759300000000);
+        assert.strictEqual(markerReads(), 0);
+    });
+
+    it('/live reports the cached halt when the ping answers false rather than throwing', async function () {
+        const { decoder } = haltedDecoderWithDeadDb(async () => false);
+        const res = await getLive(liveApp(decoder));
+        assert.strictEqual(res.body.db, false);
+        assert.strictEqual(res.body.reorg_halted, true);
+    });
+
+    it('invents no halt: a clean decoder with a dead DB still reads not-halted and never-looked', async function () {
+        const decoder = caughtUpDecoder();
+        decoder.db = { ping: async () => { throw new Error('pool gone'); } };
+        const res = await getLive(liveApp(decoder));
+        assert.strictEqual(res.body.reorg_halted, false);
+        assert.strictEqual(res.body.reorg_halt_checked_at, null);
+    });
+});

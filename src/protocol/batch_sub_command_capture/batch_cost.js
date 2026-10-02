@@ -43,10 +43,11 @@ const { hasProvablyRejectedSubCommand,
 //     direction, on exactly the networks (testnet/regtest, where new changes are
 //     genesis-active) where this gate is live today. 53 names are enabled in the sibling and
 //     absent from this decoder's VALID_ACTION_NAMES, so the gap is large and it moves.
-//     Note also that the registry is a plain object, so `constructor`, `toString` and
-//     `__proto__` read as REGISTERED AND ENABLED there; a name gate written from a list
-//     would have to reproduce that too. Left open; the over-capture it costs is the safe
-//     direction.
+//     Note also that the registry is prototype-free (Object.create(null) in the indexer's
+//     ProtocolChanges constructor), so `constructor`, `toString`, `__proto__` and the other
+//     Object.prototype names are UNREGISTERED there and the batch is rejected as
+//     'invalid: ACTION (unknown)'; a name gate written from a list must treat them as unknown
+//     too. Left open; the over-capture it costs is the safe direction.
 //   * A SLEEPING SOURCE. `indexerDb.isActionAllowed` reads the indexer's own address-sleep
 //     state (db.isAddressSleeping) as of the block. That table does not exist in the decoder
 //     and is not derivable from the transaction, so there is nothing here to mirror. Stated

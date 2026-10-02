@@ -43,6 +43,7 @@ function makeDb(ledgerRows = [], opts = {}) {
             if (/GET_LOCK/.test(sql)) return [{ l: opts.lock === false ? '0' : '1' }];
             if (SET_RE.test(sql) && opts.failRestore && params[0] === 30) throw new Error('restore boom');
             if (/SELECT name, checksum FROM schema_migrations/.test(sql)) return ledgerRows.slice();
+            if (/@@SESSION\.sql_mode/.test(sql)) return [{ mode: 'STRICT_TRANS_TABLES' }];
             if (/information_schema\.tables/.test(sql)) return [{ dataType: 'bigint', columnType: 'bigint(20) unsigned' }];
             if (/MODIFY c BIGINT/.test(sql) && opts.failBody) throw new Error('body boom');
             return [];

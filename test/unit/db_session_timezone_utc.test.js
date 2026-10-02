@@ -20,4 +20,13 @@ describe('Database session timezone', () => {
         assert.strictEqual(db.connectionPoolParams.connectionLimit, 10)
         assert.strictEqual(db.connectionPoolParams.insertIdAsNumber, true)
     })
+
+    it('pins every pooled session to a strict sql_mode without NO_BACKSLASH_ESCAPES', () => {
+        const { DECODER_SQL_MODE } = require('../../src/db/constants.js')
+        const db = new Database('127.0.0.1', 3306, 'test_db', 'user', 'pass')
+
+        assert.ok(DECODER_SQL_MODE.split(',').includes('STRICT_TRANS_TABLES'))
+        assert.ok(!DECODER_SQL_MODE.includes('NO_BACKSLASH_ESCAPES'))
+        assert.strictEqual(db.connectionPoolParams.initSql, "SET SESSION sql_mode='" + DECODER_SQL_MODE + "'")
+    })
 })

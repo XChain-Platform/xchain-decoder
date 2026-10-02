@@ -54,9 +54,9 @@ function jsonBigIntSafe(key, value){
 // runMigrations' callers build partial `this` objects, and a prototype hop would break
 // the guard on those (see the comment at that closure).
 //
-// Holds only while sql_mode omits NO_BACKSLASH_ESCAPES. Nothing in this tree sets
-// sql_mode and the pool params below set none; if that ever changes, every caller of
-// this helper must be revisited. Kept byte-for-byte in sync with xchain-indexer/src/db/index.js.
+// Holds only while sql_mode omits NO_BACKSLASH_ESCAPES. The pool pins DECODER_SQL_MODE
+// (db/constants.js), which omits it, and assertStrictSqlMode fails startup if a session
+// carries it. Kept byte-for-byte in sync with xchain-indexer/src/db/shared.js.
 function opensBackslashEscape(str, i, quote){
     return str[i] === '\\' && quote !== '`' && i + 1 < str.length;
 }

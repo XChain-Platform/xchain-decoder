@@ -249,3 +249,47 @@ describe('Database#countReorgDeletesAboveTip()', function () {
         await assert.rejects(() => db.countReorgDeletesAboveTip(), /getLastBlockIndex failed/)
     })
 })
+
+// Two interrupted rollbacks over the same range: the older run deleted 410..311, the
+// decoder re-synced, and the newer run deleted 400..301, so 110 distinct heights sit
+// above the stored tip of 300 behind 200 marker rows. The scan below honours LIMIT the
+// way MariaDB does, newest ids first, which is the only way a row-count bound can bite.
+function reDeletedRangeDecoder() {
+    const markers = []
+    let id = 0
+    for (let h = 410; h >= 311; h--) markers.push({ id: ++id, data: JSON.stringify([{ block_index: h, block_hash: 'bb' }]) })
+    for (let h = 400; h >= 301; h--) markers.push({ id: ++id, data: JSON.stringify([{ block_index: h, block_hash: 'bb' }]) })
+    const newestFirst = markers.slice().reverse()
+    const scans = []
+    const { decoder, deleted } = restartedDecoder({})
+    const markerDb = Object.create(Database.prototype)
+    markerDb.transactionConnection = null
+    markerDb.getLastBlockIndex = () => decoder.db.getLastBlockIndex()
+    markerDb.getConnection = async () => ({
+        query: async (sql) => {
+            const limit = Number(/LIMIT (\d+)/.exec(sql)[1])
+            scans.push(limit)
+            return newestFirst.slice(0, limit)
+        },
+        release: async () => {}
+    })
+    decoder.db.countReorgDeletesAboveTip = (...args) => markerDb.countReorgDeletesAboveTip(...args)
+    return { decoder, deleted, scans }
+}
+
+describe('verifyReorg: a re-deleted height does not shrink the carried-over depth', function () {
+
+    it('counts every distinct height above the tip when repeat markers fill the newest rows', async function () {
+        const { decoder, deleted, scans } = reDeletedRangeDecoder()
+
+        await assert.rejects(() => decoder.verifyReorg(NODE_TIP), (err) => {
+            assert.match(err.message, /safe-depth/)
+            assert.match(err.message, /resumed from 110 already deleted above the tip/)
+            return true
+        })
+
+        assert.strictEqual(deleted.length, SAFE_DEPTH - 110,
+            'a scan bounded at the height ceiling reads 100 here and spends ten blocks past the purge horizon')
+        assert.ok(scans.every((limit) => limit >= 200), 'the scan must reach both runs\' markers: ' + scans)
+    })
+})

@@ -26,7 +26,7 @@ const { isBatchSubCommandCaptureActive } = require('../protocol/batch_sub_comman
 //the list of possible dispenses.
 //
 //v0 wire format (must stay in sync with the
-//indexer (see xchain-indexer/src/actions/dispenser.js):
+//indexer (see xchain-indexer/src/actions/dispenser/index.js this.formats):
 //  DISPENSER|0|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT
 //    |GIVE_OWNERSHIP|GIVE_ESCROW
 //    |GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS
@@ -203,7 +203,7 @@ function pushV0DispenserCreate(decodedDataSplit, dispenserCreateCandidates, pars
 
     // Require an INTEGER, matching the indexer, which rejects any
     // non-integer EXPIRATION outright (isInteger, see
-    // xchain-indexer/src/actions/dispenser.js). dispensers.expiration
+    // xchain-indexer/src/actions/dispenser/validate_format.js). dispensers.expiration
     // is BIGINT UNSIGNED, so a fractional value like 1700000000.5
     // either fails the write under a strict sql_mode - wedging the
     // block loop, which then retries the same deterministic tx
@@ -241,7 +241,7 @@ function collectDispenserCreates(commands, dispenserCommandPrefix, parseResult, 
             continue
         let decodedDataSplit = dispenserCommand.split("|")
         // Field [1] is the DISPENSER FORMAT (create=0, cancel=1,
-        // edit=2; xchain-indexer/src/actions/dispenser.js this.formats).
+        // edit=2; xchain-indexer/src/actions/dispenser/index.js this.formats).
         // The decoder mirrors all three so its open-dispenser view (the
         // address set that gates transaction_output capture) tracks the
         // same lifecycle the indexer derives. Formats 1 and 2 reference

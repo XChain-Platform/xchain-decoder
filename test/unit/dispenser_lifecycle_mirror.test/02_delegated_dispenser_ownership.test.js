@@ -18,7 +18,7 @@ describe("DISPENSER lifecycle mirror: advisory open-view", function () {
     this.timeout(0)
 
     // Delegated (GET_ADDRESS) dispensers. The indexer authorises a cancel/edit from the
-    // dispenser SOURCE *or* its GET_ADDRESS (xchain-indexer/src/actions/dispenser.js,
+    // dispenser SOURCE *or* its GET_ADDRESS (xchain-indexer/src/actions/dispenser/index.js,
     // "invalid: SOURCE (not owner)"). The decoder keys the open row on the operating
     // address (GET_ADDRESS when delegated) and stores the create SOURCE beside it, so a
     // creator-issued edit still reaches its row. That reach is kept here; only the
