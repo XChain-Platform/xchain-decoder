@@ -137,11 +137,14 @@ function captureCommands(decodedData, consensusNetwork, blockTime){
 // RESIDUAL, stated rather than hidden: dispensers.oracle_address_id is ONE column, so a
 // batch opening two Mode B dispensers on the SAME operating address naming DIFFERENT
 // oracles records only the first, and a later v2 refill of the second (which resolves its
-// oracle from these rows, by SOURCE) captures no oracle-fee output. Recording both needs a
-// per-sub-command discriminator in the dispensers PRIMARY KEY - a schema migration on
-// every decoder in the fleet, mainnet included, where this gate is DISARMED - which is a
-// wider blast radius than the hole it would close. Registering ONE of the two is strictly
-// better than today, where a batch registers NEITHER.
+// oracle from these rows, by SOURCE) captures no oracle-fee output. This gate is ARMED on
+// mainnet from 2026-08-16T00:00:00Z (constants.js), so the hole is LIVE there. Recording
+// both needs a per-sub-command discriminator in the dispensers PRIMARY KEY: a schema
+// migration on every decoder in the fleet PLUS a flag-day of its own, because rows written
+// above this gate must still re-decode byte-identically below that new instant. The
+// trade-off, live oracle-fee under-capture against migration plus flag-day, stays OPEN.
+// Registering ONE of the two is strictly better than the pre-gate behaviour, where a
+// batch registers NEITHER.
 function collapseDispenserRegistrations(candidates){
     const collapsed = new Map()
     if (!Array.isArray(candidates)) return []

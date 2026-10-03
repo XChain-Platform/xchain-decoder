@@ -156,10 +156,11 @@ describe('Database schema-contract guards @regression', function () {
             runMigrationsInner: async () => ({ applied: [], pending: [], lockSkipped: true }),
             assertDispenserExpirationIsBigintUnsigned: async () => { calls.push('dispenser'); },
             assertPubkeyColumnIsUncompressedWide: async () => { calls.push('pubkey'); },
-            assertActionDataIsUtf8mb4: async () => { calls.push('utf8mb4'); }
+            assertActionDataIsUtf8mb4: async () => { calls.push('utf8mb4'); },
+            assertStrictSqlMode: async () => { calls.push('sqlmode'); }
         };
         const result = await Database.prototype.runMigrations.call(ctx);
-        assert.deepStrictEqual(calls, ['dispenser', 'pubkey', 'utf8mb4']);
+        assert.deepStrictEqual(calls, ['dispenser', 'pubkey', 'utf8mb4', 'sqlmode']);
         assert.strictEqual(result.lockSkipped, true);
     });
 
@@ -207,6 +208,40 @@ describe('Database schema-contract guards @regression', function () {
 
         const bad = contextReturning([{ tbl: 'transactions', cs: 'utf8mb3' }]);
         await assert.rejects(utf8Guard.call(bad));
+        assert.strictEqual(bad.releasedCount(), 1);
+    });
+});
+
+    // The poison-row errnos are errors only under a strict sql_mode. The pool pins one; this
+    // guard catches a session where something between the decoder and the server changed it.
+    const sqlModeGuard = Database.prototype.assertStrictSqlMode;
+
+describe('Database schema-contract guards @regression', function () {
+
+    it('accepts the stock MariaDB strict mode and STRICT_ALL_TABLES', async function () {
+        await sqlModeGuard.call(contextReturning([{ mode: 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' }]));
+        await sqlModeGuard.call(contextReturning([{ mode: 'STRICT_ALL_TABLES' }]));
+    });
+
+    it('rejects a lax mode, naming the quarantine divergence it causes', async function () {
+        for (const mode of ['', 'NO_ENGINE_SUBSTITUTION']) {
+            await assert.rejects(sqlModeGuard.call(contextReturning([{ mode }])), /1406.*quarantines/s);
+        }
+    });
+
+    it('rejects NO_BACKSLASH_ESCAPES even under a strict mode', async function () {
+        await assert.rejects(
+            sqlModeGuard.call(contextReturning([{ mode: 'STRICT_TRANS_TABLES,NO_BACKSLASH_ESCAPES' }])),
+            /NO_BACKSLASH_ESCAPES/);
+    });
+
+    it('releases the pooled connection on the sql_mode pass and throw paths', async function () {
+        const ok = contextReturning([{ mode: 'STRICT_TRANS_TABLES' }]);
+        await sqlModeGuard.call(ok);
+        assert.strictEqual(ok.releasedCount(), 1);
+
+        const bad = contextReturning([{ mode: '' }]);
+        await assert.rejects(sqlModeGuard.call(bad));
         assert.strictEqual(bad.releasedCount(), 1);
     });
 });

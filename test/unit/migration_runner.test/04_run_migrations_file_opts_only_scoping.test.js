@@ -45,10 +45,12 @@ const Database = require('../../../src/db');
             async query(sql, params) {
                 if (/GET_LOCK/.test(sql))                                      return [{ l: '1' }];
                 if (/RELEASE_LOCK/.test(sql))                                  return [];
+                if (/^SET SESSION max_statement_time/.test(sql))               return [];
                 if (/CREATE TABLE (IF NOT EXISTS )?schema_migrations/.test(sql)) return [];
                 if (/SELECT name, checksum FROM schema_migrations/.test(sql))  return ledgerRows.slice();
                 // The BIGINT UNSIGNED contract assertion names both tables, so it is
                 // matched first; the bare .columns lookup is the precondition probe.
+                if (/@@SESSION\.sql_mode/.test(sql))                           return [{ mode: 'STRICT_TRANS_TABLES' }];
                 if (/information_schema\.tables/.test(sql))                    return [{ dataType: 'bigint', columnType: 'bigint(20) unsigned' }];
                 if (/information_schema\.columns/.test(sql))                   return [{ dataType: 'bigint' }];
                 if (/^INSERT INTO schema_migrations/.test(sql)) { applied.push(params[0]); return []; }

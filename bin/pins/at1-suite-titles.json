@@ -91,25 +91,6 @@
       "src/sql schema parse-coverage @regression transactions.sql is parseable by the drift reconciler (non-null)",
       "src/sql schema parse-coverage @regression transactions.sql yields at least one column"
     ],
-    "0952dfb65faa59ba": [
-      "Database#countReorgDeletesAboveTip() THROWS on a marker payload that is not the expected array",
-      "Database#countReorgDeletesAboveTip() THROWS on a non-numeric block_index",
-      "Database#countReorgDeletesAboveTip() THROWS on an unparseable marker payload",
-      "Database#countReorgDeletesAboveTip() bounds the scan, and refuses a nonsense bound rather than emitting it as SQL",
-      "Database#countReorgDeletesAboveTip() counts a height once even when it was deleted, re-synced and deleted again",
-      "Database#countReorgDeletesAboveTip() counts only the marked heights above the current tip",
-      "Database#countReorgDeletesAboveTip() handles the pre-M-12 multi-entry payload shape",
-      "Database#countReorgDeletesAboveTip() propagates a tip read that could not be answered, rather than counting against a guess",
-      "Database#countReorgDeletesAboveTip() returns zero on a database with no REORG markers at all",
-      "Database#countReorgDeletesAboveTip() scans beyond the 5006-block litecoin testnet ceiling by default",
-      "verifyReorg: the safe-depth ceiling survives a lost halt marker deletes nothing at all when the prior depth cannot be read",
-      "verifyReorg: the safe-depth ceiling survives a lost halt marker names both halves of the depth in the abort message, so the operator sees the resume",
-      "verifyReorg: the safe-depth ceiling survives a lost halt marker recovers when the read fault is transient",
-      "verifyReorg: the safe-depth ceiling survives a lost halt marker refuses the FIRST delete when the committed REORG markers already reach the ceiling",
-      "verifyReorg: the safe-depth ceiling survives a lost halt marker spends only the depth that is left, then aborts",
-      "verifyReorg: the safe-depth ceiling survives a lost halt marker still refuses on the halt marker when one DID survive, before counting anything",
-      "verifyReorg: the safe-depth ceiling survives a lost halt marker without the durable count, a restart spends a whole fresh budget"
-    ],
     "09e84783d9b0b7ef": [
       "Fuzz: DISPENSER parsing BATCH-like strings with embedded DISPENSER should handle batch: \"DISPENSER|0|A||||||B|||||3600;DISPENSER|0|C||||||D|||||7200...\"",
       "Fuzz: DISPENSER parsing BATCH-like strings with embedded DISPENSER should handle batch: \"DISPENSER|0|A||||||B|||||3600;SEND|0|XCHAIN|1000...\"",
@@ -270,6 +251,30 @@
     "0d5d819b92bebe35": [
       "Boundary: Multisig Zero-Trim Edge Cases should keep all bytes when no trailing zeros exist",
       "Boundary: Multisig Zero-Trim Edge Cases should remove single trailing zero from multisig data"
+    ],
+    "0da18e1ca9928fd3": [
+      "Database schema-contract guards @regression accepts a pubkeys.pubkey wide enough for an uncompressed key",
+      "Database schema-contract guards @regression accepts both action-text columns already at utf8mb4",
+      "Database schema-contract guards @regression accepts dispensers.expiration at BIGINT UNSIGNED",
+      "Database schema-contract guards @regression accepts the stock MariaDB strict mode and STRICT_ALL_TABLES",
+      "Database schema-contract guards @regression distinguishes a dropped column (drift, throws) from an absent table (skip)",
+      "Database schema-contract guards @regression is a no-op when the pubkeys table does not exist yet",
+      "Database schema-contract guards @regression is a no-op when the tables do not exist yet",
+      "Database schema-contract guards @regression never points a drifted INTEGER column at the DATETIME converter migration",
+      "Database schema-contract guards @regression rejects NO_BACKSLASH_ESCAPES even under a strict mode",
+      "Database schema-contract guards @regression rejects a SIGNED bigint, which the old DATA_TYPE-only guard let through",
+      "Database schema-contract guards @regression rejects a half-migrated pair where only the mempool column lagged",
+      "Database schema-contract guards @regression rejects a lax mode, naming the quarantine divergence it causes",
+      "Database schema-contract guards @regression rejects a narrower INT UNSIGNED, naming the truncation against the indexer",
+      "Database schema-contract guards @regression rejects a narrower signed INT too",
+      "Database schema-contract guards @regression rejects a transactions.data still at utf8mb3, naming the quarantine it causes",
+      "Database schema-contract guards @regression rejects the pre-migration DATETIME and names the migration that converts it",
+      "Database schema-contract guards @regression rejects the pre-widen VARCHAR(66), naming the seam field it would corrupt",
+      "Database schema-contract guards @regression releases the pooled connection on both the pass and the throw path",
+      "Database schema-contract guards @regression releases the pooled connection on the expiration pass and throw paths",
+      "Database schema-contract guards @regression releases the pooled connection on the sql_mode pass and throw paths",
+      "Database schema-contract guards @regression releases the pooled connection on the utf8mb4 pass and throw paths",
+      "Database schema-contract guards @regression runs the pubkey guard on every runMigrations exit path, lock-skip included"
     ],
     "0eb0aadd100cef95": [
       "XChainDecoder#removeObfuscation() [REGRESSION P0] R-DEC-001: should decrypt a known XCHN payload correctly",
@@ -610,9 +615,6 @@
       "Database#insertEvent() returns false on generic error",
       "Database#insertEvent() returns true on success",
       "Database#insertEvent() serialises a BigInt field instead of throwing"
-    ],
-    "2a1f796a2739fb5e": [
-      "Database session timezone pins connection parameters to UTC without changing pool safeguards"
     ],
     "2a2b9d37b8ca008a": [
       "Fuzz: XChainBlockDecoder bitcoin: blockFromBuffer with random buffers should handle 2000 random buffers",
@@ -1100,6 +1102,10 @@
       "Fuzz: parseTransaction byte-mutated transaction hex should handle 2000 byte-mutated transactions",
       "Fuzz: parseTransaction completely random hex should handle 2000 random hex strings"
     ],
+    "4ef43ab7b728601d": [
+      "Database session timezone pins connection parameters to UTC without changing pool safeguards",
+      "Database session timezone pins every pooled session to a strict sql_mode without NO_BACKSLASH_ESCAPES"
+    ],
     "4fad52825aa3c998": [
       "Boundary: isFutureSegwitScript additional edge cases should handle 4-byte script at minimum length boundary",
       "Boundary: isFutureSegwitScript additional edge cases should handle 42-byte script at maximum length boundary",
@@ -1438,6 +1444,26 @@
       "coin-registry conformance (vendored copy) @regression pin == consensusHash over the vendored files LTC/regtest vendored pin matches the vendored consensusHash",
       "coin-registry conformance (vendored copy) @regression pin == consensusHash over the vendored files LTC/testnet vendored pin matches the vendored consensusHash",
       "coin-registry conformance (vendored copy) @regression pin == consensusHash over the vendored files verifyConsensusPin passes for every network on the vendored bundle"
+    ],
+    "640847acd3068328": [
+      "Database#countReorgDeletesAboveTip() THROWS on a marker payload that is not the expected array",
+      "Database#countReorgDeletesAboveTip() THROWS on a non-numeric block_index",
+      "Database#countReorgDeletesAboveTip() THROWS on an unparseable marker payload",
+      "Database#countReorgDeletesAboveTip() bounds the scan, and refuses a nonsense bound rather than emitting it as SQL",
+      "Database#countReorgDeletesAboveTip() counts a height once even when it was deleted, re-synced and deleted again",
+      "Database#countReorgDeletesAboveTip() counts only the marked heights above the current tip",
+      "Database#countReorgDeletesAboveTip() handles the pre-M-12 multi-entry payload shape",
+      "Database#countReorgDeletesAboveTip() propagates a tip read that could not be answered, rather than counting against a guess",
+      "Database#countReorgDeletesAboveTip() returns zero on a database with no REORG markers at all",
+      "Database#countReorgDeletesAboveTip() scans beyond the 5006-block litecoin testnet ceiling by default",
+      "verifyReorg: a re-deleted height does not shrink the carried-over depth counts every distinct height above the tip when repeat markers fill the newest rows",
+      "verifyReorg: the safe-depth ceiling survives a lost halt marker deletes nothing at all when the prior depth cannot be read",
+      "verifyReorg: the safe-depth ceiling survives a lost halt marker names both halves of the depth in the abort message, so the operator sees the resume",
+      "verifyReorg: the safe-depth ceiling survives a lost halt marker recovers when the read fault is transient",
+      "verifyReorg: the safe-depth ceiling survives a lost halt marker refuses the FIRST delete when the committed REORG markers already reach the ceiling",
+      "verifyReorg: the safe-depth ceiling survives a lost halt marker spends only the depth that is left, then aborts",
+      "verifyReorg: the safe-depth ceiling survives a lost halt marker still refuses on the halt marker when one DID survive, before counting anything",
+      "verifyReorg: the safe-depth ceiling survives a lost halt marker without the durable count, a restart spends a whole fresh budget"
     ],
     "646499266a236557": [
       "Database#reconcileTableIndexes() adds a declared index that is missing live",
@@ -1903,26 +1929,6 @@
       "XChainDecoder RPC-lookup + rollback-signal hardening block loop rollback-signal handling retries the block when deleteOpenDispensers signals rollback via false",
       "XChainDecoder RPC-lookup + rollback-signal hardening block loop rollback-signal handling retries the block when the open-dispenser set cannot be loaded (null)"
     ],
-    "90ab87a9e38be026": [
-      "Database schema-contract guards @regression accepts a pubkeys.pubkey wide enough for an uncompressed key",
-      "Database schema-contract guards @regression accepts both action-text columns already at utf8mb4",
-      "Database schema-contract guards @regression accepts dispensers.expiration at BIGINT UNSIGNED",
-      "Database schema-contract guards @regression distinguishes a dropped column (drift, throws) from an absent table (skip)",
-      "Database schema-contract guards @regression is a no-op when the pubkeys table does not exist yet",
-      "Database schema-contract guards @regression is a no-op when the tables do not exist yet",
-      "Database schema-contract guards @regression never points a drifted INTEGER column at the DATETIME converter migration",
-      "Database schema-contract guards @regression rejects a SIGNED bigint, which the old DATA_TYPE-only guard let through",
-      "Database schema-contract guards @regression rejects a half-migrated pair where only the mempool column lagged",
-      "Database schema-contract guards @regression rejects a narrower INT UNSIGNED, naming the truncation against the indexer",
-      "Database schema-contract guards @regression rejects a narrower signed INT too",
-      "Database schema-contract guards @regression rejects a transactions.data still at utf8mb3, naming the quarantine it causes",
-      "Database schema-contract guards @regression rejects the pre-migration DATETIME and names the migration that converts it",
-      "Database schema-contract guards @regression rejects the pre-widen VARCHAR(66), naming the seam field it would corrupt",
-      "Database schema-contract guards @regression releases the pooled connection on both the pass and the throw path",
-      "Database schema-contract guards @regression releases the pooled connection on the expiration pass and throw paths",
-      "Database schema-contract guards @regression releases the pooled connection on the utf8mb4 pass and throw paths",
-      "Database schema-contract guards @regression runs the pubkey guard on every runMigrations exit path, lock-skip included"
-    ],
     "90ef6cdee4ed0bb5": [
       "Security: BlockchainConnector Credential handling [REGRESSION P0] R-SEC-001: should not include credentials in the URL",
       "Security: BlockchainConnector Credential handling should store RPC credentials",
@@ -2180,6 +2186,24 @@
       "Database#purgeExpiredDispensers() hard-deletes soft-expired rows at or below the safe height",
       "Database#purgeExpiredDispensers() is a no-op before any reorg-safe depth (negative/undefined height)"
     ],
+    "a623c806af89bc2c": [
+      "REORG_HALT: a halt the marker cannot record still leaves a record carries the cause when the marker write throws rather than returning false",
+      "REORG_HALT: a halt the marker cannot record still leaves a record emits REORG_HALT with reason and depth when db.markReorgHalted is missing",
+      "REORG_HALT: a halt the marker cannot record still leaves a record reports marker_persisted=false when the durable write is refused, and still aborts",
+      "REORG_HALT: a halt the marker cannot record still leaves a record reports the halt in memory even when nothing durable can be written",
+      "REORG_HALT: a halt the marker cannot record still leaves a record still emits REORG_HALT on the normal path, and says the marker was written",
+      "api.js GET /status halt surface (source pin) publishes reorg_halt_checked_at beside reorg_halted",
+      "api.js GET /status halt surface (source pin) publishes the operator-clear pair the health method carries",
+      "api.js GET /status halt surface (source pin) reads the halt through the shared reader, so a failed ping keeps the last known halt",
+      "api.js GET /status halt surface (source pin) spells the key exactly as the JSON-RPC health surface does",
+      "db: a failed temp-table drop stops being silent records the drop failure with the table and the cause",
+      "health probes: a failing probe stops being silent answers null instead of throwing when the error itself cannot be read",
+      "health probes: a failing probe stops being silent carries a cause even when the probe threw something that is not an Error",
+      "health probes: a failing probe stops being silent keeps the two probes on separate throttles, so one failure cannot mask the other",
+      "health probes: a failing probe stops being silent names the db_ping probe on /live when the ping throws",
+      "health probes: a failing probe stops being silent names the reorg_halt probe on /live, the failure that makes a halted decoder read clean",
+      "health probes: a failing probe stops being silent throttles a repeating probe failure to one line per window and counts the rest"
+    ],
     "a6813520af038fe3": [
       "Fuzz: parseTransaction H2: multisig with tiny/empty pubkeys should handle multisig with 0-byte pubkeys",
       "Fuzz: parseTransaction H2: multisig with tiny/empty pubkeys should handle multisig with 1-byte pubkeys",
@@ -2346,23 +2370,6 @@
       "XChainDecoder.verifyReorg mid-walk tip regression refreshes nodeTip on out-of-range so a regressed tip self-heals instead of wedging",
       "XChainDecoder.verifyReorg mid-walk tip regression refuses a same-tier foreign endpoint tip refresh (genesis pin mismatch) and deletes no local blocks",
       "XChainDecoder.verifyReorg mid-walk tip regression still accepts the refreshed tip when block 0 agrees, so the self-heal happy path is unchanged"
-    ],
-    "b93099e3142675e4": [
-      "REORG_HALT: a halt the marker cannot record still leaves a record carries the cause when the marker write throws rather than returning false",
-      "REORG_HALT: a halt the marker cannot record still leaves a record emits REORG_HALT with reason and depth when db.markReorgHalted is missing",
-      "REORG_HALT: a halt the marker cannot record still leaves a record reports marker_persisted=false when the durable write is refused, and still aborts",
-      "REORG_HALT: a halt the marker cannot record still leaves a record reports the halt in memory even when nothing durable can be written",
-      "REORG_HALT: a halt the marker cannot record still leaves a record still emits REORG_HALT on the normal path, and says the marker was written",
-      "api.js GET /status halt surface (source pin) publishes reorg_halt_checked_at beside reorg_halted",
-      "api.js GET /status halt surface (source pin) publishes the operator-clear pair the health method carries",
-      "api.js GET /status halt surface (source pin) spells the key exactly as the JSON-RPC health surface does",
-      "db: a failed temp-table drop stops being silent records the drop failure with the table and the cause",
-      "health probes: a failing probe stops being silent answers null instead of throwing when the error itself cannot be read",
-      "health probes: a failing probe stops being silent carries a cause even when the probe threw something that is not an Error",
-      "health probes: a failing probe stops being silent keeps the two probes on separate throttles, so one failure cannot mask the other",
-      "health probes: a failing probe stops being silent names the db_ping probe on /live when the ping throws",
-      "health probes: a failing probe stops being silent names the reorg_halt probe on /live, the failure that makes a halted decoder read clean",
-      "health probes: a failing probe stops being silent throttles a repeating probe failure to one line per window and counts the rest"
     ],
     "b97f08cbf07b98ec": [
       "CE-09: Unhandled Promise Rejection api.js catch handler should track decoder crash state",
@@ -2686,6 +2693,24 @@
       "Boundary: Script Type Detection (S-1 through S-7) [REGRESSION P1] R-SCR-005 S-1c: empty leading push with a trailing rawData push is reported, not silently blanked",
       "Boundary: Script Type Detection (S-1 through S-7) [REGRESSION P1] R-SCR-006 S-1d: a lone OP_0 payload stays silent (no false parse error)"
     ],
+    "da7078876aa77bf9": [
+      "/live gates on the poll-loop heartbeat answers 200 while the loop is iterating, caught up and quiet",
+      "/live gates on the poll-loop heartbeat answers 503 the moment the running flag drops, ahead of the silence window",
+      "/live gates on the poll-loop heartbeat answers 503 when the DB ping fails, which the heartbeat must not mask",
+      "/live gates on the poll-loop heartbeat answers 503 when the loop stops iterating, with nothing else having changed",
+      "/live gates on the poll-loop heartbeat is not silent before the loop has iterated once, so a booting decoder stays 200",
+      "/live gates on the poll-loop heartbeat reports a latent REORG_HALT marker on the surface that is actually polled",
+      "/live gates on the poll-loop heartbeat reports the halt as a stable false, not an absent key, when there is no marker",
+      "/live gates on the poll-loop heartbeat stays 200 through a node-tip outage, so containers are not restarted",
+      "/live gates on the poll-loop heartbeat still answers 200 while halted, so autoheal cannot restart-loop a resync case",
+      "/live says whether the halt marker was ever read publishes a null reorg_halt_checked_at when no marker read has completed",
+      "/live says whether the halt marker was ever read publishes the read time once a marker read has completed",
+      "/live says whether the halt marker was ever read publishes who cleared a halt, so a cleared decoder is not read as never halted",
+      "a failed DB ping keeps the halt the decoder already knows /live reports the cached halt when the ping answers false rather than throwing",
+      "a failed DB ping keeps the halt the decoder already knows /live still reports the halt and the park while the ping throws",
+      "a failed DB ping keeps the halt the decoder already knows invents no halt: a clean decoder with a dead DB still reads not-halted and never-looked",
+      "a failed DB ping keeps the halt the decoder already knows the JSON-RPC health probe reports the cached halt while the ping throws"
+    ],
     "dc2a6bdefc1386bc": [
       "Database#deleteAndCompareTxsNotInList() deletes every stored row when the node mempool is empty",
       "Database#deleteAndCompareTxsNotInList() drops the temp table and releases the connection even on the happy path",
@@ -2943,20 +2968,6 @@
       "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler suppresses an over-budget batch on regtest, where the handler rejects it whole",
       "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler under-charges DEPLOY rather than guessing its format, which is the safe direction"
     ],
-    "f271518050d7c3b9": [
-      "/live gates on the poll-loop heartbeat answers 200 while the loop is iterating, caught up and quiet",
-      "/live gates on the poll-loop heartbeat answers 503 the moment the running flag drops, ahead of the silence window",
-      "/live gates on the poll-loop heartbeat answers 503 when the DB ping fails, which the heartbeat must not mask",
-      "/live gates on the poll-loop heartbeat answers 503 when the loop stops iterating, with nothing else having changed",
-      "/live gates on the poll-loop heartbeat is not silent before the loop has iterated once, so a booting decoder stays 200",
-      "/live gates on the poll-loop heartbeat reports a latent REORG_HALT marker on the surface that is actually polled",
-      "/live gates on the poll-loop heartbeat reports the halt as a stable false, not an absent key, when there is no marker",
-      "/live gates on the poll-loop heartbeat stays 200 through a node-tip outage, so containers are not restarted",
-      "/live gates on the poll-loop heartbeat still answers 200 while halted, so autoheal cannot restart-loop a resync case",
-      "/live says whether the halt marker was ever read publishes a null reorg_halt_checked_at when no marker read has completed",
-      "/live says whether the halt marker was ever read publishes the read time once a marker read has completed",
-      "/live says whether the halt marker was ever read publishes who cleared a halt, so a cleared decoder is not read as never halted"
-    ],
     "f2b4a0f1e0a013b6": [
       "Database#createAddress() inserts and returns id when address does not exist",
       "Database#createAddress() returns 1 for empty string address",
@@ -3010,6 +3021,18 @@
       "CE-02: RPC Timeout Storm getRawTransaction should back off 5s on HTTP 429 (queue depth exceeded)",
       "CE-02: RPC Timeout Storm getRawTransaction should retry up to 10 times on timeout",
       "CE-02: RPC Timeout Storm getRawTransactions should fail entire batch if one tx fails"
+    ],
+    "f557b21579db13fd": [
+      "runMigrations() migration-scoped statement timeout @regression never touches the session when the lock is not acquired",
+      "runMigrations() migration-scoped statement timeout @regression raises the limit after GET_LOCK and restores it before RELEASE_LOCK",
+      "runMigrations() migration-scoped statement timeout @regression reads MIGRATE_QUERY_TIMEOUT=-5 as session values 3600, 30",
+      "runMigrations() migration-scoped statement timeout @regression reads MIGRATE_QUERY_TIMEOUT=0 as session values 0, 30",
+      "runMigrations() migration-scoped statement timeout @regression reads MIGRATE_QUERY_TIMEOUT=900000 as session values 900, 30",
+      "runMigrations() migration-scoped statement timeout @regression reads MIGRATE_QUERY_TIMEOUT=abc as session values 3600, 30",
+      "runMigrations() migration-scoped statement timeout @regression restores the limit before RELEASE_LOCK when a statement fails",
+      "runMigrations() migration-scoped statement timeout on scoped runs @regression destroys instead of pooling the connection when the restore fails",
+      "runMigrations() migration-scoped statement timeout on scoped runs @regression leaves the session alone for a scoped run with nothing to apply",
+      "runMigrations() migration-scoped statement timeout on scoped runs @regression raises and restores the limit for a scoped run that applies its file"
     ],
     "f56486fd8ec9ad87": [
       "DISPENSER lifecycle mirror: advisory open-view a creator-issued lengthening edit still reaches the delegated dispenser",
@@ -3079,8 +3102,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 187,
-      "titleCount": 1738,
+      "fileCount": 188,
+      "titleCount": 1759,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3169,9 +3192,9 @@
         "test/unit/db_queries.test/19_verify_database.test.js": "b9f5fe3686fa1924",
         "test/unit/db_queries.test/20_error_path_transaction_connection_branches.test.js": "054fdd1916b39a5f",
         "test/unit/db_query_helpers.test.js": "6fa21ab5be3abe7a",
-        "test/unit/db_session_timezone_utc.test.js": "2a1f796a2739fb5e",
-        "test/unit/decoder_halt_diagnostics.test.js": "b93099e3142675e4",
-        "test/unit/decoder_live_heartbeat.test.js": "f271518050d7c3b9",
+        "test/unit/db_session_timezone_utc.test.js": "4ef43ab7b728601d",
+        "test/unit/decoder_halt_diagnostics.test.js": "a623c806af89bc2c",
+        "test/unit/decoder_live_heartbeat.test.js": "da7078876aa77bf9",
         "test/unit/decoder_stress_sweep.test.js": "973dda09a83b0b1a",
         "test/unit/decoder_tip_stale_surface.test.js": "cdab1aa16d30bd48",
         "test/unit/dispenser_cancel_edit_db.test.js": "80d233d9d6bb2811",
@@ -3209,8 +3232,9 @@
         "test/unit/migration_runner.test/04_run_migrations_file_opts_only_scoping.test.js": "9427161b3e973b0e",
         "test/unit/migration_runner.test/05_run_migrations_migration_preconditions.test.js": "4044805d7869c790",
         "test/unit/migration_runner.test/06_database_split_sql_statements.test.js": "45857eb89566bdb3",
-        "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "90ab87a9e38be026",
+        "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "0da18e1ca9928fd3",
         "test/unit/migration_runner.test/08_destructive_guard_prefix_forms.test.js": "ace818c6415f144e",
+        "test/unit/migration_runner.test/09_migration_query_timeout.test.js": "f557b21579db13fd",
         "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
         "test/unit/node_catch_up_wait.test.js": "4763aa60db951190",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
@@ -3228,7 +3252,7 @@
         "test/unit/protocol_time.test.js": "a712626ef67e3e03",
         "test/unit/protocol_time_parity.test.js": "bea80fd3971653d5",
         "test/unit/remove_obfuscation.test.js": "0eb0aadd100cef95",
-        "test/unit/reorg_depth_across_restart.test.js": "0952dfb65faa59ba",
+        "test/unit/reorg_depth_across_restart.test.js": "640847acd3068328",
         "test/unit/reorg_halt_clear.test.js": "c7bb56e0e47bab3f",
         "test/unit/reorg_halt_park.test.js": "b6be0fd71f5537fb",
         "test/unit/reorg_halt_surface.test.js": "51c14bbdc7db5a0e",
@@ -3560,8 +3584,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 187,
-      "titleCount": 1738,
+      "fileCount": 188,
+      "titleCount": 1759,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3650,9 +3674,9 @@
         "test/unit/db_queries.test/19_verify_database.test.js": "b9f5fe3686fa1924",
         "test/unit/db_queries.test/20_error_path_transaction_connection_branches.test.js": "054fdd1916b39a5f",
         "test/unit/db_query_helpers.test.js": "6fa21ab5be3abe7a",
-        "test/unit/db_session_timezone_utc.test.js": "2a1f796a2739fb5e",
-        "test/unit/decoder_halt_diagnostics.test.js": "b93099e3142675e4",
-        "test/unit/decoder_live_heartbeat.test.js": "f271518050d7c3b9",
+        "test/unit/db_session_timezone_utc.test.js": "4ef43ab7b728601d",
+        "test/unit/decoder_halt_diagnostics.test.js": "a623c806af89bc2c",
+        "test/unit/decoder_live_heartbeat.test.js": "da7078876aa77bf9",
         "test/unit/decoder_stress_sweep.test.js": "973dda09a83b0b1a",
         "test/unit/decoder_tip_stale_surface.test.js": "cdab1aa16d30bd48",
         "test/unit/dispenser_cancel_edit_db.test.js": "80d233d9d6bb2811",
@@ -3690,8 +3714,9 @@
         "test/unit/migration_runner.test/04_run_migrations_file_opts_only_scoping.test.js": "9427161b3e973b0e",
         "test/unit/migration_runner.test/05_run_migrations_migration_preconditions.test.js": "4044805d7869c790",
         "test/unit/migration_runner.test/06_database_split_sql_statements.test.js": "45857eb89566bdb3",
-        "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "90ab87a9e38be026",
+        "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "0da18e1ca9928fd3",
         "test/unit/migration_runner.test/08_destructive_guard_prefix_forms.test.js": "ace818c6415f144e",
+        "test/unit/migration_runner.test/09_migration_query_timeout.test.js": "f557b21579db13fd",
         "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
         "test/unit/node_catch_up_wait.test.js": "4763aa60db951190",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
@@ -3709,7 +3734,7 @@
         "test/unit/protocol_time.test.js": "a712626ef67e3e03",
         "test/unit/protocol_time_parity.test.js": "bea80fd3971653d5",
         "test/unit/remove_obfuscation.test.js": "0eb0aadd100cef95",
-        "test/unit/reorg_depth_across_restart.test.js": "0952dfb65faa59ba",
+        "test/unit/reorg_depth_across_restart.test.js": "640847acd3068328",
         "test/unit/reorg_halt_clear.test.js": "c7bb56e0e47bab3f",
         "test/unit/reorg_halt_park.test.js": "b6be0fd71f5537fb",
         "test/unit/reorg_halt_surface.test.js": "51c14bbdc7db5a0e",

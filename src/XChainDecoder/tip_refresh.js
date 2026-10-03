@@ -110,7 +110,7 @@ async function fetchChainTip(loop){
         if (!loop.lastBlockchainInfo
             || typeof loop.lastBlockchainInfo["blocks"] !== 'number'
             || typeof loop.lastBlockchainInfo["verificationprogress"] !== 'number'){
-            logger.info("Malformed getblockchaininfo response (missing or non-numeric 'blocks'/'verificationprogress'). Trying again...")
+            logger.error("Malformed getblockchaininfo response (missing or non-numeric 'blocks'/'verificationprogress'). Trying again...")
             loop.lastBlockchainInfo = null
             await this.sleep(3000)
             return 'continue'
@@ -142,8 +142,7 @@ async function fetchChainTip(loop){
         loop.lastBlockchainInfoRefreshAt = Date.now()
         this.blockchainInfoLastRefreshAt = loop.lastBlockchainInfoRefreshAt
     } catch (e){
-        logger.info(e)
-        logger.info(formatLogLine("Error trying to get network info from the node. Trying again...", e))
+        logger.error(formatLogLine("Error trying to get network info from the node. Trying again...", e))
         await this.sleep(3000)
         return 'continue'
     }

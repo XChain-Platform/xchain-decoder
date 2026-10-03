@@ -13,11 +13,11 @@ const XChainDecoder = require('../../src/XChainDecoder')
 
 // A v0 DISPENSER open is only valid for this chain when BOTH coin fields name the
 // local native coin. These tests pin the producer gate to the indexer's four
-// format==0 coin checks (xchain-indexer/src/actions/dispenser.js): GIVE_COIN and
-// GET_COIN must each be a supported COIN and equal the local COIN. The decoder
-// previously admitted an open whenever EITHER field was merely non-empty, so it
-// opened dispensers the indexer rejects and then misclassified later native-coin
-// payments to that address as failed dispenses.
+// format==0 coin checks (xchain-indexer/src/actions/dispenser/validate.js): GIVE_COIN and
+// GET_COIN must each be a supported COIN and equal the local COIN. A gate that admits
+// an open whenever EITHER field is merely non-empty opens dispensers the indexer
+// rejects and then misclassifies later native-coin payments to that address as
+// failed dispenses.
 function makeDecoder(network) {
     return new XChainDecoder(
         network, null, null, null, null, null,

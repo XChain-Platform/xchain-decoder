@@ -16,7 +16,7 @@
  * SQL quote walkers model MariaDB/MySQL backslash escapes.
  *
  * MariaDB/MySQL honour `\<char>` inside `'` and `"` string literals whenever
- * sql_mode omits NO_BACKSLASH_ESCAPES, which nothing in this tree sets. The four
+ * sql_mode omits NO_BACKSLASH_ESCAPES, which the pool pin (DECODER_SQL_MODE) omits. The four
  * walkers used to treat a doubled quote as the ONLY escape, so a `\'` closed the
  * span early, the literal's real closing quote re-opened it, and the following
  * `;` plus everything up to the next quote merged into one chunk. A `DROP TABLE`

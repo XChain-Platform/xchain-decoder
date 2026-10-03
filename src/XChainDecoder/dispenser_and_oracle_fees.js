@@ -79,7 +79,7 @@ module.exports = {
 
     // A v0 DISPENSER open is valid for THIS chain only when BOTH coin fields name
     // this chain's native coin. This mirrors the indexer's four format==0 checks
-    // (xchain-indexer/src/actions/dispenser.js): GIVE_COIN and GET_COIN must each be
+    // (xchain-indexer/src/actions/dispenser/validate.js): GIVE_COIN and GET_COIN must each be
     // a supported COIN AND equal the local COIN. Requiring both to equal this.coinTick
     // satisfies all four at once (the local coin is by definition supported).
     //

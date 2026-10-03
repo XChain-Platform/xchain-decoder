@@ -27,7 +27,7 @@ async function insertDispenserRow(database, connection, query, openDispenser){
     // The create's SOURCE, recorded ONLY when the dispenser operates on a
     // delegated GET_ADDRESS (address != source). The indexer authorises a later
     // cancel/edit from EITHER the dispenser SOURCE or its GET_ADDRESS
-    // (xchain-indexer/src/actions/dispenser.js "SOURCE (not owner)"), and
+    // (xchain-indexer/src/actions/dispenser/index.js "SOURCE (not owner)"), and
     // address_id records only the operating address, so without this id a
     // creator-issued cancel of a delegated dispenser matches no decoder row and the
     // row stays open past the indexer's close. A non-delegated dispenser leaves

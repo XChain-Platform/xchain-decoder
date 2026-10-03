@@ -64,7 +64,7 @@ module.exports = {
     // THE FLOOR IS MEASURED AGAINST THE MARK BLOCK, NOT THE EXPIRATION. The indexer runs a
     // block's transactions BEFORE its expiration pass (xchain-indexer XChainIndexer.js, the
     // processTransaction loop ahead of util.processExpirations), and its cancel handler tests
-    // only that the dispenser status is 'open' (actions/dispenser.js). So a cancel landing in
+    // only that the dispenser status is 'open' (actions/dispenser/index.js). So a cancel landing in
     // the first block whose header time passes expiration E is ACCEPTED, and the indexer then
     // settles fills until that cancel's block time plus DISPENSER_CLOSE_DELAY. Anchoring
     // retention on E alone ends capture at E + grace and loses the buyer's coin in the window
@@ -166,7 +166,7 @@ module.exports = {
     // never roll back committed block data. At worst soft-expired rows linger a
     // little longer). Deterministic across nodes: keyed off canonical block height,
     // never wall clock. Bounds dispensers table growth (the reason streamed
-    // dispenser replication was disabled, see xchain-sync replicatedTables.js).
+    // dispenser replication was disabled, see xchain-sync src/schema/replicated_tables.js).
     async purgeExpiredDispensers(safeHeight) {
         if (safeHeight == null || safeHeight < 0) return true   // nothing reorg-safe yet (initial sync)
         const query = `

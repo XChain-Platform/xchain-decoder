@@ -221,7 +221,9 @@ Database.DEPLOY_PRECONDITION_TAG = 'deploy-precondition=required';
 // here must exist, be mode=manual, and carry the tag.
 //
 // ADDING A STARTUP ASSERTION: register it here and tag its migration file, or the
-// next fleet deploy discovers the requirement as a crash-loop again.
+// next fleet deploy discovers the requirement as a crash-loop again. A server-setting
+// assertion with no migration behind it (assertStrictSqlMode) is not registered: the
+// pool pins what it checks, so it holds by construction and cannot crash-loop a deploy.
 Database.STARTUP_ASSERTED_MIGRATIONS = [
     {
         file:      '2026-06-13-dispensers-expiration-bigint.sql',

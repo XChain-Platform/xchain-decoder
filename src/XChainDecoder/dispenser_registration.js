@@ -26,7 +26,7 @@ const { isBatchSubCommandCaptureActive } = require('../protocol/batch_sub_comman
 //the list of possible dispenses.
 //
 //v0 wire format (must stay in sync with the
-//indexer (see xchain-indexer/src/actions/dispenser.js):
+//indexer (see xchain-indexer/src/actions/dispenser/index.js this.formats):
 //  DISPENSER|0|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT
 //    |GIVE_OWNERSHIP|GIVE_ESCROW
 //    |GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS
@@ -115,10 +115,13 @@ const { isBatchSubCommandCaptureActive } = require('../protocol/batch_sub_comman
 // BELOW the flag-day must still reproduce the over-captured rows the
 // fleet wrote, and only a gate can promise that in advance. It rides
 // BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION rather than a constant
-// of its own because that gate is BUILT AND STILL UNARMED on mainnet:
-// the tightening costs no flag-day, and the inheritance it closes
-// arms in the same instant that introduced it. A second constant
-// would arm one half of one decision separately.
+// of its own because the tightening and the sub-command walk it
+// guards arm at ONE instant (mainnet 2026-08-16T00:00:00Z), so the
+// inheritance it closes never exists above the gate and the
+// tightening costs no flag-day of its own. That gate is LIVE on
+// mainnet, so any further change to this prefix logic needs a new
+// flag-day. A second constant would arm one half of one decision
+// separately.
 //
 // `DISPENSER|` is the whole tightening: DISPENSER has no legacy
 // VERSION-less wire form to spare (actions.js injects VERSION 0 for
@@ -200,7 +203,7 @@ function pushV0DispenserCreate(decodedDataSplit, dispenserCreateCandidates, pars
 
     // Require an INTEGER, matching the indexer, which rejects any
     // non-integer EXPIRATION outright (isInteger, see
-    // xchain-indexer/src/actions/dispenser.js). dispensers.expiration
+    // xchain-indexer/src/actions/dispenser/validate_format.js). dispensers.expiration
     // is BIGINT UNSIGNED, so a fractional value like 1700000000.5
     // either fails the write under a strict sql_mode - wedging the
     // block loop, which then retries the same deterministic tx
@@ -238,7 +241,7 @@ function collectDispenserCreates(commands, dispenserCommandPrefix, parseResult, 
             continue
         let decodedDataSplit = dispenserCommand.split("|")
         // Field [1] is the DISPENSER FORMAT (create=0, cancel=1,
-        // edit=2; xchain-indexer/src/actions/dispenser.js this.formats).
+        // edit=2; xchain-indexer/src/actions/dispenser/index.js this.formats).
         // The decoder mirrors all three so its open-dispenser view (the
         // address set that gates transaction_output capture) tracks the
         // same lifecycle the indexer derives. Formats 1 and 2 reference

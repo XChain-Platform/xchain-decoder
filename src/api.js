@@ -45,6 +45,7 @@ const jsonRouter = require('express-json-rpc-router')
 const {
     makeRpcBatchGuard,
     registerLiveRoute,
+    readReorgHaltForProbe,
     noteProbeFailure,
     nodeReachabilityFields,
     resetProbeLogState,
@@ -68,7 +69,7 @@ const DB_PASSWORD =  process.env.DECODER_DB_PASS
 const DECODER_API_PORT = parseInt(process.env.DECODER_API_PORT, 10)
 const AUX_POW = process.env.AUX_POW === 'true' || process.env.AUX_POW === '1'
 // Native-coin protocol fee destination for this coin+network: registry-pinned default with a
-// non-mainnet-only env override (see src/protocol/fee_destination.js). When resolved, the decoder persists
+// regtest-only env override (see src/protocol/fee_destination.js). When resolved, the decoder persists
 // outputs paying it to transaction_outputs so the indexer can validate native-coin fee payments.
 const FEE_DESTINATION = resolveFeeDestination(NETWORK, process.env.FEE_DESTINATION || null)
 
@@ -135,10 +136,7 @@ function registerStatusRoute(app, decoder, isDecoderRunning){
         // Halt marker, reported here too so an operator can see it on the cheap probe.
         // The HTTP code stays keyed on running+db for the reason given in
         // src/api/health_probe.js: neither a dormant halt nor a park is a fault a restart repairs.
-        let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
-        if (dbOk && typeof decoder.checkReorgHalt === 'function'){
-            try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', '/status', e) }
-        }
+        const reorgHalt = await readReorgHaltForProbe(decoder, dbOk, '/status')
         // RULED 2026-09-01: xchain-node's BootstrapHealthGate refuses any
         // /status payload with no lag key (lagKeys: lag_blocks, blockLag, lag) once it
         // falls back to this route. getSyncStatus() already reports the same

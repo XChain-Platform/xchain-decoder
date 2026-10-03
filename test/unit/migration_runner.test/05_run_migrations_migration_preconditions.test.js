@@ -50,8 +50,10 @@ const Database = require('../../../src/db');
             async query(sql, params) {
                 if (/GET_LOCK/.test(sql))                                        return [{ l: '1' }];
                 if (/RELEASE_LOCK/.test(sql))                                    return [];
+                if (/^SET SESSION max_statement_time/.test(sql))                 return [];
                 if (/CREATE TABLE (IF NOT EXISTS )?schema_migrations/.test(sql))  return [];
                 if (/SELECT name, checksum FROM schema_migrations/.test(sql))     return [];
+                if (/@@SESSION\.sql_mode/.test(sql))                              return [{ mode: 'STRICT_TRANS_TABLES' }];
                 // Contract guard first: its query names both information_schema tables.
                 if (/information_schema\.tables/.test(sql))
                     return [{ dataType: expirationType,

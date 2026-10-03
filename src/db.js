@@ -20,7 +20,7 @@
 
 const mariadb = require('mariadb');
 const config = require('./config');
-const { DB_NAME_REGEX } = require('./db/constants.js')
+const { DB_NAME_REGEX, DECODER_SQL_MODE } = require('./db/constants.js')
 const { resolveQueryTimeout } = require('./db/query_helpers.js')
 
 class Database {
@@ -58,7 +58,10 @@ class Database {
             timezone:          'Z',
             connectionLimit:  10,
             insertIdAsNumber: true,
-            queryTimeout:     resolveQueryTimeout(config.DB_QUERY_TIMEOUT)
+            queryTimeout:     resolveQueryTimeout(config.DB_QUERY_TIMEOUT),
+            // Strict mode on every pooled session; initSql, not sessionVariables, because
+            // the driver re-runs initSql after a connection reset and sessionVariables not.
+            initSql:          "SET SESSION sql_mode='" + DECODER_SQL_MODE + "'"
         };
         this.pool = mariadb.createPool(this.connectionPoolParams);
         this.transactionConnection = null;

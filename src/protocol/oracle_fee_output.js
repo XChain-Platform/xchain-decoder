@@ -33,14 +33,14 @@
 const { ORACLE_FEE_OUTPUT_ACTIVATION, ORACLE_FEE_SET_CAPTURE_ACTIVATION } = require('./constants.js')
 
 // Field positions in the DISPENSER v0 wire format (must stay in sync with the
-// indexer, xchain-indexer/src/actions/dispenser.js this.formats[0]):
+// indexer, xchain-indexer/src/actions/dispenser/index.js this.formats[0]):
 //   0 DISPENSER | 1 VERSION | 2 GIVE_COIN | 3 GIVE_TICK | 4 GIVE_AMOUNT
 //   5 GIVE_OWNERSHIP | 6 GIVE_ESCROW | 7 GET_COIN | 8 GET_TICK | 9 GET_AMOUNT
 //   10 GET_ADDRESS | 11 FIAT_CODE | 12 FIAT_AMOUNT | 13 ORACLE_ADDRESS
 //   14 EXPIRATION | 15 ALLOW_LIST | 16 BLOCK_LIST | 17 MEMO
 // Decoder offset = indexer format position + 1, because the decoder splits with the
 // ACTION token ('DISPENSER') at 0 while the indexer's format string starts at VERSION.
-// The comment is no longer the only contract: test/unit/dispenserFieldOffsets.test.js
+// The comment is no longer the only contract: test/unit/dispenser_field_offsets.test.js
 // derives every one of these offsets from the live sibling Dispenser's this.formats.
 //
 // EVERY v0 position the decoder reads is named here, not just the ones oracle-fee

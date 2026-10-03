@@ -106,6 +106,20 @@ function makeRpcBatchGuard(maxBatch){
     }
 }
 
+// Read the REORG_HALT state for a health surface: the live marker read when the DB
+// answered its ping, else the last known cached state, so a DB fault never reports a
+// known or parked halt as clear. Shared by /live, GET /status and the health method.
+async function readReorgHaltForProbe(decoder, dbOk, route) {
+    if (dbOk && typeof decoder.checkReorgHalt === 'function'){
+        try { return await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', route, e) }
+    }
+    // No marker query on a failed ping: the pool just failed, and the healthcheck must stay fast.
+    if (typeof decoder.getReorgHaltStatus === 'function'){
+        try { return decoder.getReorgHaltStatus() } catch (e) { noteProbeFailure('reorg_halt', route, e) }
+    }
+    return { halted: false, reason: null, at: null, cleared_at: null, cleared_reason: null, checked_at: null }
+}
+
 // GET /live, the LIVENESS probe the Docker HEALTHCHECK runs. It is /status plus the
 // one thing /status structurally cannot see: the block loop retrying a block forever.
 // decoderRunning only goes false when start() REJECTS, and the loop never rejects on a
@@ -149,10 +163,7 @@ async function getLiveProbeState(decoder, isDecoderRunning) {
     // for a fault no restart touches. That holds in both halt shapes, latent (the
     // decoder keeps parsing forward and is doing useful work) and parked (it has
     // stopped on purpose and is waiting for the clear, which lands while it runs).
-    let reorgHalt = { halted: false, reason: null, at: null, checked_at: null }
-    if (dbOk && typeof decoder.checkReorgHalt === 'function'){
-        try { reorgHalt = await decoder.checkReorgHalt() } catch (e) { noteProbeFailure('reorg_halt', '/live', e) }
-    }
+    const reorgHalt = await readReorgHaltForProbe(decoder, dbOk, '/live')
     const syncStatus = decoder.getSyncStatus()
     const healthy = decoderRunning && dbOk && !stalled && !pollSilent
     return { decoderRunning, dbOk, stalled, pollSilent, reorgHalt, syncStatus, healthy }
@@ -210,4 +221,4 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
     })
 }
 
-module.exports = { makeRpcBatchGuard, registerLiveRoute, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
+module.exports = { makeRpcBatchGuard, registerLiveRoute, readReorgHaltForProbe, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }

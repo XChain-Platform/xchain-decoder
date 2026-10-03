@@ -200,8 +200,8 @@ function initialLoopLatches(){
     let txParseRetryCount = 0
 
     // Deterministic-INSERT-failure tracking. A row the DB rejects deterministically
-    // (Database.POISON_ROW, e.g. a 4-byte-UTF-8 char on the utf8mb3 `data` column,
-    // errno 1366) can never insert as-is, so retrying the block would wedge it forever.
+    // (Database.POISON_ROW: an errno in DETERMINISTIC_WRITE_ERRNOS, e.g. 1406 data too
+    // long) can never insert as-is, so retrying the block would wedge it forever.
     // After TX_PARSE_MAX_RETRIES the tx position is added to insertQuarantine and the
     // re-parse skips it (PARSE_ERROR + no insert), mirroring the parse-throw quarantine.
     // Keyed "<blockHeight>:<txPosition>"; cleared on block commit so it stays bounded

@@ -198,6 +198,15 @@ describe('api.js GET /status halt surface (source pin)', function () {
             'need to tell "clean" apart from "never looked"')
     })
 
+    it('reads the halt through the shared reader, so a failed ping keeps the last known halt', function () {
+        const at = src.indexOf("app.get('/status'")
+        const body = src.slice(at, src.indexOf('function createJsonRpcController', at))
+        assert.ok(/readReorgHaltForProbe\(decoder, dbOk, '\/status'\)/.test(body),
+            'GET /status no longer reads the halt through readReorgHaltForProbe')
+        assert.ok(!/reorgHalt\s*=\s*\{\s*halted:\s*false/.test(body),
+            'GET /status seeds a not-halted default that a DB fault would publish')
+    })
+
     it('spells the key exactly as the JSON-RPC health surface does', function () {
         // The gate reads one key name across both surfaces; a near-miss spelling on
         // the fallback body reads as an absent timestamp and refuses every decoder.
