@@ -37,7 +37,7 @@ describe('envInt', () => {
     })
 
     it('uses the fallback for missing, empty, and invalid values', () => {
-        for (const raw of [undefined, null, '', 0, 'x']) {
+        for (const raw of [undefined, null, '', 0, 'x', -2]) {
             assert.strictEqual(envInt(raw, 7, 'RPC_TIMEOUT'), 7)
         }
     })
