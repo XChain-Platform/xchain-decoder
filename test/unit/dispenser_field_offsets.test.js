@@ -17,8 +17,8 @@
 // address the dispenser row is registered under), ORACLE_ADDRESS (the token oracle-fee
 // capture keys on), the v0 create EXPIRATION and the v2 edit EXPIRATION. The
 // authoritative layout is the indexer's own format strings
-// (xchain-indexer/src/actions/dispenser/index.js this.formats, moved there from the former
-// single-file src/actions/dispenser.js by the indexer M3 directory split), and until this
+// (xchain-indexer/src/actions/dispenser/index.js this.formats, moved into
+// xchain-indexer/src/actions/dispenser/ by the indexer M3 directory split), and until this
 // guard existed the only thing binding the two was a prose comment, while every comparable
 // dependency at this seam already had a mechanical gate (indexer_batch_limits.js vendoring,
 // oracle_fee_output_activation_conformance.test.js).
