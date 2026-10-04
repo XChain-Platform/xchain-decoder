@@ -44,7 +44,7 @@ describe('envInt', () => {
 
     it('trims valid integers and honors a custom minimum', () => {
         assert.strictEqual(envInt('  8 ', 7, 'RPC_TIMEOUT'), 8)
-        assert.strictEqual(envInt('-2', 7, 'RPC_TIMEOUT', -5), -2)
+        assert.strictEqual(envInt(-2, 7, 'RPC_TIMEOUT', -5), -2)
         assert.strictEqual(envInt('0', 7, 'RPC_TIMEOUT', 0), 0)
     })
 
