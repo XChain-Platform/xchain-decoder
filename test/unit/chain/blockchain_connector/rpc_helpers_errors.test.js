@@ -22,8 +22,11 @@ function assertThrowsLabel(response, label) {
 }
 
 describe('rpcResult errors', () => {
-    it('returns positive and zero results', () => {
+    it('returns a positive result', () => {
         assert.strictEqual(rpcResult({ data: { result: 5 } }, 'read'), 5)
+    })
+
+    it('returns a zero result', () => {
         assert.strictEqual(rpcResult({ data: { result: 0 } }, 'read'), 0)
     })
 
@@ -43,9 +46,15 @@ describe('rpcResult errors', () => {
         )
     })
 
-    it('throws only the label for missing results', () => {
+    it('throws only the label for a null response', () => {
         assertThrowsLabel(null, 'missing')
+    })
+
+    it('throws only the label for an absent result', () => {
         assertThrowsLabel({ data: {} }, 'missing')
+    })
+
+    it('throws only the label for a null result', () => {
         assertThrowsLabel({ data: { result: null } }, 'missing')
     })
 })
@@ -75,9 +84,15 @@ describe('sanitizeRpcError', () => {
         assert.strictEqual(error.propertyIsEnumerable('rpcMessage'), false)
     })
 
-    it('renders errors and non-error values without responses', () => {
+    it('returns the message of an error without a response', () => {
         assert.strictEqual(sanitizeRpcError(new Error('plain')), 'plain')
+    })
+
+    it('returns a string unchanged', () => {
         assert.strictEqual(sanitizeRpcError('text'), 'text')
+    })
+
+    it('returns null as a string', () => {
         assert.strictEqual(sanitizeRpcError(null), 'null')
     })
 })
