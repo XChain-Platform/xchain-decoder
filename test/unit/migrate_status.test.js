@@ -17,7 +17,6 @@
 const assert = require('assert');
 const sinon  = require('sinon');
 const fs     = require('fs');
-const os     = require('os');
 const path   = require('path');
 
 const DB_PATH      = require.resolve('../../src/db.js');
@@ -27,7 +26,11 @@ const ENV_KEYS = ['DECODER_DB_HOST', 'DECODER_DB_PORT', 'DECODER_DB_NAME',
                   'DECODER_DB_USER', 'DECODER_DB_PASS'];
 
 let savedEnv, savedExitCode, savedArgv, exitStub, consoleErrStub, consoleLogStub;
-let tmpDir, fileA, fileB, fileC;
+let fileA, fileB, fileC;
+
+const STATUS_SQL_PATH = path.join(__dirname, 'status-fixture');
+const STATUS_MIGRATIONS_PATH = path.join(STATUS_SQL_PATH, 'migrations');
+const STATUS_FILES = ['2026-01-01-a.sql', '2026-01-02-b.sql', '2026-01-03-c.sql'];
 
 function prepareMigrateTest() {
     savedEnv = {};
@@ -118,20 +121,16 @@ function loadMigrateWith(fakeDbClass) {
 
 function prepareStatusTest() {
     prepareMigrateTest();
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decoder-migrate-status-'));
-    const migrationsDir = path.join(tmpDir, 'migrations');
-    fs.mkdirSync(migrationsDir);
-    fileA = '2026-01-01-a.sql';
-    fileB = '2026-01-02-b.sql';
-    fileC = '2026-01-03-c.sql';
-    for (const file of [fileA, fileB, fileC]) {
-        fs.writeFileSync(path.join(migrationsDir, file), '-- xchain:migration mode=auto\nSELECT 1;\n');
-    }
+    [fileA, fileB, fileC] = STATUS_FILES;
+    const readdirSync = fs.readdirSync;
+    sinon.stub(fs, 'readdirSync').callsFake((dir, ...args) => {
+        if (dir === STATUS_MIGRATIONS_PATH) return [...STATUS_FILES];
+        return readdirSync.call(fs, dir, ...args);
+    });
 }
 
 function restoreStatusTest() {
     restoreMigrateTest();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 
 function setEnv() {
@@ -151,7 +150,7 @@ describe('migrate.js operator CLI --status/--json @regression', function () {
     it('--status --json prints one JSON object with applied and pending arrays and applies nothing', async function () {
         setEnv();
         process.argv = ['node', 'migrate.js', '--status', '--json'];
-        const fake = makeFakeDbForStatus({ sqlPath: tmpDir, appliedNames: [fileA] });
+        const fake = makeFakeDbForStatus({ sqlPath: STATUS_SQL_PATH, appliedNames: [fileA] });
         loadMigrateWith(fake.FakeDatabase);
         await fake.done;
 
@@ -175,7 +174,7 @@ describe('migrate.js operator CLI --status/--json @regression', function () {
         setEnv();
         process.argv = ['node', 'migrate.js', '--status', '--json'];
         const noSuchTable = Object.assign(new Error('no such table'), { code: 'ER_NO_SUCH_TABLE', errno: 1146 });
-        const fake = makeFakeDbForStatus({ sqlPath: tmpDir, queryError: noSuchTable });
+        const fake = makeFakeDbForStatus({ sqlPath: STATUS_SQL_PATH, queryError: noSuchTable });
         loadMigrateWith(fake.FakeDatabase);
         await fake.done;
 
@@ -192,7 +191,7 @@ describe('migrate.js operator CLI --status/--json @regression', function () {
     it('--status without --json prints a human-readable line instead of JSON', async function () {
         setEnv();
         process.argv = ['node', 'migrate.js', '--status'];
-        const fake = makeFakeDbForStatus({ sqlPath: tmpDir, appliedNames: [fileA, fileB] });
+        const fake = makeFakeDbForStatus({ sqlPath: STATUS_SQL_PATH, appliedNames: [fileA, fileB] });
         loadMigrateWith(fake.FakeDatabase);
         await fake.done;
 
@@ -205,7 +204,7 @@ describe('migrate.js operator CLI --status/--json @regression', function () {
     it('a real query failure during --status still fails loudly and closes the pool', async function () {
         setEnv();
         process.argv = ['node', 'migrate.js', '--status', '--json'];
-        const fake = makeFakeDbForStatus({ sqlPath: tmpDir, queryError: new Error('connection refused') });
+        const fake = makeFakeDbForStatus({ sqlPath: STATUS_SQL_PATH, queryError: new Error('connection refused') });
         loadMigrateWith(fake.FakeDatabase);
         await fake.done;
 
