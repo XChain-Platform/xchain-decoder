@@ -12,6 +12,166 @@
  *
  **********************************************************************/
 
+// Stake-weighted quorum (STAKE_WEIGHTED_QUORUM).
+// Consensus-critical activation: at/above this BTC-anchored snapshot_block the
+// federation quorum becomes stake-WEIGHTED (signers' summed source stake must
+// exceed 2/3 of total active snapshot stake) instead of count-based (2f+1 of the
+// pubkey COUNT).
+//
+// Keyed on the BTC `snapshot_block` carried by every settlement/checkpoint
+// canonical (NOT each chain's local processing height) so the hub and the BTC,
+// LTC and DOGE indexers all flip on the SAME anchor. A per-chain local-height
+// gate would fork: one snapshot_block lands at different local heights per chain.
+// The `network` is also taken from the row, so the gate is env-independent.
+//
+// Enforced IDENTICALLY by the hub (every PBFT tally engine), the indexer
+// (every settlement-signature gate + recovery), and the sdk/explorer/sync
+// verifiers. All five keep a local copy of this map; the cross-service
+// regression suite asserts they equal these values, so the activation height
+// can never silently diverge (a divergence forks the chain).
+//
+// mainnet is ARMED (2026-07-07) to a concrete near-term height: 961000, the
+// BTC-anchored flag-day at which mainnet flips from the count-based quorum
+// rule to stake-weighted. BTC anchor ~2026-08-04; hub + ALL indexers (+
+// sdk/explorer/sync copies) MUST deploy before this height. testnet/regtest
+// activate at genesis so the e2e / regtest stack exercises stake-weighting
+// from block 0.
+const STAKE_WEIGHTED_QUORUM_ACTIVATION = {
+    mainnet: 961000,      // ARMED 2026-07-07: BTC anchor ~2026-08-04; deploy hub + ALL indexers (+ sdk/explorer/sync copies) before this height
+    testnet: 0,
+    regtest: 0,
+};
+
+// EQUIV_HEADER_ACTIVATION: the BTC-anchored flag-day at/above which every
+// consensus canonical is prefixed with a uniform signed header
+// `EQUIV|<ENGINE_TAG>|<ROUND_ID>|<VIEW>||<CONTENT>`. This is consensus-breaking (it changes the
+// signed preimage of every settlement/checkpoint/price/attestation signature + the config-change
+// PBFT canonical), so it is gated, kept byte-identical to the local copies in
+// xchain-{hub,indexer,sdk,explorer,sync}/src/equivocation_header.js by the
+// cross-service regression suite, and must deploy hub + ALL indexers atomically. Its sole
+// consumer is the SLASH v0 equivocation-slashing action, which is only constructible from
+// post-flag-day (header-carrying) messages. Same ARMED height and deploy-by convention as
+// STAKE_WEIGHTED_QUORUM_ACTIVATION: mainnet is armed to 961000 (2026-07-07; BTC anchor
+// ~2026-08-04), not a disabled placeholder.
+const EQUIV_HEADER_ACTIVATION = {
+    mainnet: 961000,      // ARMED 2026-07-07: BTC anchor ~2026-08-04; deploy hub + ALL indexers (+ sdk/explorer/sync copies) before this height
+    testnet: 0,
+    regtest: 0,
+};
+
+// STATE_COMMITMENT_ACTIVATION (light-client SPV, spec §6.4): the flag-day at/above which
+// each indexer computes + commits the additive per-block `state_root` (balances+stakes SMT)
+// and `block_merkle_root`. ADDITIVE (the three consensus block hashes + BLOCK_HASH_VERSION are
+// untouched), so it is not consensus-breaking by itself; it only adds new committed roots that
+// the xchain-sync follower recomputes and HALTS on if they diverge. UNLIKE the two maps above,
+// this gates on the chain's OWN local block_index (each chain starts committing its own per-block
+// root at its own height); the Phase 2 checkpoint/ANCHOR extension that SIGNS these roots gates on
+// snapshot_block. Kept byte-identical to the local copies in xchain-indexer/src/
+// state_commitment_activation.js + xchain-sync/src/state_commitment_activation.js (and xchain-hub
+// at Phase 2) by the cross-service regression suite. ARMED MID-CHAIN 2026-07-07 with per-chain
+// '<COIN>:<network>' keys (one shared height cannot fit BTC ~957k and DOGE ~6.28M at once; bare
+// network key remains for regtest; coin-less mainnet/testnet lookups stay inert). Same heights
+// as the two state-hash gate maps, so ONE deploy-by date governs all Cohort-C flips; each height
+// precedes the Cohort-B BTC anchor (961000) as the checkpoint-commitment ordering requires.
+const STATE_COMMITMENT_ACTIVATION = {
+    'BTC:mainnet':  958500,     // ARMED 2026-07-07 at tip 957062; ~10 days of margin
+    'LTC:mainnet':  3143000,    // ARMED 2026-07-07 at tip 3138154; ~8 days
+    'DOGE:mainnet': 6291000,    // ARMED 2026-07-07 at tip 6280094; ~7.5 days
+    'BTC:testnet':  145000,     // ARMED 2026-07-07 at tip 143299
+    'LTC:testnet':  4805000,    // ARMED 2026-07-07 at tip 4797675
+    'DOGE:testnet': 67000000,   // ARMED 2026-07-07 at tip 66498605 (fast chain, wide margin)
+    regtest: 0,                 // armed from genesis: fresh regtest stacks exercise the roots end to end
+};
+
+// CHECKPOINT_COMMITMENT_ACTIVATION (light-client SPV, spec §6.1/§6.3, Phase 2): the flag-day at/above
+// which the quorum-signed checkpoint canonical (and the on-chain ANCHOR) COMMIT the additive
+// `state_root` + `block_merkle_root` (with their version bytes) that STATE_COMMITMENT_ACTIVATION made
+// the indexer compute in Phase 1. Post-flag-day the checkpoint canonical string gains
+// `|STATE_ROOT|STATE_ROOT_VERSION|BLOCK_MERKLE_ROOT|BLOCK_MERKLE_VERSION` and a new ANCHOR v3 carries
+// the roots on DOGE; pre-flag-day both keep their old shape and the roots are absent. Consensus-relevant
+// for signature verification (the signed preimage changes), so it must deploy hub + ALL indexers + the
+// SDK/explorer verifiers atomically.
+//
+// UNLIKE STATE_COMMITMENT_ACTIVATION (which gates on each chain's OWN local block_index, since each chain
+// computes its own per-block root), this gates on the BTC-anchored `snapshot_block` carried by every
+// checkpoint canonical, exactly like STAKE_WEIGHTED_QUORUM_ACTIVATION / EQUIV_HEADER_ACTIVATION, so the
+// hub and the BTC/LTC/DOGE indexers all flip the SIGNED shape on the same anchor. The operator MUST pick
+// a snapshot_block at/after which every checkpointed chain is already past its own STATE_COMMITMENT
+// flag-day (else the engine would have no roots to sign). Kept byte-identical to the local copies in
+// xchain-{hub,indexer,sdk,explorer,sync}/src/checkpoint_commitment_activation.js (sync consumes it at
+// checkpoint.js to decide whether to expect the roots) by the cross-service regression suite. Same
+// ARMED height and deploy-by convention as the maps above: mainnet is armed to 961000
+// (2026-07-07; BTC anchor ~2026-08-04), not a disabled placeholder.
+const CHECKPOINT_COMMITMENT_ACTIVATION = {
+    mainnet: 961000,      // ARMED 2026-07-07: BTC anchor ~2026-08-04; deploy hub + ALL indexers (+ sdk/explorer/sync copies) before this height
+    testnet: 146000,      // ARMED 2026-07-22: first BTC-testnet anchor past all three STATE_COMMITMENT testnet thresholds; was 0, which forced the SPV root suffix from testnet genesis before the indexer computes roots, so the hub refused to sign every testnet checkpoint
+    regtest: 0,
+};
+
+// ANCHOR_REWARD_ACTIVATION (anchor-reward re-derivation): the flag-day at/above which the validator
+// anchor reward stops being TRUSTED from the hub's `pushvalidatorrewards` JSON-RPC and is instead
+// DERIVED by every indexer from the on-chain ANCHOR bytes. Post-flag-day the hub emits a publisher-
+// bearing ANCHOR (v4 rootless / v5 root-bearing) carrying the elected publisher pubkey plus a 2f+1
+// `oracle_publish` attestation (XANCPUB) over the reward tuple; the indexer verifies that quorum and
+// credits the publisher with ANCHOR_REWARD_AMOUNT (a frozen consensus constant, NEVER from the wire).
+// Below the flag-day the old push path stands and v4/v5 anchors are rejected. Consensus-relevant (the
+// credited reward becomes a COLLECT-spendable per-block ledger row), so it must deploy hub + ALL
+// indexers atomically. Like CHECKPOINT_COMMITMENT_ACTIVATION / STAKE_WEIGHTED_QUORUM_ACTIVATION it gates
+// on the BTC-anchored `snapshot_block` carried by every ANCHOR canonical. Kept byte-identical to the
+// local copies in xchain-{hub,indexer}/src/anchor_reward_activation.js by the cross-service regression
+// suite. Same ARMED height and deploy-by convention as the maps above: mainnet is armed to 961000
+// (2026-07-07; BTC anchor ~2026-08-04), not a disabled placeholder.
+const ANCHOR_REWARD_ACTIVATION = {
+    mainnet: 961000,      // ARMED 2026-07-07: BTC anchor ~2026-08-04; deploy hub + ALL indexers (+ sdk/explorer/sync copies) before this height
+    testnet: 0,
+    regtest: 0,
+};
+
+// ANCHOR_REWARD_AMOUNT: the frozen validator anchor-publish reward, signed into the XANCPUB attestation
+// by the hub and re-derived by the indexer (never from the wire). Changing it is itself a flag-day.
+const ANCHOR_REWARD_AMOUNT = '10.00000000';
+
+// ARCHIVE_REWARD_ACTIVATION (archive-reward re-derivation): the flag-day at/above which the
+// anchor_archive reward stops riding the key-authenticated `pushvalidatorrewards` rail and is instead
+// DERIVED by every indexer from the on-chain ANCHOR v6 bytes (the v1 archive anchor plus the same
+// PUBLISHER + 2f+1 XANCPUB attestation tail as v4/v5, attested over an 'anchor_archive' canonical
+// keyed on MATCH_BATCH_SEQ). This retires the last insider-with-key reward-forge surface the
+// per-chain ANCHOR_REWARD flag-day left open. Below the flag-day the legacy v1 + push path stands
+// and v6 anchors are rejected. Consensus-relevant, same deploy rules and snapshot_block gating as
+// ANCHOR_REWARD_ACTIVATION; kept byte-identical to the local copies in
+// xchain-{hub,indexer}/src/anchor_reward_activation.js by the cross-service regression suite.
+const ARCHIVE_REWARD_ACTIVATION = {
+    mainnet: 963000,      // ARMED 2026-07-16, RE-PINNED 2026-08-12 off 969500 onto the pre-launch-freeze train boundary (tip 959,853 on 07-27 at ~144 blocks/day + 21d); deploy every consumer before this era
+    testnet: 0,
+    regtest: 0,
+};
+
+// ARCHIVE_REWARD_AMOUNT: the frozen archive-publish reward, signed into the archive XANCPUB
+// attestation by the hub and re-derived by the indexer (never from the wire). Kept equal to the
+// hub's historical default (ANCHOR_REWARD_PER_PUBLISH). Changing it is itself a flag-day.
+const ARCHIVE_REWARD_AMOUNT = '10.00000000';
+
+// CROSS_CHAIN_ROYALTY_ACTIVATION (cross-chain royalty match-canonical): the flag-day at/above which
+// the validator-signed XMATCH canonical carries the matched orders' royalty payout legs
+// (a_payout_legs / b_payout_legs), so a colluding hub cannot strip a royalty from a cross-chain
+// match; below it the canonical stays byte-identical to the legacy format, so pre-existing
+// signatures keep verifying. Consensus-relevant (the signed preimage changes), so it must deploy
+// hub + ALL indexers atomically. Like CHECKPOINT_COMMITMENT_ACTIVATION / ANCHOR_REWARD_ACTIVATION
+// it gates on the BTC-anchored `snapshot_block` carried by every XMATCH canonical. The CREATE-side
+// acceptance rule (deny a royalty-bearing cross-chain listing while enforcement is impossible) is
+// gated separately by the CROSS_CHAIN_ROYALTY entry in the indexer's protocol_changes.js; the
+// operator MUST flip this canonical gate first or together with it, NEVER create-side first
+// (create-side ON with canonical OFF would put the legs in unsigned mirror fields, the exact
+// tamper hole the legs-in-canonical design closes). Kept byte-identical to the local copies in
+// xchain-{hub,indexer}/src/cross_chain_royalty_activation.js by the cross-service regression
+// suite. Same ARMED height and deploy-by convention as the maps above: mainnet is armed to
+// 961000 (2026-07-07; BTC anchor ~2026-08-04), not a disabled placeholder.
+const CROSS_CHAIN_ROYALTY_ACTIVATION = {
+    mainnet: 961000,      // ARMED 2026-07-07: BTC anchor ~2026-08-04; deploy hub + ALL indexers before this height
+    testnet: 0,
+    regtest: 0,
+};
+
 // ORACLE_FEE_OUTPUT_ACTIVATION (PRICE v1 oracle usage fee): the flag-day
 // at/above which the DECODER persists a native-coin output paying a DISPENSER's
 // ORACLE_ADDRESS into transaction_outputs, so the indexer's validateOracleFee can see the
@@ -259,10 +419,83 @@ const BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION = {
     regtest: 0,
 };
 
+// ENVELOPE_RECOGNITION_ACTIVATION (Taproot-envelope spec §7): the LOCAL block height
+// at/above which the decoder recognizes Taproot-envelope reveals as
+// action-bearing transactions, per host chain and network. Recognition changes
+// what counts as an action (and §3.8's mixed-carrier/multi-envelope rejections
+// activate at the same height), so it is fleet-deterministic: every decoder
+// instance for a given chain+network MUST flip at the same height or the fleet
+// forks on the first envelope (or the first mixed-carrier tx). Keyed on each
+// chain's OWN local block height (like STATE_COMMITMENT_ACTIVATION), because
+// recognition happens while parsing that chain's blocks; DOGE has no segwit,
+// hence no Taproot and no envelope, so its entry is null (never active) and
+// must stay null. Below the height the decoder behaves EXACTLY as shipped: a
+// pre-flag tx containing an envelope plus an OP_RETURN action replays as the
+// OP_RETURN action, exactly as the fleet indexed it live.
+//
+// The mainnet heights were pinned 2026-08-02 against a MEASURED tip (BTC 960812,
+// LTC 3153356) with ~6 hours of margin over a redeploy train that takes about an
+// hour. Re-pinning an already-deployed, already-armed cohort is done by moving the
+// constant, never by rebasing the code. testnet/regtest stay genesis-active: this
+// gate only ever applied to mainnet.
+//
+// DEPLOY DEADLINE: EVERY decoder on BTC and LTC mainnet MUST be running this
+// constant before its height or the fleet forks on the first envelope (or the first
+// mixed-carrier tx, which the §3.8 rejections start refusing at exactly this
+// height). Rollout order within any venue: decoder before encoder, per the standing
+// coupling rule. Verify the fleet by reading the armed map out of each RUNNING
+// container rather than out of this file.
+const ENVELOPE_RECOGNITION_ACTIVATION = {
+    BTC:  { mainnet: 960850, testnet: 0, regtest: 0 },
+    LTC:  { mainnet: 3153500, testnet: 0, regtest: 0 },
+    DOGE: { mainnet: null, testnet: null, regtest: null },
+};
+
+// ENVELOPE_CARRIER_RECOGNITION_ACTIVATION (Taproot-envelope spec §3.8): the LOCAL block
+// height at/above which the decoder counts a RECOGNIZED but payload-free carrier as a
+// mixed carrier. Below it, arbitration infers carrier presence from accumulated payload
+// bytes, so an OP_RETURN that deobfuscates to exactly the XCHN magic and nothing else
+// contributes zero bytes and the envelope is still accepted as an action - while §3.8
+// says an envelope mixed with any other carrier is not an action. That is a divergence
+// against any implementation written from the published rule.
+//
+// Its own height, separate from ENVELOPE_RECOGNITION_ACTIVATION, because that gate is
+// already ARMED on BTC and LTC mainnet: §3.8 arbitration has been live consensus since
+// 2026-08-02, so changing what it refuses is a second recognition change and every
+// decoder must flip at the same height or the fleet forks. Below the height the decoder
+// behaves EXACTLY as shipped, so replay of indexed history is byte-identical.
+//
+// The mainnet entries are deliberately UNPINNED (null = never active). Pinning them
+// against a measured tip, with the redeploy train's margin, is an operator decision and
+// a deploy-train act, not a code edit made in passing. testnet/regtest are genesis-active,
+// matching the sibling gate above: recognition itself has been genesis-active there, so
+// the refusal rule the spec states applies to those chains from genesis too.
+//
+// DEPLOY DEADLINE (once pinned): EVERY decoder on that chain+network MUST be running the
+// pinned height before it, or the fleet forks on the first envelope carrying a
+// marker-only XCHN OP_RETURN. Verify the fleet by reading the armed map out of each
+// RUNNING container rather than out of this file.
+const ENVELOPE_CARRIER_RECOGNITION_ACTIVATION = {
+    BTC:  { mainnet: null, testnet: 0, regtest: 0 },
+    LTC:  { mainnet: null, testnet: 0, regtest: 0 },
+    DOGE: { mainnet: null, testnet: null, regtest: null },
+};
+
 module.exports = {
+    STAKE_WEIGHTED_QUORUM_ACTIVATION,
+    EQUIV_HEADER_ACTIVATION,
+    STATE_COMMITMENT_ACTIVATION,
+    CHECKPOINT_COMMITMENT_ACTIVATION,
+    ANCHOR_REWARD_ACTIVATION,
+    ANCHOR_REWARD_AMOUNT,
+    ARCHIVE_REWARD_ACTIVATION,
+    ARCHIVE_REWARD_AMOUNT,
+    CROSS_CHAIN_ROYALTY_ACTIVATION,
     ORACLE_FEE_OUTPUT_ACTIVATION,
     ORACLE_FEE_SET_CAPTURE_ACTIVATION,
     DISPENSER_EXPIRY_REALIGN_ACTIVATION,
     DISPENSER_CANCEL_GRACE_ACTIVATION,
     BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
+    ENVELOPE_RECOGNITION_ACTIVATION,
+    ENVELOPE_CARRIER_RECOGNITION_ACTIVATION,
 };
