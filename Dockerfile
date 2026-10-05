@@ -1,4 +1,4 @@
-FROM node:25.9.0
+FROM node:25.9.0@sha256:78839ac448c23517f8eab2e8f7943d9b4f73979eb7f8bed2c73dbf72ff869e7b
 
 RUN mkdir /XChainDecoder/
 COPY ./package.json /XChainDecoder/package.json
