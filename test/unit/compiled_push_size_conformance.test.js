@@ -204,9 +204,7 @@ describe('compiled-push-size arbiter conformance', function () {
     });
 });
 
-describe('payload_helpers pure functions', function () {
-    const helpers = require('../../src/XChainDecoder/payload_helpers.js');
-
+function describeCatchingUp(helpers) {
     describe('nodeStillCatchingUp', function () {
         it('is true only for a strict true initialblockdownload', function () {
             assert.strictEqual(helpers.nodeStillCatchingUp({ initialblockdownload: true }), true);
@@ -217,7 +215,9 @@ describe('payload_helpers pure functions', function () {
             assert.strictEqual(helpers.nodeStillCatchingUp(undefined), false);
         });
     });
+}
 
+function describePushSize(helpers) {
     describe('compiledPushSize', function () {
         const size = helpers.compiledPushSize;
 
@@ -231,7 +231,9 @@ describe('payload_helpers pure functions', function () {
             assert.strictEqual(size(65536), 65539);
         });
     });
+}
 
+function describeCanonicalize(helpers) {
     describe('canonicalizeActionPayload', function () {
         const canon = helpers.canonicalizeActionPayload;
 
@@ -260,7 +262,9 @@ describe('payload_helpers pure functions', function () {
             assert.strictEqual(out.actionName, 'ADDRESS');
         });
     });
+}
 
+function describeBufferutils(helpers) {
     describe('bigIntBufferutilsActive', function () {
         it('reports the installed bufferutils as patched', function () {
             assert.strictEqual(helpers.bigIntBufferutilsActive(), true);
@@ -274,4 +278,12 @@ describe('payload_helpers pure functions', function () {
             assert.strictEqual(helpers.bigIntBufferutilsActive(tolerant), true);
         });
     });
+}
+
+describe('payload_helpers pure functions', function () {
+    const helpers = require('../../src/XChainDecoder/payload_helpers.js');
+    describeCatchingUp(helpers);
+    describePushSize(helpers);
+    describeCanonicalize(helpers);
+    describeBufferutils(helpers);
 });
