@@ -120,6 +120,11 @@ describe('dispenser expiration extend undo', () => {
         assert.strictEqual(store.dispensers[0].expired_block_index, 40);
     });
 
+});
+
+describe('dispenser extension undo purge and failure', () => {
+    afterEach(() => sinon.restore());
+
     it('purges undo rows at the reorg-safe height with the expired dispensers', async () => {
         const db = makeDb();
         const store = fakeStore([]);
@@ -134,23 +139,23 @@ describe('dispenser expiration extend undo', () => {
         db.pool = { getConnection: sinon.stub().resolves({ query: sinon.stub().rejects(new Error('boom')), release: sinon.stub().resolves() }) };
         assert.strictEqual(await db.recordDispenserExtensionUndo('src', 50), false);
     });
+});
 
-    describe('extendEditedDispenser', () => {
-        it('records before it extends', async () => {
-            const order = [];
-            const ctx = { db: {
-                recordDispenserExtensionUndo: async () => { order.push('record'); return true },
-                extendOpenDispenserExpirationBySource: async () => { order.push('extend'); return true },
-            } };
-            await extendEditedDispenser.call(ctx, { editSource: 's', newExpiration: 9 }, 50);
-            assert.deepStrictEqual(order, ['record', 'extend']);
-        });
+describe('extendEditedDispenser', () => {
+    it('records before it extends', async () => {
+        const order = [];
+        const ctx = { db: {
+            recordDispenserExtensionUndo: async () => { order.push('record'); return true },
+            extendOpenDispenserExpirationBySource: async () => { order.push('extend'); return true },
+        } };
+        await extendEditedDispenser.call(ctx, { editSource: 's', newExpiration: 9 }, 50);
+        assert.deepStrictEqual(order, ['record', 'extend']);
+    });
 
-        it('rolls back without extending when the record fails', async () => {
-            const extend = sinon.stub().resolves(true);
-            const ctx = { db: { recordDispenserExtensionUndo: async () => false, extendOpenDispenserExpirationBySource: extend } };
-            assert.strictEqual(await extendEditedDispenser.call(ctx, { editSource: 's', newExpiration: 9 }, 50), 'rollback');
-            assert.ok(extend.notCalled);
-        });
+    it('rolls back without extending when the record fails', async () => {
+        const extend = sinon.stub().resolves(true);
+        const ctx = { db: { recordDispenserExtensionUndo: async () => false, extendOpenDispenserExpirationBySource: extend } };
+        assert.strictEqual(await extendEditedDispenser.call(ctx, { editSource: 's', newExpiration: 9 }, 50), 'rollback');
+        assert.ok(extend.notCalled);
     });
 });

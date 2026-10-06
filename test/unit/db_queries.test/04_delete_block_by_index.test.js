@@ -43,10 +43,26 @@ function injectPool(db, pool) {
     db.pool = pool;
 }
 
+// The resurrect UPDATE (clearing expiry marks left by this now-orphaned block)
+// must run BEFORE the dispenser row-delete, so a dispenser expired by this block
+// is restored on reorg; the extension restore must run before the undo rows it
+// reads are deleted.
+function assertRestoreOrdering(calls) {
+    const resurrectIdx = calls.findIndex(s => /UPDATE\s+dispensers\s+SET\s+expired_block_index\s*=\s*NULL/i.test(s));
+    const dispDeleteIdx = calls.findIndex(s => /DELETE\s+FROM\s+dispensers/i.test(s));
+    assert.ok(resurrectIdx >= 0, 'must clear soft-expiry marks for the orphaned block');
+    assert.ok(resurrectIdx < dispDeleteIdx, 'resurrect UPDATE must precede the dispenser DELETE');
+    // The extension restore UPDATE must run before the undo rows it reads are deleted.
+    const restoreIdx = calls.findIndex(s => /UPDATE\s+dispensers\s+d\s+INNER\s+JOIN\s+dispenser_extension_undo/i.test(s));
+    const undoDeleteIdx = calls.findIndex(s => /DELETE\s+FROM\s+dispenser_extension_undo/i.test(s));
+    assert.ok(restoreIdx >= 0, 'must restore pre-extend expirations for the orphaned block');
+    assert.ok(restoreIdx < undoDeleteIdx, 'restore UPDATE must precede the undo DELETE');
+}
+
 describe('Database#deleteBlockByIndex()', () => {
     afterEach(() => sinon.restore());
 
-    it('executes 4 DELETE queries and returns true on success', async () => {
+    it('executes 5 DELETE queries and returns true on success', async () => {
         const db = makeDb();
         const q  = sinon.stub().resolves([]);
         const { pool, conn } = withConn(q);
@@ -73,18 +89,7 @@ describe('Database#deleteBlockByIndex()', () => {
         );
         const deletes = calls.filter(s => /DELETE/i.test(s));
         assert.strictEqual(deletes.length, 5, 'no additional undeclared DELETE targets');
-        // The resurrect UPDATE (clearing expiry marks left by this now-orphaned
-        // block) must run BEFORE the dispenser row-delete, so a dispenser expired
-        // by this block is restored on reorg.
-        const resurrectIdx = calls.findIndex(s => /UPDATE\s+dispensers\s+SET\s+expired_block_index\s*=\s*NULL/i.test(s));
-        const dispDeleteIdx = calls.findIndex(s => /DELETE\s+FROM\s+dispensers/i.test(s));
-        assert.ok(resurrectIdx >= 0, 'must clear soft-expiry marks for the orphaned block');
-        assert.ok(resurrectIdx < dispDeleteIdx, 'resurrect UPDATE must precede the dispenser DELETE');
-        // The extension restore UPDATE must run before the undo rows it reads are deleted.
-        const restoreIdx = calls.findIndex(s => /UPDATE\s+dispensers\s+d\s+INNER\s+JOIN\s+dispenser_extension_undo/i.test(s));
-        const undoDeleteIdx = calls.findIndex(s => /DELETE\s+FROM\s+dispenser_extension_undo/i.test(s));
-        assert.ok(restoreIdx >= 0, 'must restore pre-extend expirations for the orphaned block');
-        assert.ok(restoreIdx < undoDeleteIdx, 'restore UPDATE must precede the undo DELETE');
+        assertRestoreOrdering(calls);
     });
 
     it('throws on query error (propagates after rolling back)', async () => {
