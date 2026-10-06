@@ -125,11 +125,6 @@ class MockDatabase {
     }
 
     async recordDispenserExtensionUndo() {
-        this._track("recordDispenserExtensionUndo")
-        return true
-    }
-
-    async recordDispenserExtensionUndo() {
         this._track('recordDispenserExtensionUndo')
         return true
     }

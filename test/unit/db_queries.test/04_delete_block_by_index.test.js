@@ -55,8 +55,9 @@ describe('Database#deleteBlockByIndex()', () => {
         assert.strictEqual(r, true);
         const calls = conn.query.getCalls().map(c => c.args[0]);
         // Explicit per-table checks instead of a magic DELETE count: the rollback
-        // must touch exactly transaction_outputs, dispensers, transactions, blocks.
-        for (const table of ['transaction_outputs', 'dispensers', 'transactions', 'blocks']) {
+        // must touch exactly transaction_outputs, dispensers, dispenser_extension_undo,
+        // transactions, blocks.
+        for (const table of ['transaction_outputs', 'dispensers', 'dispenser_extension_undo', 'transactions', 'blocks']) {
             assert.ok(
                 calls.some(s => new RegExp(`DELETE\\s+FROM\\s+${table}\\b`, 'i').test(s)),
                 `must DELETE FROM ${table} on reorg rollback`
@@ -71,7 +72,7 @@ describe('Database#deleteBlockByIndex()', () => {
             'events/index_addresses must never be deleted on reorg'
         );
         const deletes = calls.filter(s => /DELETE/i.test(s));
-        assert.strictEqual(deletes.length, 4, 'no additional undeclared DELETE targets');
+        assert.strictEqual(deletes.length, 5, 'no additional undeclared DELETE targets');
         // The resurrect UPDATE (clearing expiry marks left by this now-orphaned
         // block) must run BEFORE the dispenser row-delete, so a dispenser expired
         // by this block is restored on reorg.
@@ -79,6 +80,11 @@ describe('Database#deleteBlockByIndex()', () => {
         const dispDeleteIdx = calls.findIndex(s => /DELETE\s+FROM\s+dispensers/i.test(s));
         assert.ok(resurrectIdx >= 0, 'must clear soft-expiry marks for the orphaned block');
         assert.ok(resurrectIdx < dispDeleteIdx, 'resurrect UPDATE must precede the dispenser DELETE');
+        // The extension restore UPDATE must run before the undo rows it reads are deleted.
+        const restoreIdx = calls.findIndex(s => /UPDATE\s+dispensers\s+d\s+INNER\s+JOIN\s+dispenser_extension_undo/i.test(s));
+        const undoDeleteIdx = calls.findIndex(s => /DELETE\s+FROM\s+dispenser_extension_undo/i.test(s));
+        assert.ok(restoreIdx >= 0, 'must restore pre-extend expirations for the orphaned block');
+        assert.ok(restoreIdx < undoDeleteIdx, 'restore UPDATE must precede the undo DELETE');
     });
 
     it('throws on query error (propagates after rolling back)', async () => {
