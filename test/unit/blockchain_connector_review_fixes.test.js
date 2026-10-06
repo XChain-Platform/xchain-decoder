@@ -185,13 +185,13 @@ describe('BlockchainConnector RPC error accounting and reporting', () => {
         // the contract for the next one rather than a behaviour change.
         it('returns a falsy-but-present result instead of throwing', async () => {
             axiosStub.resolves({ data: { result: '' } })
-            assert.strictEqual(await connector.getBlockHash(0), '')
+            assert.strictEqual(await connector.getBlockchainInfo(), '')
 
             axiosStub.resolves({ data: { result: 0 } })
-            assert.strictEqual(await connector.getBlockHash(0), 0)
+            assert.strictEqual(await connector.getBlockchainInfo(), 0)
 
             axiosStub.resolves({ data: { result: false } })
-            assert.strictEqual(await connector.getBlockHash(0), false)
+            assert.strictEqual(await connector.getBlockchainInfo(), false)
 
             assert.strictEqual(connector.rpcErrors, 0, 'a valid falsy result is not an RPC failure')
         }).timeout(5000)
@@ -275,10 +275,10 @@ const LADDER_METHODS = [
 function blockPathRoutingTests() {
     it('routes every block-path method through the shared ladder', async () => {
         const seen = []
-        connector.rpcCallWithTimeoutRetry = async (data) => { seen.push(data.method); return 'ok' }
+        connector.rpcCallWithTimeoutRetry = async (data) => { seen.push(data.method); return data.method === 'getblockhash' ? 'ab'.repeat(32) : 'ok' }
 
-        for (const [name, args] of LADDER_METHODS) {
-            assert.strictEqual(await connector[name](...args), 'ok',
+        for (const [name, args, rpc] of LADDER_METHODS) {
+            assert.strictEqual(await connector[name](...args), rpc === 'getblockhash' ? 'ab'.repeat(32) : 'ok',
                 `${name} must go through the shared ladder, not a private copy`)
         }
         assert.deepStrictEqual(seen, LADDER_METHODS.map(([, , rpc]) => rpc))

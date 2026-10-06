@@ -130,10 +130,10 @@ function defineThresholdAndRetryTests() {
         const connector = makeConnector('10.0.0.2', 2)
         axiosStub.onCall(0).rejects(connectionError('ECONNABORTED'))
         axiosStub.onCall(1).rejects(connectionError('ECONNABORTED'))
-        axiosStub.onCall(2).resolves({ data: { result: 'deadbeef' } })
+        axiosStub.onCall(2).resolves({ data: { result: 'deadbeef'.repeat(8) } })
 
         const hash = await connector.getBlockHash(5)
-        assert.strictEqual(hash, 'deadbeef')
+        assert.strictEqual(hash, 'deadbeef'.repeat(8))
         assert.strictEqual(axiosStub.getCall(2).args[0], 'http://10.0.0.2:8332')
     })
 }

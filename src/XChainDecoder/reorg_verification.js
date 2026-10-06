@@ -290,7 +290,8 @@ async function walkReorg(nodeTip, priorDepth, blocksDeleted){
             continue
         }
 
-        if (lastBlock["block_hash"] != blockHashFromNode){
+        // Strict compare: a loose one could coerce a non-string into a false fork that deletes this block.
+        if (lastBlock["block_hash"] !== blockHashFromNode){
             retryCount = await deleteForkedBlock.call(this, lastBlockIndex, lastBlock, priorDepth, blocksDeleted, retryCount)
         } else {
             thereAreDifferences = false

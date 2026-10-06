@@ -36,6 +36,17 @@ function envInt(raw, fallback, name, min = 1) {
     return n
 }
 
+// Attach the node's JSON-RPC error code and message to an error, non-enumerable so
+// JSON serialization of the error is unchanged. The one definition both transports
+// use: sanitizeRpcError for an HTTP-500 body, rpcResult for an HTTP-200 one.
+function attachRpcFields(error, rpcCode, rpcMessage){
+    if (!error || (rpcCode === undefined && rpcMessage === undefined)) return
+    try {
+        Object.defineProperty(error, 'rpcCode', { value: rpcCode, enumerable: false, configurable: true })
+        Object.defineProperty(error, 'rpcMessage', { value: rpcMessage, enumerable: false, configurable: true })
+    } catch (_) { /* attaching diagnostics must never mask the original failure */ }
+}
+
 // Sanitize an axios error before it is logged or re-thrown. Every RPC call passes
 // `auth: { username: rpcUser, password: rpcPassword }`, and axios attaches the request
 // config to the thrown error, so `logger.error(formatLogLine(msg, error))` serializes NODE_USER /
@@ -69,11 +80,8 @@ function sanitizeRpcError(error){
             }
             error.response = (status !== undefined) ? { status: status } : undefined
         }
-        if (error && (rpcCode !== undefined || rpcMessage !== undefined)) {
-            // Non-enumerable so this does not alter JSON serialization of the error.
-            Object.defineProperty(error, 'rpcCode', { value: rpcCode, enumerable: false, configurable: true })
-            Object.defineProperty(error, 'rpcMessage', { value: rpcMessage, enumerable: false, configurable: true })
-        }
+        // Non-enumerable so this does not alter JSON serialization of the error.
+        attachRpcFields(error, rpcCode, rpcMessage)
     } catch (_) { /* sanitization must never mask the original failure */ }
     const base = (error && error.message) ? error.message : String(error)
     if (rpcCode !== undefined || rpcMessage !== undefined) {
@@ -101,7 +109,12 @@ function rpcResult(response, label) {
     if (rpcError) {
         const code = (rpcError.code !== undefined) ? rpcError.code : 'unknown'
         const message = (typeof rpcError.message === 'string') ? rpcError.message : JSON.stringify(rpcError)
-        throw new Error(`${label}: RPC error ${code}: ${message}`)
+        const err = new Error(`${label}: RPC error ${code}: ${message}`)
+        // Carry the code and message as fields too, exactly as an HTTP-500 error does, so
+        // a caller branching on rpcCode behaves the same on a JSON-RPC 2.0 node.
+        attachRpcFields(err, rpcError.code,
+            (typeof rpcError.message === 'string') ? rpcError.message : undefined)
+        throw err
     }
     if (!response || !response.data) throw new Error(label)
     const result = response.data.result
@@ -150,6 +163,7 @@ function nodeReachabilityFrom(startedAt, lastNodeOkAt, lastNodeFailAt, now = Dat
 
 module.exports = {
     envInt,
+    attachRpcFields,
     sanitizeRpcError,
     rpcResult,
     normalizeEndpoint,

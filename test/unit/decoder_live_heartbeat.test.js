@@ -284,3 +284,23 @@ describe('a failed DB ping keeps the halt the decoder already knows', function (
         assert.strictEqual(res.body.reorg_halt_checked_at, null);
     });
 });
+
+describe('/live keeps a halt whose marker write failed past the probe TTL', function () {
+    // The state haltReorg leaves when the write fails: halted in memory, nothing
+    // durable, cache already expired. The re-probe reads no row and must not clear it.
+    it('still reports reorg_halted with its reason after the re-probe reads no row', async function () {
+        const decoder = caughtUpDecoder();
+        decoder.reorgHalted = true;
+        decoder.reorgHaltReason = 'over-deep rollback';
+        decoder.reorgHaltAt = '2026-10-05T00:00:00.000Z';
+        decoder.reorgHaltMarkerPersisted = false;
+        decoder.reorgHaltCheckedAt = 1;
+        let reads = 0;
+        decoder.db.getReorgHaltMarker = async () => { reads++; return { halted: false, at: null, reason: null }; };
+        const res = await getLive(liveApp(decoder));
+        assert.strictEqual(reads, 1, 'the expired cache must trigger a real re-read');
+        assert.strictEqual(res.body.reorg_halted, true);
+        assert.strictEqual(res.body.reorg_halt_reason, 'over-deep rollback');
+        assert.strictEqual(res.body.reorg_halted_at, '2026-10-05T00:00:00.000Z');
+    });
+});
