@@ -162,6 +162,25 @@ describe('malformed-AuxPoW block reassembly fallback', function () {
     })
 })
 
+// The node's own RPC code is the other half of telling an unreachable or warming
+// node apart from unusable block bytes, so it must survive the wrap like error.code.
+describe('malformed-AuxPoW block reassembly fallback', function () {
+    it('getBlockReassembled carries rpcCode/rpcMessage through the wrap, untagged', async function () {
+        const rpcErr = new Error('block header: RPC error -28: Loading block index...')
+        Object.defineProperty(rpcErr, 'rpcCode', { value: -28, enumerable: false, configurable: true })
+        Object.defineProperty(rpcErr, 'rpcMessage', { value: 'Loading block index...', enumerable: false, configurable: true })
+        const connector = makeConnector({ getBlockHeader: async () => { throw rpcErr } })
+        await assert.rejects(() => connector.getBlockReassembled('hash'), (err) => {
+            assert.strictEqual(err.rpcCode, -28)
+            assert.strictEqual(err.rpcMessage, 'Loading block index...')
+            assert.strictEqual(err.propertyIsEnumerable('rpcCode'), false)
+            assert.strictEqual(err.cause, rpcErr)
+            assert.strictEqual(err.auxPowParseFailure, undefined)
+            return true
+        })
+    })
+})
+
 describe('malformed-AuxPoW block reassembly fallback', function () {
 
     describe('BlockchainConnector.probeTxIndex', function () {

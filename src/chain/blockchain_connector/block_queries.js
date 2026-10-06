@@ -13,6 +13,10 @@
  ********************************************************************/
 
 const { encodeVarintHex, stripAuxPowFromBlockHex } = require('./auxpow_codec.js')
+const { attachRpcFields } = require('./rpc_helpers.js')
+
+// A block hash as every supported node prints it: 32 bytes of hex, either case.
+const BLOCK_HASH_HEX = /^[0-9a-fA-F]{64}$/
 
 module.exports = {
     async getNetworkInfo(){
@@ -37,12 +41,22 @@ module.exports = {
         // "Do not know how to serialize a BigInt". Coerce defensively at the RPC boundary.
         blockindex = Number(blockindex)
 
-        return await this.rpcCallWithTimeoutRetry({
+        const result = await this.rpcCallWithTimeoutRetry({
             jsonrpc: '2.0',
             method: 'getblockhash',
             params: [blockindex],
             id: 1,
         }, 'block hash')
+        // Require a 64-hex block hash: the reorg walk deletes stored blocks on a hash
+        // mismatch, so a malformed answer (a proxy's object, number or short string)
+        // must fail closed into the caller's retry, never read as a fork.
+        if (typeof result !== 'string' || !BLOCK_HASH_HEX.test(result)) {
+            this.rpcErrors++
+            throw new Error('Error getting block hash: malformed result (' + typeof result + ' '
+                + String(JSON.stringify(result)).slice(0, 80) + ')')
+        }
+        // Lowercase it so a case-changing hop cannot make a valid hash compare unequal.
+        return result.toLowerCase()
     },
 
     async getBlockHeader(blockhash, hexFormat = true) {
@@ -121,9 +135,11 @@ module.exports = {
             // sit INSIDE this try, so a transport fault (an ECONNRESET from a saturated
             // Dogecoin 1.14 RPC queue, an ECONNABORTED timeout, a node restart) lands here
             // beside a genuine content fault, and only error.code and the rpcCode/rpcMessage
-            // sanitizeRpcError attaches separate the two. _auxPowParseErrorCount never
-            // decays, so once a height has escalated to this path every later failure at
-            // that height arrives through this catch, which is precisely where an operator
+            // the RPC helpers attach (to an HTTP-500 and an HTTP-200 JSON-RPC error alike)
+            // separate the two, so all three are copied onto the wrapper below.
+            // _auxPowParseErrorCount never decays, so once a height has escalated to this
+            // path every later failure at that height arrives through this catch, which is
+            // precisely where an operator
             // has to tell an unreachable node from a block whose bytes are unusable.
             // Mirrors the cause attachment getBlockWithoutAuxPow makes above.
             //
@@ -136,6 +152,7 @@ module.exports = {
             const reassembleErr = new Error("There were problems reassembling a block without auxpow. " + err.message)
             reassembleErr.cause = err
             if (err && err.code !== undefined) reassembleErr.code = err.code
+            if (err) attachRpcFields(reassembleErr, err.rpcCode, err.rpcMessage)
             throw reassembleErr
         }
     },

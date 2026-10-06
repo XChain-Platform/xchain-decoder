@@ -46,6 +46,27 @@ describe('rpcResult errors', () => {
         )
     })
 
+    // A JSON-RPC 2.0 node sends its error with HTTP 200, so the fields an HTTP-500
+    // error gets from sanitizeRpcError must be attached here too.
+    it('attaches a non-enumerable rpcCode and rpcMessage to an HTTP-200 RPC error', () => {
+        const response = { data: { error: { code: -8, message: 'Block height out of range' } } }
+        assert.throws(() => rpcResult(response, 'read'), (error) => {
+            assert.strictEqual(error.message, 'read: RPC error -8: Block height out of range')
+            assert.strictEqual(error.rpcCode, -8)
+            assert.strictEqual(error.rpcMessage, 'Block height out of range')
+            assert.strictEqual(error.propertyIsEnumerable('rpcCode'), false)
+            assert.strictEqual(error.propertyIsEnumerable('rpcMessage'), false)
+            return true
+        })
+    })
+
+    it('leaves rpcMessage undefined for a non-string message and rpcCode undefined for no code', () => {
+        assert.throws(() => rpcResult({ data: { error: { code: 1 } } }, 'read'), (error) =>
+            error.rpcCode === 1 && error.rpcMessage === undefined)
+        assert.throws(() => rpcResult({ data: { error: { message: 'x' } } }, 'read'), (error) =>
+            error.message === 'read: RPC error unknown: x' && error.rpcCode === undefined && error.rpcMessage === 'x')
+    })
+
     it('throws only the label for a null response', () => {
         assertThrowsLabel(null, 'missing')
     })

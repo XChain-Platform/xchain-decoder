@@ -37,6 +37,7 @@
  *      action, so the purge cannot have lost anything. --force overrides this one
  *      for an operator who has compared the dispensers table against a known-good
  *      replica; the clear row records that it was forced.
+ *   3. the session passes the decoder's strict sql_mode check. Cannot be forced.
  *
  * Reads DECODER_DB_* from the service environment (.env), like migrate.js.
  *
@@ -126,6 +127,21 @@ function refuseUnpinnableHalt(marker, error){
     return true
 }
 
+// Refuse a session whose sql_mode the decoder itself would refuse at startup. This
+// CLI builds its own pool and never runs runMigrations, so without this check the row
+// that decides halt state could be written on a lax session with no warning.
+async function refuseLaxSqlMode(db, error){
+    try {
+        await db.assertStrictSqlMode()
+        return false
+    } catch (err){
+        error('clear-reorg-halt: REFUSED. This session\'s SQL mode failed the strict-mode check, so the '
+            + 'REORG_HALT_CLEARED row would be written with no strict-mode guarantee. Nothing was cleared. '
+            + ((err && err.message) || err))
+        return true
+    }
+}
+
 // The whole decision, with the database and the output injected so it can be
 // exercised without MariaDB. Returns the process exit code.
 async function run({ db, argv = [], log = console.log, error = console.error }){
@@ -153,6 +169,8 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
     const preconditions = await checkClearPreconditions(db, args, error)
     if (preconditions.exitCode !== undefined) return preconditions.exitCode
     const { checks, dispenserClean, dispensers, dispenserTxs } = preconditions
+    // Before the dry-run branch, so a dry run predicts the same refusal a real run hits.
+    if (await refuseLaxSqlMode(db, error)) return EXIT.FAILED
 
     const verdict = 'checks: rolled-back blocks above tip = 0; dispensers = ' + dispensers + '; DISPENSER actions decoded = ' + dispenserTxs
         + (dispenserClean ? ' (clean)' : ' (FORCED by the operator)')
