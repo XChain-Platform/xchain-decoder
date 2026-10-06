@@ -168,25 +168,6 @@ module.exports = {
         await connection.query(`DELETE FROM dispenser_extension_undo WHERE block_index = ?;`, [blockIndex])
     },
 
-    // Drop undo rows at or below the reorg-safe height, on the same bound as
-    // purgeExpiredDispensers, so the undo table cannot outgrow the window it protects.
-    async purgeDispenserExtensionUndo(safeHeight) {
-        if (safeHeight == null || safeHeight < 0) return true
-        let connection = await this.getConnection()
-        const ownLease = (this.transactionConnection == null)
-        try {
-            await connection.query(`DELETE FROM dispenser_extension_undo WHERE block_index <= ?;`, [safeHeight])
-            return true
-        } catch (err) {
-            logger.error(formatLogLine('Error purging dispenser extension undo rows:', err));
-            return false
-        } finally {
-            if (ownLease){
-                await connection.release()
-            }
-        }
-    },
-
     async deleteOpenDispensers(blockIndex, minExpiration) {
         // SOFT-EXPIRE, don't hard-delete. minExpiration is the block's protocol
         // unix timestamp; expiration is a unix BIGINT, so compare
@@ -248,6 +229,8 @@ module.exports = {
         const ownLease = (this.transactionConnection == null)
         try {
             await connection.query(query, [safeHeight])
+            // Undo rows are only useful inside the window a reorg can reach, the same bound.
+            await connection.query(`DELETE FROM dispenser_extension_undo WHERE block_index <= ?;`, [safeHeight])
             return true
         } catch (err) {
             logger.error(formatLogLine('Error purging expired dispensers:', err));

@@ -124,6 +124,16 @@ class MockDatabase {
         return true
     }
 
+    async recordDispenserExtensionUndo() {
+        this._track("recordDispenserExtensionUndo")
+        return true
+    }
+
+    async recordDispenserExtensionUndo() {
+        this._track('recordDispenserExtensionUndo')
+        return true
+    }
+
     async purgeExpiredDispensers(safeHeight) {
         this._track('purgeExpiredDispensers')
         return true

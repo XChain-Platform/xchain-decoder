@@ -55,6 +55,7 @@ function createMockDatabase(overrides = {}) {
         insertDispenser: sinon.stub().resolves(true),
         insertEvent: sinon.stub().resolves(true),
         deleteOpenDispensers: sinon.stub().resolves(true),
+        recordDispenserExtensionUndo: async () => true,
         purgeExpiredDispensers: sinon.stub().resolves(true),
         deleteAndCompareTxsNotInList: sinon.stub().resolves({ transactionsDeleted: 0 }),
         isThereADispenserForAddress: sinon.stub().resolves(false),
