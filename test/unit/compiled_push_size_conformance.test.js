@@ -203,3 +203,75 @@ describe('compiled-push-size arbiter conformance', function () {
         });
     });
 });
+
+describe('payload_helpers pure functions', function () {
+    const helpers = require('../../src/XChainDecoder/payload_helpers.js');
+
+    describe('nodeStillCatchingUp', function () {
+        it('is true only for a strict true initialblockdownload', function () {
+            assert.strictEqual(helpers.nodeStillCatchingUp({ initialblockdownload: true }), true);
+            assert.strictEqual(helpers.nodeStillCatchingUp({ initialblockdownload: false }), false);
+            assert.strictEqual(helpers.nodeStillCatchingUp({ initialblockdownload: 'true' }), false);
+            assert.strictEqual(helpers.nodeStillCatchingUp({}), false);
+            assert.strictEqual(helpers.nodeStillCatchingUp(null), false);
+            assert.strictEqual(helpers.nodeStillCatchingUp(undefined), false);
+        });
+    });
+
+    describe('compiledPushSize', function () {
+        const size = helpers.compiledPushSize;
+
+        it('adds one byte through 75, two through 255, three from 256', function () {
+            const cases = [[0, 1], [1, 2], [75, 76], [76, 78], [255, 257], [256, 259]];
+            for (const [len, want] of cases) assert.strictEqual(size(len), want, `length ${len}`);
+        });
+
+        it('keeps the three-byte overhead across 65535 and 65536', function () {
+            assert.strictEqual(size(65535), 65538);
+            assert.strictEqual(size(65536), 65539);
+        });
+    });
+
+    describe('canonicalizeActionPayload', function () {
+        const canon = helpers.canonicalizeActionPayload;
+
+        it('expands an alias and preserves bytes after the first pipe', function () {
+            const input = Buffer.from('TRANSFER|a|b');
+            const out = canon(input);
+            assert.strictEqual(out.buffer.toString(), 'SEND|a|b');
+            assert.strictEqual(out.rawActionName, 'TRANSFER');
+            assert.strictEqual(out.actionName, 'SEND');
+            assert.strictEqual(out.isKnown, true);
+            assert.strictEqual(canon(out.buffer).buffer.toString(), 'SEND|a|b');
+        });
+
+        it('returns the original buffer for a canonical or unknown name', function () {
+            const known = Buffer.from('SEND|x');
+            assert.strictEqual(canon(known).buffer, known);
+            const unknown = Buffer.from('NOPE|x');
+            const out = canon(unknown);
+            assert.strictEqual(out.buffer, unknown);
+            assert.strictEqual(out.isKnown, false);
+        });
+
+        it('treats a pipe-free payload as all name', function () {
+            const out = canon(Buffer.from('ADDR'));
+            assert.strictEqual(out.buffer.toString(), 'ADDRESS');
+            assert.strictEqual(out.actionName, 'ADDRESS');
+        });
+    });
+
+    describe('bigIntBufferutilsActive', function () {
+        it('reports the installed bufferutils as patched', function () {
+            assert.strictEqual(helpers.bigIntBufferutilsActive(), true);
+        });
+
+        it('fails safe for a missing reader or a throwing reader', function () {
+            assert.strictEqual(helpers.bigIntBufferutilsActive({}), false);
+            const throwing = { BufferReader: class { readUInt64() { throw new Error('value out of range'); } } };
+            assert.strictEqual(helpers.bigIntBufferutilsActive(throwing), false);
+            const tolerant = { BufferReader: class { readUInt64() { return 2n ** 53n; } } };
+            assert.strictEqual(helpers.bigIntBufferutilsActive(tolerant), true);
+        });
+    });
+});
