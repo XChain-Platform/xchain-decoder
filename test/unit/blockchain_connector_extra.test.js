@@ -245,10 +245,10 @@ describe('BlockchainConnector (extra coverage)', () => {
             const timeoutErr = Object.assign(new Error('timeout'), { code: 'ECONNABORTED' })
 
             axiosStub.onCall(0).rejects(timeoutErr)
-            axiosStub.onCall(1).resolves({ data: { result: 'somehash' } })
+            axiosStub.onCall(1).resolves({ data: { result: 'ab'.repeat(32) } })
 
             const result = await connector.getBlockHash(100)
-            assert.strictEqual(result, 'somehash')
+            assert.strictEqual(result, 'ab'.repeat(32))
             assert.strictEqual(axiosStub.callCount, 2)
         })
 
@@ -376,10 +376,10 @@ describe('BlockchainConnector (extra coverage)', () => {
             const timeoutErr = Object.assign(new Error('timeout'), { code: 'ECONNABORTED' })
             axiosStub.onCall(0).rejects(timeoutErr)
             axiosStub.onCall(1).rejects(timeoutErr)
-            axiosStub.onCall(2).resolves({ data: { result: 'blockhash' } })
+            axiosStub.onCall(2).resolves({ data: { result: 'cd'.repeat(32) } })
 
             const result = await connector.getBlockHash(100)
-            assert.strictEqual(result, 'blockhash')
+            assert.strictEqual(result, 'cd'.repeat(32))
             assert.strictEqual(backoffSpy.callCount, 2)
         })
 

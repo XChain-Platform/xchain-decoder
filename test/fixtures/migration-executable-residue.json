@@ -1,0 +1,46 @@
+{
+  "2026-05-28-unique-index-tables.sql": {
+    "residue": "9e4dcd6d94aed3532f7be06059d7a0b53dc4f9f63d19fb564beceba5648173f1",
+    "sha256": "4f7f53ea5423d5ad50e0a2136243dab9e215033e6a110c7b47e66ba5361d44c2"
+  },
+  "2026-06-02-fix-previous-block-hash-byte-order.sql": {
+    "residue": "d23710057c7957212bc8d176f1598c70322e25c597f51f3b9b4ec6208c632d57",
+    "sha256": "db1e2cac25b7ed132dddaf33a483f35151208901c40a5b4c637d5b5f23492663"
+  },
+  "2026-06-02-widen-ids-to-bigint.sql": {
+    "residue": "51d74c7078068b010db2decf5dad242094b218049be6cb232aea84853121cbd0",
+    "sha256": "b03b41b6fcabef9c959851ede9b75cc9089cef7c015bdd69cfcea74ad5acea7a"
+  },
+  "2026-06-13-dispensers-expiration-bigint.sql": {
+    "residue": "3646f568c94a54e9fa18d7e484818fc8e28651aa83fa90c0198ee39cfabfd06b",
+    "sha256": "0e871ed4aea8649d6a5ffe866d78af38ceee37e5cd07d651287cfe1e8c99c8b2"
+  },
+  "2026-06-15-events-data-mediumtext.sql": {
+    "residue": "915f2a14ba4835e7fae0a309419a39010f1a1604b6d946bdefe77e8c11ee1564",
+    "sha256": "3790d814dec1ecbf7be78065be82a9f7e4f983c4529620f3c1a7d01f129881e8"
+  },
+  "2026-06-15-mempool-raw-strings.sql": {
+    "residue": "3598856a27b08598976aa31b72270be9b4b170e4dd449ba2c7e80aa4271a850d",
+    "sha256": "571c0a30c8264acf89e5f5a11e491cb2c733d96c9ec732c0036bf6cdeb273456"
+  },
+  "2026-06-17-pubkeys-add-monotonic-id.sql": {
+    "residue": "2a13c0eb4501caae8e010b211521996574b4089490604f266807fa7ec5ca606d",
+    "sha256": "1d8406192690e5a754ec9430fcd9115e907f34944f340a70b776166a62f83868"
+  },
+  "2026-07-24-pubkeys-widen-uncompressed.sql": {
+    "residue": "7da72df46a6af78cb4ede312db2ec2947d16c79b6c2692627ce9df029060981c",
+    "sha256": "156fca3b75b332ef099e8dd5d28624d9ebc26d34e143e37e1f9503b6c0da0c1d"
+  },
+  "2026-08-10-action-data-utf8mb4.sql": {
+    "residue": "a4c87c86ffba8bc1b674ada7ce7f678612ea008f08a7d362d9dcfe546ce2ed1d",
+    "sha256": "0b3b2fefb780da1fb96a0d5518967b67b215676cc1ac02efc08ec1672d9091b2"
+  },
+  "2026-08-22-mempool-first-seen.sql": {
+    "residue": "c3e167c81c150d5306b575f2465d798be267d0e1521385246321dc3b3f73d142",
+    "sha256": "65baa4b8645ac2de43de0291a2e9d0bac3d8dce83f4884894e2da6d19683b729"
+  },
+  "2026-09-27-mempool-first-seen-datetime.sql": {
+    "residue": "ad7e67e22f93b412624d1eea2e3039ff2d523b4bb7142380ee6a91b64d64b266",
+    "sha256": "4342fc1560c68b7b14a86a7c0338dd879a769c1651f441348fc7ac9ec12bcc05"
+  }
+}
