@@ -121,6 +121,8 @@ const TAPROOT_LEAF_VERSION = 0xc0
 // script-path elements. An annex-bearing reveal is never recognized (§3.8).
 const TAPROOT_ANNEX_MARKER = 0x50
 
+// Consensus surface: a name missing here drops every on-chain instance of that action,
+// so any membership change is a flag-day, pinned by test/unit/valid_action_names_flag_day.test.js.
 const VALID_ACTION_NAMES = new Set([
     'ADDRESS', 'AIRDROP', 'ANCHOR', 'ATTEST',
     'BATCH', 'BET', 'BROADCAST', 'CALLBACK', 'COINPAY', 'COLLECT',
