@@ -159,3 +159,13 @@ describe('extendEditedDispenser', () => {
         assert.ok(extend.notCalled);
     });
 });
+
+describe('dispenser_extension_undo schema', () => {
+    it('is a src/sql table the startup reconciler creates and drift-checks, with nullable pre-images', () => {
+        const sql  = require('fs').readFileSync(require('path').join(__dirname, '../../src/sql/dispenser_extension_undo.sql'), 'utf8');
+        const cols = makeDb().parseExpectedColumns(sql);
+        assert.deepStrictEqual(cols.map(c => c.name),
+            ['block_index', 'tx_index', 'address_id', 'prior_expiration', 'prior_expired_block_index']);
+        assert.deepStrictEqual(cols.filter(c => c.nullable).map(c => c.name), ['prior_expiration', 'prior_expired_block_index']);
+    });
+});
