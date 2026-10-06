@@ -113,6 +113,7 @@ module.exports = {
         let connection = await this.getConnection()
 
         try {
+            await this.restoreDispenserExtensions(connection, blockIndex)
             await deleteBlockRows(connection, blockIndex)
             await insertReorgEvent(connection, blockIndex, reorgBlockHash)
 

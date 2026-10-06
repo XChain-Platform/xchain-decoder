@@ -117,6 +117,57 @@ module.exports = {
         return addresses;
     },
 
+    // Pre-image capture for a format-2 expiration extend. Called before the extend runs, on
+    // the block transaction, it records the expiration and expiry mark of every row the extend
+    // will touch (same two-key source match and mark filter), with INSERT IGNORE so a second
+    // extend of the same row in the block keeps the value the row held when the block began.
+    // Same false/true contract as the extend: false means the query failed and the block
+    // transaction was rolled back.
+    async recordDispenserExtensionUndo(sourceAddress, blockIndex) {
+        const query = `
+            INSERT IGNORE INTO dispenser_extension_undo
+                (block_index, tx_index, address_id, prior_expiration, prior_expired_block_index)
+            SELECT ?, tx_index, address_id, expiration, expired_block_index
+            FROM dispensers
+            WHERE (address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1)
+                OR source_address_id = (SELECT id FROM index_addresses WHERE address = ? LIMIT 1))
+              AND (expired_block_index IS NULL OR expired_block_index = ?);
+        `;
+        let connection = await this.getConnection()
+        const ownLease = (this.transactionConnection == null)
+        try {
+            await connection.query(query, [blockIndex, sourceAddress, sourceAddress, blockIndex])
+            return true
+        } catch (err) {
+            logger.error(formatLogLine('Error recording dispenser extension undo:', err));
+            if (this.transactionConnection){
+                await this.endTransaction()
+            }
+            return false
+        } finally {
+            if (ownLease){
+                await connection.release()
+            }
+        }
+    },
+
+    // Reorg half of recordDispenserExtensionUndo: put back the expiration and expiry mark the
+    // orphaned block's extends overwrote, then drop that block's undo rows. A prior mark equal
+    // to the orphaned block becomes NULL, the clear the reorg applies to every stamp of that
+    // height. Runs on the caller's reorg connection and transaction; throws on a query fault so
+    // deleteBlockByIndex rolls back as it does for its other statements.
+    async restoreDispenserExtensions(connection, blockIndex) {
+        await connection.query(`
+            UPDATE dispensers d
+            INNER JOIN dispenser_extension_undo u
+                ON u.tx_index = d.tx_index AND u.address_id <=> d.address_id
+            SET d.expiration = u.prior_expiration,
+                d.expired_block_index = CASE WHEN u.prior_expired_block_index = u.block_index
+                                             THEN NULL ELSE u.prior_expired_block_index END
+            WHERE u.block_index = ?;`, [blockIndex])
+        await connection.query(`DELETE FROM dispenser_extension_undo WHERE block_index = ?;`, [blockIndex])
+    },
+
     async deleteOpenDispensers(blockIndex, minExpiration) {
         // SOFT-EXPIRE, don't hard-delete. minExpiration is the block's protocol
         // unix timestamp; expiration is a unix BIGINT, so compare
@@ -178,6 +229,8 @@ module.exports = {
         const ownLease = (this.transactionConnection == null)
         try {
             await connection.query(query, [safeHeight])
+            // Undo rows are only useful inside the window a reorg can reach, the same bound.
+            await connection.query(`DELETE FROM dispenser_extension_undo WHERE block_index <= ?;`, [safeHeight])
             return true
         } catch (err) {
             logger.error(formatLogLine('Error purging expired dispensers:', err));

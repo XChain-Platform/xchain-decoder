@@ -85,6 +85,7 @@ function configureDecoderDatabase(decoder, calls){
             calls.captureFloors.push(floor)
             return new Set()
         },
+        recordDispenserExtensionUndo: async () => true,
         purgeExpiredDispensers: async () => true,
         insertTransaction: async () => true,
         insertTransactionOutput: async () => true,

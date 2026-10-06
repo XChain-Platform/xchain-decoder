@@ -165,6 +165,7 @@ function buildDecoder(txSpecs, model) {
         insertDispenser:                     (d) => model.insertDispenser(d),
         extendOpenDispenserExpirationBySource: (s, e, b) => model.extendOpenDispenserExpirationBySource(s, e, b),
         deleteOpenDispensers:                (b, m) => model.deleteOpenDispensers(b, m),
+        recordDispenserExtensionUndo: async () => true,
         purgeExpiredDispensers:              (h) => model.purgeExpiredDispensers(h),
         getAllOpenDispenserAddresses:        () => model.getAllOpenDispenserAddresses(),
         getOpenDispenserOracleAddressBySource: (s) => model.getOpenDispenserOracleAddressBySource(s),

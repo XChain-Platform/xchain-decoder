@@ -379,6 +379,10 @@ async function extendEditedDispenser(extension, nextBlockHeight){
     // The clear below stays for the legacy era it was written
     // for, where it is still the only thing ending the
     // PERSISTENT divergence.
+    // Pre-image first, so a reorg of this block can restore what the extend overwrites.
+    if ((await this.db.recordDispenserExtensionUndo(editSource, nextBlockHeight)) === false){
+        return 'rollback'
+    }
     if ((await this.db.extendOpenDispenserExpirationBySource(editSource, newExpiration, nextBlockHeight)) === false){
         // extendOpenDispenserExpirationBySource's error path already rolled the block back.
         return 'rollback'
