@@ -2577,6 +2577,10 @@
       "Database#getConnection() succeeds on first pool.getConnection call",
       "Database#getConnection() throws after maxAttempts (30) consecutive failures"
     ],
+    "d18469488f659a45": [
+      "protocol time newest-first caller contract fetchPreviousBlockTimes returns a height-ordered window bounded by the median span",
+      "protocol time newest-first caller contract returns the available newest-first prefix near genesis"
+    ],
     "d19fabd24013167c": [
       "node_catching_up rides the health payloads /live publishes null when no wait is running, never an omitted key",
       "node_catching_up rides the health payloads /live publishes the wait verbatim (the real registrar, not a copy of it)",
@@ -3102,8 +3106,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 188,
-      "titleCount": 1759,
+      "fileCount": 189,
+      "titleCount": 1761,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3249,6 +3253,7 @@
         "test/unit/parse_transaction.test/04_get_source_from_output.test.js": "5bfafba200cdf61c",
         "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js": "6a95ee16117e8e38",
         "test/unit/protocol_constants.test.js": "13584cc3d862a5a2",
+        "test/unit/protocol_time_caller_order.test.js": "d18469488f659a45",
         "test/unit/protocol_time.test.js": "a712626ef67e3e03",
         "test/unit/protocol_time_parity.test.js": "bea80fd3971653d5",
         "test/unit/remove_obfuscation.test.js": "0eb0aadd100cef95",
@@ -3584,8 +3589,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 188,
-      "titleCount": 1759,
+      "fileCount": 189,
+      "titleCount": 1761,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "d8cd8319c6020126",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3731,6 +3736,7 @@
         "test/unit/parse_transaction.test/04_get_source_from_output.test.js": "5bfafba200cdf61c",
         "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js": "6a95ee16117e8e38",
         "test/unit/protocol_constants.test.js": "13584cc3d862a5a2",
+        "test/unit/protocol_time_caller_order.test.js": "d18469488f659a45",
         "test/unit/protocol_time.test.js": "a712626ef67e3e03",
         "test/unit/protocol_time_parity.test.js": "bea80fd3971653d5",
         "test/unit/remove_obfuscation.test.js": "0eb0aadd100cef95",

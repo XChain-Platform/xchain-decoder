@@ -59,9 +59,17 @@ function isProtocolTimeMtpActive(network){
 
 // The median of the previous MEDIAN_TIME_SPAN block timestamps, Bitcoin-style.
 //
-// `previousBlockTimes` is the timestamps of the blocks BELOW the one being
-// resolved, in any order; only the newest MEDIAN_TIME_SPAN of them are used, so
-// callers may hand over a longer window. Genesis and the blocks just above it
+// CALLER CONTRACT. `previousBlockTimes` is the timestamps of the blocks BELOW
+// the one being resolved, NEWEST FIRST by block height, and at most
+// MEDIAN_TIME_SPAN long. The one real caller, fetchPreviousBlockTimes in
+// XChainDecoder/block_store.js, provides both guarantees.
+//
+// This function selects the newest entries by VALUE, not by position. For a
+// window within the span the two are the same set, so the result is the Bitcoin
+// median whatever the order. A longer window on a chain whose stamps are not
+// monotonic would pick a different set than "the 11 blocks below", so the width
+// bound belongs to the caller and a wider read is a contract violation, not a
+// convenience. Genesis and the blocks just above it
 // have fewer than a full span available: Bitcoin medians whatever exists rather
 // than failing, and so does this.
 //

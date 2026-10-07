@@ -119,7 +119,9 @@ async function finishBlock(loop, block, nextBlockHeight, nextBlockHash, openDisp
 }
 
 async function fetchPreviousBlockTimes(nextBlockHeight, span){
-    // Walk strictly backward so a failed lookup never mixes reorg states.
+    // Walk strictly backward so the result is newest first by block height and
+    // never wider than `span`, as medianTimePast's caller contract requires. A
+    // failed lookup returns no partial window, avoiding mixed reorg states.
     let previousBlockTimes = []
     for (let height = nextBlockHeight - 1; height >= 0 && previousBlockTimes.length < span; height--){
         let previousBlock
@@ -195,4 +197,4 @@ async function storeBlock(loop, block, nextBlockHeight, nextBlockHash, previousB
         this, loop, block, nextBlockHeight, nextBlockHash, openAddresses, expireAtEnd)
 }
 
-module.exports = { storeBlock }
+module.exports = { storeBlock, fetchPreviousBlockTimes }
