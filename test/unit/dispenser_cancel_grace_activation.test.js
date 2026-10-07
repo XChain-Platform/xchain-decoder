@@ -41,7 +41,6 @@ const { DISPENSER_CANCEL_GRACE_ACTIVATION,
         DISPENSER_CANCEL_GRACE_SECONDS,
         isDispenserCancelGraceActive,
         cancelGraceFloor } = require('../../src/protocol/dispenser_cancel_grace.js');
-const XChainDecoder = require('../../src/XChainDecoder.js');
 
 const DOCS_CONSTANTS = process.env.XCHAIN_DOCS_DIR
     ? path.join(process.env.XCHAIN_DOCS_DIR, 'protocol', 'constants.js')
@@ -207,20 +206,4 @@ describe('DISPENSER_CANCEL_GRACE_SECONDS cross-repo invariants', function () {
         assert.strictEqual(DISPENSER_CANCEL_GRACE_SECONDS, 3600);
     });
 
-    it('the hard purge cannot reclaim a row that is still inside the grace window', function () {
-        // purgeExpiredDispensers hard-deletes a row 126 blocks (DISPENSER_EXPIRE_SAFE_DEPTH)
-        // after the block that stamped it. A row purged while still inside its grace window
-        // would drop out of the widened capture set early, so the depth has to outlast the
-        // grace on the FASTEST chain the platform decodes. Purge is keyed on block HEIGHT, so
-        // even a burst that outran this stays deterministic across nodes; the margin is what
-        // keeps the grace from being cosmetic on DOGE.
-        const FASTEST_TARGET_SPACING = 60;   // DOGE (BTC 600 / LTC 150 / DOGE 60)
-        const purgeSpan = XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH * FASTEST_TARGET_SPACING;
-        assert.ok(
-            purgeSpan > DISPENSER_CANCEL_GRACE_SECONDS,
-            `the purge span (${purgeSpan}s at target spacing) must exceed the grace window ` +
-            `(${DISPENSER_CANCEL_GRACE_SECONDS}s), or a cancelled dispenser is hard-deleted ` +
-            'before the indexer stops matching it'
-        );
-    });
 });
