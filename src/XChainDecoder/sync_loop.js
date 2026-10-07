@@ -76,7 +76,7 @@ async function reconcileEqualHeightTip(loop){
         // true. Its own catch classifies rather than swallows: a REORG_HALT
         // refusal parks the loop (nothing a restart can fix), every other abort
         // still propagates out of start() and halts loudly.
-        this.log("Equal-height tip replacement detected at height " + loop.lastProcessedBlockIndex + ". Reconciling...")
+        this.logWarn("Equal-height tip replacement detected at height " + loop.lastProcessedBlockIndex + ". Reconciling...")
         await this.db.endTransaction()
         try {
             await this.verifyReorg(this.blockchainInfoLastBlock)

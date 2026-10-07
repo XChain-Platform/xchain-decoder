@@ -346,7 +346,7 @@ module.exports = {
             // Each rolled-back block already persisted its own REORG marker atomically with its
             // delete (deleteBlockByIndex), so there is no separate end-of-run event to write.
             // This is only an ops summary of the completed reorg.
-            this.log(`reorg: rolled back ${blocksDeleted.length} block(s): ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
+            this.logWarn(`reorg: rolled back ${blocksDeleted.length} block(s): ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
             // Once per RUN, never per deleted block: a per-block increment would report a
             // single depth-5 reorg as five reorgs and destroy the frequency signal.
             this.reorgCount++

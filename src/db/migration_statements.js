@@ -13,6 +13,7 @@
  **********************************************************************/
 
 const { opensBackslashEscape } = require('./query_helpers.js')
+const { ensureLedgerAppliedAtDatetime } = require('./migration_ledger.js')
 
 // True when a `#` sits outside every quoted span - a line comment
 // stripSqlLineComments should already have removed. Quote-aware so a `#`
@@ -37,6 +38,14 @@ function hasUnquotedHash(s){
     return false;
 }
 
+// True for the only session SETs an auto file may carry: SET NAMES and a single UTC time_zone,
+// the zone the pool is configured for (timezone 'Z'), so neither can relax a strict-mode check.
+// Kept in step with the xchain-indexer classifier.
+function autoEligibleSet(stmt){
+    if(/^SET\s+NAMES\s+['"]?\w+['"]?(?:\s+COLLATE\s+['"]?\w+['"]?)?$/i.test(stmt)) return true;
+    return /^SET\s+(?:SESSION\s+|LOCAL\s+|@@SESSION\.|@@LOCAL\.|@@)?time_zone\s*=\s*'\+00:00'$/i.test(stmt);
+}
+
 function isSimpleDestructiveStatement(stmt){
     // Server-side indirection escapes a statement-prefix classifier: a mode=auto
     // file can smuggle destructive SQL past every keyword check below via dynamic
@@ -44,12 +53,17 @@ function isSimpleDestructiveStatement(stmt){
     // or a `CALL proc()` whose body the scanner cannot see. None of these are used
     // by any committed auto migration, so treat them as non-auto-eligible. SET of a
     // user variable (`SET @s = ...`) exists to stage dynamic SQL for PREPARE, so
-    // flag it too - but NOT system-variable SETs (`SET NAMES ...`, `SET sql_mode
-    // = ...`, `SET @@session...`), which are benign and stay auto-eligible.
+    // flag it too.
     if(/^PREPARE\b/i.test(stmt)) return true;
     if(/^EXECUTE\b/i.test(stmt)) return true;
     if(/^CALL\b/i.test(stmt)) return true;
     if(/^SET\s+@(?!@)/i.test(stmt)) return true;
+    // Any other SET is an allow-list, not a deny-list: only SET NAMES and a single
+    // UTC time_zone stay auto-eligible. A SET sql_mode (or foreign_key_checks, ...) turns
+    // off the strict-mode backstop, so a later narrowing MODIFY in the same file truncates
+    // silently instead of failing; and SET STATEMENT v=x FOR <stmt> hides a statement
+    // behind the SET keyword from every check below.
+    if(/^SET\b/i.test(stmt) && !autoEligibleSet(stmt)) return true;
     if(/^DROP\s+(TABLE|DATABASE|SCHEMA)\b/i.test(stmt)) return true;
     // CREATE OR REPLACE TABLE is an atomic DROP TABLE IF EXISTS + CREATE: it destroys
     // every existing row. Plain CREATE TABLE / CREATE TABLE IF NOT EXISTS are additive
@@ -137,18 +151,6 @@ function isDestructiveAlter(stmt, safeAlterDrop){
     return false;
 }
 
-async function ensureLedgerAppliedAtDatetime(conn){
-    const rows = await conn.query(
-        'SELECT DATA_TYPE AS dataType FROM information_schema.COLUMNS ' +
-        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schema_migrations' " +
-        "AND COLUMN_NAME = 'applied_at'"
-    );
-    if(String(rows[0]?.dataType || '').toLowerCase() !== 'timestamp') return;
-    await conn.query(
-        'ALTER TABLE schema_migrations MODIFY applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
-    );
-}
-
 module.exports = {
     // Read a migration file's `-- xchain:migration mode=auto|manual` header tag.
     // Defaults to 'manual' when absent (conservative: unknown DDL never auto-runs).
@@ -191,7 +193,8 @@ module.exports = {
     // TABLESPACE clause, ALTER IGNORE TABLE (deletes duplicate-key rows), any other
     // ALTER than ALTER [ONLINE] TABLE, and any CREATE other than [TEMPORARY] TABLE and
     // [UNIQUE|FULLTEXT|SPATIAL] INDEX (triggers, events, routines and views run SQL
-    // the scanner cannot read).
+    // the scanner cannot read), and any SET other than SET NAMES or a single UTC
+    // time_zone (session variables relax strict mode; SET STATEMENT ... FOR hides a statement).
     //
     // Deliberately NOT flagged (legitimate existing auto patterns): DROP INDEX/KEY,
     // DROP FOREIGN KEY/CONSTRAINT/CHECK/DEFAULT/PRIMARY KEY (structural, no row

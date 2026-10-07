@@ -17,7 +17,7 @@ const crypto = require('crypto');
 const config = require('../config');
 const Database = require('../db.js')
 const { logger } = require('./constants.js')
-const { migrationSession } = require('./migration_query_timeout.js')
+const { migrationSession, retireMigrationConnection } = require('./migration_query_timeout.js')
 
 function validateMigrationTargets(files, only, dir){
     // Targeted rollout: a name that matches no committed migration is almost
@@ -174,6 +174,8 @@ async function applyMigrationFile(database, context, file, raw, checksum, mode){
     }
     // Lift the pool's 30s statement limit so a table rebuild is not killed half-applied.
     await context.activateQueryTimeout();
+    // Marked before the first statement, so a file that fails partway still retires the connection.
+    if(context.markSessionDirty) context.markSessionDirty();
     logger.info('runMigrations: applying ' + file + ' (mode=' + mode + ', ' + statements.length + ' statement(s))...');
     try {
         for(const stmt of statements){ await context.conn.query(stmt); }
@@ -269,6 +271,7 @@ module.exports = {
         const lockName = 'xchain_migrate_' + this.dbName;
         let conn = await this.getConnection();
         let returnToPool = true;
+        let sessionDirty = false;
         try {
             const got = await conn.query('SELECT GET_LOCK(?, 30) AS l', [lockName]);
             if(!got || !got[0] || String(got[0].l) !== '1'){
@@ -288,6 +291,7 @@ module.exports = {
                 const appliedRows = await conn.query('SELECT name, checksum FROM schema_migrations');
                 const context = {
                     includeManual, only, dir, result, conn, activateQueryTimeout: session.activate,
+                    markSessionDirty: () => { sessionDirty = true; },
                     appliedByName: new Map(appliedRows.map(r => [r.name, r.checksum])),
                 };
                 for(const file of files) await processMigration(this, context, file);
@@ -295,7 +299,7 @@ module.exports = {
                 returnToPool = await session.release();
             }
         } finally {
-            if(returnToPool) try { await conn.release(); } catch(_){}
+            if(returnToPool) await retireMigrationConnection(conn, sessionDirty);
         }
         if(result.applied.length) logger.info('runMigrations: ' + result.applied.length + ' migration(s) applied to ' + this.dbName + '.');
         if(result.pending.length) logger.info('runMigrations: ' + result.pending.length + ' manual migration(s) pending for ' + this.dbName + '; run `node src/db/migrate.js` to apply.');

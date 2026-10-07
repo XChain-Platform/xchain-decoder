@@ -66,8 +66,18 @@ function migrationSession(conn, lockName, runtimeTimeoutMs){
     }
 }
 
+// A migration file may SET any session variable (sql_mode, foreign_key_checks, ...), and the
+// pool re-applies its pinned initSql only to a NEW connection, never on release. So a
+// connection that ran file statements is closed rather than handed back to the pool.
+async function retireMigrationConnection(conn, sessionDirty){
+    if(sessionDirty && typeof conn.destroy === 'function'){
+        try { await conn.destroy() } catch(_){}
+    } else try { await conn.release() } catch(_){}
+}
+
 module.exports = {
     DEFAULT_MIGRATE_QUERY_TIMEOUT_MS,
     migrationQueryTimeoutMs,
     migrationSession,
+    retireMigrationConnection,
 }

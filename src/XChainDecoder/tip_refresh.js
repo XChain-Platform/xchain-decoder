@@ -220,7 +220,7 @@ async function reconcileOrphanBlocks(loop, lastProcessedBlockIndex){
     // the fork point. blockchainInfoLastBlock was just refreshed above, so
     // the tip is current.
     if (!loop.tipBelowStoredTipRefused){
-        this.log("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+"). Reconciling orphan blocks...")
+        this.logWarn("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+"). Reconciling orphan blocks...")
     }
     await this.db.endTransaction()
     try {

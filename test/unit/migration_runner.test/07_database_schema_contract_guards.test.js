@@ -160,8 +160,24 @@ describe('Database schema-contract guards @regression', function () {
             assertStrictSqlMode: async () => { calls.push('sqlmode'); }
         };
         const result = await Database.prototype.runMigrations.call(ctx);
-        assert.deepStrictEqual(calls, ['dispenser', 'pubkey', 'utf8mb4', 'sqlmode']);
+        // sql_mode is session state, so it is checked before the body; the schema guards follow it.
+        assert.deepStrictEqual(calls, ['sqlmode', 'dispenser', 'pubkey', 'utf8mb4']);
         assert.strictEqual(result.lockSkipped, true);
+    });
+
+    it('refuses a lax session before the migration body runs a single statement', async function () {
+        // A backfill committed under a lax or NO_BACKSLASH_ESCAPES session is already truncated,
+        // so the guard has to stop the run before runMigrationsInner, not report after it.
+        const calls = [];
+        const ctx = {
+            runMigrationsInner: async () => { calls.push('body'); return { applied: [], pending: [] }; },
+            assertDispenserExpirationIsBigintUnsigned: async () => { calls.push('dispenser'); },
+            assertPubkeyColumnIsUncompressedWide: async () => { calls.push('pubkey'); },
+            assertActionDataIsUtf8mb4: async () => { calls.push('utf8mb4'); },
+            assertStrictSqlMode: async () => { calls.push('sqlmode'); throw new Error('lax session'); }
+        };
+        await assert.rejects(Database.prototype.runMigrations.call(ctx), /lax session/);
+        assert.deepStrictEqual(calls, ['sqlmode']);
     });
 
 });

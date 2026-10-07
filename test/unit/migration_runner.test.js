@@ -205,10 +205,10 @@ describe('Database.destructiveAutoStatement() @regression', function () {
         assert.ok(scanSql("SET @s = 'DROP TABLE events'; PREPARE stmt FROM @s; EXECUTE stmt;"));
     });
 
-    it('does NOT flag benign system-variable SETs (SET NAMES / SET sql_mode / SET @@)', function () {
+    it('does NOT flag the allow-listed session SETs (SET NAMES / a single UTC time_zone)', function () {
         assert.strictEqual(scanSql('SET NAMES utf8mb4;'), null);
-        assert.strictEqual(scanSql('SET sql_mode = "STRICT_ALL_TABLES";'), null);
-        assert.strictEqual(scanSql('SET @@session.foreign_key_checks = 0;'), null);
+        assert.strictEqual(scanSql("SET time_zone = '+00:00';"), null);
+        assert.strictEqual(scanSql("SET @@session.time_zone = '+00:00';"), null);
     });
 
     // The indexer twin carries the same cases; keep the two suites in step.

@@ -139,3 +139,36 @@ describe('runMigrations() migration-scoped statement timeout on scoped runs @reg
     });
 
 });
+
+// A migration file can SET session variables the pool never resets on release, so a
+// connection that ran file statements must not go back to the pool.
+describe('runMigrations() migration connection retirement @regression', function () {
+
+    it('closes, never pools, a connection that applied a migration file, after unlocking', async function () {
+        const { db, calls, counts } = makeDb();
+        const res = await withTimeoutEnv(undefined, () => db.runMigrationsInner({ includeManual: true }));
+        assert.deepStrictEqual(res.applied, [FILE]);
+        assert.deepStrictEqual(counts, { release: 0, destroy: 1 });
+        assert.ok(indexOf(calls, /RELEASE_LOCK/) > indexOf(calls, /MODIFY c BIGINT/), 'the lock is still released first');
+    });
+
+    it('closes the connection when a file fails partway through its statements', async function () {
+        const { db, counts } = makeDb([], { failBody: true });
+        await assert.rejects(() => db.runMigrationsInner({ includeManual: true }), /body boom/);
+        assert.deepStrictEqual(counts, { release: 0, destroy: 1 });
+    });
+
+    it('returns the connection to the pool when no file ran', async function () {
+        const sum = crypto.createHash('sha256').update(BODY).digest('hex');
+        const nothingPending = makeDb([{ name: FILE, checksum: sum }]);
+        const res = await nothingPending.db.runMigrationsInner({ includeManual: true });
+        assert.deepStrictEqual(res.applied, []);
+        assert.deepStrictEqual(nothingPending.counts, { release: 1, destroy: 0 });
+
+        const lockSkipped = makeDb([], { lock: false });
+        const skipped = await lockSkipped.db.runMigrationsInner({ includeManual: true });
+        assert.strictEqual(skipped.lockSkipped, true);
+        assert.deepStrictEqual(lockSkipped.counts, { release: 1, destroy: 0 });
+    });
+
+});

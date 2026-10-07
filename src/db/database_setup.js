@@ -204,12 +204,15 @@ module.exports = {
     // fail-closed guards a mode=manual migration owns fire even when the body early-returns
     // (no migrations dir, empty dir, lock contention). A throwing body is already failing
     // loudly, so the assertions are skipped there.
+    //
+    // Check sql_mode BEFORE the body: it reads session state, not schema, and a lax or
+    // NO_BACKSLASH_ESCAPES session would otherwise commit truncated backfills first.
     async runMigrations(opts = {}){
+        await this.assertStrictSqlMode();
         const result = await this.runMigrationsInner(opts);
         await this.assertDispenserExpirationIsBigintUnsigned();
         await this.assertPubkeyColumnIsUncompressedWide();
         await this.assertActionDataIsUtf8mb4();
-        await this.assertStrictSqlMode();
         return result;
     },
 

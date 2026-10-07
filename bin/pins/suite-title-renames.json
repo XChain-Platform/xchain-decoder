@@ -4,6 +4,12 @@
   "titles": {
     "test/unit/db_queries.test/04_delete_block_by_index.test.js": {
       "Database#deleteBlockByIndex() executes 4 DELETE queries and returns true on success": "Database#deleteBlockByIndex() executes 5 DELETE queries and returns true on success"
+    },
+    "test/unit/fee_destination.test.js": {
+      "resolveFeeDestination @unit honors an env override on regtest ONLY": "resolveFeeDestination @unit ignores a bare env override on regtest too, so capture and indexer validation resolve one address"
+    },
+    "test/unit/migration_runner.test.js": {
+      "Database.destructiveAutoStatement() @regression does NOT flag benign system-variable SETs (SET NAMES / SET sql_mode / SET @@)": "Database.destructiveAutoStatement() @regression does NOT flag the allow-listed session SETs (SET NAMES / a single UTC time_zone)"
     }
   }
 }
