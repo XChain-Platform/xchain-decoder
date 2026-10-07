@@ -30,7 +30,7 @@ describe('protocol time newest-first caller contract', function () {
             },
         }
 
-        const times = await fetchPreviousBlockTimes.call(context, 20, MEDIAN_TIME_SPAN)
+        const times = await fetchPreviousBlockTimes.call(context, 20, stamps.length)
         const expectedHeights = Array.from(
             { length: MEDIAN_TIME_SPAN },
             (_, offset) => 19 - offset
