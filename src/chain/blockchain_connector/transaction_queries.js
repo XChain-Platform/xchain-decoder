@@ -14,7 +14,7 @@
 
 const config = require('../../config');
 const { logger } = require('./constants.js')
-const { envInt, sanitizeRpcError } = require('./rpc_helpers.js')
+const { carryErrorIdentity, envInt, sanitizeRpcError } = require('./rpc_helpers.js')
 
 function rawTransactionResponse(response, txid) {
     // A JSON-RPC 2.0 node (Bitcoin Core >= v28) answers an RPC error with
@@ -101,7 +101,7 @@ async function handleRawTransactionFailure(connector, error, txid, tries, maxTri
         logger.error(`getRawTransaction: attempt ${tries}/${maxTries} for txid ${txid} failed: HTTP ${details.httpStatus !== undefined ? details.httpStatus : 'n/a'} rpcCode ${details.rpcCode !== undefined ? details.rpcCode : 'n/a'}: ${details.lastErrorSummary}`)
     }
     await connector.sleep(details.isQueueFull ? 5000 : 500)
-    return { resolved: false, lastErrorSummary: details.lastErrorSummary }
+    return { resolved: false, lastErrorSummary: details.lastErrorSummary, lastError: error }
 }
 
 async function runRawTransactionRetries(connector, txid, resolve, reject) {
@@ -111,6 +111,7 @@ async function runRawTransactionRetries(connector, txid, resolve, reject) {
     // deterministic misconfiguration (401/404/DNS) is diagnosable instead of
     // surfacing as a bare "failed after 10 attempts" line.
     let lastErrorSummary = null
+    let lastError = null
     while (tries < maxTries){
         tries++
         try {
@@ -131,12 +132,14 @@ async function runRawTransactionRetries(connector, txid, resolve, reject) {
                 return
             }
             lastErrorSummary = outcome.lastErrorSummary
+            lastError = outcome.lastError
         }
     }
 
     if (tries >= maxTries){
         connector.rpcErrors++
-        reject(new Error(`getRawTransaction failed after ${maxTries} attempts for txid ${txid}${lastErrorSummary ? ': ' + lastErrorSummary : ''}`))
+        // Keep the last cause's code/rpcCode so getBlockReassembled can tell an unreachable node from a bad block.
+        reject(carryErrorIdentity(new Error(`getRawTransaction failed after ${maxTries} attempts for txid ${txid}${lastErrorSummary ? ': ' + lastErrorSummary : ''}`), lastError))
     }
 }
 

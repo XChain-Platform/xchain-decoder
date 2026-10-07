@@ -338,3 +338,22 @@ describe('malformed-AuxPoW block reassembly fallback', function () {
         })
     })
 })
+
+// The per-tx fan-out is where a saturated node shows up, so the real getRawTransaction
+// ladder's exhaustion must still hand the wrapper a transport code to copy.
+describe('malformed-AuxPoW block reassembly fallback', function () {
+    it('getBlockReassembled keeps error.code when the real getRawTransaction ladder exhausts', async function () {
+        const connector = makeConnector({
+            getBlockHeader: async () => HEADER_HEX,
+            getBlockVerbose: async () => ({ tx: [TXID] }),
+            sleep: async () => {},
+            rpcPost: async () => { throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) },
+        })
+        await assert.rejects(() => connector.getBlockReassembled('hash'), (err) => {
+            assert.match(err.message, /failed after 10 attempts/)
+            assert.strictEqual(err.code, 'ECONNRESET', 'the transport code must reach the wrapper')
+            assert.strictEqual(err.auxPowParseFailure, undefined)
+            return true
+        })
+    })
+})

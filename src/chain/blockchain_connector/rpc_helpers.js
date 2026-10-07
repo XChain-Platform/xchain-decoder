@@ -161,9 +161,19 @@ function nodeReachabilityFrom(startedAt, lastNodeOkAt, lastNodeFailAt, now = Dat
     }
 }
 
+// Copy a cause's identity (error.code plus rpcCode/rpcMessage) onto an error built in its
+// place, so a retry ladder's exhaustion error still tells a transport fault from a node answer.
+function carryErrorIdentity(target, cause){
+    if (!target || !cause) return target
+    if (cause.code !== undefined) target.code = cause.code
+    attachRpcFields(target, cause.rpcCode, cause.rpcMessage)
+    return target
+}
+
 module.exports = {
     envInt,
     attachRpcFields,
+    carryErrorIdentity,
     sanitizeRpcError,
     rpcResult,
     normalizeEndpoint,
