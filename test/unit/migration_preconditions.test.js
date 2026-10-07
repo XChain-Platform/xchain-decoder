@@ -281,6 +281,23 @@ describe('assertTransactionIdsAreBigint @regression @tier1', function () {
     });
 });
 
+describe('runMigrations BIGINT id startup contract @regression @tier1', function () {
+
+    it('fails closed when the required assertion method is unavailable', async function () {
+        const ctx = {
+            assertStrictSqlMode: async () => {},
+            runMigrationsInner: async () => ({ applied: [], pending: [] }),
+            assertDispenserExpirationIsBigintUnsigned: async () => {},
+            assertPubkeyColumnIsUncompressedWide: async () => {},
+            assertActionDataIsUtf8mb4: async () => {}
+        };
+
+        await assert.rejects(
+            Database.prototype.runMigrations.call(ctx),
+            /assertTransactionIdsAreBigint/);
+    });
+});
+
 describe('Database.MIGRATION_PRECONDITIONS: pubkeys widen predicate @regression', function () {
 
     const skipWhen = Database.MIGRATION_PRECONDITIONS['2026-07-24-pubkeys-widen-uncompressed.sql'].skipWhen;

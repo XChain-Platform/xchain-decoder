@@ -212,7 +212,7 @@ module.exports = {
         const result = await this.runMigrationsInner(opts);
         await this.assertDispenserExpirationIsBigintUnsigned();
         await this.assertPubkeyColumnIsUncompressedWide();
-        if(this.assertTransactionIdsAreBigint) await this.assertTransactionIdsAreBigint();
+        await this.assertTransactionIdsAreBigint();
         await this.assertActionDataIsUtf8mb4();
         return result;
     },
