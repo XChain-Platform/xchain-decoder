@@ -207,8 +207,9 @@ Database.DEPLOY_PRECONDITION_TAG = 'deploy-precondition=required';
 // WHY THIS LIST EXISTS
 // --------------------
 // A v0.10.0 fleet deploy put five of nine decoders into Restarting(1) crash-loops.
-// The three startup assertions above (assertDispenserExpirationIsBigintUnsigned,
-// assertPubkeyColumnIsUncompressedWide, assertActionDataIsUtf8mb4) each require a
+// The four startup assertions above (assertTransactionIdsAreBigint,
+// assertDispenserExpirationIsBigintUnsigned, assertPubkeyColumnIsUncompressedWide,
+// assertActionDataIsUtf8mb4) each require a
 // mode=manual migration, and none of the three migration files carried a header the
 // deploy tool could read, so nothing checked the precondition at deploy time and the
 // crash-loop itself was the only thing that surfaced the requirement.
@@ -225,6 +226,11 @@ Database.DEPLOY_PRECONDITION_TAG = 'deploy-precondition=required';
 // assertion with no migration behind it (assertStrictSqlMode) is not registered: the
 // pool pins what it checks, so it holds by construction and cannot crash-loop a deploy.
 Database.STARTUP_ASSERTED_MIGRATIONS = [
+    {
+        file:      '2026-06-02-widen-ids-to-bigint.sql',
+        assertion: 'assertTransactionIdsAreBigint',
+        symptom:   'Fatal decoder error: transactions id columns must use BIGINT'
+    },
     {
         file:      '2026-06-13-dispensers-expiration-bigint.sql',
         assertion: 'assertDispenserExpirationIsBigintUnsigned',

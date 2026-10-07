@@ -18,7 +18,7 @@
  * A startup assertion that requires an operator-gated migration is a deploy
  * precondition: build the code, ship it to a database that never applied the
  * migration, and the service crash-loops on boot. A v0.10.0 fleet deploy put five
- * of nine decoders into exactly that state, because none of the three migrations
+ * of nine decoders into exactly that state, because none of the four migrations
  * this tree asserts at startup carried a header the deploy tool could read.
  *
  * The fix has two halves that must agree: Database.STARTUP_ASSERTED_MIGRATIONS
@@ -87,9 +87,10 @@ describe('Database.migrationDeclaresDeployPrecondition @regression @tier1', func
 
 describe('Database.STARTUP_ASSERTED_MIGRATIONS @regression @tier1', function () {
 
-    it('registers exactly the three migrations this tree asserts at startup', function () {
+    it('registers exactly the four migrations this tree asserts at startup', function () {
         const files = Database.STARTUP_ASSERTED_MIGRATIONS.map(m => m.file).sort();
         assert.deepStrictEqual(files, [
+            '2026-06-02-widen-ids-to-bigint.sql',
             '2026-06-13-dispensers-expiration-bigint.sql',
             '2026-07-24-pubkeys-widen-uncompressed.sql',
             '2026-08-10-action-data-utf8mb4.sql',
@@ -148,6 +149,8 @@ describe('Database.STARTUP_ASSERTED_MIGRATIONS @regression @tier1', function () 
 
     describe('startupAssertedMigrationFile()', function () {
         it('resolves each registered assertion to its migration filename', function () {
+            assert.strictEqual(Database.startupAssertedMigrationFile('assertTransactionIdsAreBigint'),
+                '2026-06-02-widen-ids-to-bigint.sql');
             assert.strictEqual(Database.startupAssertedMigrationFile('assertDispenserExpirationIsBigintUnsigned'),
                 '2026-06-13-dispensers-expiration-bigint.sql');
             assert.strictEqual(Database.startupAssertedMigrationFile('assertPubkeyColumnIsUncompressedWide'),
@@ -192,6 +195,24 @@ describe('startup assertion error text names the registered file @regression @ti
             'the halt message must name the migration; got: ' + message);
     });
 
+    it('assertTransactionIdsAreBigint names the exact migration file', async function () {
+        let message = null;
+        try {
+            await Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning([
+                { col: 'tx_index', dataType: 'int' },
+                { col: 'tx_hash_id', dataType: 'bigint' },
+                { col: 'block_index', dataType: 'bigint' },
+                { col: 'source_id', dataType: 'bigint' },
+                { col: 'destination_id', dataType: 'bigint' }
+            ]));
+        } catch (err) {
+            message = err.message;
+        }
+        assert.ok(message, 'an INT id column must fail the assertion');
+        assert.ok(message.includes('--file 2026-06-02-widen-ids-to-bigint.sql'),
+            'the halt message must name the migration; got: ' + message);
+    });
+
     it('assertPubkeyColumnIsUncompressedWide names the exact migration file', async function () {
         let message = null;
         try {
@@ -215,6 +236,42 @@ describe('startup assertion error text names the registered file @regression @ti
         assert.ok(message, 'a utf8mb3 column must fail the assertion');
         assert.ok(message.includes('--file 2026-08-10-action-data-utf8mb4.sql'),
             'the halt message must name the migration; got: ' + message);
+    });
+});
+
+describe('assertTransactionIdsAreBigint @regression @tier1', function () {
+
+    const columns = [
+        { col: 'tx_index', dataType: 'bigint' },
+        { col: 'tx_hash_id', dataType: 'bigint' },
+        { col: 'block_index', dataType: 'bigint' },
+        { col: 'source_id', dataType: 'bigint' },
+        { col: 'destination_id', dataType: 'bigint' }
+    ];
+
+    function ctxReturning(rows) {
+        return {
+            dbName: 'test_decoder',
+            transactionConnection: null,
+            getConnection: async () => ({
+                query: async () => rows,
+                release: async () => {}
+            })
+        };
+    }
+
+    it('accepts the complete transactions id set at BIGINT', async function () {
+        await Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning(columns));
+    });
+
+    it('rejects a missing id column', async function () {
+        await assert.rejects(
+            Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning(columns.slice(1))),
+            /tx_index=missing/);
+    });
+
+    it('skips when the transactions table does not exist yet', async function () {
+        await Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning([]));
     });
 });
 

@@ -212,6 +212,7 @@ module.exports = {
         const result = await this.runMigrationsInner(opts);
         await this.assertDispenserExpirationIsBigintUnsigned();
         await this.assertPubkeyColumnIsUncompressedWide();
+        if(this.assertTransactionIdsAreBigint) await this.assertTransactionIdsAreBigint();
         await this.assertActionDataIsUtf8mb4();
         return result;
     },
@@ -280,6 +281,41 @@ module.exports = {
                         'ALTER TABLE ' + String(row.tbl) + ' MODIFY data MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;'
                     );
                 }
+            }
+        } finally {
+            if(conn && this.transactionConnection == null){
+                try { await conn.release(); } catch(_){}
+            }
+        }
+    },
+
+    async assertTransactionIdsAreBigint(){
+        const expected = ['tx_index', 'tx_hash_id', 'block_index', 'source_id', 'destination_id'];
+        let conn;
+        try {
+            conn = await this.getConnection();
+            const rows = await conn.query(
+                "SELECT c.COLUMN_NAME AS col, c.DATA_TYPE AS dataType " +
+                "FROM information_schema.tables t " +
+                "LEFT JOIN information_schema.columns c " +
+                "  ON c.table_schema = t.table_schema AND c.table_name = t.table_name " +
+                " AND c.column_name IN ('tx_index', 'tx_hash_id', 'block_index', 'source_id', 'destination_id') " +
+                "WHERE t.table_schema = ? AND t.table_name = 'transactions'",
+                [this.dbName]
+            );
+            if(!rows.length) return;
+            const types = new Map();
+            for(const row of rows){
+                if(row.col != null) types.set(String(row.col).toLowerCase(), String(row.dataType || '').toLowerCase());
+            }
+            const invalid = expected.filter(col => types.get(col) !== 'bigint');
+            if(invalid.length){
+                const found = invalid.map(col => col + '=' + (types.get(col) || 'missing')).join(', ');
+                throw new Error(
+                    'transactions id columns must use BIGINT, but found ' + found + '. Run the pending migration: ' +
+                    'node src/db/migrate.js --file ' +
+                    Database.startupAssertedMigrationFile('assertTransactionIdsAreBigint')
+                );
             }
         } finally {
             if(conn && this.transactionConnection == null){
