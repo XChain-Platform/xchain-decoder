@@ -295,7 +295,7 @@ module.exports = {
         try {
             conn = await this.getConnection();
             const rows = await conn.query(
-                "SELECT c.COLUMN_NAME AS col, c.DATA_TYPE AS dataType " +
+                "SELECT 1 AS tableExists, c.COLUMN_NAME AS col, c.DATA_TYPE AS dataType " +
                 "FROM information_schema.tables t " +
                 "LEFT JOIN information_schema.columns c " +
                 "  ON c.table_schema = t.table_schema AND c.table_name = t.table_name " +
@@ -303,7 +303,7 @@ module.exports = {
                 "WHERE t.table_schema = ? AND t.table_name = 'transactions'",
                 [this.dbName]
             );
-            if(!rows.length) return;
+            if(!rows.length || !rows.some(row => row.tableExists != null)) return;
             const types = new Map();
             for(const row of rows){
                 if(row.col != null) types.set(String(row.col).toLowerCase(), String(row.dataType || '').toLowerCase());

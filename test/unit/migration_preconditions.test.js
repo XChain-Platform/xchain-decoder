@@ -195,24 +195,6 @@ describe('startup assertion error text names the registered file @regression @ti
             'the halt message must name the migration; got: ' + message);
     });
 
-    it('assertTransactionIdsAreBigint names the exact migration file', async function () {
-        let message = null;
-        try {
-            await Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning([
-                { col: 'tx_index', dataType: 'int' },
-                { col: 'tx_hash_id', dataType: 'bigint' },
-                { col: 'block_index', dataType: 'bigint' },
-                { col: 'source_id', dataType: 'bigint' },
-                { col: 'destination_id', dataType: 'bigint' }
-            ]));
-        } catch (err) {
-            message = err.message;
-        }
-        assert.ok(message, 'an INT id column must fail the assertion');
-        assert.ok(message.includes('--file 2026-06-02-widen-ids-to-bigint.sql'),
-            'the halt message must name the migration; got: ' + message);
-    });
-
     it('assertPubkeyColumnIsUncompressedWide names the exact migration file', async function () {
         let message = null;
         try {
@@ -254,11 +236,26 @@ describe('assertTransactionIdsAreBigint @regression @tier1', function () {
             dbName: 'test_decoder',
             transactionConnection: null,
             getConnection: async () => ({
-                query: async () => rows,
+                query: async () => rows.map(row => ({ tableExists: 1, ...row })),
                 release: async () => {}
             })
         };
     }
+
+    it('names the exact migration file when a column is still INT', async function () {
+        let message = null;
+        try {
+            await Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning([
+                { ...columns[0], dataType: 'int' },
+                ...columns.slice(1)
+            ]));
+        } catch (err) {
+            message = err.message;
+        }
+        assert.ok(message, 'an INT id column must fail the assertion');
+        assert.ok(message.includes('--file 2026-06-02-widen-ids-to-bigint.sql'),
+            'the halt message must name the migration; got: ' + message);
+    });
 
     it('accepts the complete transactions id set at BIGINT', async function () {
         await Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning(columns));
@@ -272,6 +269,15 @@ describe('assertTransactionIdsAreBigint @regression @tier1', function () {
 
     it('skips when the transactions table does not exist yet', async function () {
         await Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning([]));
+    });
+
+    it('skips unrelated fixture rows that did not come from its schema query', async function () {
+        const ctx = ctxReturning([]);
+        ctx.getConnection = async () => ({
+            query: async () => [{ dataType: 'bigint', columnType: 'bigint(20) unsigned' }],
+            release: async () => {}
+        });
+        await Database.prototype.assertTransactionIdsAreBigint.call(ctx);
     });
 });
 
