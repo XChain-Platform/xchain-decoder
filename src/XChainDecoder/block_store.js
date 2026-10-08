@@ -119,9 +119,12 @@ async function finishBlock(loop, block, nextBlockHeight, nextBlockHash, openDisp
 }
 
 async function fetchPreviousBlockTimes(nextBlockHeight, span){
-    // Walk strictly backward so a failed lookup never mixes reorg states.
+    // Walk strictly backward so the result is newest first by block height and
+    // never wider than the median span, even when asked for more. A failed
+    // lookup returns no partial window, avoiding mixed reorg states.
+    const boundedSpan = Math.min(span, protocolTime.MEDIAN_TIME_SPAN)
     let previousBlockTimes = []
-    for (let height = nextBlockHeight - 1; height >= 0 && previousBlockTimes.length < span; height--){
+    for (let height = nextBlockHeight - 1; height >= 0 && previousBlockTimes.length < boundedSpan; height--){
         let previousBlock
         try {
             previousBlock = await this.db.getBlockByIndex(height)
@@ -195,4 +198,4 @@ async function storeBlock(loop, block, nextBlockHeight, nextBlockHash, previousB
         this, loop, block, nextBlockHeight, nextBlockHash, openAddresses, expireAtEnd)
 }
 
-module.exports = { storeBlock }
+module.exports = { storeBlock, fetchPreviousBlockTimes }
