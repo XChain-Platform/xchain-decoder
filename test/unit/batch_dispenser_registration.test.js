@@ -51,6 +51,7 @@ const {
     runAll,
     runOne,
 } = require('./batch_dispenser_registration.test/support/helpers.js')
+const protocolConstants = require('../../src/protocol/constants.js')
 
 describe('BATCH dispenser registration', function () {
     this.timeout(0)
@@ -106,6 +107,31 @@ describe('BATCH dispenser registration', function () {
             for (const venue of [ABOVE_GATE, BELOW_GATE]) {
                 const decoder = await runOne(create({ giveCoin: 'DOGE', getCoin: 'DOGE' }), venue)
                 assert.deepStrictEqual(decoder.model.rows, [])
+            }
+        })
+    })
+
+    describe('address-id collapse activation', function () {
+
+        it('collapses table-equivalent address variants through the block loop', async () => {
+            const original = protocolConstants.DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION
+            protocolConstants.DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION = {
+                mainnet: null, testnet: null, regtest: 0,
+            }
+            try {
+                const first = create({ getAddress: 'bcrt1qCaseVariant', expiration: EXP_EARLY })
+                const second = create({ getAddress: 'bcrt1qcasevariant', expiration: EXP_LATE })
+                const decoder = await runOne(`BATCH|0|${first};${second}`, ABOVE_GATE)
+                assert.strictEqual(decoder.model.insertCalls, 1)
+                assert.deepStrictEqual(decoder.model.rows.map(row => ({
+                    address: row.address,
+                    expiration: row.expiration,
+                })), [{ address: 'bcrt1qCaseVariant', expiration: EXP_LATE }])
+            } finally {
+                if (original === undefined)
+                    delete protocolConstants.DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION
+                else
+                    protocolConstants.DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION = original
             }
         })
     })

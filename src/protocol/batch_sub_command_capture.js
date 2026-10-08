@@ -46,7 +46,10 @@
 
 'use strict';
 
-const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION } = require('./constants.js')
+const constants = require('./constants.js')
+const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION } = constants
+const { dispenserAddressKey } = require('./batch_sub_command_capture/dispenser_address_key.js')
+const { collapseRegistrationsByKey } = require('./dispenser_registration_collapse.js')
 const ACTION_ALIASES = require('./action_aliases.js')
 const { COMMAND_LIMIT,
         ACTION_LIMITS,
@@ -110,6 +113,14 @@ function captureCommands(decodedData, consensusNetwork, blockTime){
     return subCommands.map(command => expandSubCommandAlias(command, ACTION_ALIASES))
 }
 
+function isDispenserAddressIdCollapseActive(consensusNetwork, blockTime){
+    const gate = constants.DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION
+    const activation = gate ? gate[consensusNetwork] : undefined
+    if (typeof activation !== 'number') return false
+    const t = Number(blockTime)
+    return Number.isFinite(t) && t >= activation
+}
+
 // Collapse the v0 DISPENSER creates of ONE transaction to at most one registration per
 // OPERATING ADDRESS, keeping the LATEST expiration and the first oracle address named.
 // Input order is sub-command position order; output order is first-appearance order.
@@ -145,7 +156,13 @@ function captureCommands(decodedData, consensusNetwork, blockTime){
 // trade-off, live oracle-fee under-capture against migration plus flag-day, stays OPEN.
 // Registering ONE of the two is strictly better than the pre-gate behaviour, where a
 // batch registers NEITHER.
-function collapseDispenserRegistrations(candidates){
+//
+// Above the address-id collapse gate, use the same collation key as index_addresses so
+// spellings that resolve to one address_id cannot attempt two inserts for the same primary
+// key. Raw spellings remain distinct below the gate for historical replay compatibility.
+function collapseDispenserRegistrations(candidates, consensusNetwork, blockTime){
+    if (isDispenserAddressIdCollapseActive(consensusNetwork, blockTime))
+        return collapseRegistrationsByKey(candidates, dispenserAddressKey)
     const collapsed = new Map()
     if (!Array.isArray(candidates)) return []
     for (const candidate of candidates){
@@ -186,6 +203,7 @@ module.exports = {
     maxIdenticalMintTicks,
     captureCommands,
     collapseDispenserRegistrations,
+    isDispenserAddressIdCollapseActive,
     COMMAND_LIMIT,
     ACTION_LIMITS,
     GATED_ACTION_LIMITS,

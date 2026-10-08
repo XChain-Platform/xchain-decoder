@@ -245,7 +245,7 @@ async function persistTransaction(loop, block, nextBlockHeight, openDispenserAdd
     // A transaction carrying a single create (every non-BATCH transaction,
     // and every transaction below the gate) collapses to that create
     // unchanged, so this insert is byte-identical to the one it replaces.
-    for (let nextRegistration of collapseDispenserRegistrations(dispenserCreateCandidates)){
+    for (let nextRegistration of collapseDispenserRegistrations(dispenserCreateCandidates, this.consensusNetwork, block.timestamp)){
         if ((await registerDispenser.call(this, loop, nextRegistration, openDispenserAddresses)) === 'rollback') return 'rollback'
     }
 
