@@ -295,7 +295,7 @@ module.exports = {
         try {
             conn = await this.getConnection();
             const rows = await conn.query(
-                "SELECT 1 AS tableExists, c.COLUMN_NAME AS col, c.DATA_TYPE AS dataType " +
+                "SELECT 1 AS tableExists, c.COLUMN_NAME AS col, c.DATA_TYPE AS dataType, c.COLUMN_TYPE AS columnType " +
                 "FROM information_schema.tables t " +
                 "LEFT JOIN information_schema.columns c " +
                 "  ON c.table_schema = t.table_schema AND c.table_name = t.table_name " +
@@ -306,13 +306,22 @@ module.exports = {
             if(!rows.length || !rows.some(row => row.tableExists != null)) return;
             const types = new Map();
             for(const row of rows){
-                if(row.col != null) types.set(String(row.col).toLowerCase(), String(row.dataType || '').toLowerCase());
+                if(row.col != null) types.set(String(row.col).toLowerCase(), {
+                    dataType: String(row.dataType || '').toLowerCase(),
+                    columnType: String(row.columnType || '').toLowerCase()
+                });
             }
-            const invalid = expected.filter(col => types.get(col) !== 'bigint');
+            const invalid = expected.filter(col => {
+                const type = types.get(col);
+                return !type || type.dataType !== 'bigint' || !/\bunsigned\b/.test(type.columnType);
+            });
             if(invalid.length){
-                const found = invalid.map(col => col + '=' + (types.get(col) || 'missing')).join(', ');
+                const found = invalid.map(col => {
+                    const type = types.get(col);
+                    return col + '=' + (type ? (type.columnType || type.dataType || 'unknown') : 'missing');
+                }).join(', ');
                 throw new Error(
-                    'transactions id columns must use BIGINT, but found ' + found + '. Run the pending migration: ' +
+                    'transactions id columns must use BIGINT UNSIGNED, but found ' + found + '. Run the pending migration: ' +
                     'node src/db/migrate.js --file ' +
                     Database.startupAssertedMigrationFile('assertTransactionIdsAreBigint')
                 );

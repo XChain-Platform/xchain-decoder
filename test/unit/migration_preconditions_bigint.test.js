@@ -21,11 +21,11 @@ const Database = require('../../src/db');
 describe('assertTransactionIdsAreBigint @regression @tier1', function () {
 
     const columns = [
-        { col: 'tx_index', dataType: 'bigint' },
-        { col: 'tx_hash_id', dataType: 'bigint' },
-        { col: 'block_index', dataType: 'bigint' },
-        { col: 'source_id', dataType: 'bigint' },
-        { col: 'destination_id', dataType: 'bigint' }
+        { col: 'tx_index', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+        { col: 'tx_hash_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+        { col: 'block_index', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+        { col: 'source_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+        { col: 'destination_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' }
     ];
 
     function ctxReturning(rows) {
@@ -43,7 +43,7 @@ describe('assertTransactionIdsAreBigint @regression @tier1', function () {
         let message = null;
         try {
             await Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning([
-                { ...columns[0], dataType: 'int' },
+                { ...columns[0], dataType: 'int', columnType: 'int(10) unsigned' },
                 ...columns.slice(1)
             ]));
         } catch (err) {
@@ -54,7 +54,16 @@ describe('assertTransactionIdsAreBigint @regression @tier1', function () {
             'the halt message must name the migration; got: ' + message);
     });
 
-    it('accepts the complete transactions id set at BIGINT', async function () {
+    it('rejects a signed BIGINT id column', async function () {
+        await assert.rejects(
+            Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning([
+                { ...columns[0], columnType: 'bigint(20)' },
+                ...columns.slice(1)
+            ])),
+            /BIGINT UNSIGNED.*tx_index=bigint\(20\)/s);
+    });
+
+    it('accepts the complete transactions id set at BIGINT UNSIGNED', async function () {
         await Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning(columns));
     });
 

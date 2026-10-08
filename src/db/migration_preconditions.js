@@ -231,7 +231,7 @@ Database.STARTUP_ASSERTED_MIGRATIONS = [
     {
         file:      BIGINT_ID_MIGRATION,
         assertion: 'assertTransactionIdsAreBigint',
-        symptom:   'Fatal decoder error: transactions id columns must use BIGINT'
+        symptom:   'Fatal decoder error: transactions id columns must use BIGINT UNSIGNED'
     },
     {
         file:      '2026-06-13-dispensers-expiration-bigint.sql',
