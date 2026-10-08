@@ -18,26 +18,26 @@ const assert = require('assert');
 
 const Database = require('../../src/db');
 
-describe('assertTransactionIdsAreBigint @regression @tier1', function () {
+const columns = [
+    { col: 'tx_index', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+    { col: 'tx_hash_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+    { col: 'block_index', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+    { col: 'source_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+    { col: 'destination_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' }
+];
 
-    const columns = [
-        { col: 'tx_index', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
-        { col: 'tx_hash_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
-        { col: 'block_index', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
-        { col: 'source_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
-        { col: 'destination_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' }
-    ];
+function ctxReturning(rows) {
+    return {
+        dbName: 'test_decoder',
+        transactionConnection: null,
+        getConnection: async () => ({
+            query: async () => rows.map(row => ({ tableExists: 1, ...row })),
+            release: async () => {}
+        })
+    };
+}
 
-    function ctxReturning(rows) {
-        return {
-            dbName: 'test_decoder',
-            transactionConnection: null,
-            getConnection: async () => ({
-                query: async () => rows.map(row => ({ tableExists: 1, ...row })),
-                release: async () => {}
-            })
-        };
-    }
+describe('assertTransactionIdsAreBigint types @regression @tier1', function () {
 
     it('names the exact migration file when a column is still INT', async function () {
         let message = null;
@@ -66,7 +66,9 @@ describe('assertTransactionIdsAreBigint @regression @tier1', function () {
     it('accepts the complete transactions id set at BIGINT UNSIGNED', async function () {
         await Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning(columns));
     });
+});
 
+describe('assertTransactionIdsAreBigint metadata @regression @tier1', function () {
     it('rejects a missing id column', async function () {
         await assert.rejects(
             Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning(columns.slice(1))),
