@@ -34,6 +34,7 @@ function manifestSlice(flag) {
 // Name the files that hold the literals (XChainDecoder.js only re-exports them).
 const DECODER_CONSTANTS_REL = 'src/XChainDecoder/constants.js';
 const DECODER_ALIASES_REL = 'src/protocol/action_aliases.js';
+const SETTLEMENT_ANCHORS = ['LIST_SHARE', 'XPOLICY'];
 function localDecoderSet() {
     const src = decomment(fs.readFileSync(path.join(__dirname, '..', '..', ...DECODER_CONSTANTS_REL.split('/')), 'utf8'));
     const m = src.match(/VALID_ACTION_NAMES = new Set\(\[([\s\S]*?)\]\)/);
@@ -53,6 +54,17 @@ describe('ACTION manifest conformance: decoder wireDecoded set @regression', fun
             '. EXTRA (decoded, not in manifest -> add an entry): ' + JSON.stringify(extra) +
             '. Edit xchain-documentation/protocol/action-manifest.json + re-vendor, or wire the decoder' +
             ' (VALID_ACTION_NAMES in ' + DECODER_CONSTANTS_REL + ').');
+    });
+
+    it('settlement anchors remain explorer-only and outside the wire decoder', function () {
+        const decoded = localDecoderSet();
+        for (const name of SETTLEMENT_ANCHORS) {
+            assert.deepStrictEqual(MANIFEST.actions[name], {
+                category: 'settlement-anchor',
+                explorerRender: true
+            }, name + ' manifest capabilities drifted');
+            assert.ok(!decoded.includes(name), name + ' must not enter VALID_ACTION_NAMES');
+        }
     });
 
     // The decoder is the on-chain arbiter that performs alias expansion
