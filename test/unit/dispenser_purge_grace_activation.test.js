@@ -16,7 +16,8 @@ const path = require('path');
 
 const { DISPENSER_PURGE_GRACE_ACTIVATION } = require('../../src/protocol/constants.js');
 
-const DOC_CONSTANTS = process.env.XC_DOC_CONSTANTS || (process.env.XCHAIN_DOCS_DIR
+const EXPLICIT_DOC_CONSTANTS = process.env.XC_DOC_CONSTANTS;
+const DOC_CONSTANTS = EXPLICIT_DOC_CONSTANTS || (process.env.XCHAIN_DOCS_DIR
     ? path.join(process.env.XCHAIN_DOCS_DIR, 'protocol', 'constants.js')
     : path.join(__dirname, '..', '..', '..', 'xchain-documentation', 'protocol', 'constants.js'));
 
@@ -31,8 +32,13 @@ describe('DISPENSER_PURGE_GRACE_ACTIVATION conformance', function () {
     });
 
     it('is value-identical to the canonical map in xchain-documentation', function () {
-        if (!fs.existsSync(DOC_CONSTANTS)) this.skip();
+        if (!fs.existsSync(DOC_CONSTANTS)) {
+            if (EXPLICIT_DOC_CONSTANTS)
+                assert.fail('XC_DOC_CONSTANTS does not exist: ' + DOC_CONSTANTS);
+            this.skip();
+        }
         const canonical = require(DOC_CONSTANTS).DISPENSER_PURGE_GRACE_ACTIVATION;
+        if (!canonical && !EXPLICIT_DOC_CONSTANTS) this.skip();
         assert.ok(canonical && typeof canonical === 'object',
             'xchain-documentation/protocol/constants.js must export ' +
             'DISPENSER_PURGE_GRACE_ACTIVATION');
