@@ -42,9 +42,9 @@
  * WHAT THE GRACE MOVES, AND WHAT IT MUST NOT. The widening applies to the CAPTURE SET only:
  * getAllOpenDispenserAddresses admits a row whose expiration is no older than the floor this
  * module computes. The soft-expire predicate, the expiry MARK, the extend mirror, the
- * oracle-address resolution and the hard purge keep their current timing. That confines the
- * change to the over-capture direction the advisory contract calls safe, because capture is a
- * Set membership test that the indexer arbitrates afterwards. Delaying the MARK instead would
+ * oracle-address resolution keep their current timing. The hard purge changes only under its
+ * independent activation gate. That confines the change to the over-capture direction, because
+ * capture is a Set membership test that the indexer arbitrates afterwards. Delaying the MARK instead would
  * reach getOpenDispenserOracleAddressBySource, whose below-gate `ORDER BY ... LIMIT 1` would
  * then rank a dead row first; oracle-fee capture is a single-address EQUALITY test, so a wrong
  * pick captures NOTHING. That is the under-capture direction, a second funds-loss path rather
@@ -57,7 +57,10 @@
 
 'use strict';
 
-const { DISPENSER_CANCEL_GRACE_ACTIVATION } = require('./constants.js')
+const {
+    DISPENSER_CANCEL_GRACE_ACTIVATION,
+    DISPENSER_PURGE_GRACE_ACTIVATION,
+} = require('./constants.js')
 
 // Seconds a soft-expired dispenser stays an eligible payment destination at/above the gate.
 //
@@ -100,9 +103,25 @@ function cancelGraceFloor(consensusNetwork, blockTime){
     return Number(blockTime) - DISPENSER_CANCEL_GRACE_SECONDS
 }
 
+function isDispenserPurgeGraceActive(consensusNetwork, blockTime){
+    const activation = DISPENSER_PURGE_GRACE_ACTIVATION[consensusNetwork]
+    if (typeof activation !== 'number') return false
+    const t = Number(blockTime)
+    if (!Number.isFinite(t)) return false
+    return t >= activation
+}
+
+function purgeGraceFloor(consensusNetwork, blockTime){
+    if (!isDispenserPurgeGraceActive(consensusNetwork, blockTime)) return null
+    return Number(blockTime) - DISPENSER_CANCEL_GRACE_SECONDS
+}
+
 module.exports = {
     DISPENSER_CANCEL_GRACE_ACTIVATION,
+    DISPENSER_PURGE_GRACE_ACTIVATION,
     DISPENSER_CANCEL_GRACE_SECONDS,
     isDispenserCancelGraceActive,
     cancelGraceFloor,
+    isDispenserPurgeGraceActive,
+    purgeGraceFloor,
 }

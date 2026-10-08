@@ -69,12 +69,16 @@ class DispenserModel {
     constructor(){
         this.rows = []
         this.captureLoads = []
+        this.purgeCalls = []
     }
     async insertDispenser(){ return true }
     async extendOpenDispenserExpirationBySource(){ return true }
     async getOpenDispenserOracleAddressBySource(){ return null }
     async getOpenDispenserOracleAddressesBySource(){ return [] }
-    async purgeExpiredDispensers(){ return true }
+    async purgeExpiredDispensers(safeHeight, graceFloor){
+        this.purgeCalls.push({ safeHeight, graceFloor })
+        return true
+    }
     // Mirrors deleteOpenDispensers: stamp open rows whose expiration < minExpiration.
     //
     // expiredBlockTime stands in for the `LEFT JOIN blocks eb ON eb.block_index =
@@ -180,7 +184,7 @@ function runTwoBlocks(consensusNetwork, expireAt, payAt, model){
         extendOpenDispenserExpirationBySource: (s, e, b) => model.extendOpenDispenserExpirationBySource(s, e, b),
         deleteOpenDispensers:                  (b, m) => model.deleteOpenDispensers(b, m),
         recordDispenserExtensionUndo: async () => true,
-        purgeExpiredDispensers:                (h) => model.purgeExpiredDispensers(h),
+        purgeExpiredDispensers:                (h, f) => model.purgeExpiredDispensers(h, f),
         getAllOpenDispenserAddresses:          (f) => model.getAllOpenDispenserAddresses(f),
         getOpenDispenserOracleAddressBySource:   (s) => model.getOpenDispenserOracleAddressBySource(s),
         getOpenDispenserOracleAddressesBySource: (s) => model.getOpenDispenserOracleAddressesBySource(s),
@@ -228,6 +232,10 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
         const payLoad = model.captureLoads[1]
         assert.strictEqual(payLoad.floor, payAt - DISPENSER_CANCEL_GRACE_SECONDS,
             'the block loop must pass the grace floor derived from this block header time')
+        assert.deepStrictEqual(model.purgeCalls[1], {
+            safeHeight: 1 - XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH,
+            graceFloor: payAt - DISPENSER_CANCEL_GRACE_SECONDS,
+        }, 'the purge must use the same committed block time and grace duration')
         assert.ok(payLoad.set.has(ADDR),
             'a payment inside the indexer fill window must still be captured by the decoder')
 
@@ -258,6 +266,8 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
         const payLoad = model.captureLoads[1]
         assert.strictEqual(payLoad.floor, null,
             'below the gate the block loop must pass no floor at all')
+        assert.strictEqual(model.purgeCalls[1].graceFloor, null,
+            'the independent purge gate must preserve the legacy height-only delete')
         assert.ok(!payLoad.set.has(ADDR),
             'below the gate the expired dispenser stays out of the capture set')
     })
