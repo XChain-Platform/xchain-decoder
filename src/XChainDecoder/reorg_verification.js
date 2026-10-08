@@ -76,8 +76,8 @@ async function readPriorRollbackDepth(){
 
 // Fail-closed reorg-depth ceiling, parity with xchain-utxo-tracker's
 // UNDO_BLOCKS guard (XChainUtxoTracker.js verifyReorg). Soft-expired
-// dispensers are hard-purged once DISPENSER_EXPIRE_SAFE_DEPTH blocks
-// deep (purgeExpiredDispensers), and deleteBlockByIndex can only
+// dispensers become eligible for hard purge once DISPENSER_EXPIRE_SAFE_DEPTH
+// blocks deep (purgeExpiredDispensers), and deleteBlockByIndex can only
 // resurrect a dispenser whose expired_block_index row still exists, so
 // rolling back past that window would silently and permanently lose
 // money-bearing dispenser state vs a from-scratch sync. A loud abort is
@@ -98,7 +98,7 @@ async function assertWithinSafeDepth(lastBlockIndex, priorDepth, blocksDeleted){
             + (priorDepth + blocksDeleted.length) + " blocks (" + blocksDeleted.length
             + " in this run, resumed from " + priorDepth + " already deleted above the tip); "
             + "soft-expired dispenser rows for block height "
-            + lastBlockIndex + " and below have already been hard-purged, so continuing would "
+            + lastBlockIndex + " and below may already have been hard-purged, so continuing would "
             + "silently lose money-bearing dispenser state. Aborting. Recovery: a full resync from "
             + "a known-good snapshot, or once the rolled-back range is re-parsed and the database "
             + "is verified intact, `xchain-node clear-reorg-halt <coin> <network> --reason \"...\"`."
