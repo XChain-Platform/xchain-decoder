@@ -243,6 +243,10 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
         // against the widened set rather than a copy made for the assertion.
         assert.strictEqual(setsSeenByParse[1], payLoad.set)
     })
+})
+
+describe('dispenser cancellation grace: activation gate', function () {
+    this.timeout(0)
 
     it('keeps the unwidened capture set below the flag-day (the other side of the gate)', async () => {
         // Same blocks, same model, gate DISARMED. Every network in the map is armed at genesis
