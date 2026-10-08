@@ -9,7 +9,7 @@
   },
   "2026-06-02-widen-ids-to-bigint.sql": {
     "residue": "51d74c7078068b010db2decf5dad242094b218049be6cb232aea84853121cbd0",
-    "sha256": "b03b41b6fcabef9c959851ede9b75cc9089cef7c015bdd69cfcea74ad5acea7a"
+    "sha256": "33423de08d0869d7a81829301668383ee3cb47e7226bff587fcfcbf9fa0c7b1c"
   },
   "2026-06-13-dispensers-expiration-bigint.sql": {
     "residue": "3646f568c94a54e9fa18d7e484818fc8e28651aa83fa90c0198ee39cfabfd06b",
