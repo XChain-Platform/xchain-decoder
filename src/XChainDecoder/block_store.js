@@ -17,7 +17,7 @@ const { isDispenserExpiryRealignActive } = require('../protocol/dispenser_expiry
 const { cancelGraceFloor, purgeGraceFloor } = require('../protocol/dispenser_cancel_grace')
 const protocolTime = require('../protocol/protocol_time')
 const { logger, SYNCED_THRESHOLD, DB_TRANSACTION_BLOCKS_QUANTITY, LOG_BLOCK_INTERVAL, DISPENSER_EXPIRE_SAFE_DEPTH } = require('./constants.js')
-const { ingestTransaction } = require('./transaction_ingest.js')
+const { ingestTransaction, clearQuarantineState } = require('./transaction_ingest.js')
 
 async function loadOpenDispenserAddresses(block, nextBlockHeight){
     // Load the set once per block after any legacy expiry and before the
@@ -49,6 +49,18 @@ async function retryFailedCommit(loop, nextBlockHeight){
     return 'continue'
 }
 
+// Purge after commit at a deterministic, reorg-safe canonical height. A failed purge only keeps
+// rows longer and retries at the next commit, so count it for monitoring and never throw.
+async function purgeExpiredAfterCommit(nextBlockHeight, blockTime){
+    const safeDepth = this.dispenserExpireSafeDepth || DISPENSER_EXPIRE_SAFE_DEPTH
+    const safeHeight = nextBlockHeight - safeDepth
+    const purged = await this.db.purgeExpiredDispensers(safeHeight, purgeGraceFloor(this.consensusNetwork, blockTime))
+    if (purged !== false) return
+    this.dispenserPurgeFailures = (this.dispenserPurgeFailures || 0) + 1
+    logger.warn(`Expired-dispenser purge at safe height ${safeHeight} failed `
+        + `(${this.dispenserPurgeFailures} since start); the rows stay until a later purge succeeds`)
+}
+
 async function commitBlockBatch(loop, nextBlockHeight, nextBlockHash, blockTime){
     if ((nextBlockHeight % LOG_BLOCK_INTERVAL === 0) || ((this.blockchainInfoLastBlock - nextBlockHeight) <= SYNCED_THRESHOLD)) {
         this.log("Parsing block "+(nextBlockHeight)+"("+nextBlockHash+") Txs ("+loop.transactionsCount+") Outputs ("+loop.outputCount+")")
@@ -59,14 +71,10 @@ async function commitBlockBatch(loop, nextBlockHeight, nextBlockHash, blockTime)
         return await retryFailedCommit.call(this, loop, nextBlockHeight)
     }
 
-    // Drop poison-tx positions only after their PARSE_ERROR rows commit.
-    if (loop.insertQuarantine.size > 0) loop.insertQuarantine.clear()
+    // Drop poison-tx positions and retry counts only after their PARSE_ERROR rows commit.
+    clearQuarantineState(loop)
 
-    // Purge after commit at a deterministic, reorg-safe canonical height.
-    const safeDepth = this.dispenserExpireSafeDepth || DISPENSER_EXPIRE_SAFE_DEPTH
-    await this.db.purgeExpiredDispensers(
-        nextBlockHeight - safeDepth,
-        purgeGraceFloor(this.consensusNetwork, blockTime))
+    await purgeExpiredAfterCommit.call(this, nextBlockHeight, blockTime)
 
     loop.blocksCount = 0
     loop.transactionsCount = 0
@@ -93,7 +101,7 @@ async function finishBlock(loop, block, nextBlockHeight, nextBlockHash, openDisp
 
     for (let txIndex=0;txIndex < transactions.length;txIndex++){
         let nextTransaction = transactions[txIndex]
-        const directive = await ingestTransaction.call(this, loop, block, nextBlockHeight, openDispenserAddresses, nextTransaction, txIndex)
+        const directive = await ingestTransaction.call(this, loop, block, nextBlockHeight, openDispenserAddresses, nextTransaction, txIndex, nextBlockHash)
         if (directive === 'rollback') return 'rollback'
         if (directive === 'continue') continue
 

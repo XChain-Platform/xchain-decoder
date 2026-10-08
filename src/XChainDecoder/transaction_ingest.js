@@ -23,6 +23,28 @@ const { captureCommands, collapseDispenserRegistrations } = require('../protocol
 const { logger, TX_PARSE_MAX_RETRIES } = require('./constants.js')
 const { dispenserCommandPrefixFor, collectDispenserCreates, registerDispenser, dispenserEditExtension, extendEditedDispenser } = require('./dispenser_registration.js')
 
+// Key retry and quarantine state by height, block hash and tx position, so a
+// second tx in the block, or a sibling block that replaced this one at the same
+// height, never inherits another position's retries or quarantine.
+function quarantineKey(nextBlockHeight, nextBlockHash, txIndex){
+    return nextBlockHeight + ':' + nextBlockHash + ':' + txIndex
+}
+
+// Record one more failed attempt for this key and return the running total.
+function countAttempt(attempts, key){
+    const attempt = (attempts.get(key) || 0) + 1
+    attempts.set(key, attempt)
+    return attempt
+}
+
+// Drop every retry count and quarantined position once the block that owned
+// them has committed (its PARSE_ERROR rows are durable), keeping the state bounded.
+function clearQuarantineState(loop){
+    loop.txParseRetryCounts.clear()
+    loop.insertQuarantineCounts.clear()
+    loop.insertQuarantine.clear()
+}
+
 async function skipQuarantinedTransaction(block, nextBlockHeight, nextTransaction, txIndex){
     this.parseErrors++
     let quarantinedHash = null
@@ -40,7 +62,7 @@ async function skipQuarantinedTransaction(block, nextBlockHeight, nextTransactio
     return 'continue'
 }
 
-async function handleParseFailure(loop, e, block, nextBlockHeight, nextTransactionHash, txIndex){
+async function handleParseFailure(loop, e, block, nextBlockHeight, nextTransactionHash, txIndex, retryKey){
     if (e && e.rpcLookupFailure){
         // A prevout/fee-output RPC lookup failed even after the
         // connector's internal retries. That is node/infrastructure
@@ -54,16 +76,11 @@ async function handleParseFailure(loop, e, block, nextBlockHeight, nextTransacti
         return 'rollback'
     }
 
-    if (loop.txParseRetryHeight != nextBlockHeight){
-        loop.txParseRetryHeight = nextBlockHeight
-        loop.txParseRetryCount = 0
-    }
-    loop.txParseRetryCount++
-
-    if (loop.txParseRetryCount <= TX_PARSE_MAX_RETRIES){
+    const attempt = countAttempt(loop.txParseRetryCounts, retryKey)
+    if (attempt <= TX_PARSE_MAX_RETRIES){
         // Could be transient (DB hiccup inside parseTransaction):
         // roll the block back and re-parse it from scratch.
-        logger.error(formatLogLine(`parseTransaction failed in block ${nextBlockHeight} (tx position ${txIndex}, attempt ${loop.txParseRetryCount}/${TX_PARSE_MAX_RETRIES}), retrying block:`, e))
+        logger.error(formatLogLine(`parseTransaction failed in block ${nextBlockHeight} (tx position ${txIndex}, attempt ${attempt}/${TX_PARSE_MAX_RETRIES}), retrying block:`, e))
         await this.db.endTransaction()
         return 'rollback'
     }
@@ -86,19 +103,19 @@ async function handleParseFailure(loop, e, block, nextBlockHeight, nextTransacti
     return 'continue'
 }
 
-async function parseBlockTransaction(loop, block, nextBlockHeight, openDispenserAddresses, nextTransaction, txIndex){
+async function parseBlockTransaction(loop, block, nextBlockHeight, openDispenserAddresses, nextTransaction, txIndex, retryKey){
     let nextTransactionHash = null
     let parseResult = null
     try {
         nextTransactionHash = nextTransaction.getId()
         parseResult = await this.parseTransaction(nextTransaction, openDispenserAddresses, undefined, nextBlockHeight)
     } catch (e){
-        return await handleParseFailure.call(this, loop, e, block, nextBlockHeight, nextTransactionHash, txIndex)
+        return await handleParseFailure.call(this, loop, e, block, nextBlockHeight, nextTransactionHash, txIndex, retryKey)
     }
     return { nextTransactionHash, parseResult }
 }
 
-async function insertTransactionRow(loop, parseResult, nextTransactionHash, nextBlockHeight, stored, txIndex){
+async function insertTransactionRow(loop, parseResult, nextTransactionHash, nextBlockHeight, stored, txIndex, retryKey){
     let insertResult = await this.db.insertTransaction({
         index: loop.lastProcessedTxIndex,
         hash: nextTransactionHash,
@@ -120,16 +137,12 @@ async function insertTransactionRow(loop, parseResult, nextTransactionHash, next
         // retry margin guards against a misclassified transient error;
         // the errno set is conservative, so this normally quarantines
         // on the first exceedance.)
-        if (loop.insertQuarantineHeight != nextBlockHeight){
-            loop.insertQuarantineHeight = nextBlockHeight
-            loop.insertQuarantineCount = 0
-        }
-        loop.insertQuarantineCount++
-        if (loop.insertQuarantineCount > TX_PARSE_MAX_RETRIES){
-            loop.insertQuarantine.add(nextBlockHeight + ':' + txIndex)
+        const attempt = countAttempt(loop.insertQuarantineCounts, retryKey)
+        if (attempt > TX_PARSE_MAX_RETRIES){
+            loop.insertQuarantine.add(retryKey)
             logger.error(`Quarantining tx with deterministic INSERT failure in block ${nextBlockHeight} (tx position ${txIndex}, hash ${nextTransactionHash}) after ${TX_PARSE_MAX_RETRIES} block retries`)
         } else {
-            logger.error(`insertTransaction deterministic failure in block ${nextBlockHeight} (tx position ${txIndex}, attempt ${loop.insertQuarantineCount}/${TX_PARSE_MAX_RETRIES}), retrying block`)
+            logger.error(`insertTransaction deterministic failure in block ${nextBlockHeight} (tx position ${txIndex}, attempt ${attempt}/${TX_PARSE_MAX_RETRIES}), retrying block`)
         }
         return 'rollback'
     } else if (insertResult === false){
@@ -225,8 +238,8 @@ async function capturePaymentOutputs(loop, block, parseResult, nextTransactionHa
     return commands
 }
 
-async function persistTransaction(loop, block, nextBlockHeight, openDispenserAddresses, parseResult, nextTransactionHash, dispenseOutputs, stored, decodedData, txIndex){
-    if ((await insertTransactionRow.call(this, loop, parseResult, nextTransactionHash, nextBlockHeight, stored, txIndex)) === 'rollback') return 'rollback'
+async function persistTransaction(loop, block, nextBlockHeight, openDispenserAddresses, parseResult, nextTransactionHash, dispenseOutputs, stored, decodedData, txIndex, retryKey){
+    if ((await insertTransactionRow.call(this, loop, parseResult, nextTransactionHash, nextBlockHeight, stored, txIndex, retryKey)) === 'rollback') return 'rollback'
     //Store dispenses outputs. false means the INSERT failed and
     //the block transaction was already rolled back: stop writing
     //(anything further would land outside a transaction) and
@@ -260,9 +273,10 @@ async function persistTransaction(loop, block, nextBlockHeight, openDispenserAdd
     }
 }
 
-async function ingestTransaction(loop, block, nextBlockHeight, openDispenserAddresses, nextTransaction, txIndex){
+async function ingestTransaction(loop, block, nextBlockHeight, openDispenserAddresses, nextTransaction, txIndex, nextBlockHash){
     let nextTransactionHash = null
     let parseResult = null
+    const retryKey = quarantineKey(nextBlockHeight, nextBlockHash, txIndex)
 
     // Insert-quarantine skip: this tx position deterministically failed to
     // INSERT on a prior pass of this block. Skip it exactly like a quarantined
@@ -270,11 +284,11 @@ async function ingestTransaction(loop, block, nextBlockHeight, openDispenserAddr
     // poison row cannot wedge the block. The block transaction is open here
     // (beginTransaction ran when blocksQuantity hit 0), so the event commits
     // with the block. Deterministic across instances, so parity holds.
-    if (loop.insertQuarantine.has(nextBlockHeight + ':' + txIndex)){
+    if (loop.insertQuarantine.has(retryKey)){
         return await skipQuarantinedTransaction.call(this, block, nextBlockHeight, nextTransaction, txIndex)
     }
 
-    const parsed = await parseBlockTransaction.call(this, loop, block, nextBlockHeight, openDispenserAddresses, nextTransaction, txIndex)
+    const parsed = await parseBlockTransaction.call(this, loop, block, nextBlockHeight, openDispenserAddresses, nextTransaction, txIndex, retryKey)
     if (typeof parsed === 'string') return parsed
     ;({ nextTransactionHash, parseResult } = parsed)
 
@@ -297,7 +311,7 @@ async function ingestTransaction(loop, block, nextBlockHeight, openDispenserAddr
             // The canonical ACTION string as stored; the dispenser and
             // COINPAY handling below reads the same value the row holds.
             let decodedData = stored.data
-            return await persistTransaction.call(this, loop, block, nextBlockHeight, openDispenserAddresses, parseResult, nextTransactionHash, dispenseOutputs, stored, decodedData, txIndex)
+            return await persistTransaction.call(this, loop, block, nextBlockHeight, openDispenserAddresses, parseResult, nextTransactionHash, dispenseOutputs, stored, decodedData, txIndex, retryKey)
         } else {
             // Verify a payload that says something has an author. A
             // record with no resolvable source address cannot be
@@ -312,4 +326,4 @@ async function ingestTransaction(loop, block, nextBlockHeight, openDispenserAddr
     }
 }
 
-module.exports = { ingestTransaction }
+module.exports = { ingestTransaction, clearQuarantineState }

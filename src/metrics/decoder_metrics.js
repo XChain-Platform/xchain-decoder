@@ -46,7 +46,8 @@ const DECODER_GAUGES = [
 const DECODER_COUNTERS = [
     ['parse_errors_total', 'Transactions the decoder failed to parse since process start'],
     ['rpc_errors_total',   'Node RPC errors seen since process start'],
-    ['reorgs_total',       'Reorgs this decoder has rolled back since process start']
+    ['reorgs_total',       'Reorgs this decoder has rolled back since process start'],
+    ['dispenser_purge_failures_total', 'Post-commit expired-dispenser purges that failed since process start']
 ];
 
 function collectDecoderMetrics(decoder, gauges, counters) {
@@ -89,6 +90,7 @@ function collectDecoderMetrics(decoder, gauges, counters) {
     const rpcErrors = (decoder.rpcErrors || 0) + ((decoder.connector && decoder.connector.rpcErrors) || 0);
     counters.rpc_errors_total.setMonotonic({}, rpcErrors);
     counters.parse_errors_total.setMonotonic({}, decoder.parseErrors || 0);
+    counters.dispenser_purge_failures_total.setMonotonic({}, decoder.dispenserPurgeFailures || 0);
 
     // Reorg churn. The durable REORG rows and the indexer's reorgsProcessed cover
     // the completed handshake, but neither is scrapeable when only Prometheus is

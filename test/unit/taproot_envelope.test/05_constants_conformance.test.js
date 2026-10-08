@@ -154,6 +154,17 @@ describe('Taproot envelope recognition', function () {
                 DOGE: { mainnet: null, testnet: null, regtest: null },
             })
         })
+
+        // Pins the carrier-recognition map literally, for the same fork reason as the map
+        // above; the docs-parity case below skips without the sibling and only compares copies.
+        // Arming a mainnet height is a deploy-train act and must edit this assertion on purpose.
+        it('the carrier-recognition map is exactly the shipped shape: mainnet unarmed, genesis-active test networks, DOGE never', function () {
+            assert.deepStrictEqual(CONSTANTS.ENVELOPE_CARRIER_RECOGNITION_ACTIVATION, {
+                BTC:  { mainnet: null, testnet: 0, regtest: 0 },
+                LTC:  { mainnet: null, testnet: 0, regtest: 0 },
+                DOGE: { mainnet: null, testnet: null, regtest: null },
+            })
+        })
     })
 })
 

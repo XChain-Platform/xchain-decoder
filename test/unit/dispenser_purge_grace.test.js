@@ -58,6 +58,8 @@ function emptyLoop(){
         validTransactionsCount: 0,
         outputCount: 0,
         insertQuarantine: new Set(),
+        txParseRetryCounts: new Map(),
+        insertQuarantineCounts: new Map(),
         startTimeStamp: Date.now(),
     }
 }

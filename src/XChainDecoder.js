@@ -209,6 +209,7 @@ function initializeDecoderMode(decoder) {
 
     decoder.rpcErrors = 0
     decoder.parseErrors = 0
+    decoder.dispenserPurgeFailures = 0
 }
 
 function initializeDecoderReorg(decoder) {

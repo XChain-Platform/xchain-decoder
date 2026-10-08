@@ -194,24 +194,23 @@ function initialLoopLatches(){
     // it every poll, so a latch here would be a per-transition line that never toggles.
     let chainFieldMissingLogged = false
 
-    // Transaction-level parse-failure tracking for the block currently being
-    // retried (see TX_PARSE_MAX_RETRIES).
-    let txParseRetryHeight = -1
-    let txParseRetryCount = 0
+    // Transaction-level parse-failure attempts per tx position of the block being
+    // retried (see TX_PARSE_MAX_RETRIES), keyed like insertQuarantine below.
+    const txParseRetryCounts = new Map()
 
     // Deterministic-INSERT-failure tracking. A row the DB rejects deterministically
     // (Database.POISON_ROW: an errno in DETERMINISTIC_WRITE_ERRNOS, e.g. 1406 data too
     // long) can never insert as-is, so retrying the block would wedge it forever.
     // After TX_PARSE_MAX_RETRIES the tx position is added to insertQuarantine and the
     // re-parse skips it (PARSE_ERROR + no insert), mirroring the parse-throw quarantine.
-    // Keyed "<blockHeight>:<txPosition>"; cleared on block commit so it stays bounded
-    // and cannot leak across a height whose content changed under a reorg. Only
+    // Counts and entries are keyed "<blockHeight>:<blockHash>:<txPosition>", so every tx
+    // gets its own retries and a block replaced at the same height (sibling or reorg)
+    // never inherits them; all are cleared on block commit so they stay bounded. Only
     // DETERMINISTIC failures quarantine; transient ones (false) still retry forever, so
     // no instance ever skips a tx a healthy instance accepts (cross-instance parity).
-    let insertQuarantineHeight = -1
-    let insertQuarantineCount = 0
+    const insertQuarantineCounts = new Map()
     const insertQuarantine = new Set()
-    return { nodeSyncedProblem, nodeCatchingUpProblem, tipBelowStoredTipRefused, wrongChainProblem, wrongGenesisProblem, chainFieldMissingLogged, txParseRetryHeight, txParseRetryCount, insertQuarantineHeight, insertQuarantineCount, insertQuarantine }
+    return { nodeSyncedProblem, nodeCatchingUpProblem, tipBelowStoredTipRefused, wrongChainProblem, wrongGenesisProblem, chainFieldMissingLogged, txParseRetryCounts, insertQuarantineCounts, insertQuarantine }
 }
 
 async function bootDecoder(){
