@@ -110,6 +110,7 @@ module.exports = {
     // the decoder already depends on (Dogecoin 1.14 has no verbosity-2
     // getblock, so per-txid fetches are the portable route). Deterministic
     // across instances: the output depends only on chain content.
+    // Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector/block_queries.js getBlockReassembled.
     async getBlockReassembled(blockhash) {
         try {
             // Older daemons append the AuxPoW bytes to getblockheader; the pure

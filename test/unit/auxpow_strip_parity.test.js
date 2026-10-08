@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 // The AuxPoW strip primitives are duplicated between
-// xchain-decoder/src/chain/blockchain_connector.js and the xchain-utxo-tracker twin.
+// xchain-decoder/src/chain/blockchain_connector/auxpow_codec.js and the xchain-utxo-tracker twin.
 // Both carry "Keep in sync with ..." comments, but nothing enforces that
 // automatically: one repo can wrap its errors differently, or factor the strip
 // logic into a differently named helper, while the comments still claim parity.
@@ -177,11 +177,11 @@ describe('AuxPoW strip parity with xchain-utxo-tracker @regression', function ()
             for (const name of SHARED_FUNCTIONS) {
                 assert.ok(
                     localSource.includes(
-                        'Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector.js ' + name),
+                        'Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector/auxpow_codec.js ' + name),
                     `decoder copy of ${name} lacks its Keep-in-sync comment`)
                 assert.ok(
                     twinSource.includes(
-                        'Keep in sync with xchain-decoder/src/chain/blockchain_connector.js ' + name),
+                        'Keep in sync with xchain-decoder/src/chain/blockchain_connector/auxpow_codec.js ' + name),
                     `utxo-tracker copy of ${name} lacks its Keep-in-sync comment`)
             }
         })
