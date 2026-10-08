@@ -8,6 +8,9 @@
     "test/unit/fee_destination.test.js": {
       "resolveFeeDestination @unit honors an env override on regtest ONLY": "resolveFeeDestination @unit ignores a bare env override on regtest too, so capture and indexer validation resolve one address"
     },
+    "test/unit/migration_preconditions.test.js": {
+      "Database.STARTUP_ASSERTED_MIGRATIONS @regression @tier1 registers exactly the three migrations this tree asserts at startup": "Database.STARTUP_ASSERTED_MIGRATIONS @regression @tier1 registers exactly the four migrations this tree asserts at startup"
+    },
     "test/unit/migration_runner.test.js": {
       "Database.destructiveAutoStatement() @regression does NOT flag benign system-variable SETs (SET NAMES / SET sql_mode / SET @@)": "Database.destructiveAutoStatement() @regression does NOT flag the allow-listed session SETs (SET NAMES / a single UTC time_zone)"
     }

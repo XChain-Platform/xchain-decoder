@@ -303,6 +303,9 @@ async function ingestTransaction(loop, block, nextBlockHeight, openDispenserAddr
             // record with no resolvable source address cannot be
             // attributed to anyone, so it is skipped rather than stored.
             if ((parseResult["data"].length > 0) && (parseResult["source"] == null)){
+                // Count the skip toward parse_errors (monitoring only, nothing stored)
+                // so a source-resolution regression shows in health and metrics.
+                this.parseErrors++
                 logger.error(`Skipping tx ${nextTransactionHash}: XChain data found but source address could not be resolved`)
             }
         }

@@ -20,8 +20,9 @@
 
 const { format: formatLogLine } = require('node:util')
 const { chainTierMismatch } = require('../protocol/chain_identity')
-const { logger, DISPENSER_EXPIRE_SAFE_DEPTH } = require('./constants.js')
+const { logger, DISPENSER_EXPIRE_SAFE_DEPTH, MIN_VERIFICATION_PROGRESS_TO_PARSE } = require('./constants.js')
 const { haltReorg } = require('./reorg_halt.js')
+const { nodeStillCatchingUp } = require('./payload_helpers.js')
 
 function safeDepthFor(decoder){
     return decoder.dispenserExpireSafeDepth || DISPENSER_EXPIRE_SAFE_DEPTH
@@ -75,8 +76,8 @@ async function readPriorRollbackDepth(){
 
 // Fail-closed reorg-depth ceiling, parity with xchain-utxo-tracker's
 // UNDO_BLOCKS guard (XChainUtxoTracker.js verifyReorg). Soft-expired
-// dispensers are hard-purged once DISPENSER_EXPIRE_SAFE_DEPTH blocks
-// deep (purgeExpiredDispensers), and deleteBlockByIndex can only
+// dispensers become eligible for hard purge once DISPENSER_EXPIRE_SAFE_DEPTH
+// blocks deep (purgeExpiredDispensers), and deleteBlockByIndex can only
 // resurrect a dispenser whose expired_block_index row still exists, so
 // rolling back past that window would silently and permanently lose
 // money-bearing dispenser state vs a from-scratch sync. A loud abort is
@@ -97,7 +98,7 @@ async function assertWithinSafeDepth(lastBlockIndex, priorDepth, blocksDeleted){
             + (priorDepth + blocksDeleted.length) + " blocks (" + blocksDeleted.length
             + " in this run, resumed from " + priorDepth + " already deleted above the tip); "
             + "soft-expired dispenser rows for block height "
-            + lastBlockIndex + " and below have already been hard-purged, so continuing would "
+            + lastBlockIndex + " and below may already have been hard-purged, so continuing would "
             + "silently lose money-bearing dispenser state. Aborting. Recovery: a full resync from "
             + "a known-good snapshot, or once the rolled-back range is re-parsed and the database "
             + "is verified intact, `xchain-node clear-reorg-halt <coin> <network> --reason \"...\"`."
@@ -161,6 +162,13 @@ async function deleteAboveTipBlock(lastBlockIndex, lastBlock, nodeTip, priorDept
     return retryCount
 }
 
+// Return true while the node is in initial block download or below the parse threshold,
+// the block loop's own two gates: the mid-walk refresh keeps its tip then, because a
+// catching-up node is waited on, never rolled back (its low tip deletes valid blocks).
+function nodeTipStillCatchingUp(info){
+    return nodeStillCatchingUp(info) || info["verificationprogress"] < MIN_VERIFICATION_PROGRESS_TO_PARSE
+}
+
 async function refreshReorgTip(nodeTip){
     try {
         const info = await this.connector.getBlockchainInfo()
@@ -185,6 +193,8 @@ async function refreshReorgTip(nodeTip){
             const reorgGenesisMismatch = await this.verifyChainGenesis()
             if (reorgGenesisMismatch){
                 this.logError('reorg: ignoring a tip refresh from a foreign endpoint: ' + reorgGenesisMismatch)
+            } else if (nodeTipStillCatchingUp(info)) {
+                this.logWarn('reorg: ignoring a tip refresh from a node still catching up')
             } else {
                 nodeTip = info.blocks
             }

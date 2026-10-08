@@ -84,14 +84,14 @@ describe('Database#getMempoolTransactions()', () => {
 
     it('reads the raw-string columns + first_seen in tx_hash order with a clamped limit', async () => {
         const db  = new Database('127.0.0.1', 3306, 'xchain_btc', 'u', 'p');
-        const row = { tx_hash: 'aa', source: 's', data: 'MINT|0|TOK|1', first_seen: new Date() };
+        const row = { tx_hash: 'aa', source: 's', data: 'MINT|0|TOK|1', first_seen: 1767225600n };
         const q   = sinon.stub().resolves([row]);
         const { pool, conn } = withConn(q);
         db.pool = pool;
         const rows = await db.getMempoolTransactions(9999);
-        assert.deepStrictEqual(rows, [row]);
+        assert.deepStrictEqual(rows, [{ ...row, first_seen: 1767225600 }]);
         const sql = q.firstCall.args[0];
-        assert.ok(sql.includes('tx_hash, source, data, first_seen'));
+        assert.ok(sql.includes('tx_hash, source, data, UNIX_TIMESTAMP(first_seen) AS first_seen'));
         // Action-carrying rows only: the table holds a row for EVERY mempool tx
         // (data blanked to '' when the tx carried no valid ACTION), so an
         // unfiltered window fills with actionless rows on a busy chain and the
@@ -102,6 +102,19 @@ describe('Database#getMempoolTransactions()', () => {
         // limit clamps to the same 500-row cap the explorer window uses.
         assert.ok(/ORDER BY tx_hash\s+LIMIT 500/.test(sql));
         assert.ok(conn.release.calledOnce);
+    });
+
+    it('returns first_seen as plain unix seconds whatever the host time zone', async () => {
+        const db = new Database('127.0.0.1', 3306, 'xchain_btc', 'u', 'p');
+        const q  = sinon.stub().resolves([
+            { tx_hash: 'aa', source: 's', data: 'd', first_seen: 1767225600n },
+            { tx_hash: 'bb', source: 's', data: 'd', first_seen: '1767225601' },
+            { tx_hash: 'cc', source: 's', data: 'd', first_seen: null },
+        ]);
+        db.pool = withConn(q).pool;
+        const rows = await db.getMempoolTransactions(10);
+        assert.deepStrictEqual(rows.map(r => r.first_seen), [1767225600, 1767225601, null]);
+        assert.doesNotThrow(() => JSON.stringify(rows));
     });
 
     it('releases the connection even when the query throws', async () => {
@@ -160,6 +173,13 @@ describe('api.js getmempool method (source pin)', () => {
         assert.ok(body.includes('getMempoolTransactions(500)'), 'getmempool must read the full bounded window once');
         assert.ok(body.includes('getMempoolTransactionCount()'), 'getmempool must report the true total');
         assert.ok(/Math\.min\(parseInt\(params && params\.limit, 10\) \|\| 500, 500\)/.test(body), 'per-request limit clamp missing');
+    });
+
+    it('serves first_seen as the SQL-read unix seconds, never a driver Date', () => {
+        const at = src.indexOf('async getmempool(');
+        const body = src.slice(at, at + 3000);
+        assert.ok(!body.includes('getTime()'), 'getmempool must not convert a host-local driver Date');
+        assert.ok(body.includes('Number.isFinite(r.first_seen)'), 'first_seen must pass through as a number or null');
     });
 
     it('maps the node-mempool observation snapshot into the response', () => {

@@ -14,7 +14,7 @@
 
 const { format: formatLogLine } = require('node:util')
 const { isDispenserExpiryRealignActive } = require('../protocol/dispenser_expiry_realign')
-const { cancelGraceFloor } = require('../protocol/dispenser_cancel_grace')
+const { cancelGraceFloor, purgeGraceFloor } = require('../protocol/dispenser_cancel_grace')
 const protocolTime = require('../protocol/protocol_time')
 const { logger, SYNCED_THRESHOLD, DB_TRANSACTION_BLOCKS_QUANTITY, LOG_BLOCK_INTERVAL, DISPENSER_EXPIRE_SAFE_DEPTH } = require('./constants.js')
 const { ingestTransaction } = require('./transaction_ingest.js')
@@ -49,7 +49,7 @@ async function retryFailedCommit(loop, nextBlockHeight){
     return 'continue'
 }
 
-async function commitBlockBatch(loop, nextBlockHeight, nextBlockHash){
+async function commitBlockBatch(loop, nextBlockHeight, nextBlockHash, blockTime){
     if ((nextBlockHeight % LOG_BLOCK_INTERVAL === 0) || ((this.blockchainInfoLastBlock - nextBlockHeight) <= SYNCED_THRESHOLD)) {
         this.log("Parsing block "+(nextBlockHeight)+"("+nextBlockHash+") Txs ("+loop.transactionsCount+") Outputs ("+loop.outputCount+")")
         this.log("Inserting data Blocks ("+loop.blocksCount+") Valid Transactions ("+loop.validTransactionsCount+")")
@@ -64,7 +64,9 @@ async function commitBlockBatch(loop, nextBlockHeight, nextBlockHash){
 
     // Purge after commit at a deterministic, reorg-safe canonical height.
     const safeDepth = this.dispenserExpireSafeDepth || DISPENSER_EXPIRE_SAFE_DEPTH
-    await this.db.purgeExpiredDispensers(nextBlockHeight - safeDepth)
+    await this.db.purgeExpiredDispensers(
+        nextBlockHeight - safeDepth,
+        purgeGraceFloor(this.consensusNetwork, blockTime))
 
     loop.blocksCount = 0
     loop.transactionsCount = 0
@@ -110,7 +112,8 @@ async function finishBlock(loop, block, nextBlockHeight, nextBlockHash, openDisp
 
     // Commit a full batch, or commit immediately when this block reaches tip.
     if ((loop.blocksQuantity == DB_TRANSACTION_BLOCKS_QUANTITY-1) || (nextBlockHeight == this.blockchainInfoLastBlock)){
-        if ((await commitBlockBatch.call(this, loop, nextBlockHeight, nextBlockHash)) === 'continue') return 'continue'
+        if ((await commitBlockBatch.call(
+            this, loop, nextBlockHeight, nextBlockHash, block.timestamp)) === 'continue') return 'continue'
     }
 
     loop.blocksQuantity = loop.blocksQuantity + 1
@@ -119,9 +122,12 @@ async function finishBlock(loop, block, nextBlockHeight, nextBlockHash, openDisp
 }
 
 async function fetchPreviousBlockTimes(nextBlockHeight, span){
-    // Walk strictly backward so a failed lookup never mixes reorg states.
+    // Walk strictly backward so the result is newest first by block height and
+    // never wider than the median span, even when asked for more. A failed
+    // lookup returns no partial window, avoiding mixed reorg states.
+    const boundedSpan = Math.min(span, protocolTime.MEDIAN_TIME_SPAN)
     let previousBlockTimes = []
-    for (let height = nextBlockHeight - 1; height >= 0 && previousBlockTimes.length < span; height--){
+    for (let height = nextBlockHeight - 1; height >= 0 && previousBlockTimes.length < boundedSpan; height--){
         let previousBlock
         try {
             previousBlock = await this.db.getBlockByIndex(height)
@@ -195,4 +201,4 @@ async function storeBlock(loop, block, nextBlockHeight, nextBlockHash, previousB
         this, loop, block, nextBlockHeight, nextBlockHash, openAddresses, expireAtEnd)
 }
 
-module.exports = { storeBlock }
+module.exports = { storeBlock, fetchPreviousBlockTimes }

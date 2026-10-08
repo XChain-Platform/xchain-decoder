@@ -15,6 +15,14 @@
 const { format: formatLogLine } = require('node:util');
 const { logger } = require('./constants.js')
 
+// Convert first_seen to plain unix seconds, null when absent. The SQL reads it with
+// UNIX_TIMESTAMP on the +00:00 session, because the driver decodes a DATETIME as
+// host-local time; the BIGINT it returns arrives as a BigInt, which JSON cannot carry.
+function firstSeenAsSeconds(row){
+    const n = (row.first_seen == null) ? NaN : Number(row.first_seen)
+    return Object.assign({}, row, { first_seen: Number.isFinite(n) ? n : null })
+}
+
 module.exports = {
     async insertMempoolTransaction(tx) {
         const query = `
@@ -83,7 +91,8 @@ module.exports = {
     // ACTION-CARRYING ROWS ONLY. This table holds a row for EVERY mempool tx the
     // decoder observed, not just XChain ones: buildStoredActionRecord blanks
     // `data` to '' (never NULL) for a money-bearing tx whose ACTION was invalid
-    // or unknown, which on a public chain is nearly all of them (measured on BTC
+    // or unknown (and the mempool path blanks an ACTION whose source could not
+    // be resolved), which on a public chain is nearly all of them (measured on BTC
     // testnet 2026-08-22: 32 of 32 rows). An unfiltered window is useless to the
     // consumer, because on a busy chain all 500 slots fill with actionless rows
     // and the feed renders empty while real pending actions sit deeper in the
@@ -92,7 +101,7 @@ module.exports = {
     async getMempoolTransactions(limit) {
         const max = Math.max(1, Math.min(Number(limit) || 200, 500))
         const query = `
-            SELECT tx_hash, source, data, first_seen
+            SELECT tx_hash, source, data, UNIX_TIMESTAMP(first_seen) AS first_seen
             FROM mempool_transactions
             WHERE data IS NOT NULL AND data != ''
             ORDER BY tx_hash
@@ -102,7 +111,7 @@ module.exports = {
         const ownLease = (this.transactionConnection == null)
         try {
             const rows = await connection.query(query)
-            return rows || []
+            return (rows || []).map(firstSeenAsSeconds)
         } finally {
             if (ownLease) {
                 await connection.release()

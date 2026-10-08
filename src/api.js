@@ -265,8 +265,8 @@ function createMempoolMethods(decoder){
                     // TEXT can come back as a Buffer depending on driver options;
                     // normalize so the JSON body always carries the UTF-8 string.
                     data:       Buffer.isBuffer(r.data) ? r.data.toString('utf8') : r.data,
-                    first_seen: (r.first_seen instanceof Date) ? Math.floor(r.first_seen.getTime() / 1000)
-                              : (r.first_seen != null ? r.first_seen : null)
+                    // Unix seconds read in SQL (see getMempoolTransactions), never a driver Date.
+                    first_seen: Number.isFinite(r.first_seen) ? r.first_seen : null
                 }))
             };
         }

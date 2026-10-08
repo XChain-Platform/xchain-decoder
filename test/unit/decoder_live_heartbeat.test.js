@@ -111,7 +111,7 @@ describe('/live gates on the poll-loop heartbeat', function () {
         const decoder = caughtUpDecoder();
         decoder.lastPollAt = 0;
         const res = await getLive(liveApp(decoder));
-        assert.strictEqual(res.status, 200, 'a long initial sync must not be restarted');
+        assert.strictEqual(res.status, 200, 'a decoder still in pre-loop boot (e.g. running migrations) must not be restarted');
         assert.strictEqual(res.body.poll_silent, false);
         assert.strictEqual(res.body.last_poll_at, null);
     });

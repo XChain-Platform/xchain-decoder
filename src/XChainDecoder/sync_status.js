@@ -178,11 +178,13 @@ module.exports = {
     // iteration counter independent of the chain covers all three.
     //
     // Fail-quiet in the same style as isStalled(), because the consumer restarts the
-    // container: lastPollAt 0 (loop has not iterated yet, e.g. a long initial sync)
-    // is never silent.
+    // container: lastPollAt 0 means pre-loop boot (database prepare and migrations,
+    // txindex probe, cursor read), never initial sync, since every pass stamps it.
+    // That window is bounded by DB_QUERY_TIMEOUT and MIGRATE_QUERY_TIMEOUT (default
+    // 1 h per migration statement): a timeout fails start() and /live turns 503. Until
+    // then /live stays 200 on purpose, so autoheal never restarts a long migration.
     isPollSilent() {
-        // The loop has not completed a single pass yet, which a long initial sync
-        // does legitimately, so there is no silence to report.
+        // The loop has not started yet (pre-loop boot), so there is no silence to report.
         if (!this.lastPollAt) return false
         return (Date.now() - this.lastPollAt) > POLL_SILENT_MS
     },
