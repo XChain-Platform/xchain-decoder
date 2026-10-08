@@ -346,6 +346,20 @@ const DISPENSER_CANCEL_GRACE_ACTIVATION = {
     regtest: 0,
 };
 
+// DISPENSER_PURGE_GRACE_ACTIVATION: the block-time boundary at/above which the
+// decoder keeps a soft-expired dispenser until its cancellation grace period has
+// passed instead of hard-purging it at the raw expiration time. It is a separate
+// gate from DISPENSER_CANCEL_GRACE_ACTIVATION because capture eligibility and row
+// retention change independently.
+//
+// Mainnet and testnet remain unarmed so existing history is not reinterpreted.
+// Regtest is genesis-active so the grace-aware purge path is exercised there.
+const DISPENSER_PURGE_GRACE_ACTIVATION = {
+    mainnet: 9999999999,
+    testnet: 9999999999,
+    regtest: 0,
+};
+
 // BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION (output capture AND open-dispenser registration
 // through a BATCH): the flag-day at/above which the DECODER reads a BATCH's SUB-COMMANDS
 // instead of only its top-level ACTION name, both when deciding which native-coin outputs to
@@ -495,6 +509,7 @@ module.exports = {
     ORACLE_FEE_SET_CAPTURE_ACTIVATION,
     DISPENSER_EXPIRY_REALIGN_ACTIVATION,
     DISPENSER_CANCEL_GRACE_ACTIVATION,
+    DISPENSER_PURGE_GRACE_ACTIVATION,
     BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
     ENVELOPE_RECOGNITION_ACTIVATION,
     ENVELOPE_CARRIER_RECOGNITION_ACTIVATION,
