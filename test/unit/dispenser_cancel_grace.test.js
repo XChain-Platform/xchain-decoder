@@ -209,9 +209,7 @@ function fundedCancelledDispenser(){
     return model
 }
 
-describe('dispenser cancellation grace: decoder capture outlasts the indexer fill window', function () {
-    this.timeout(0)
-
+function registerPostExpiryCaptureTest(){
     it('captures a payment made after expiry while the indexer still settles fills', async () => {
         // The finding's named failure mode, driven end to end. The dispenser is cancelled at
         // EXPIRATION - 600, so the indexer keeps settling until EXPIRATION + 3000. A payment
@@ -243,11 +241,9 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
         // against the widened set rather than a copy made for the assertion.
         assert.strictEqual(setsSeenByParse[1], payLoad.set)
     })
-})
+}
 
-describe('dispenser cancellation grace: activation gate', function () {
-    this.timeout(0)
-
+function registerInactiveGateTest(){
     it('keeps the unwidened capture set below the flag-day (the other side of the gate)', async () => {
         // Same blocks, same model, gate DISARMED. Every network in the map is armed at genesis
         // since the 2026-09-09 ruling, so the below-gate branch is reached by disarming mainnet
@@ -275,6 +271,12 @@ describe('dispenser cancellation grace: activation gate', function () {
         assert.ok(!payLoad.set.has(ADDR),
             'below the gate the expired dispenser stays out of the capture set')
     })
+}
+
+describe('dispenser cancellation grace: decoder capture outlasts the indexer fill window', function () {
+    this.timeout(0)
+    registerPostExpiryCaptureTest()
+    registerInactiveGateTest()
 })
 
 describe('dispenser cancellation grace: decoder capture outlasts the indexer fill window', function () {
