@@ -51,62 +51,97 @@ const {
     runAll,
     runOne,
 } = require('./batch_dispenser_registration.test/support/helpers.js')
+const protocolConstants = require('../../src/protocol/constants.js')
+
+function defineTopLevelCreateTests(){
+    it('registers a top-level create above the gate', async () => {
+        const decoder = await runOne(create({ oracle: ORACLE_A }), ABOVE_GATE)
+        assert.strictEqual(decoder.model.rows.length, 1)
+        assert.deepStrictEqual(decoder.model.rows[0], {
+            txIndex: 1, address: SOURCE, expiration: EXP_LATE,
+            oracleAddress: ORACLE_A, sourceAddress: null, expiredBlockIndex: null })
+    })
+
+    it('registers a top-level create below the gate, byte-identically', async () => {
+        const decoder = await runOne(create({ oracle: ORACLE_A }), BELOW_GATE)
+        assert.deepStrictEqual(decoder.model.rows, [{
+            txIndex: 1, address: SOURCE, expiration: EXP_LATE,
+            oracleAddress: ORACLE_A, sourceAddress: null, expiredBlockIndex: null }])
+    })
+
+    it('defaults an omitted EXPIRATION from the block time on both sides', async () => {
+        for (const venue of [ABOVE_GATE, BELOW_GATE]) {
+            const decoder = await runOne(CREATE_NO_TAIL, venue)
+            assert.strictEqual(decoder.model.rows.length, 1)
+            assert.strictEqual(decoder.model.rows[0].expiration,
+                decoder.getDefaultExpiration(T0))
+        }
+    })
+
+    it('registers a delegated create on GET_ADDRESS and records the create SOURCE', async () => {
+        for (const venue of [ABOVE_GATE, BELOW_GATE]) {
+            const decoder = await runOne(create({ getAddress: DELEGATE_A }), venue)
+            assert.strictEqual(decoder.model.rows.length, 1)
+            assert.strictEqual(decoder.model.rows[0].address, DELEGATE_A)
+            assert.strictEqual(decoder.model.rows[0].sourceAddress, SOURCE)
+        }
+    })
+}
+
+function defineTopLevelEditTests(){
+    it('still extends on a top-level v2 edit, and registers no create row', async () => {
+        for (const venue of [ABOVE_GATE, BELOW_GATE]) {
+            const decoder = await runAll([
+                { id: 'create01', action: create({ expiration: EXP_EARLY }), source: SOURCE, outputs: [] },
+                { id: 'edit01',   action: refill(EXP_LATE),                  source: SOURCE, outputs: [] },
+            ], venue)
+            assert.strictEqual(decoder.model.rows.length, 1, 'an edit creates no row')
+            assert.strictEqual(decoder.model.rows[0].expiration, EXP_LATE)
+            assert.strictEqual(decoder.model.extendCalls.length, 1)
+        }
+    })
+
+    it('skips a top-level create whose coins name another chain, on both sides', async () => {
+        for (const venue of [ABOVE_GATE, BELOW_GATE]) {
+            const decoder = await runOne(create({ giveCoin: 'DOGE', getCoin: 'DOGE' }), venue)
+            assert.deepStrictEqual(decoder.model.rows, [])
+        }
+    })
+}
+
+function defineAddressIdCollapseTests(){
+    it('collapses table-equivalent address variants through the block loop', async () => {
+        const original = protocolConstants.DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION
+        protocolConstants.DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION = {
+            mainnet: null, testnet: null, regtest: 0,
+        }
+        try {
+            const first = create({ getAddress: 'bcrt1qCaseVariant', expiration: EXP_EARLY })
+            const second = create({ getAddress: 'bcrt1qcasevariant', expiration: EXP_LATE })
+            const decoder = await runOne(`BATCH|0|${first};${second}`, ABOVE_GATE)
+            assert.strictEqual(decoder.model.insertCalls, 1)
+            assert.deepStrictEqual(decoder.model.rows.map(row => ({
+                address: row.address,
+                expiration: row.expiration,
+            })), [{ address: 'bcrt1qCaseVariant', expiration: EXP_LATE }])
+        } finally {
+            if (original === undefined)
+                delete protocolConstants.DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION
+            else
+                protocolConstants.DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION = original
+        }
+    })
+}
 
 describe('BATCH dispenser registration', function () {
     this.timeout(0)
 
     describe('a top-level DISPENSER is untouched on both sides of the gate', function () {
+        defineTopLevelCreateTests()
+        defineTopLevelEditTests()
+    })
 
-        it('registers a top-level create above the gate', async () => {
-            const decoder = await runOne(create({ oracle: ORACLE_A }), ABOVE_GATE)
-            assert.strictEqual(decoder.model.rows.length, 1)
-            assert.deepStrictEqual(decoder.model.rows[0], {
-                txIndex: 1, address: SOURCE, expiration: EXP_LATE,
-                oracleAddress: ORACLE_A, sourceAddress: null, expiredBlockIndex: null })
-        })
-
-        it('registers a top-level create below the gate, byte-identically', async () => {
-            const decoder = await runOne(create({ oracle: ORACLE_A }), BELOW_GATE)
-            assert.deepStrictEqual(decoder.model.rows, [{
-                txIndex: 1, address: SOURCE, expiration: EXP_LATE,
-                oracleAddress: ORACLE_A, sourceAddress: null, expiredBlockIndex: null }])
-        })
-
-        it('defaults an omitted EXPIRATION from the block time on both sides', async () => {
-            for (const venue of [ABOVE_GATE, BELOW_GATE]) {
-                const decoder = await runOne(CREATE_NO_TAIL, venue)
-                assert.strictEqual(decoder.model.rows.length, 1)
-                assert.strictEqual(decoder.model.rows[0].expiration,
-                    decoder.getDefaultExpiration(T0))
-            }
-        })
-
-        it('registers a delegated create on GET_ADDRESS and records the create SOURCE', async () => {
-            for (const venue of [ABOVE_GATE, BELOW_GATE]) {
-                const decoder = await runOne(create({ getAddress: DELEGATE_A }), venue)
-                assert.strictEqual(decoder.model.rows.length, 1)
-                assert.strictEqual(decoder.model.rows[0].address, DELEGATE_A)
-                assert.strictEqual(decoder.model.rows[0].sourceAddress, SOURCE)
-            }
-        })
-
-        it('still extends on a top-level v2 edit, and registers no create row', async () => {
-            for (const venue of [ABOVE_GATE, BELOW_GATE]) {
-                const decoder = await runAll([
-                    { id: 'create01', action: create({ expiration: EXP_EARLY }), source: SOURCE, outputs: [] },
-                    { id: 'edit01',   action: refill(EXP_LATE),                  source: SOURCE, outputs: [] },
-                ], venue)
-                assert.strictEqual(decoder.model.rows.length, 1, 'an edit creates no row')
-                assert.strictEqual(decoder.model.rows[0].expiration, EXP_LATE)
-                assert.strictEqual(decoder.model.extendCalls.length, 1)
-            }
-        })
-
-        it('skips a top-level create whose coins name another chain, on both sides', async () => {
-            for (const venue of [ABOVE_GATE, BELOW_GATE]) {
-                const decoder = await runOne(create({ giveCoin: 'DOGE', getCoin: 'DOGE' }), venue)
-                assert.deepStrictEqual(decoder.model.rows, [])
-            }
-        })
+    describe('address-id collapse activation', function () {
+        defineAddressIdCollapseTests()
     })
 })
