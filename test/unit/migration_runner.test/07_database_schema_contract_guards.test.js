@@ -156,12 +156,13 @@ describe('Database schema-contract guards @regression', function () {
             runMigrationsInner: async () => ({ applied: [], pending: [], lockSkipped: true }),
             assertDispenserExpirationIsBigintUnsigned: async () => { calls.push('dispenser'); },
             assertPubkeyColumnIsUncompressedWide: async () => { calls.push('pubkey'); },
+            assertTransactionIdsAreBigint: async () => { calls.push('bigint ids'); },
             assertActionDataIsUtf8mb4: async () => { calls.push('utf8mb4'); },
             assertStrictSqlMode: async () => { calls.push('sqlmode'); }
         };
         const result = await Database.prototype.runMigrations.call(ctx);
         // sql_mode is session state, so it is checked before the body; the schema guards follow it.
-        assert.deepStrictEqual(calls, ['sqlmode', 'dispenser', 'pubkey', 'utf8mb4']);
+        assert.deepStrictEqual(calls, ['sqlmode', 'dispenser', 'pubkey', 'bigint ids', 'utf8mb4']);
         assert.strictEqual(result.lockSkipped, true);
     });
 
