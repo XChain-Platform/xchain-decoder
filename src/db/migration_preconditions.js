@@ -202,9 +202,6 @@ Database.backdatedFrontierViolation = function(pendingName, appliedNames){
 Database.DEPLOY_PRECONDITION_TAG = 'deploy-precondition=required';
 
 const BIGINT_ID_MIGRATION = '2026-06-02-widen-ids-to-bigint.sql';
-const bigintIdRebaseline = Database.MIGRATION_CHECKSUM_REBASELINES[BIGINT_ID_MIGRATION];
-bigintIdRebaseline.from = [].concat(bigintIdRebaseline.from, bigintIdRebaseline.to);
-bigintIdRebaseline.to = '33423de08d0869d7a81829301668383ee3cb47e7226bff587fcfcbf9fa0c7b1c';
 
 // Migrations this tree ASSERTS at startup: the service refuses to run when the
 // target database has not applied them.
