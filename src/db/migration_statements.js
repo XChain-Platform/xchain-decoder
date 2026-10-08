@@ -127,6 +127,9 @@ function isDestructiveAlter(stmt, safeAlterDrop){
     if(/\bRENAME\b(?!\s+(INDEX|KEY)\b)/i.test(stmt)) return true;
     // CHANGE [COLUMN] renames and retypes in one clause - manual only.
     if(/\bCHANGE\b/i.test(stmt)) return true;
+    // CONVERT TO CHARACTER SET rewrites every text column of the table and can truncate or
+    // re-encode row data.
+    if(/\bCONVERT\s+TO\b/i.test(stmt)) return true;
     // MODIFY that adds NOT NULL narrows the column domain - except an
     // AUTO_INCREMENT attribute repair: an AUTO_INCREMENT column is
     // definitionally NOT NULL, so no domain is narrowed (see the
@@ -146,6 +149,10 @@ function isDestructiveAlter(stmt, safeAlterDrop){
     mClauses.push(stmt.slice(mStart));
     for(const clause of mClauses){
         if(/\bMODIFY\b[\s\S]*\bNOT\s+NULL\b/i.test(clause) &&
+           !/\bAUTO_INCREMENT\b/i.test(clause)) return true;
+        // A MODIFY restates the whole column, so restating id without AUTO_INCREMENT strips
+        // the attribute and every later insert loses its generated key.
+        if(/^\s*(?:ALTER\s+(?:ONLINE\s+)?TABLE\s+(?:`[^`]+`|[A-Za-z0-9_$.]+)\s+)?MODIFY\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?`?id`?(?=[\s,]|$)/i.test(clause) &&
            !/\bAUTO_INCREMENT\b/i.test(clause)) return true;
     }
     return false;
@@ -187,9 +194,10 @@ module.exports = {
     // committed AUTO_INCREMENT id=0 repair),
     // ALTER TABLE ... DROP <column|partition|bare identifier>,
     // ALTER TABLE ... RENAME (except RENAME INDEX/KEY), ALTER TABLE ... CHANGE
-    // (rename+retype), MODIFY ... NOT NULL (the statically detectable
-    // narrowing; a width reduction cannot be seen without the live schema and
-    // stays covered by the manual-tag convention), any ALTER TABLE PARTITION or
+    // (rename+retype), CONVERT TO (rewrites every text column), MODIFY ... NOT NULL
+    // (the statically detectable narrowing; the runner's live-schema guard catches a
+    // width cut or a dropped attribute), MODIFY id without AUTO_INCREMENT (strips the
+    // generated key), any ALTER TABLE PARTITION or
     // TABLESPACE clause, ALTER IGNORE TABLE (deletes duplicate-key rows), any other
     // ALTER than ALTER [ONLINE] TABLE, and any CREATE other than [TEMPORARY] TABLE and
     // [UNIQUE|FULLTEXT|SPATIAL] INDEX (triggers, events, routines and views run SQL

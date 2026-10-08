@@ -20,8 +20,9 @@
 
 const { format: formatLogLine } = require('node:util')
 const { chainTierMismatch } = require('../protocol/chain_identity')
-const { logger, DISPENSER_EXPIRE_SAFE_DEPTH } = require('./constants.js')
+const { logger, DISPENSER_EXPIRE_SAFE_DEPTH, MIN_VERIFICATION_PROGRESS_TO_PARSE } = require('./constants.js')
 const { haltReorg } = require('./reorg_halt.js')
+const { nodeStillCatchingUp } = require('./payload_helpers.js')
 
 function safeDepthFor(decoder){
     return decoder.dispenserExpireSafeDepth || DISPENSER_EXPIRE_SAFE_DEPTH
@@ -161,6 +162,13 @@ async function deleteAboveTipBlock(lastBlockIndex, lastBlock, nodeTip, priorDept
     return retryCount
 }
 
+// Return true while the node is in initial block download or below the parse threshold,
+// the block loop's own two gates: the mid-walk refresh keeps its tip then, because a
+// catching-up node is waited on, never rolled back (its low tip deletes valid blocks).
+function nodeTipStillCatchingUp(info){
+    return nodeStillCatchingUp(info) || info["verificationprogress"] < MIN_VERIFICATION_PROGRESS_TO_PARSE
+}
+
 async function refreshReorgTip(nodeTip){
     try {
         const info = await this.connector.getBlockchainInfo()
@@ -185,6 +193,8 @@ async function refreshReorgTip(nodeTip){
             const reorgGenesisMismatch = await this.verifyChainGenesis()
             if (reorgGenesisMismatch){
                 this.logError('reorg: ignoring a tip refresh from a foreign endpoint: ' + reorgGenesisMismatch)
+            } else if (nodeTipStillCatchingUp(info)) {
+                this.logWarn('reorg: ignoring a tip refresh from a node still catching up')
             } else {
                 nodeTip = info.blocks
             }

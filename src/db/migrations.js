@@ -18,6 +18,7 @@ const config = require('../config');
 const Database = require('../db.js')
 const { logger } = require('./constants.js')
 const { migrationSession, retireMigrationConnection } = require('./migration_query_timeout.js')
+const { assertNoLiveColumnLoss } = require('./migration_live_schema_guard.js')
 
 function validateMigrationTargets(files, only, dir){
     // Targeted rollout: a name that matches no committed migration is almost
@@ -171,6 +172,8 @@ async function applyMigrationFile(database, context, file, raw, checksum, mode){
                 offender.slice(0, 160) + (offender.length > 160 ? '...' : '') + '". ' +
                 'Re-tag the file `-- xchain:migration mode=manual` and apply it deliberately via `node src/db/migrate.js`.');
         }
+        // The text scan cannot see what a MODIFY drops from the live column; this check can.
+        await assertNoLiveColumnLoss(context.conn, file, statements);
     }
     // Lift the pool's 30s statement limit so a table rebuild is not killed half-applied.
     await context.activateQueryTimeout();

@@ -88,6 +88,19 @@ function* parseMempoolTransaction(nextTx, nextTransactionHash){
     return parseResult
 }
 
+// Apply the block path's two admission gates: an ACTION needs a resolved source
+// (hasStorableContent), then the shared payload gate (buildStoredActionRecord).
+// An unattributable ACTION is blanked, not skipped: the row is the seen-set entry.
+function admitMempoolAction(parseResult, nextTransactionHash){
+    const hasAction = (parseResult["data"] != null) && (parseResult["data"].length > 0)
+    if (hasAction && !this.hasStorableContent(parseResult)){
+        this.parseErrors++
+        logger.error(`Mempool: tx ${nextTransactionHash}: XChain data found but source address could not be resolved`)
+        return { skip: false, data: "", rawData: null, unattributed: true }
+    }
+    return this.buildStoredActionRecord(parseResult, nextTransactionHash, true)
+}
+
 function* storeMempoolTransaction(nextTxHex, nextTxHexIndex){
     let nextTx = decodeMempoolTransaction.call(this, nextTxHex, nextTxHexIndex)
     if (nextTx == null) {
@@ -101,7 +114,7 @@ function* storeMempoolTransaction(nextTxHex, nextTxHexIndex){
         return false
     }
 
-    // Same storage gate as the confirmed-block path, by construction:
+    // Same admission gates as the confirmed-block path (admitMempoolAction):
     // buildStoredActionRecord owns the ceiling, the alias expansion, the
     // UTF-8 decode and the VALID_ACTION_NAMES check, so a pending tx can
     // never show one thing and then silently vanish on confirm. It stores
@@ -111,7 +124,7 @@ function* storeMempoolTransaction(nextTxHex, nextTxHexIndex){
     // two encodings and content-correlation between a pending row and its
     // confirmed twin silently mismatches (uuid:26220713). A rejected ACTION
     // on a money-bearing tx blanks to '' (never SQL NULL) for the same reason.
-    let stored = this.buildStoredActionRecord(parseResult, nextTransactionHash, true)
+    const stored = admitMempoolAction.call(this, parseResult, nextTransactionHash)
     if (stored.skip) return false
 
     if (!(yield this.mempoolDb.insertMempoolTransaction({
@@ -127,7 +140,7 @@ function* storeMempoolTransaction(nextTxHex, nextTxHexIndex){
         yield this.sleep(3000)
         return false
     } else {
-        return (parseResult["data"] != null) && (parseResult["data"].length > 0)
+        return !stored.unattributed && (parseResult["data"] != null) && (parseResult["data"].length > 0)
     }
 }
 
