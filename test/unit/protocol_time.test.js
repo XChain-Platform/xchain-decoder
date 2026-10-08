@@ -36,6 +36,24 @@ describe('protocol time', function () {
         assert.strictEqual(protocolTime('testnet', false, previous), false)
     })
 
+    it('takes the first 11 height-descending entries before sorting by timestamp', function () {
+        const newestFirst = [
+            100, 900, 200, 800, 300, 700, 400, 600, 500, 1000, 1100,
+            999999,
+        ]
+
+        assert.strictEqual(medianTimePast(newestFirst), 600)
+    })
+
+    it('does not replace an unusable window entry with an older entry', function () {
+        const newestFirst = [
+            100, 200, 300, 400, 500, NaN, 700, 800, 900, 1000, 1100,
+            999999,
+        ]
+
+        assert.strictEqual(medianTimePast(newestFirst), 700)
+    })
+
     it('returns an immutable context without changing replay inputs', function () {
         const input = previous.slice()
         const first = createBlockTimeContext('testnet', 500, input)
