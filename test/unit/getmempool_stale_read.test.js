@@ -23,14 +23,16 @@ let previousTtl;
 
 async function servesStaleSnapshotAndRetries(){
     const firstRow = { tx_hash: 'aa', source: 'alice', data: 'first', first_seen: 11 };
+    const partialRow = { tx_hash: 'cc', source: 'carol', data: 'partial', first_seen: 33 };
     const recoveredRow = { tx_hash: 'bb', source: 'bob', data: 'second', first_seen: 22 };
     const getRows = sinon.stub();
     getRows.onCall(0).resolves([firstRow]);
-    getRows.onCall(1).rejects(new Error('read failed'));
+    getRows.onCall(1).resolves([partialRow]);
     getRows.onCall(2).resolves([recoveredRow]);
     const getTotal = sinon.stub();
     getTotal.onCall(0).resolves(7);
-    getTotal.onCall(1).resolves(8);
+    getTotal.onCall(1).rejects(new Error('count failed'));
+    getTotal.onCall(2).resolves(8);
     const decoder = {
         nodeMempoolTxCount: 12,
         nodeMempoolUpdatedAt: 900,
@@ -56,6 +58,7 @@ async function servesStaleSnapshotAndRetries(){
 
     const recovered = await getmempool({ limit: 500 });
     assert.strictEqual(getRows.callCount, 3);
+    assert.strictEqual(getTotal.callCount, 3);
     assert.strictEqual(recovered.stale, false);
     assert.strictEqual(recovered.read_ok_at, 6000);
     assert.strictEqual(recovered.total, 8);
