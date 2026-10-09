@@ -235,7 +235,7 @@ function pushV0DispenserCreate(decodedDataSplit, dispenserCreateCandidates, pars
     }
 
     // Require an integer. At/above EXACT_INTEGER_EXPIRATION_ACTIVATION the
-    // wire token is checked before Number conversion, matching the indexer's
+    // wire token is checked without relying on Number conversion, matching the indexer's
     // exact integer rule. Below it the legacy Number-based decision remains,
     // preserving historical replay. dispensers.expiration is BIGINT UNSIGNED,
     // so a fractional value like 1700000000.5
