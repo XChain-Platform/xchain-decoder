@@ -29,6 +29,7 @@ const path         = require('path');
 const sinon        = require('sinon');
 const XChainDecoder = require('../../src/XChainDecoder');
 const Database      = require('../../src/db.js');
+const { createMempoolMethods } = require('../../src/api');
 
 function makeDecoder() {
     return new XChainDecoder(
@@ -148,11 +149,56 @@ describe('Database#getMempoolTransactionCount()', () => {
     });
 });
 
-// api.js builds its JSON-RPC controller inside startApi() (it is not exported),
-// so the getmempool contract is pinned at the source level, the same way the
-// explorer pins this repo's mempool INSERT site: the method must exist, consult
-// its TTL cache before the DB, clamp the row window, and map the decoder's
-// node-mempool snapshot fields into the response.
+describe('api.js getmempool stale fallback', () => {
+    let clock;
+    let previousTtl;
+
+    beforeEach(() => {
+        previousTtl = process.env.GETMEMPOOL_CACHE_MS;
+        process.env.GETMEMPOOL_CACHE_MS = '5000';
+        clock = sinon.useFakeTimers({ now: 1000, toFake: ['Date'] });
+        sinon.stub(console, 'error');
+    });
+
+    afterEach(() => {
+        clock.restore();
+        sinon.restore();
+        if (previousTtl === undefined) delete process.env.GETMEMPOOL_CACHE_MS;
+        else process.env.GETMEMPOOL_CACHE_MS = previousTtl;
+    });
+
+    it('marks a failed refresh stale and preserves the last successful read', async () => {
+        const getRows = sinon.stub();
+        getRows.onFirstCall().resolves([
+            { tx_hash: 'aa', source: 'alice', data: 'first', first_seen: 11 }
+        ]);
+        getRows.onSecondCall().rejects(new Error('read failed'));
+        const decoder = {
+            nodeMempoolTxCount: 12,
+            nodeMempoolUpdatedAt: 900,
+            mempoolDb: {
+                getMempoolTransactions: getRows,
+                getMempoolTransactionCount: sinon.stub().resolves(7)
+            }
+        };
+        const getmempool = createMempoolMethods(decoder).getmempool;
+
+        const fresh = await getmempool({ limit: 500 });
+        clock.tick(5000);
+        const failed = await getmempool({ limit: 500 });
+
+        assert.strictEqual(fresh.stale, false);
+        assert.strictEqual(fresh.read_ok_at, 1000);
+        assert.strictEqual(failed.stale, true);
+        assert.strictEqual(failed.read_ok_at, fresh.read_ok_at);
+        assert.strictEqual(failed.total, fresh.total);
+        assert.deepStrictEqual(failed.rows, fresh.rows);
+    });
+});
+
+// Keep the source contract pinned alongside the runtime behavior: the method
+// must exist, consult its TTL cache before the DB, clamp the row window, and map
+// the decoder's node-mempool snapshot fields into the response.
 describe('api.js getmempool method (source pin)', () => {
     const src = fs.readFileSync(path.join(__dirname, '../../src/api.js'), 'utf8');
 
