@@ -215,6 +215,35 @@ function createJsonRpcController(decoder, isDecoderRunning, getDecoderError){
 
 // getmempool's shared snapshot cache (see the method's comment). Held here so
 // every request, whatever its limit, slices one cached 500-row window.
+async function readMempoolSnapshot(db, now){
+    const rows  = await db.getMempoolTransactions(500);
+    const total = await db.getMempoolTransactionCount();
+    return { t: now, rows, total, read_ok_at: Date.now() };
+}
+function emptyMempoolSnapshot(now){
+    return { t: now, rows: [], total: 0, read_ok_at: null };
+}
+function normalizeMempoolRow(row){
+    return {
+        tx_hash: row.tx_hash,
+        source: row.source,
+        // Normalize driver Buffers and invalid SQL timestamps for JSON.
+        data: Buffer.isBuffer(row.data) ? row.data.toString('utf8') : row.data,
+        first_seen: Number.isFinite(row.first_seen) ? row.first_seen : null
+    };
+}
+function buildMempoolResult(decoder, snapshot, params, stale){
+    const limit = Math.max(1, Math.min(parseInt(params && params.limit, 10) || 500, 500));
+    return {
+        node_tx_count: decoder.nodeMempoolTxCount,
+        node_updated_at: decoder.nodeMempoolUpdatedAt,
+        stale,
+        read_ok_at: snapshot.read_ok_at,
+        total: snapshot.total,
+        rows: snapshot.rows.slice(0, limit).map(normalizeMempoolRow)
+    };
+}
+
 function createMempoolMethods(decoder){
     let getmempoolCache = null;
     return {
@@ -242,12 +271,9 @@ function createMempoolMethods(decoder){
             let stale = false;
             let snapshot = getmempoolCache;
             if (!getmempoolCache || (now - getmempoolCache.t) >= ttl) {
-                let rows = [], total = 0;
                 if (db) {
                     try {
-                        rows  = await db.getMempoolTransactions(500);
-                        total = await db.getMempoolTransactionCount();
-                        getmempoolCache = { t: now, rows, total, read_ok_at: Date.now() };
+                        getmempoolCache = await readMempoolSnapshot(db, now);
                     } catch (err) {
                         // Serve the stale snapshot if we have one; a mempool read
                         // must never surface as an API error to remote explorers.
@@ -255,27 +281,11 @@ function createMempoolMethods(decoder){
                         stale = true;
                     }
                 } else {
-                    getmempoolCache = { t: now, rows, total, read_ok_at: null };
+                    getmempoolCache = emptyMempoolSnapshot(now);
                 }
-                snapshot = getmempoolCache || { rows: [], total: 0, read_ok_at: null };
+                snapshot = getmempoolCache || emptyMempoolSnapshot(now);
             }
-            const limit = Math.max(1, Math.min(parseInt(params && params.limit, 10) || 500, 500));
-            return {
-                node_tx_count: decoder.nodeMempoolTxCount,
-                node_updated_at: decoder.nodeMempoolUpdatedAt,
-                stale,
-                read_ok_at: snapshot.read_ok_at,
-                total: snapshot.total,
-                rows: snapshot.rows.slice(0, limit).map(r => ({
-                    tx_hash:    r.tx_hash,
-                    source:     r.source,
-                    // TEXT can come back as a Buffer depending on driver options;
-                    // normalize so the JSON body always carries the UTF-8 string.
-                    data:       Buffer.isBuffer(r.data) ? r.data.toString('utf8') : r.data,
-                    // Unix seconds read in SQL (see getMempoolTransactions), never a driver Date.
-                    first_seen: Number.isFinite(r.first_seen) ? r.first_seen : null
-                }))
-            };
+            return buildMempoolResult(decoder, snapshot, params, stale);
         }
     }
 }
