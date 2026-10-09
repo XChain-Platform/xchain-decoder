@@ -140,6 +140,8 @@ describe('Taproot envelope recognition', function () {
             assert.strictEqual(XChainDecoder.ENVELOPE_MAX_PAYLOAD, CONSTANTS.ENVELOPE_MAX_PAYLOAD)
             assert.strictEqual(CONSTANTS.ENVELOPE_MAX_PAYLOAD, 390000)
             assert.deepStrictEqual(XChainDecoder.ENVELOPE_RECOGNITION_ACTIVATION, CONSTANTS.ENVELOPE_RECOGNITION_ACTIVATION)
+            assert.strictEqual(XChainDecoder.DISPENSER_WIDE_EXPIRATION_ACTIVATION,
+                CONSTANTS.DISPENSER_WIDE_EXPIRATION_ACTIVATION)
         })
 
         // Pins the ARMED map exactly (operator §7 cohort call, 2026-08-01). Every value

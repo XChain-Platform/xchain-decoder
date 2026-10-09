@@ -33,6 +33,7 @@ const actionSize = require('./constants/action_size.js');
 const vmCrossCall = require('./constants/vm_cross_call.js');
 const batchLimits = require('./constants/batch_limits.js');
 const activation = require('./constants/activation.js');
+const dispenserWideExpiration = require('./constants/dispenser_wide_expiration.js');
 
 // VALID_FIAT_CODES: the accepted FIAT_CODE allow-list for PRICE actions. The indexer's
 // config['FIATS'] keys (xchain-indexer/src/config.js) are the on-chain arbiter; this list
@@ -104,6 +105,7 @@ module.exports = {
     DISPENSER_CANCEL_GRACE_ACTIVATION: activation.DISPENSER_CANCEL_GRACE_ACTIVATION,
     DISPENSER_PURGE_GRACE_ACTIVATION: activation.DISPENSER_PURGE_GRACE_ACTIVATION,
     DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION: activation.DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION,
+    DISPENSER_WIDE_EXPIRATION_ACTIVATION: dispenserWideExpiration.DISPENSER_WIDE_EXPIRATION_ACTIVATION,
     BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION: activation.BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
     ENVELOPE_MAX_PAYLOAD: actionSize.ENVELOPE_MAX_PAYLOAD,
     ENVELOPE_RECOGNITION_ACTIVATION: activation.ENVELOPE_RECOGNITION_ACTIVATION,

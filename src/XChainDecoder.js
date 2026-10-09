@@ -37,6 +37,7 @@ const transactionParsingMethods = require('./XChainDecoder/transaction_parsing.j
 const reorgVerificationMethods = require('./XChainDecoder/reorg_verification.js')
 const startupMethods = require('./XChainDecoder/startup.js')
 const mempoolRefreshMethods = require('./XChainDecoder/mempool_refresh.js')
+const { DISPENSER_WIDE_EXPIRATION_ACTIVATION } = require('./protocol/constants.js')
 
 //We need to init the ecc to parse taproot addresses from output scripts
 bitcoin.initEccLib(ecc);
@@ -338,6 +339,7 @@ Object.assign(XChainDecoder, {
     // (encoder/docs copies must stay byte-equal).
     ENVELOPE_MAX_PAYLOAD,
     ENVELOPE_RECOGNITION_ACTIVATION,
+    DISPENSER_WIDE_EXPIRATION_ACTIVATION,
 });
 
 module.exports = XChainDecoder

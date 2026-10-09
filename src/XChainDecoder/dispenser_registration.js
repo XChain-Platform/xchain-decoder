@@ -21,6 +21,7 @@
 const { logger } = require('./constants.js')
 const { oracleAddressFromCreate, V0_GIVE_COIN_INDEX, V0_GET_COIN_INDEX, V0_GET_ADDRESS_INDEX, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('../protocol/oracle_fee_output')
 const { isBatchSubCommandCaptureActive } = require('../protocol/batch_sub_command_capture')
+const { normalizeDispenserExpiration } = require('./dispenser_wide_expiration.js')
 
 //Catch any dispenser message to add it to
 //the list of possible dispenses.
@@ -198,7 +199,7 @@ function pushV0DispenserCreate(decodedDataSplit, dispenserCreateCandidates, pars
     if (expirationToken === undefined || expirationToken === "") {
         expiration = this.getDefaultExpiration(block.timestamp)
     } else {
-        expiration = Number(expirationToken)
+        expiration = normalizeDispenserExpiration(expirationToken, this.consensusNetwork, block.timestamp)
     }
 
     // Require an INTEGER, matching the indexer, which rejects any
@@ -209,28 +210,17 @@ function pushV0DispenserCreate(decodedDataSplit, dispenserCreateCandidates, pars
     // block loop, which then retries the same deterministic tx
     // forever - or truncates under a lax one, leaving the decoder
     // holding a dispenser the indexer never registered.
-    // Number.isSafeInteger already excludes NaN and Infinity, so it
-    // subsumes the isNaN test it replaces; the default expiration is
-    // integral by construction (block timestamp + whole days).
-    //
-    // SAFE integer, not merely integer, and no u32 ceiling. The old
+    // Exact integer, not merely integer, and no u32 ceiling. The old
     // `expiration > 4294967295` reject was recognition drift: the
     // indexer escrows any non-negative integer EXPIRATION into its own
     // BIGINT UNSIGNED column, so a dispenser opened past year 2106 (or
     // spelled 9999999999 for "never") stayed open and escrowed there
     // while the decoder skipped registration, and a later coin payment
-    // to it was never flagged as a dispense. Number.isSafeInteger is
-    // the bound Number() holds exactly: at or below it the payload token
-    // round-trips, so the decoder stores the same value the indexer does,
-    // and it stays far inside BIGINT UNSIGNED. It is NOT the indexer's
-    // bound: the indexer accepts any integer EXPIRATION up to 2^64-1
-    // (xchain-indexer/src/config/wire_fields.js), so a create between 2^53
-    // and 2^64-1 is still this drift, escrowed there and never registered
-    // here. Closing it changes captured outputs, so it needs an activation.
-    // Dropping the ceiling outright would NOT be safe - Number.isInteger
-    // is true for 1e300, which overflows the column and wedges the block
-    // loop on the same deterministic tx forever.
-    if (!Number.isSafeInteger(expiration) || expiration < 0) {
+    // to it was never flagged as a dispense. The normalizer preserves safe
+    // values exactly. Above its gate, decimal u64 tokens are parsed as BigInt
+    // and clamped to the largest exact Number, keeping this advisory row open
+    // for every reachable block without rounding the wire value.
+    if (expiration === null) {
         this.parseErrors++
         logger.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[V0_EXPIRATION_INDEX]}'`)
     } else if (this.dispenserOpensForThisChain(giveCoin, getCoin)){
@@ -334,19 +324,12 @@ function dispenserEditExtension(dispenserCommand, dispenserCommandPrefix, parseR
         const editExpirationToken = decodedDataSplit[V2_EXPIRATION_INDEX]
         if (editSource && editSource.length > 0 &&
             editExpirationToken !== undefined && editExpirationToken !== ""){
-            const newExpiration = Number(editExpirationToken)
-            // Same integer contract as the create guard above: the edit
-            // path writes through extendOpenDispenserExpirationBySource
-            // into the same BIGINT UNSIGNED column, and the indexer
-            // rejects a fractional edit EXPIRATION with the identical
-            // isInteger test. The SAFE-integer ceiling replaces a u32 one
-            // (see the create guard: a u32 reject here would silently
-            // decline to mirror an extend the indexer accepted, closing the
-            // decoder's row early on a dispenser that is still open and
-            // escrowed). The indexer's own ceiling is u64, so an extend past
-            // 2^53 still goes unmirrored; the create guard says why that
-            // gap waits on a decoder activation.
-            if (Number.isSafeInteger(newExpiration) && newExpiration >= 0 &&
+            const newExpiration = normalizeDispenserExpiration(
+                editExpirationToken, this.consensusNetwork, block.timestamp)
+            // Same exact-or-clamped contract as the create guard above. A
+            // wide valid edit extends every candidate row to the decoder's
+            // maximum exact expiration instead of being silently ignored.
+            if (newExpiration !== null &&
                 newExpiration > block.timestamp){
                 return { editSource, newExpiration }
             }
