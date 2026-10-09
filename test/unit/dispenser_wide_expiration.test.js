@@ -101,6 +101,9 @@ describe('DISPENSER wide expiration', function () {
         assert.strictEqual(normalizeDispenserExpiration('9.007199254740992e15', 'regtest', 0), MAX_SAFE_DISPENSER_EXPIRATION)
     })
 
+})
+
+describe('DISPENSER wide expiration registration', function () {
     it('retains the historical rejection below the gate', function () {
         const gate = DISPENSER_WIDE_EXPIRATION_ACTIVATION.mainnet
         assert.strictEqual(normalizeDispenserExpiration(FIRST_WIDE, 'mainnet', gate - 1), null)

@@ -18,10 +18,10 @@
 // EXPIRATION onto the decoder's exact Number range. Mainnet and testnet keep
 // the historical rejection until a fleet flag day is selected. Regtest is
 // genesis-active so the widened recognition path is continuously exercised.
-const DISPENSER_WIDE_EXPIRATION_ACTIVATION = {
+const DISPENSER_WIDE_EXPIRATION_GATES = {
     mainnet: 9999999999,
     testnet: 9999999999,
     regtest: 0,
 };
 
-module.exports = { DISPENSER_WIDE_EXPIRATION_ACTIVATION };
+module.exports = { DISPENSER_WIDE_EXPIRATION_GATES };
