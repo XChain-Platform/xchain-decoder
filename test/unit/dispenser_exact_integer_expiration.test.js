@@ -13,7 +13,7 @@ const { DispenserModel, buildDecoder, T0, ADDR, CREATE } =
 
 const NAME = 'EXACT_INTEGER_EXPIRATION_ACTIVATION'
 
-describe('DISPENSER exact integer EXPIRATION activation', function () {
+function restoreActivationAround() {
     const saved = {}
 
     beforeEach(function () {
@@ -25,6 +25,10 @@ describe('DISPENSER exact integer EXPIRATION activation', function () {
         for (const network of Object.keys(saved))
             activation[NAME][network] = saved[network]
     })
+}
+
+describe('DISPENSER exact integer EXPIRATION activation', function () {
+    restoreActivationAround()
 
     it('is public and UNARMED on every network', function () {
         assert.deepStrictEqual(activation[NAME], {
@@ -52,6 +56,11 @@ describe('DISPENSER exact integer EXPIRATION activation', function () {
         for (const value of ['1.5', '.5', '1e-3', '1000.0000000000000001', 'text', ''])
             assert.strictEqual(isExactIntegerToken(value), false, value)
     })
+
+})
+
+describe('DISPENSER exact integer EXPIRATION decoding', function () {
+    restoreActivationAround()
 
     it('preserves precision-rounded create and edit behavior below the gate', async function () {
         const model = new DispenserModel()
@@ -102,6 +111,11 @@ describe('DISPENSER exact integer EXPIRATION activation', function () {
         assert.strictEqual(model.calls.extend.length, 0)
         assert.strictEqual(model.rows[0].expiration, T0 + 1000000)
     })
+
+})
+
+describe('DISPENSER exact integer EXPIRATION valid spellings', function () {
+    restoreActivationAround()
 
     it('keeps exactly integral decimal and exponent spellings valid above the gate', async function () {
         activation[NAME].regtest = 0
