@@ -197,42 +197,12 @@ const ORACLE_FEE_OUTPUT_ACTIVATION = {
     regtest: 0,
 };
 
-// ORACLE_FEE_SET_CAPTURE_ACTIVATION (PRICE v1 oracle usage fee, set-membership capture): the
-// flag-day at/above which the DECODER captures a DISPENSER v2 (edit/refill) oracle-fee output
-// by SET MEMBERSHIP over EVERY open Mode B dispenser of the paying SOURCE, instead of the one
-// top-ranked row the legacy lookup picks. Keyed on BLOCK TIME with the same >= semantics as
-// ORACLE_FEE_OUTPUT_ACTIVATION, which it never precedes: set capture only widens a capture
-// that gate has already switched on.
-//
-// WHY IT EXISTS: a v2 payload names its target by DISPENSER_ACTION_INDEX, an id in the
-// INDEXER's action space the decoder does not maintain, so the decoder resolves the oracle by
-// SOURCE address. Capture is an address EQUALITY test, so when one source holds several open
-// Mode B dispensers with DIFFERENT oracle addresses, a refill of any row but the top-ranked
-// one resolves the wrong oracle, NOTHING is captured, and the indexer (which resolves the
-// exact DISPENSER_ACTION_INDEX target) rejects a valid refill after the payer's native payment
-// is already spent. Testing membership over the whole set captures the right output for every
-// row; the extra outputs a multi-oracle source's refill may also capture are ones the indexer
-// ignores, which is the over-capture direction the decoder's advisory open-view calls safe.
-//
-// CONSENSUS-AFFECTING: it changes the set of outputs persisted to transaction_outputs, so an
-// ungated widening breaks from-genesis byte-identity and forks validators. The legacy
-// single-pick therefore stays live BELOW the gate, and a re-decode of pre-flag-day history
-// reproduces exactly what the fleet wrote live.
-//
-// mainnet is ARMED at the base gate's own instant by the 2026-09-09 ruling, the earliest the
-// ordering above permits: the indexed mainnet history holds 0 dispensers (measured
-// 2026-09-09), so set capture persists exactly the output set the legacy single-pick did and
-// the arm rewrites no agreed history. A from-genesis OLD-vs-ON replay witness per chain is the
-// proof. regtest holds no agreed history (its chains are recreated per run), so it is
-// genesis-on and exercises the set path in the regtest venues.
-//
-// DEPLOY DEADLINE, once an instant is armed: EVERY decoder on that network MUST be running the
-// armed value before the instant, or the fleet splits on the first refill of a source holding
-// more than one open Mode B dispenser.
-//
-// Vendored byte-equal into xchain-decoder/src/protocol/constants.js; the conformance suite
-// keeps the two copies in lockstep and refuses a value that precedes
-// ORACLE_FEE_OUTPUT_ACTIVATION.
+// Enables set-membership oracle-fee capture for all open Mode B dispensers owned by
+// the source. The legacy single-row lookup can miss a refill's oracle when the source
+// owns multiple dispensers. This block-time gate must never precede
+// ORACLE_FEE_OUTPUT_ACTIVATION because it changes persisted outputs. Mainnet is armed
+// at that base gate after a zero-dispenser history audit; testnet and regtest start at
+// genesis. Every decoder must deploy an armed value before its activation instant.
 const ORACLE_FEE_SET_CAPTURE_ACTIVATION = {
     mainnet: 1786060800,  // ARMED by the 2026-09-09 ruling at its base gate's own instant, the earliest the ordering above permits; identity on the indexed mainnet history (0 dispensers, measured 2026-09-09)
     // ARMED AT GENESIS (instant 0 = always in force), operator-ratified 2026-08-18 under the
@@ -243,46 +213,11 @@ const ORACLE_FEE_SET_CAPTURE_ACTIVATION = {
     regtest: 0,
 };
 
-// DISPENSER_EXPIRY_REALIGN_ACTIVATION (dispenser soft-expire measurement point): the flag-day
-// at/above which the DECODER soft-expires open dispensers AFTER the block's transaction loop
-// instead of before it, putting its measurement point where the INDEXER's already is. Keyed on
-// BLOCK TIME with the same >= semantics as ORACLE_FEE_OUTPUT_ACTIVATION, because dispensers
-// settle on BTC, LTC and DOGE, whose heights diverge.
-//
-// WHY IT EXISTS: the two services expire the same dispenser at opposite ends of the same block.
-// The decoder runs db.deleteOpenDispensers BEFORE its transaction loop and then loads the
-// open-dispenser address set the loop tests every output against, so on the FIRST block whose
-// header time passes an expiration the dispenser is already out of that set. The indexer runs
-// utility.processExpirations AFTER its transaction loop (XChainIndexer.js, next to
-// processBetPasses), so for every transaction in that same block it still treats the dispenser
-// as open. The indexer only ever sees outputs the decoder persisted, so a native payment to
-// that dispenser on the boundary block is dropped by the decoder and no DISPENSE ever reaches
-// the indexer: the payer's coin is spent and nothing is dispensed for it. That is money-bearing
-// and unreachable by any in-memory re-seed, because transactions preceding an edit in the block
-// are already past.
-//
-// At/above the gate the soft-expire moves to the end of the block loop, inside the same block
-// transaction, so both services measure expiry at the identical point and a boundary block
-// yields the same DISPENSE set on both sides.
-//
-// CONSENSUS-AFFECTING: it changes the set of outputs persisted to transaction_outputs on
-// boundary blocks, so an ungated move breaks from-genesis byte-identity and forks validators.
-// The legacy block-start soft-expire therefore stays live BELOW the gate, and a re-decode of
-// pre-flag-day history reproduces exactly what the fleet wrote live.
-//
-// mainnet is ARMED at genesis (instant 0) by the 2026-09-09 ruling: the indexed mainnet history
-// holds 0 dispensers and 0 dispenses (measured 2026-09-09), so no block ever carried an expiry
-// boundary the realigned soft-expire could move and the arm rewrites no agreed history. A
-// from-genesis OLD-vs-ON replay witness per chain is the proof. regtest holds no agreed history
-// (its chains are recreated per run), so it is genesis-on and exercises the realigned path in
-// the regtest venues.
-//
-// DEPLOY DEADLINE, once an instant is armed: EVERY decoder on that network MUST be running the
-// armed value before the instant, or the fleet splits on the first block whose header time
-// passes an open dispenser's expiration.
-//
-// Vendored byte-equal into xchain-decoder/src/protocol/constants.js; the conformance suite
-// keeps the two copies in lockstep.
+// Moves decoder soft-expiry from block start to after the transaction loop, matching
+// the indexer's measurement point so boundary-block payments are retained. This
+// block-time gate changes persisted outputs. Genesis activation was approved after a
+// zero-dispenser and zero-dispense history audit; every decoder must deploy an armed
+// value before its activation instant.
 const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
     mainnet: 0,           // ARMED at genesis by the 2026-09-09 ruling: identity on the indexed mainnet history (0 dispensers, 0 dispenses, measured 2026-09-09)
     // ARMED AT GENESIS (instant 0 = always in force), operator-ratified 2026-08-18 under the
@@ -293,48 +228,12 @@ const DISPENSER_EXPIRY_REALIGN_ACTIVATION = {
     regtest: 0,
 };
 
-// DISPENSER_CANCEL_GRACE_ACTIVATION (dispenser cancellation grace capture): the flag-day
-// at/above which the DECODER keeps a just-expired dispenser in the block loop's payment
-// CAPTURE SET for a grace window past its expiration. Keyed on BLOCK TIME with the same >=
-// semantics as DISPENSER_EXPIRY_REALIGN_ACTIVATION, because dispensers settle on BTC, LTC
-// and DOGE, whose heights diverge.
-//
-// WHY IT EXISTS: the indexer keeps a CANCELLED dispenser fillable past its own expiration.
-// It excludes `cancelling` rows from its expiration pass (xchain-indexer/src/db/index_tables.js
-// getExpiredItems, `s2.status='open'`), keeps them matchable through
-// `status IN ('open','cancelling')` in findMatchingDispensers, and closes only at the
-// cancel's block time plus DISPENSER_CLOSE_DELAY (3600s). The decoder mirrors no cancel at
-// all, by design, so it soft-expires that dispenser at its raw expiration and drops the
-// address from the capture set. Cancel a funded dispenser shortly before its expiration and
-// a window opens: the indexer still settles fills, the decoder captures no output, and the
-// buyer's native coin reaches the seller with no DISPENSE record and no inventory release.
-//
-// At/above the gate the CAPTURE SET alone widens: a row whose expiration is no older than
-// the grace window stays an eligible payment destination even once the soft-expire has
-// stamped it. The soft-expire itself, the expiry MARK, the extend mirror, the oracle-address
-// resolution and the hard purge all keep their current timing, which confines the change to
-// the over-capture direction the decoder's advisory contract (xchain-decoder/src/db.js,
-// above extendOpenDispenserExpirationBySource) calls safe. Delaying the MARK instead reaches
-// the legacy single-pick oracle resolution, whose ORDER BY ... LIMIT 1 then ranks a dead row
-// first and captures nothing at all: the under-capture direction, a second money-bearing
-// defect rather than a fix. Widen the capture set, never the mark.
-//
-// CONSENSUS-AFFECTING: it changes the set of outputs persisted to transaction_outputs, so an
-// ungated widening breaks from-genesis byte-identity and forks validators. The unwidened
-// capture set therefore stays live BELOW the gate, and a re-decode of pre-flag-day history
-// reproduces exactly what the fleet wrote.
-//
-// mainnet is ARMED at genesis (instant 0) by the 2026-09-09 ruling: the indexed mainnet
-// history holds 0 dispensers and 0 dispenses (measured 2026-09-09), so the widened capture
-// set admits no output the unwidened one missed and the arm rewrites no agreed history. A
-// from-genesis OLD-vs-ON replay witness per chain is the proof.
-//
-// DEPLOY DEADLINE, once an instant is armed: EVERY decoder on that network MUST be running
-// the armed value before the instant, or the fleet splits on the first block whose header
-// time passes a cancelled dispenser's expiration.
-//
-// Vendored byte-equal into xchain-decoder/src/protocol/constants.js; the conformance suite
-// keeps the two copies in lockstep.
+// Keeps just-expired cancelling dispensers in the payment capture set for the
+// indexer's cancellation grace window. Only capture eligibility widens; the expiry
+// mark, edit mirror, oracle lookup, and purge timing stay unchanged. This block-time
+// gate changes persisted outputs. Genesis activation was approved after a
+// zero-dispenser and zero-dispense history audit; every decoder must deploy an armed
+// value before its activation instant.
 const DISPENSER_CANCEL_GRACE_ACTIVATION = {
     mainnet: 0,           // ARMED at genesis by the 2026-09-09 ruling: identity on the indexed mainnet history (0 dispensers, 0 dispenses, measured 2026-09-09)
     // ARMED AT GENESIS (instant 0 = always in force), matching the sibling
@@ -385,135 +284,32 @@ const EXACT_INTEGER_EXPIRATION_ACTIVATION = {
     regtest: null,
 };
 
-// BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION (output capture AND open-dispenser registration
-// through a BATCH): the flag-day at/above which the DECODER reads a BATCH's SUB-COMMANDS
-// instead of only its top-level ACTION name, both when deciding which native-coin outputs to
-// persist and when deciding which dispensers to register. Keyed on BLOCK TIME with the same >=
-// semantics as ORACLE_FEE_OUTPUT_ACTIVATION, because the affected settlement flows run on BTC,
-// LTC and DOGE, whose heights diverge by millions of blocks.
-//
-// WHY IT EXISTS: capture reads the top-level action string. `decodedData.startsWith("COINPAY|")`
-// is FALSE for `BATCH|0|COINPAY|0|x;COINPAY|0|y`, and resolveOracleFeeAddresses' matching
-// `startsWith("DISPENSER|")` is false for a batched DISPENSER, so a BATCH carrying either action
-// persists NO settlement output and NO oracle-fee output. The indexer only ever sees outputs the
-// decoder persisted, so a batched COINPAY reaches it with an EMPTY COIN_DESTINATION and settles
-// nothing ("COINPAY (skip): destination mismatch tx= payee=<seller>", witnessed on regtest), and
-// a batched Mode B DISPENSER is rejected for a missing oracle fee whether or not the payer paid.
-// Both are money-bearing: the payer's coin is spent and nothing settles. At/above the gate the
-// capture decision runs over the batch's sub-command list, split exactly as the indexer's
-// xchain-indexer/src/actions/batch/validate.js readCommands splits it, so a batched COINPAY
-// captures the same outputs a top-level COINPAY does.
-//
-// THE OPEN-DISPENSER REGISTRY RIDES THE SAME INSTANT, deliberately, because it is the same
-// blindness and the same decision. `decodedData.startsWith("DISPENSER")` is false for
-// `BATCH|0|DISPENSER|0|...`, so a dispenser CREATED inside a batch never entered
-// getAllOpenDispenserAddresses: payments to it were never classified as dispense outputs and no
-// DISPENSE ever fired, while the INDEXER, which dispatches the sub-command, registered it. A
-// user could open a dispenser in a batch, fund it, and it would never dispense. That registry IS
-// the address set the dispense half of output capture tests against, so splitting the two across
-// two flag-days would leave the decoder half-batch-aware for a stretch of chain with nothing
-// gained. One instant arms both; xchain-decoder/test/unit/batch_dispenser_registration.test.js
-// drives the coupling rather than asserting it in prose.
-//
-// CONSENSUS-AFFECTING: it changes the set of rows written to transaction_outputs, which changes
-// indexer verdicts, which changes the ledger. An ungated flip makes a from-genesis re-decode
-// capture outputs the live fleet never captured, so the legacy top-level-only view stays live
-// BELOW the gate and pre-flag-day history re-decodes byte-identically.
-//
-// NEVER ARM IT BELOW two sibling instants, both asserted in
-// test/unit/batch_sub_command_output_capture_activation.test.js:
-//   * the indexer's FIX_OUTPUT_FANOUT. A BATCH is a data-bearing, non-COINPAY row, so the extra
-//     captured outputs fan it out to several rows, and BELOW that flag-day
-//     output_fanout.collapseOutputFanout treats that as a consensus-critical fault and HALTS the
-//     block. Arming this gate earlier does not merely change a verdict, it stops the chain.
-//   * the indexer's BATCH_ISSUANCE_LIMITS, which carries the batch-cumulative settlement ledger.
-//     Capture without that ledger lets N COINPAY sub-commands settle N obligations from ONE
-//     payment, which is the defect this spec's R5 closes; arming capture first would open it.
-//
-// null means DISARMED (never active), the fail-closed default: a network keeps the legacy
-// top-level-only view until the operator ratifies an instant, chosen with the fleet's upgrade
-// state in hand, because arming it too early forks the chain and arming it in the past rewrites
-// agreed history. Mainnet is ARMED (below). testnet and regtest are genesis-on, matching BOTH
-// sibling gates there (FIX_OUTPUT_FANOUT and BATCH_ISSUANCE_LIMITS are all-zeros off mainnet),
-// so the venues exercise the sub-command path from block 0.
-//
-// DEPLOY DEADLINE, once an instant is armed: EVERY decoder on that network MUST be running the
-// armed value before the instant, or the fleet splits on the first BATCH carrying a COINPAY or a
-// Mode B DISPENSER.
-//
-// Vendored into xchain-decoder/src/protocol/constants.js AHEAD of the canonical copy in
-// xchain-documentation/protocol/constants.js; the conformance suite requires that mirror to exist
-// before mainnet may be armed.
+// Enables output capture and open-dispenser registration from BATCH subcommands.
+// Both must switch together because the registry supplies the dispenser capture set.
+// This block-time gate changes persisted rows and must never precede either the
+// indexer's FIX_OUTPUT_FANOUT or BATCH_ISSUANCE_LIMITS activation. Mainnet is armed
+// below; testnet and regtest start at genesis. Every decoder must deploy the armed
+// value before the first affected BATCH.
 const BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION = {
-    mainnet: 1786838400,  // ARMED 2026-08-14 (operator, pre-launch): 2026-08-16T00:00:00Z, the
-                          // SAME instant as BATCH_ISSUANCE_LIMITS carries in the indexer. One
-                          // decision, one boundary: arming the issuance rework WITHOUT this one
-                          // ships a mainnet where a batched COINPAY spends the coin and settles
-                          // nothing, and a batched DISPENSER create never dispenses, because
-                          // capture would still read only the top-level ACTION name. DEPLOY
-                          // DEADLINE: every decoder on mainnet must run this value BEFORE the
-                          // instant, or the fleet splits on the first BATCH carrying a COINPAY
-                          // or a Mode B DISPENSER.
+    mainnet: 1786838400,  // ARMED 2026-08-14 for 2026-08-16T00:00:00Z, matching BATCH_ISSUANCE_LIMITS
     testnet: 0,
     regtest: 0,
 };
 
-// ENVELOPE_RECOGNITION_ACTIVATION (Taproot-envelope spec §7): the LOCAL block height
-// at/above which the decoder recognizes Taproot-envelope reveals as
-// action-bearing transactions, per host chain and network. Recognition changes
-// what counts as an action (and §3.8's mixed-carrier/multi-envelope rejections
-// activate at the same height), so it is fleet-deterministic: every decoder
-// instance for a given chain+network MUST flip at the same height or the fleet
-// forks on the first envelope (or the first mixed-carrier tx). Keyed on each
-// chain's OWN local block height (like STATE_COMMITMENT_ACTIVATION), because
-// recognition happens while parsing that chain's blocks; DOGE has no segwit,
-// hence no Taproot and no envelope, so its entry is null (never active) and
-// must stay null. Below the height the decoder behaves EXACTLY as shipped: a
-// pre-flag tx containing an envelope plus an OP_RETURN action replays as the
-// OP_RETURN action, exactly as the fleet indexed it live.
-//
-// The mainnet heights were pinned 2026-08-02 against a MEASURED tip (BTC 960812,
-// LTC 3153356) with ~6 hours of margin over a redeploy train that takes about an
-// hour. Re-pinning an already-deployed, already-armed cohort is done by moving the
-// constant, never by rebasing the code. testnet/regtest stay genesis-active: this
-// gate only ever applied to mainnet.
-//
-// DEPLOY DEADLINE: EVERY decoder on BTC and LTC mainnet MUST be running this
-// constant before its height or the fleet forks on the first envelope (or the first
-// mixed-carrier tx, which the §3.8 rejections start refusing at exactly this
-// height). Rollout order within any venue: decoder before encoder, per the standing
-// coupling rule. Verify the fleet by reading the armed map out of each RUNNING
-// container rather than out of this file.
+// Enables Taproot-envelope action recognition at each chain's local height. It also
+// activates mixed-carrier and multi-envelope rejection. DOGE remains disabled because
+// it has no Taproot. Mainnet heights were pinned 2026-08-02; testnet and regtest start
+// at genesis. Deploy every decoder before an armed height, decoder before encoder.
 const ENVELOPE_RECOGNITION_ACTIVATION = {
     BTC:  { mainnet: 960850, testnet: 0, regtest: 0 },
     LTC:  { mainnet: 3153500, testnet: 0, regtest: 0 },
     DOGE: { mainnet: null, testnet: null, regtest: null },
 };
 
-// ENVELOPE_CARRIER_RECOGNITION_ACTIVATION (Taproot-envelope spec §3.8): the LOCAL block
-// height at/above which the decoder counts a RECOGNIZED but payload-free carrier as a
-// mixed carrier. Below it, arbitration infers carrier presence from accumulated payload
-// bytes, so an OP_RETURN that deobfuscates to exactly the XCHN magic and nothing else
-// contributes zero bytes and the envelope is still accepted as an action - while §3.8
-// says an envelope mixed with any other carrier is not an action. That is a divergence
-// against any implementation written from the published rule.
-//
-// Its own height, separate from ENVELOPE_RECOGNITION_ACTIVATION, because that gate is
-// already ARMED on BTC and LTC mainnet: §3.8 arbitration has been live consensus since
-// 2026-08-02, so changing what it refuses is a second recognition change and every
-// decoder must flip at the same height or the fleet forks. Below the height the decoder
-// behaves EXACTLY as shipped, so replay of indexed history is byte-identical.
-//
-// The mainnet entries are deliberately UNPINNED (null = never active). Pinning them
-// against a measured tip, with the redeploy train's margin, is an operator decision and
-// a deploy-train act, not a code edit made in passing. testnet/regtest are genesis-active,
-// matching the sibling gate above: recognition itself has been genesis-active there, so
-// the refusal rule the spec states applies to those chains from genesis too.
-//
-// DEPLOY DEADLINE (once pinned): EVERY decoder on that chain+network MUST be running the
-// pinned height before it, or the fleet forks on the first envelope carrying a
-// marker-only XCHN OP_RETURN. Verify the fleet by reading the armed map out of each
-// RUNNING container rather than out of this file.
+// Makes a recognized payload-free carrier count in mixed-carrier arbitration. This is
+// separate because envelope recognition is already armed on BTC and LTC mainnet.
+// Mainnet stays unpinned pending an operator decision; testnet and regtest start at
+// genesis. Deploy every decoder before pinning a mainnet height.
 const ENVELOPE_CARRIER_RECOGNITION_ACTIVATION = {
     BTC:  { mainnet: null, testnet: 0, regtest: 0 },
     LTC:  { mainnet: null, testnet: 0, regtest: 0 },
