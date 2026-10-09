@@ -239,34 +239,36 @@ function createMempoolMethods(decoder){
             const ttl = parseInt(config.GETMEMPOOL_CACHE_MS, 10) || 5000;
             const now = Date.now();
             const db  = decoder.mempoolDb || decoder.db;
+            let stale = false;
+            let snapshot = getmempoolCache;
             if (!getmempoolCache || (now - getmempoolCache.t) >= ttl) {
-                let rows = [], total = 0;
                 if (db) {
                     try {
-                        rows  = await db.getMempoolTransactions(500);
-                        total = await db.getMempoolTransactionCount();
+                        const rows  = await db.getMempoolTransactions(500);
+                        const total = await db.getMempoolTransactionCount();
+                        getmempoolCache = { t: now, rows, total, read_ok_at: Date.now() };
                     } catch (err) {
                         // Serve the stale snapshot if we have one; a mempool read
                         // must never surface as an API error to remote explorers.
                         console.error('getmempool: mempool read failed:', err);
-                        rows  = getmempoolCache ? getmempoolCache.rows  : [];
-                        total = getmempoolCache ? getmempoolCache.total : 0;
+                        stale = true;
                     }
+                } else {
+                    getmempoolCache = { t: now, rows: [], total: 0, read_ok_at: null };
                 }
-                getmempoolCache = { t: now, rows, total };
+                snapshot = getmempoolCache || { rows: [], total: 0, read_ok_at: null };
             }
             const limit = Math.max(1, Math.min(parseInt(params && params.limit, 10) || 500, 500));
             return {
                 node_tx_count: decoder.nodeMempoolTxCount,
                 node_updated_at: decoder.nodeMempoolUpdatedAt,
-                total: getmempoolCache.total,
-                rows: getmempoolCache.rows.slice(0, limit).map(r => ({
-                    tx_hash:    r.tx_hash,
-                    source:     r.source,
-                    // TEXT can come back as a Buffer depending on driver options;
-                    // normalize so the JSON body always carries the UTF-8 string.
-                    data:       Buffer.isBuffer(r.data) ? r.data.toString('utf8') : r.data,
-                    // Unix seconds read in SQL (see getMempoolTransactions), never a driver Date.
+                stale,
+                read_ok_at: snapshot.read_ok_at,
+                total: snapshot.total,
+                rows: snapshot.rows.slice(0, limit).map(r => ({
+                    tx_hash: r.tx_hash,
+                    source: r.source,
+                    data: Buffer.isBuffer(r.data) ? r.data.toString('utf8') : r.data,
                     first_seen: Number.isFinite(r.first_seen) ? r.first_seen : null
                 }))
             };
@@ -381,4 +383,4 @@ if (require.main === module) startApi()
 // startApi is exported so the crash handlers it installs can be driven for real
 // rather than asserted against the source text; the require.main guard above
 // still keeps a plain require from opening a port or a DB connection.
-module.exports = { makeRpcBatchGuard, registerLiveRoute, startApi, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
+module.exports = { makeRpcBatchGuard, registerLiveRoute, startApi, createMempoolMethods, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
