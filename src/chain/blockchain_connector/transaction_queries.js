@@ -16,6 +16,14 @@ const config = require('../../config');
 const { logger } = require('./constants.js')
 const { carryErrorIdentity, envInt, sanitizeRpcError } = require('./rpc_helpers.js')
 
+// Return a truthy result only if it is a whole hex string; throw into the retry loop otherwise.
+// (Callers decode outside their tagged try, so a non-hex answer would quarantine as content.)
+function wholeHexResult(result, txid) {
+    if (typeof result === 'string' && result.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(result)) return result
+    const shape = typeof result === 'string' ? `a ${result.length}-char string` : `a ${typeof result}`
+    throw new Error(`getRawTransaction: malformed result for txid ${txid}: expected whole hex, got ${shape}`)
+}
+
 function rawTransactionResponse(response, txid) {
     // A JSON-RPC 2.0 node (Bitcoin Core >= v28) answers an RPC error with
     // HTTP 200 and a body error object, so axios never throws and the
@@ -40,7 +48,7 @@ function rawTransactionResponse(response, txid) {
     // Return (not break) so
     // a success on the final attempt cannot fall through to the failure
     // guard below and inflate rpcErrors on a recovered fetch.
-    if (response.data.result) return response.data.result
+    if (response.data.result) return wholeHexResult(response.data.result, txid)
 
     // Tx no longer retrievable (mined/evicted between getRawMempool and this
     // call, or an empty RPC result): resolve null so a single missing tx does

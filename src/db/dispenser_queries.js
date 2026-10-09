@@ -71,7 +71,8 @@ module.exports = {
     // retention on E alone ends capture at E + grace and loses the buyer's coin in the window
     // between the two. The block that stamps expired_block_index is exactly the last block in
     // which a cancel can be accepted, so its header time plus the same grace covers every
-    // settleable fill by construction, with no slack constant. The join reads that header time
+    // settleable fill by construction, with no slack constant (on testnet only once the indexer
+    // gates its close delay on protocol time; see dispenser_cancel_grace.js). The join reads that header time
     // from this decoder's own blocks table rather than duplicating it on the dispenser row, so
     // the reorg clear at deleteBlockByIndex and the this-block restore in
     // extendOpenDispenserExpirationBySource keep the pair consistent by clearing one column.

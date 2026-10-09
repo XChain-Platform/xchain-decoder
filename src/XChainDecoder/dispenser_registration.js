@@ -220,9 +220,13 @@ function pushV0DispenserCreate(decodedDataSplit, dispenserCreateCandidates, pars
     // spelled 9999999999 for "never") stayed open and escrowed there
     // while the decoder skipped registration, and a later coin payment
     // to it was never flagged as a dispense. Number.isSafeInteger is
-    // the bound that actually holds: at or below it Number() round-trips
-    // the payload token exactly, so the decoder stores the same value
-    // the indexer does, and it stays far inside BIGINT UNSIGNED.
+    // the bound Number() holds exactly: at or below it the payload token
+    // round-trips, so the decoder stores the same value the indexer does,
+    // and it stays far inside BIGINT UNSIGNED. It is NOT the indexer's
+    // bound: the indexer accepts any integer EXPIRATION up to 2^64-1
+    // (xchain-indexer/src/config/wire_fields.js), so a create between 2^53
+    // and 2^64-1 is still this drift, escrowed there and never registered
+    // here. Closing it changes captured outputs, so it needs an activation.
     // Dropping the ceiling outright would NOT be safe - Number.isInteger
     // is true for 1e300, which overflows the column and wedges the block
     // loop on the same deterministic tx forever.
@@ -335,11 +339,13 @@ function dispenserEditExtension(dispenserCommand, dispenserCommandPrefix, parseR
             // path writes through extendOpenDispenserExpirationBySource
             // into the same BIGINT UNSIGNED column, and the indexer
             // rejects a fractional edit EXPIRATION with the identical
-            // isInteger test, and the same SAFE-integer ceiling rather than
-            // a u32 one (see the create guard: a u32 reject here would
-            // silently decline to mirror an extend the indexer accepted,
-            // closing the decoder's row early on a dispenser that is still
-            // open and escrowed).
+            // isInteger test. The SAFE-integer ceiling replaces a u32 one
+            // (see the create guard: a u32 reject here would silently
+            // decline to mirror an extend the indexer accepted, closing the
+            // decoder's row early on a dispenser that is still open and
+            // escrowed). The indexer's own ceiling is u64, so an extend past
+            // 2^53 still goes unmirrored; the create guard says why that
+            // gap waits on a decoder activation.
             if (Number.isSafeInteger(newExpiration) && newExpiration >= 0 &&
                 newExpiration > block.timestamp){
                 return { editSource, newExpiration }

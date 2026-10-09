@@ -55,7 +55,12 @@ async function readPriorRollbackDepth(){
         try {
             // Default scan bound, never the height ceiling: the bound counts ROWS and the
             // method returns distinct HEIGHTS, so re-deleted heights would crowd out older ones.
-            priorDepth = await this.db.countReorgDeletesAboveTip()
+            const depth = await this.db.countReorgDeletesAboveTip()
+            // A non-count is a read fault, never a depth: NaN fails both ceiling comparisons open.
+            if (!Number.isInteger(depth) || depth < 0){
+                throw new Error('countReorgDeletesAboveTip returned a non-count depth (' + typeof depth + ' ' + String(depth) + ')')
+            }
+            priorDepth = depth
             seedErr = null
             break
         } catch (err){

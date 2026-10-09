@@ -153,6 +153,9 @@ function registerStatusRoute(app, decoder, isDecoderRunning){
             db: dbOk,
             running: decoderRunning,
             lag: syncStatus.lag,
+            // Ships beside lag: a frozen tip reads lag 0, and the bootstrap gate refuses on
+            // this flag. Reported, not gated on, as on /live.
+            node_height_stale: syncStatus.node_height_stale === true,
             reorg_halted:      reorgHalt.halted,
             reorg_halt_reason: reorgHalt.reason,
             reorg_halted_at:   reorgHalt.at,
@@ -383,4 +386,4 @@ if (require.main === module) startApi()
 // startApi is exported so the crash handlers it installs can be driven for real
 // rather than asserted against the source text; the require.main guard above
 // still keeps a plain require from opening a port or a DB connection.
-module.exports = { makeRpcBatchGuard, registerLiveRoute, startApi, createMempoolMethods, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
+module.exports = { makeRpcBatchGuard, registerLiveRoute, registerStatusRoute, startApi, createMempoolMethods, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }

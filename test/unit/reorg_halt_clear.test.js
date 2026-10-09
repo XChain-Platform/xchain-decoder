@@ -269,6 +269,28 @@ describe('clear-reorg-halt CLI', function () {
 
 describe('clear-reorg-halt CLI', function () {
 
+    // fakeDb's destructuring default turns an undefined count into 0, so each value
+    // is wired onto the method directly.
+    it('refuses, and cannot be forced, when the above-tip count is not a non-negative integer', async function () {
+        for (const value of [undefined, null, NaN, '0', {}, -1, 1.5]){
+            for (const argv of [['--reason', REASON, '--force'], ['--dry-run']]){
+                const { db, calls } = fakeDb()
+                db.countReorgDeletesAboveTip = async () => value
+                const errors = []
+                const exit = await run({ db, argv, log: () => {}, error: (l) => errors.push(l) })
+                const label = String(typeof value) + ' ' + String(value) + ' ' + argv.join(' ')
+                assert.strictEqual(exit, EXIT.NOT_RESYNCED, label)
+                assert.strictEqual(calls.clear.length, 0, label)
+                const refusal = errors.join('\n')
+                assert.match(refusal, /cannot be forced/, label)
+                assert.doesNotMatch(refusal, /undefined block|NaN block|null block/, label)
+            }
+        }
+    })
+})
+
+describe('clear-reorg-halt CLI', function () {
+
     it('refuses a database that has held dispenser state unless forced, and records the force', async function () {
         const { db, calls } = fakeDb({ dispensers: 3 })
         assert.strictEqual(await run({ db, argv: ['--reason', REASON], ...quiet }), EXIT.DISPENSER_STATE)

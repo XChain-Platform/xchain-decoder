@@ -16,8 +16,9 @@
 // Nine guards in test/unit are byte-identity or value-parity checks against a
 // SIBLING checkout (the roundtrip-conformance fixture against xchain-encoder,
 // the vendored coins registry against xchain-hub, the AuxPoW strip against
-// xchain-utxo-tracker, and so on). Every one of them resolves its sibling with
-// existsSync and calls this.skip() when it is absent. That is the right
+// xchain-utxo-tracker, and so on). Each resolves its sibling with existsSync or
+// through test/helpers/sibling_checkout.js (which also refuses a lane symlink
+// into a live main checkout) and calls this.skip() when it is unusable. That is the right
 // behaviour for a single-repo checkout, and it is invisible: mocha reports a
 // skipped test as `pending`, the suite still exits 0, and the push gate prints
 // PASS. A sibling the CI venue was never told to ship (.ci-siblings) is

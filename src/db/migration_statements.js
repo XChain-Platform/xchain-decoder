@@ -14,6 +14,7 @@
 
 const { opensBackslashEscape, createNamesNonInnoDb, dropTargetDestroys } = require('./query_helpers.js')
 const { ensureLedgerAppliedAtDatetime } = require('./migration_ledger.js')
+const { stripBlockComments } = require('./migration_live_schema_guard.js')
 
 // True when a `#` sits outside every quoted span - a line comment
 // stripSqlLineComments should already have removed. Quote-aware so a `#`
@@ -222,9 +223,9 @@ module.exports = {
             // something a prefix classifier cannot see - and no committed auto migration
             // uses one, so treat any statement carrying one as non-auto-eligible.
             if(/\/\*(?:!|M!)/i.test(String(raw)))                return raw;
-            // Belt-and-braces: strip /* */ block comments (line comments are already
-            // gone) so a keyword inside comment prose never triggers or hides a hit.
-            const stmt = String(raw).replace(/\/\*[\s\S]*?\*\//g, ' ').trim();
+            // Strip /* */ comments (line comments are gone) so comment prose never triggers or hides
+            // a hit; quote-aware, so a '/*' literal and a later '*/' literal hide no real clause.
+            const stmt = stripBlockComments(raw).trim();
             if(!stmt) continue;
             // Second layer behind stripSqlLineComments: MariaDB/MySQL honour `#` to
             // end-of-line as a comment, so `# note\nDROP TABLE balances` is a DROP every

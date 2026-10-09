@@ -135,6 +135,15 @@ describe('verifyReorg: the safe-depth ceiling survives a lost halt marker', func
         assert.strictEqual(decoder.getReorgHaltStatus().halted, false)
     })
 
+    it('treats a prior depth that is not a non-negative integer as a read fault, deleting nothing', async function () {
+        for (const value of [undefined, NaN, '3', -1, 2.5]){
+            const { decoder, deleted } = restartedDecoder({ countReorgDeletesAboveTip: async () => value })
+            await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /prior rollback depth could not be read/)
+            assert.strictEqual(deleted.length, 0, String(value))
+            assert.strictEqual(decoder.getReorgHaltStatus().halted, false, String(value))
+        }
+    })
+
     it('recovers when the read fault is transient', async function () {
         let attempts = 0
         const { decoder, deleted } = restartedDecoder({

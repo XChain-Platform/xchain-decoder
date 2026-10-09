@@ -39,6 +39,13 @@
  * contract in db.js retired). getAllOpenDispenserAddresses reads that mark time by joining
  * this decoder's own blocks table on expired_block_index.
  *
+ * THE BOUND NEEDS THE INDEXER'S CLOSE-DELAY CLOCK. Where protocol time is the raw header time
+ * (mainnet, regtest) the cancel block's header is no later than the mark's, so the bound holds
+ * as stated. On testnet protocol time is median-time-past, a cancel accepted before the mark
+ * can sit in a future-stamped block, and the bound holds only once the indexer measures its
+ * close delay on the cancel block's protocol time (its DISPENSER_DELAY_PROTOCOL_TIME gate),
+ * because protocol time never decreases and never exceeds the mark block's header time.
+ *
  * WHAT THE GRACE MOVES, AND WHAT IT MUST NOT. The widening applies to the CAPTURE SET only:
  * getAllOpenDispenserAddresses admits a row whose expiration is no older than the floor this
  * module computes. The soft-expire predicate, the expiry MARK, the extend mirror, the

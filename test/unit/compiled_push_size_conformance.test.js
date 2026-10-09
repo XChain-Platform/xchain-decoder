@@ -26,8 +26,8 @@
 'use strict';
 
 const assert = require('assert');
-const fs = require('fs');
 const path = require('path');
+const { siblingCheckout, skipOrFail } = require('../helpers/sibling_checkout.js');
 const bitcoin = require('bitcoinjs-lib');
 const XChainDecoder = require('../../src/XChainDecoder.js');
 
@@ -76,12 +76,12 @@ describe('compiled-push-size arbiter conformance', function () {
 describe('compiled-push-size arbiter conformance', function () {
 
     // CONFORMANCE: the encoder's emit-side helper must be the same function.
-    // Skips when the sibling xchain-encoder is not checked out.
+    // Skips when xchain-encoder is absent or is a lane symlink into a live main checkout.
     describe('parity with the encoder compiledPushSize', function () {
         const ENCODER = process.env.XCHAIN_ENCODER_DIR ||
             path.join(__dirname, '..', '..', '..', 'xchain-encoder');
         const VALIDATOR = path.join(ENCODER, 'src', 'common', 'validator.js');
-        before(function () { if (!fs.existsSync(VALIDATOR)) { if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-encoder sibling not found at ' + VALIDATOR + ' but XCHAIN_REQUIRE_SIBLINGS=1'); this.skip(); } });
+        before(function () { skipOrFail(this, siblingCheckout(__dirname, VALIDATOR), 'the encoder compiledPushSize parity guard'); });
 
         it('agrees with the decoder helper for every length up to the ceiling', function () {
             const encoderPushSize = require(VALIDATOR).compiledPushSize;
@@ -108,7 +108,7 @@ describe('compiled-push-size arbiter conformance', function () {
         const ENCODER = process.env.XCHAIN_ENCODER_DIR ||
             path.join(__dirname, '..', '..', '..', 'xchain-encoder');
         const VALIDATOR = path.join(ENCODER, 'src', 'common', 'validator.js');
-        before(function () { if (!fs.existsSync(VALIDATOR)) { if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-encoder sibling not found at ' + VALIDATOR + ' but XCHAIN_REQUIRE_SIBLINGS=1'); this.skip(); } });
+        before(function () { skipOrFail(this, siblingCheckout(__dirname, VALIDATOR), 'the encoder compiledPushSize parity guard'); });
 
         // The envelope band, which the sweep above cannot reach.
         //
@@ -149,7 +149,7 @@ describe('compiled-push-size arbiter conformance', function () {
         const ENCODER = process.env.XCHAIN_ENCODER_DIR ||
             path.join(__dirname, '..', '..', '..', 'xchain-encoder');
         const VALIDATOR = path.join(ENCODER, 'src', 'common', 'validator.js');
-        before(function () { if (!fs.existsSync(VALIDATOR)) { if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-encoder sibling not found at ' + VALIDATOR + ' but XCHAIN_REQUIRE_SIBLINGS=1'); this.skip(); } });
+        before(function () { skipOrFail(this, siblingCheckout(__dirname, VALIDATOR), 'the encoder compiledPushSize parity guard'); });
 
         describe('envelope push band (0xffff .. ENVELOPE_MAX_PAYLOAD)', function () {
             const BAND = [8192, 65534, 65535, 65536, 65537, 200000, 390000];

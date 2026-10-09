@@ -91,6 +91,9 @@ function* parseMempoolTransaction(nextTx, nextTransactionHash){
 // Apply the block path's two admission gates: an ACTION needs a resolved source
 // (hasStorableContent), then the shared payload gate (buildStoredActionRecord).
 // An unattributable ACTION is blanked, not skipped: the row is the seen-set entry.
+
+// Diverges for an unattributed ACTION paying an open dispenser: the mempool parse has
+// no open-dispenser set, so it blanks one the block path stores on confirm.
 function admitMempoolAction(parseResult, nextTransactionHash){
     const hasAction = (parseResult["data"] != null) && (parseResult["data"].length > 0)
     if (hasAction && !this.hasStorableContent(parseResult)){

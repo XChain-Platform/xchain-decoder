@@ -304,10 +304,10 @@ describe('BlockchainConnector', () => {
 
     describe('#getRawTransaction()', () => {
         it('should return raw tx hex on success', async () => {
-            axiosStub.resolves({ data: { result: 'rawtxhex' } })
+            axiosStub.resolves({ data: { result: '0100beef' } })
 
             const result = await connector.getRawTransaction('txid123')
-            assert.strictEqual(result, 'rawtxhex')
+            assert.strictEqual(result, '0100beef')
         })
 
         it('should resolve null when response has no result (tx mined/evicted)', async () => {
@@ -333,10 +333,10 @@ describe('BlockchainConnector', () => {
         it('should resolve on success after retries', async () => {
             axiosStub.onCall(0).rejects(new Error('fail'))
             axiosStub.onCall(1).rejects(new Error('fail'))
-            axiosStub.onCall(2).resolves({ data: { result: 'txhex' } })
+            axiosStub.onCall(2).resolves({ data: { result: 'aa01' } })
 
             const result = await connector.getRawTransaction('txid')
-            assert.strictEqual(result, 'txhex')
+            assert.strictEqual(result, 'aa01')
         }).timeout(5000)
 
         it('[REGRESSION P2] R-RPC-002: should back off longer on -429 work queue depth exceeded', async () => {
@@ -345,13 +345,13 @@ describe('BlockchainConnector', () => {
             // a JSON body whose error.code === -429 (NOT an actual HTTP 429 response).
             queueError.response = { data: { error: { code: -429, message: 'Work queue depth exceeded' } } }
             axiosStub.onCall(0).rejects(queueError)
-            axiosStub.onCall(1).resolves({ data: { result: 'txhex' } })
+            axiosStub.onCall(1).resolves({ data: { result: 'aa01' } })
 
             const start = Date.now()
             const result = await connector.getRawTransaction('txid')
             const elapsed = Date.now() - start
 
-            assert.strictEqual(result, 'txhex')
+            assert.strictEqual(result, 'aa01')
             // -429 backoff is 5000ms vs normal 500ms
             assert.ok(elapsed >= 4000, `Expected >= 4000ms backoff, got ${elapsed}ms`)
         }).timeout(10000)
@@ -363,11 +363,11 @@ describe('BlockchainConnector', () => {
 
     describe('#getRawTransactions()', () => {
         it('should batch multiple getRawTransaction calls', async () => {
-            axiosStub.resolves({ data: { result: 'txhex' } })
+            axiosStub.resolves({ data: { result: 'aa01' } })
 
             const results = await connector.getRawTransactions(['tx1', 'tx2', 'tx3'])
             assert.strictEqual(results.length, 3)
-            assert.strictEqual(results[0], 'txhex')
+            assert.strictEqual(results[0], 'aa01')
         })
 
         it('should return empty array for empty input', async () => {
@@ -379,12 +379,12 @@ describe('BlockchainConnector', () => {
             // tx2 was evicted between getRawMempool and the fetch: empty RPC result.
             // The batch must still return the other txs with a null hole for the missing one,
             // rather than rejecting and dropping every txid in the batch.
-            axiosStub.onCall(0).resolves({ data: { result: 'txhex1' } })
+            axiosStub.onCall(0).resolves({ data: { result: 'aa11' } })
             axiosStub.onCall(1).resolves({ data: { result: null, error: { message: 'tx not found' } } })
-            axiosStub.onCall(2).resolves({ data: { result: 'txhex3' } })
+            axiosStub.onCall(2).resolves({ data: { result: 'aa33' } })
 
             const results = await connector.getRawTransactions(['tx1', 'tx2', 'tx3'])
-            assert.deepStrictEqual(results, ['txhex1', null, 'txhex3'])
+            assert.deepStrictEqual(results, ['aa11', null, 'aa33'])
         })
     })
 })

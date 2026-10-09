@@ -292,10 +292,10 @@ describe('BlockchainConnector (extra coverage)', () => {
         it('should retry on ECONNABORTED and succeed on a later attempt', async () => {
             const abortErr = Object.assign(new Error('timeout'), { code: 'ECONNABORTED' })
             axiosStub.onCall(0).rejects(abortErr)
-            axiosStub.onCall(1).resolves({ data: { result: 'txhex' } })
+            axiosStub.onCall(1).resolves({ data: { result: 'aa01' } })
 
             const result = await connector.getRawTransaction('txid')
-            assert.strictEqual(result, 'txhex')
+            assert.strictEqual(result, 'aa01')
             assert.strictEqual(axiosStub.callCount, 2)
         }).timeout(5000)
     })
@@ -311,13 +311,13 @@ describe('BlockchainConnector (extra coverage)', () => {
         it('should back off longer on ECONNRESET (Dogecoin queue-full signal)', async () => {
             const resetErr = Object.assign(new Error('reset'), { code: 'ECONNRESET' })
             axiosStub.onCall(0).rejects(resetErr)
-            axiosStub.onCall(1).resolves({ data: { result: 'txhex' } })
+            axiosStub.onCall(1).resolves({ data: { result: 'aa01' } })
 
             const start = Date.now()
             const result = await connector.getRawTransaction('txid')
             const elapsed = Date.now() - start
 
-            assert.strictEqual(result, 'txhex')
+            assert.strictEqual(result, 'aa01')
             // ECONNRESET backoff is 5000ms
             assert.ok(elapsed >= 4000, `Expected >= 4000ms, got ${elapsed}ms`)
         }).timeout(10000)

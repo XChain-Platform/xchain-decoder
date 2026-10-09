@@ -16,6 +16,7 @@ const { format: formatLogLine } = require('node:util');
 const { SATOSHIS_DECIMALS, logger } = require('./constants.js')
 
 async function deleteBlockRows(connection, blockIndex){
+    // Classify every src/sql table in test/unit/reorg_table_coverage.test.js (deleted here or exempted there).
     // Resurrect any dispenser that THIS (now-orphaned) block soft-expired:
     // clear the expiry mark so it is open again. Must run before the
     // dispenser row-delete below (a dispenser both OPENED and expired in

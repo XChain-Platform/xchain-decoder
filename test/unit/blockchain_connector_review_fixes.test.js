@@ -47,10 +47,10 @@ describe('BlockchainConnector RPC error accounting and reporting', () => {
         it('does NOT increment rpcErrors when the fetch succeeds on the 10th attempt', async () => {
             const timeoutErr = Object.assign(new Error('timeout'), { code: 'ECONNABORTED' })
             for (let i = 0; i < 9; i++) axiosStub.onCall(i).rejects(timeoutErr)
-            axiosStub.onCall(9).resolves({ data: { result: 'txhex' } })
+            axiosStub.onCall(9).resolves({ data: { result: 'aa01' } })
 
             const result = await connector.getRawTransaction('txid')
-            assert.strictEqual(result, 'txhex')
+            assert.strictEqual(result, 'aa01')
             assert.strictEqual(axiosStub.callCount, 10)
             assert.strictEqual(connector.rpcErrors, 0,
                 'a recovered fetch on the last attempt must not report an RPC error')

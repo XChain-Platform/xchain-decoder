@@ -88,12 +88,27 @@ function parseArgs(argv){
     return out
 }
 
+// Render a non-count for the refusal text without throwing on any input.
+function describeCount(value){
+    if (typeof value === 'string') return 'the string ' + JSON.stringify(value)
+    if (typeof value === 'number' || typeof value === 'bigint' || value == null) return String(value)
+    return 'a value of type ' + typeof value
+}
+
 async function checkClearPreconditions(db, args, error){
     // Check 1: the rollback has been re-synced. Not forceable: a halt with blocks
     // still missing above the tip is a rollback in progress, and clearing it lets
     // the next verifyReorg resume past the window.
     const deletesAboveTip = await db.countReorgDeletesAboveTip()
-    if (deletesAboveTip > 0){
+    // Only a proven zero passes, like the dispenser check below: a count that is not
+    // a non-negative integer cannot prove the range was re-parsed.
+    if (!Number.isInteger(deletesAboveTip) || deletesAboveTip < 0){
+        error('clear-reorg-halt: REFUSED. The count of rolled-back blocks above the tip could not be read as a '
+            + 'block count (got ' + describeCount(deletesAboveTip) + '), so this command cannot confirm the rollback '
+            + 'was re-parsed. This check cannot be forced. Nothing was cleared.')
+        return { exitCode: EXIT.NOT_RESYNCED }
+    }
+    if (deletesAboveTip !== 0){
         error('clear-reorg-halt: REFUSED. ' + deletesAboveTip + ' block(s) rolled back above the current tip have not been re-parsed yet. '
             + 'This check cannot be forced. If the decoder is parked on this halt (reorg_halt_parked: true on health, '
             + '/status or /live), it parses nothing and will never re-parse this range: recover with a full resync from '
