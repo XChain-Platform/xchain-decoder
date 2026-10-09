@@ -366,6 +366,25 @@ const DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION = {
     regtest: 0,
 };
 
+// EXACT_INTEGER_EXPIRATION_ACTIVATION: the block-time boundary at/above which the
+// decoder tests a DISPENSER create or edit EXPIRATION wire spelling in exact decimal
+// space as well as checking its Number conversion. The legacy
+// Number.isSafeInteger(Number(token)) guard can
+// accept a fractional wire value when its fractional tail is below Number precision,
+// while the indexer's exact integer rule rejects the same action. Registering or
+// extending that dispenser here would then make the decoder capture payments for an
+// action the indexer did not accept.
+//
+// This recognition change is consensus-affecting because it can remove an address from
+// the decoder's payment-output capture set. Every network therefore remains UNARMED
+// until an operator audit establishes a safe flag-day and the matching indexer gate is
+// armed. null means never active; unknown networks and invalid block times fail closed.
+const EXACT_INTEGER_EXPIRATION_ACTIVATION = {
+    mainnet: null,
+    testnet: null,
+    regtest: null,
+};
+
 // BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION (output capture AND open-dispenser registration
 // through a BATCH): the flag-day at/above which the DECODER reads a BATCH's SUB-COMMANDS
 // instead of only its top-level ACTION name, both when deciding which native-coin outputs to
@@ -517,6 +536,7 @@ module.exports = {
     DISPENSER_CANCEL_GRACE_ACTIVATION,
     DISPENSER_PURGE_GRACE_ACTIVATION,
     DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION,
+    EXACT_INTEGER_EXPIRATION_ACTIVATION,
     BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
     ENVELOPE_RECOGNITION_ACTIVATION,
     ENVELOPE_CARRIER_RECOGNITION_ACTIVATION,

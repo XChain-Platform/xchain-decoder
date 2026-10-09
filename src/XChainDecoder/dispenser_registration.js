@@ -21,6 +21,39 @@
 const { logger } = require('./constants.js')
 const { oracleAddressFromCreate, V0_GIVE_COIN_INDEX, V0_GET_COIN_INDEX, V0_GET_ADDRESS_INDEX, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('../protocol/oracle_fee_output')
 const { isBatchSubCommandCaptureActive } = require('../protocol/batch_sub_command_capture')
+const { EXACT_INTEGER_EXPIRATION_ACTIVATION } = require('../protocol/constants.js')
+
+function isExactIntegerExpirationActive(consensusNetwork, blockTime){
+    const activation = EXACT_INTEGER_EXPIRATION_ACTIVATION[consensusNetwork]
+    if (typeof activation !== 'number') return false
+    const t = Number(blockTime)
+    return Number.isFinite(t) && t >= activation
+}
+
+// Test mathematical integrality from the wire spelling without first rounding through
+// Number. This accepts the same decimal and exponent forms as the indexer's numeric
+// parser, including integral forms such as 1.0 and 1e3, while rejecting a non-zero
+// fractional tail even when it is too small for Number to retain.
+function isExactIntegerToken(value){
+    const match = String(value).trim().match(/^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/)
+    if (!match) return false
+    const whole = match[2] || ''
+    const fraction = (match[3] !== undefined) ? match[3] : (match[4] || '')
+    const digits = whole + fraction
+    const exponent = Number(match[5] || 0)
+    if (!Number.isSafeInteger(exponent)) return false
+    const fractionalDigits = fraction.length - exponent
+    if (fractionalDigits <= 0) return true
+    if (fractionalDigits >= digits.length) return /^0*$/.test(digits)
+    return /^0*$/.test(digits.slice(digits.length - fractionalDigits))
+}
+
+function hasValidExpirationToken(expirationToken, expiration, consensusNetwork, blockTime){
+    if (!Number.isSafeInteger(expiration) || expiration < 0) return false
+    if (expirationToken === undefined || expirationToken === '') return true
+    if (!isExactIntegerExpirationActive(consensusNetwork, blockTime)) return true
+    return isExactIntegerToken(expirationToken)
+}
 
 //Catch any dispenser message to add it to
 //the list of possible dispenses.
@@ -201,10 +234,11 @@ function pushV0DispenserCreate(decodedDataSplit, dispenserCreateCandidates, pars
         expiration = Number(expirationToken)
     }
 
-    // Require an INTEGER, matching the indexer, which rejects any
-    // non-integer EXPIRATION outright (isInteger, see
-    // xchain-indexer/src/actions/dispenser/validate_format.js). dispensers.expiration
-    // is BIGINT UNSIGNED, so a fractional value like 1700000000.5
+    // Require an integer. At/above EXACT_INTEGER_EXPIRATION_ACTIVATION the
+    // wire token is checked before Number conversion, matching the indexer's
+    // exact integer rule. Below it the legacy Number-based decision remains,
+    // preserving historical replay. dispensers.expiration is BIGINT UNSIGNED,
+    // so a fractional value like 1700000000.5
     // either fails the write under a strict sql_mode - wedging the
     // block loop, which then retries the same deterministic tx
     // forever - or truncates under a lax one, leaving the decoder
@@ -230,7 +264,7 @@ function pushV0DispenserCreate(decodedDataSplit, dispenserCreateCandidates, pars
     // Dropping the ceiling outright would NOT be safe - Number.isInteger
     // is true for 1e300, which overflows the column and wedges the block
     // loop on the same deterministic tx forever.
-    if (!Number.isSafeInteger(expiration) || expiration < 0) {
+    if (!hasValidExpirationToken(expirationToken, expiration, this.consensusNetwork, block.timestamp)) {
         this.parseErrors++
         logger.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[V0_EXPIRATION_INDEX]}'`)
     } else if (this.dispenserOpensForThisChain(giveCoin, getCoin)){
@@ -335,7 +369,7 @@ function dispenserEditExtension(dispenserCommand, dispenserCommandPrefix, parseR
         if (editSource && editSource.length > 0 &&
             editExpirationToken !== undefined && editExpirationToken !== ""){
             const newExpiration = Number(editExpirationToken)
-            // Same integer contract as the create guard above: the edit
+            // Same gated integer contract as the create guard above: the edit
             // path writes through extendOpenDispenserExpirationBySource
             // into the same BIGINT UNSIGNED column, and the indexer
             // rejects a fractional edit EXPIRATION with the identical
@@ -346,7 +380,7 @@ function dispenserEditExtension(dispenserCommand, dispenserCommandPrefix, parseR
             // escrowed). The indexer's own ceiling is u64, so an extend past
             // 2^53 still goes unmirrored; the create guard says why that
             // gap waits on a decoder activation.
-            if (Number.isSafeInteger(newExpiration) && newExpiration >= 0 &&
+            if (hasValidExpirationToken(editExpirationToken, newExpiration, this.consensusNetwork, block.timestamp) &&
                 newExpiration > block.timestamp){
                 return { editSource, newExpiration }
             }
@@ -395,4 +429,5 @@ async function extendEditedDispenser(extension, nextBlockHeight){
     }
 }
 
-module.exports = { dispenserCommandPrefixFor, collectDispenserCreates, registerDispenser, dispenserEditExtension, extendEditedDispenser }
+module.exports = { dispenserCommandPrefixFor, collectDispenserCreates, registerDispenser, dispenserEditExtension, extendEditedDispenser,
+    isExactIntegerExpirationActive, isExactIntegerToken }
