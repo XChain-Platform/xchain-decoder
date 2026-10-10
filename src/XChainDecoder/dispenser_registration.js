@@ -21,7 +21,12 @@
 const { logger } = require('./constants.js')
 const { oracleAddressFromCreate, V0_GIVE_COIN_INDEX, V0_GET_COIN_INDEX, V0_GET_ADDRESS_INDEX, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('../protocol/oracle_fee_output')
 const { isBatchSubCommandCaptureActive } = require('../protocol/batch_sub_command_capture')
-const { normalizeDispenserExpiration } = require('./dispenser_wide_expiration.js')
+const {
+    hasValidExpirationToken,
+    isExactIntegerExpirationActive,
+    isExactIntegerToken,
+    normalizeDispenserExpiration,
+} = require('./dispenser_wide_expiration.js')
 
 //Catch any dispenser message to add it to
 //the list of possible dispenses.
@@ -199,28 +204,21 @@ function pushV0DispenserCreate(decodedDataSplit, dispenserCreateCandidates, pars
     if (expirationToken === undefined || expirationToken === "") {
         expiration = this.getDefaultExpiration(block.timestamp)
     } else {
-        expiration = normalizeDispenserExpiration(expirationToken, this.consensusNetwork, block.timestamp)
+        expiration = Number(expirationToken)
+        expiration = normalizeDispenserExpiration(
+            expirationToken, this.consensusNetwork, block.timestamp, expiration)
     }
 
-    // Require an INTEGER, matching the indexer, which rejects any
-    // non-integer EXPIRATION outright (isInteger, see
-    // xchain-indexer/src/actions/dispenser/validate_format.js). dispensers.expiration
-    // is BIGINT UNSIGNED, so a fractional value like 1700000000.5
-    // either fails the write under a strict sql_mode - wedging the
-    // block loop, which then retries the same deterministic tx
-    // forever - or truncates under a lax one, leaving the decoder
-    // holding a dispenser the indexer never registered.
-    // Exact integer, not merely integer, and no u32 ceiling. The old
-    // `expiration > 4294967295` reject was recognition drift: the
-    // indexer escrows any non-negative integer EXPIRATION into its own
-    // BIGINT UNSIGNED column, so a dispenser opened past year 2106 (or
-    // spelled 9999999999 for "never") stayed open and escrowed there
-    // while the decoder skipped registration, and a later coin payment
-    // to it was never flagged as a dispense. The normalizer preserves safe
-    // values exactly. Above its gate, decimal u64 tokens are parsed as BigInt
-    // and clamped to the largest exact Number, keeping this advisory row open
-    // for every reachable block without rounding the wire value.
-    if (expiration === null) {
+    // Require an integer: dispensers.expiration is BIGINT UNSIGNED, so a fractional
+    // value wedges the block loop or leaves a dispenser the indexer never registered.
+    // At/above EXACT_INTEGER_EXPIRATION_ACTIVATION the wire token is checked in exact
+    // decimal space as the indexer does; below it the Number-based decision is kept
+    // for historical replay. The default expiration is integral by construction.
+    //
+    // Above the wide-expiration gate, exact unsigned u64 values beyond Number's safe
+    // range clamp to its largest exact integer, keeping the advisory row open without
+    // rounding the wire value. Overflow and invalid spellings remain rejected.
+    if (!hasValidExpirationToken(expirationToken, expiration, this.consensusNetwork, block.timestamp)) {
         this.parseErrors++
         logger.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[V0_EXPIRATION_INDEX]}'`)
     } else if (this.dispenserOpensForThisChain(giveCoin, getCoin)){
@@ -324,12 +322,11 @@ function dispenserEditExtension(dispenserCommand, dispenserCommandPrefix, parseR
         const editExpirationToken = decodedDataSplit[V2_EXPIRATION_INDEX]
         if (editSource && editSource.length > 0 &&
             editExpirationToken !== undefined && editExpirationToken !== ""){
+            const convertedExpiration = Number(editExpirationToken)
             const newExpiration = normalizeDispenserExpiration(
-                editExpirationToken, this.consensusNetwork, block.timestamp)
-            // Same exact-or-clamped contract as the create guard above. A
-            // wide valid edit extends every candidate row to the decoder's
-            // maximum exact expiration instead of being silently ignored.
-            if (newExpiration !== null &&
+                editExpirationToken, this.consensusNetwork, block.timestamp, convertedExpiration)
+            // Same gated exact-or-clamped contract as the create guard above.
+            if (hasValidExpirationToken(editExpirationToken, newExpiration, this.consensusNetwork, block.timestamp) &&
                 newExpiration > block.timestamp){
                 return { editSource, newExpiration }
             }
@@ -378,4 +375,4 @@ async function extendEditedDispenser(extension, nextBlockHeight){
     }
 }
 
-module.exports = { dispenserCommandPrefixFor, collectDispenserCreates, registerDispenser, dispenserEditExtension, extendEditedDispenser }
+module.exports = { dispenserCommandPrefixFor, collectDispenserCreates, registerDispenser, dispenserEditExtension, extendEditedDispenser, isExactIntegerExpirationActive, isExactIntegerToken }

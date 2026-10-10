@@ -14,7 +14,10 @@
 
 'use strict';
 
-const { DISPENSER_WIDE_EXPIRATION_ACTIVATION } = require('../protocol/constants.js')
+const {
+    DISPENSER_WIDE_EXPIRATION_ACTIVATION,
+    EXACT_INTEGER_EXPIRATION_ACTIVATION,
+} = require('../protocol/constants.js')
 
 const MAX_SAFE_DISPENSER_EXPIRATION = Number.MAX_SAFE_INTEGER
 const U64_MAX = 18446744073709551615n
@@ -24,6 +27,30 @@ function isDispenserWideExpirationActive(consensusNetwork, blockTime){
     if (typeof activation !== 'number') return false
     const time = Number(blockTime)
     return Number.isFinite(time) && time >= activation
+}
+
+function isExactIntegerExpirationActive(consensusNetwork, blockTime){
+    const activation = EXACT_INTEGER_EXPIRATION_ACTIVATION[consensusNetwork]
+    return typeof activation === 'number' && Number.isFinite(Number(blockTime)) && Number(blockTime) >= activation
+}
+
+function isExactIntegerToken(value){
+    const match = String(value).trim().match(/^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/)
+    if (!match) return false
+    const fraction = match[3] || match[4] || ''
+    const digits = (match[2] || '') + fraction
+    const exponent = Number(match[5] || 0)
+    if (!Number.isSafeInteger(exponent)) return false
+    const fractionalDigits = fraction.length - exponent
+    if (fractionalDigits <= 0) return true
+    if (fractionalDigits >= digits.length) return /^0*$/.test(digits)
+    return /^0*$/.test(digits.slice(digits.length - fractionalDigits))
+}
+
+function hasValidExpirationToken(expirationToken, expiration, consensusNetwork, blockTime){
+    if (!Number.isSafeInteger(expiration) || expiration < 0) return false
+    if (expirationToken === undefined || expirationToken === '') return true
+    return !isExactIntegerExpirationActive(consensusNetwork, blockTime) || isExactIntegerToken(expirationToken)
 }
 
 function exactUnsignedDecimal(raw){
@@ -57,10 +84,9 @@ function exactUnsignedDecimal(raw){
 // range is therefore represented by the largest exact Number, never by a rounded
 // conversion of the wire token. Both values are far beyond the Unix timestamps
 // this decoder can process, so neither side can expire first in reachable history.
-function normalizeDispenserExpiration(raw, consensusNetwork, blockTime){
+function normalizeDispenserExpiration(raw, consensusNetwork, blockTime, asNumber = Number(raw)){
     if (raw === null || raw === undefined) return null
     if (typeof raw === 'string' && raw.trim() === '') return null
-    const asNumber = Number(raw)
     if (Number.isSafeInteger(asNumber) && asNumber >= 0)
         return asNumber
 
@@ -78,6 +104,9 @@ module.exports = {
     DISPENSER_WIDE_EXPIRATION_ACTIVATION,
     MAX_SAFE_DISPENSER_EXPIRATION,
     U64_MAX,
+    hasValidExpirationToken,
     isDispenserWideExpirationActive,
+    isExactIntegerExpirationActive,
+    isExactIntegerToken,
     normalizeDispenserExpiration,
 }
