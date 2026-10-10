@@ -21,33 +21,12 @@
 const { logger } = require('./constants.js')
 const { oracleAddressFromCreate, V0_GIVE_COIN_INDEX, V0_GET_COIN_INDEX, V0_GET_ADDRESS_INDEX, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('../protocol/oracle_fee_output')
 const { isBatchSubCommandCaptureActive } = require('../protocol/batch_sub_command_capture')
-const { EXACT_INTEGER_EXPIRATION_ACTIVATION } = require('../protocol/constants.js')
-
-function isExactIntegerExpirationActive(consensusNetwork, blockTime){
-    const activation = EXACT_INTEGER_EXPIRATION_ACTIVATION[consensusNetwork]
-    return typeof activation === 'number' && Number.isFinite(Number(blockTime)) && Number(blockTime) >= activation
-}
-
-// Integrality of the wire spelling without rounding through Number: accepts 1.0 and 1e3,
-// rejects a non-zero fractional tail even when too small for Number to retain.
-function isExactIntegerToken(value){
-    const match = String(value).trim().match(/^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/)
-    if (!match) return false
-    const fraction = match[3] || match[4] || ''
-    const digits = (match[2] || '') + fraction
-    const exponent = Number(match[5] || 0)
-    if (!Number.isSafeInteger(exponent)) return false
-    const fractionalDigits = fraction.length - exponent
-    if (fractionalDigits <= 0) return true
-    if (fractionalDigits >= digits.length) return /^0*$/.test(digits)
-    return /^0*$/.test(digits.slice(digits.length - fractionalDigits))
-}
-
-function hasValidExpirationToken(expirationToken, expiration, consensusNetwork, blockTime){
-    if (!Number.isSafeInteger(expiration) || expiration < 0) return false
-    if (expirationToken === undefined || expirationToken === '') return true
-    return !isExactIntegerExpirationActive(consensusNetwork, blockTime) || isExactIntegerToken(expirationToken)
-}
+const {
+    hasValidExpirationToken,
+    isExactIntegerExpirationActive,
+    isExactIntegerToken,
+    normalizeDispenserExpiration,
+} = require('./dispenser_wide_expiration.js')
 
 //Catch any dispenser message to add it to
 //the list of possible dispenses.
@@ -226,6 +205,8 @@ function pushV0DispenserCreate(decodedDataSplit, dispenserCreateCandidates, pars
         expiration = this.getDefaultExpiration(block.timestamp)
     } else {
         expiration = Number(expirationToken)
+        expiration = normalizeDispenserExpiration(
+            expirationToken, this.consensusNetwork, block.timestamp, expiration)
     }
 
     // Require an integer: dispensers.expiration is BIGINT UNSIGNED, so a fractional
@@ -234,12 +215,9 @@ function pushV0DispenserCreate(decodedDataSplit, dispenserCreateCandidates, pars
     // decimal space as the indexer does; below it the Number-based decision is kept
     // for historical replay. The default expiration is integral by construction.
     //
-    // SAFE integer and no u32 ceiling: the indexer escrows any non-negative integer
-    // EXPIRATION, so a u32 reject was recognition drift. Number.isSafeInteger is the
-    // bound Number() holds exactly, but the indexer accepts up to 2^64-1
-    // (xchain-indexer/src/config/wire_fields.js), so a create between 2^53 and 2^64-1
-    // is still drift; closing it changes captured outputs and needs an activation.
-    // Dropping the ceiling is unsafe: Number.isInteger is true for 1e300.
+    // Above the wide-expiration gate, exact unsigned u64 values beyond Number's safe
+    // range clamp to its largest exact integer, keeping the advisory row open without
+    // rounding the wire value. Overflow and invalid spellings remain rejected.
     if (!hasValidExpirationToken(expirationToken, expiration, this.consensusNetwork, block.timestamp)) {
         this.parseErrors++
         logger.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[V0_EXPIRATION_INDEX]}'`)
@@ -344,10 +322,10 @@ function dispenserEditExtension(dispenserCommand, dispenserCommandPrefix, parseR
         const editExpirationToken = decodedDataSplit[V2_EXPIRATION_INDEX]
         if (editSource && editSource.length > 0 &&
             editExpirationToken !== undefined && editExpirationToken !== ""){
-            const newExpiration = Number(editExpirationToken)
-            // Same gated integer contract as the create guard: the edit writes the
-            // same BIGINT UNSIGNED column. The SAFE-integer ceiling replaces a u32 one,
-            // and an extend past 2^53 stays unmirrored until a decoder activation.
+            const convertedExpiration = Number(editExpirationToken)
+            const newExpiration = normalizeDispenserExpiration(
+                editExpirationToken, this.consensusNetwork, block.timestamp, convertedExpiration)
+            // Same gated exact-or-clamped contract as the create guard above.
             if (hasValidExpirationToken(editExpirationToken, newExpiration, this.consensusNetwork, block.timestamp) &&
                 newExpiration > block.timestamp){
                 return { editSource, newExpiration }
