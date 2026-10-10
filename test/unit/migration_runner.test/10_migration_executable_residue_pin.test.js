@@ -75,4 +75,16 @@ describe('migration executable-residue pin: the guard bites @regression', functi
         assert.deepStrictEqual(kinds({}), ['missing']);
         assert.deepStrictEqual(kinds({ [FILE]: RAW, '2099-01-02-new.sql': 'SELECT 1;' }), []);
     });
+
+    it('an unpinned file that sorts before the newest pin is rejected', function () {
+        const old = '2098-12-31-missed.sql';
+        const bad = pin.findViolations({
+            files: { [FILE]: RAW, [old]: 'SELECT 1;' },
+            fixture,
+            rebaselines: {}
+        });
+        assert.deepStrictEqual(bad.map((v) => v.kind + ':' + v.file), ['unpinned:' + old]);
+        assert.ok(bad[0].message.includes('sorts before the newest pinned migration ' + FILE));
+        assert.ok(bad[0].message.includes('--add'));
+    });
 });

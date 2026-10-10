@@ -26,9 +26,11 @@
  *            passes only when a reviewed rebaseline heals the pinned hash to the
  *            current one, since that is the only case a deployed DB survives.
  *
- * A file the pin does not hold yet passes, so a new migration needs no fixture edit;
- * `--add` pins it. An existing entry moves only through `--accept <file>`, which is
- * legitimate solely for a file no database has applied.
+ * A file the pin does not hold yet passes when its name sorts after the newest pinned
+ * migration, so a new migration needs no fixture edit; `--add` pins it. A file that
+ * sorts before the newest pinned migration fails because it was missed or backdated.
+ * An existing entry moves only through `--accept <file>`, which is legitimate solely
+ * for a file no database has applied.
  *
  * USAGE (from the repo root)
  *   node bin/lib/migration_residue_pin.js              check; exit 1 on a violation
@@ -63,6 +65,11 @@ function pinOf(raw){
 // Every violation of the pin over `files` (name -> raw text), as { file, kind, message }.
 function findViolations({ files, fixture, rebaselines }){
     const out = [];
+    const newest = Object.keys(fixture).sort().pop() || '';
+    for(const file of Object.keys(files).filter((f) => !Object.hasOwn(fixture, f) && f < newest).sort()){
+        out.push({ file, kind: 'unpinned', message: file + ' sorts before the newest pinned migration ' + newest +
+            ' but is not pinned: run node bin/lib/migration_residue_pin.js --add and commit the fixture.' });
+    }
     for(const file of Object.keys(fixture).sort()){
         const pinned = fixture[file];
         // Deleting or renaming an applied migration is forbidden: the decoder has no ledger rename map.
