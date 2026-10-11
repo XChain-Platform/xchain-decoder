@@ -19,6 +19,7 @@
  ********************************************************************/
 
 const { format: formatLogLine } = require('node:util')
+const { cancelGraceFloor } = require('../protocol/dispenser_cancel_grace')
 const { logger, MEMPOOL_BATCH_SIZE } = require('./constants.js')
 
 function dedupNodeMempool(rawMempoolUnordered){
@@ -64,7 +65,30 @@ function decodeMempoolTransaction(nextTxHex, nextTxHexIndex){
     return nextTx
 }
 
-function* parseMempoolTransaction(nextTx, nextTransactionHash){
+// The open-dispenser set a pending tx is classified against, loaded once per cycle on
+// mempoolDb with the same query and grace floor the block loop uses
+// (loadOpenDispenserAddresses in block_store.js). A pending tx confirms at the earliest
+// into the next block, whose header time is close to now, so wall-clock seconds stand
+// in for that block's timestamp. A failed read is logged and the cycle parses against
+// an empty set: the mempool view is non-consensus, so a pending row that blanks an
+// unattributed ACTION for one poll is corrected by the block path on confirm, and the
+// rest of the cycle (pruning, new arrivals) still runs.
+function* loadMempoolOpenDispenserAddresses(){
+    const floor = cancelGraceFloor(this.consensusNetwork, Math.floor(Date.now() / 1000))
+    let openDispenserAddresses = null
+    try {
+        openDispenserAddresses = yield this.mempoolDb.getAllOpenDispenserAddresses(floor)
+    } catch (err) {
+        logger.error(formatLogLine("Mempool: failed to load open dispenser addresses:", err))
+    }
+    if (openDispenserAddresses == null) {
+        logger.error("Mempool: open dispenser addresses unavailable; classifying this cycle without them")
+        return new Set()
+    }
+    return openDispenserAddresses
+}
+
+function* parseMempoolTransaction(nextTx, nextTransactionHash, openDispenserAddresses){
     let parseResult = null
     try {
         // Pass mempoolDb so the pubkey-capture writes inside parseTransaction also
@@ -75,7 +99,10 @@ function* parseMempoolTransaction(nextTx, nextTransactionHash){
         // mempool view is per-instance and non-consensus, so a
         // briefly-lagging instance near the flag boundary is
         // acceptable where a forked BLOCK parse would not be.
-        parseResult = yield this.parseTransaction(nextTx, undefined, this.mempoolDb, this.lastProcessedBlockIndex + 1)
+        // The open-dispenser set makes a payment to an open dispenser a dispense
+        // output here exactly as on the block path, so hasStorableContent agrees
+        // between the two for an ACTION whose source cannot be resolved.
+        parseResult = yield this.parseTransaction(nextTx, openDispenserAddresses, this.mempoolDb, this.lastProcessedBlockIndex + 1)
     } catch (err) {
         // The surrounding try has no catch (only a finally for the busy
         // flag), so a single undecodable mempool tx would abort the whole
@@ -91,9 +118,8 @@ function* parseMempoolTransaction(nextTx, nextTransactionHash){
 // Apply the block path's two admission gates: an ACTION needs a resolved source
 // (hasStorableContent), then the shared payload gate (buildStoredActionRecord).
 // An unattributable ACTION is blanked, not skipped: the row is the seen-set entry.
-
-// Diverges for an unattributed ACTION paying an open dispenser: the mempool parse has
-// no open-dispenser set, so it blanks one the block path stores on confirm.
+// An unattributed ACTION that pays an open dispenser carries dispense outputs, so it
+// passes hasStorableContent and keeps its text, matching the row stored on confirm.
 function admitMempoolAction(parseResult, nextTransactionHash){
     const hasAction = (parseResult["data"] != null) && (parseResult["data"].length > 0)
     if (hasAction && !this.hasStorableContent(parseResult)){
@@ -104,7 +130,7 @@ function admitMempoolAction(parseResult, nextTransactionHash){
     return this.buildStoredActionRecord(parseResult, nextTransactionHash, true)
 }
 
-function* storeMempoolTransaction(nextTxHex, nextTxHexIndex){
+function* storeMempoolTransaction(nextTxHex, nextTxHexIndex, openDispenserAddresses){
     let nextTx = decodeMempoolTransaction.call(this, nextTxHex, nextTxHexIndex)
     if (nextTx == null) {
         return false
@@ -112,7 +138,7 @@ function* storeMempoolTransaction(nextTxHex, nextTxHexIndex){
 
     let nextTransactionHash = nextTx.getId()
 
-    let parseResult = yield* parseMempoolTransaction.call(this, nextTx, nextTransactionHash)
+    let parseResult = yield* parseMempoolTransaction.call(this, nextTx, nextTransactionHash, openDispenserAddresses)
     if (parseResult == null) {
         return false
     }
@@ -147,7 +173,7 @@ function* storeMempoolTransaction(nextTxHex, nextTxHexIndex){
     }
 }
 
-function* storeMempoolBatches(rawMempool){
+function* storeMempoolBatches(rawMempool, openDispenserAddresses){
     let validTransactionsCount = 0
     let i = 0
     while (i < rawMempool.length) {
@@ -172,7 +198,7 @@ function* storeMempoolBatches(rawMempool){
                 continue
             }
 
-            if (yield* storeMempoolTransaction.call(this, nextTxHex, nextTxHexIndex)) {
+            if (yield* storeMempoolTransaction.call(this, nextTxHex, nextTxHexIndex, openDispenserAddresses)) {
                 validTransactionsCount = validTransactionsCount + 1
             }
         }
@@ -185,6 +211,9 @@ function* storeMempoolBatches(rawMempool){
 function* refreshMempoolRows(rawMempool, nodeMempoolCount, mempoolStartTime){
     let validTransactionsCount = 0
 
+    // One load per cycle, shared by every tx the cycle parses.
+    const openDispenserAddresses = yield* loadMempoolOpenDispenserAddresses.call(this)
+
     // All mempool DB work runs on this.mempoolDb, never this.db, so it stays outside the
     // block loop's open transaction. Deletes txs no longer in the node mempool and
     // drops txs already stored, leaving rawMempool holding only the new arrivals.
@@ -195,7 +224,7 @@ function* refreshMempoolRows(rawMempool, nodeMempoolCount, mempoolStartTime){
     // the call above truncated rawMempool down to the txids this node has not stored.
     let newArrivalsCount = rawMempool.length
 
-    validTransactionsCount = yield* storeMempoolBatches.call(this, rawMempool)
+    validTransactionsCount = yield* storeMempoolBatches.call(this, rawMempool, openDispenserAddresses)
 
     let mempoolEndTime = Date.now()
     let timeString = this.millisecondsToTimeString(mempoolEndTime - mempoolStartTime)
