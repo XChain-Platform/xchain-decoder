@@ -47,7 +47,7 @@
  * ignored token (a typo, `--dry-run`, `--help`) would silently apply every
  * pending manual migration the operator was only asking about.
  *
- * Reads DECODER_DB_* from the service environment (.env).
+ * Reads DECODER_DB_* from the service environment (.env), through src/config.js.
  *
  ********************************************************************/
 
@@ -56,6 +56,7 @@ const dotenv   = require('dotenv');
 dotenv.config();
 
 const Database = require('../db.js');
+const config   = require('../config.js');
 
 // Spelled out for an operator reading it mid-incident: the difference between a
 // blanket run and a scoped one is the whole risk of this command, so each mode
@@ -195,11 +196,11 @@ async function main(){
     if(parsed === null) return;
     const only = parsed.only;
 
-    const host = process.env.DECODER_DB_HOST;
-    const port = process.env.DECODER_DB_PORT;
-    const name = process.env.DECODER_DB_NAME;
-    const user = process.env.DECODER_DB_USER;
-    const pass = process.env.DECODER_DB_PASS;
+    const host = config.DECODER_DB_HOST;
+    const port = config.DECODER_DB_PORT;
+    const name = config.DECODER_DB_NAME;
+    const user = config.DECODER_DB_USER;
+    const pass = config.DECODER_DB_PASS;
     if(!host || !name || !user){
         console.error('migrate: DECODER_DB_HOST / DECODER_DB_NAME / DECODER_DB_USER must be set (load the service .env).');
         process.exit(2);
