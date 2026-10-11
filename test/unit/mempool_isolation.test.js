@@ -28,6 +28,7 @@ function buildDecoder(insertResult) {
 
   const calls = { db: [], mempoolDb: [] }
   const spyDb = (label) => ({
+    getAllOpenDispenserAddresses: async () => { calls[label].push('openDispensers'); return new Set() },
     deleteAndCompareTxsNotInList: async () => { calls[label].push('delete'); return { transactionsDeleted: 0 } },
     insertMempoolTransaction:     async () => { calls[label].push('insert'); return insertResult },
     // A block delete/rollback surface: touching these from the mempool path would be the bug.
@@ -60,7 +61,7 @@ describe('updateMempool DB isolation', function () {
   it('routes the mempool DELETE and INSERT to mempoolDb, never to the block db', async () => {
     const { decoder, calls } = buildDecoder(true)
     await decoder.updateMempool()
-    assert.deepStrictEqual(calls.mempoolDb, ['delete', 'insert'], 'mempool work must run on mempoolDb')
+    assert.deepStrictEqual(calls.mempoolDb, ['openDispensers', 'delete', 'insert'], 'mempool work must run on mempoolDb')
     assert.deepStrictEqual(calls.db, [], 'the block db must be untouched by mempool maintenance')
   })
 
