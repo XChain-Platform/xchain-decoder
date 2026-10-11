@@ -39,7 +39,8 @@
  *      replica; the clear row records that it was forced.
  *   3. the session passes the decoder's strict sql_mode check. Cannot be forced.
  *
- * Reads DECODER_DB_* from the service environment (.env), like migrate.js.
+ * Reads DECODER_DB_* from the service environment (.env) through src/config.js,
+ * like migrate.js.
  *
  ********************************************************************/
 
@@ -51,6 +52,7 @@
 if (require.main === module) require('dotenv').config()
 
 const Database = require('./db.js')
+const config = require('./config.js')
 
 const EXIT = {
     OK: 0,
@@ -221,11 +223,11 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
 }
 
 async function main(){
-    const host = process.env.DECODER_DB_HOST
-    const port = process.env.DECODER_DB_PORT
-    const name = process.env.DECODER_DB_NAME
-    const user = process.env.DECODER_DB_USER
-    const pass = process.env.DECODER_DB_PASS
+    const host = config.DECODER_DB_HOST
+    const port = config.DECODER_DB_PORT
+    const name = config.DECODER_DB_NAME
+    const user = config.DECODER_DB_USER
+    const pass = config.DECODER_DB_PASS
     if (!host || !name || !user){
         console.error('clear-reorg-halt: DECODER_DB_HOST / DECODER_DB_NAME / DECODER_DB_USER must be set (load the service .env).')
         process.exit(EXIT.USAGE)
