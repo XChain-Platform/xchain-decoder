@@ -14,12 +14,14 @@ const XChainDecoder = require('../../src/XChainDecoder')
 // Pin mempool admission to the block path's attribution rule (hasStorableContent).
 // The block path skips an ACTION whose source cannot be resolved, so the mempool
 // must not publish it as pending; it keeps a blanked row as the seen-set entry.
-function runOneMempoolCycle(parseResult) {
+function runOneMempoolCycle(parseResult, openDispensers = new Set()) {
   const decoder = new XChainDecoder(
     'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
   )
   const inserted = []
+  const floors = []
   decoder.mempoolDb = {
+    getAllOpenDispenserAddresses: async (floor) => { floors.push(floor); return openDispensers },
     deleteAndCompareTxsNotInList: async () => ({ transactionsDeleted: 0 }),
     insertMempoolTransaction: async (row) => { inserted.push(row); return true },
   }
@@ -29,8 +31,13 @@ function runOneMempoolCycle(parseResult) {
     getRawTransactions: async () => ['hexdata'],
   }
   decoder.xchainBlockDecoder = { transactionFromHex: () => ({ ins: [{}], getId: () => 'txid1' }) }
-  decoder.parseTransaction = async () => parseResult
-  return decoder.updateMempool().then(() => ({ decoder, inserted }))
+  const parseSets = []
+  decoder.parseTransaction = async (...args) => {
+    const openSet = args[1]
+    parseSets.push(openSet)
+    return typeof parseResult === 'function' ? parseResult(openSet) : parseResult
+  }
+  return decoder.updateMempool().then(() => ({ decoder, inserted, floors, parseSets }))
 }
 
 function actionResult(source, extra) {
@@ -69,5 +76,33 @@ describe('mempool admission of an ACTION with no resolvable source', function ()
     const { inserted } = await runOneMempoolCycle(actionResult(null, { dispenseOutputs: dispense }))
     assert.strictEqual(inserted.length, 1)
     assert.strictEqual(inserted[0].data, 'COINPAY|0|abc|def', 'must match the block path, which stores this tx')
+  })
+
+  it('parses against the getAllOpenDispenserAddresses set, so an unattributed ACTION paying an open dispenser keeps its text', async () => {
+    const open = new Set(['dispenserAddr'])
+    // Classify the payment output the way captureOutputAddress does: a dispense
+    // output only when its address is in the open-dispenser set the parse is handed.
+    const classify = (openSet) => actionResult(null, {
+      dispenseOutputs: (openSet && openSet.has('dispenserAddr'))
+        ? [{ txIndex: 'txid1', vout: 1, destinationAddress: 'dispenserAddr', amount: 1 }]
+        : [],
+    })
+    const { inserted, parseSets } = await runOneMempoolCycle(classify, open)
+    assert.strictEqual(parseSets[0], open, 'the mempool parse must see the loaded open-dispenser set')
+    assert.strictEqual(inserted.length, 1)
+    assert.strictEqual(inserted[0].data, 'COINPAY|0|abc|def', 'the block path stores this ACTION on confirm')
+  })
+
+  it('loads the open-dispenser set with the cancelGraceFloor for the network', async () => {
+    const { floors } = await runOneMempoolCycle(actionResult('src'))
+    assert.strictEqual(floors.length, 1, 'one load per cycle')
+    assert.ok(floors[0] === null || Number.isFinite(floors[0]), 'the floor is null below the gate or a finite time')
+  })
+
+  it('still runs the cycle against an empty set when getAllOpenDispenserAddresses fails', async () => {
+    const { inserted, parseSets } = await runOneMempoolCycle(actionResult('src'), null)
+    assert.ok(parseSets[0] instanceof Set && parseSets[0].size === 0, 'a failed load classifies against no open dispensers')
+    assert.strictEqual(inserted.length, 1, 'pruning and new arrivals must not stall on the failed read')
+    assert.strictEqual(inserted[0].data, 'COINPAY|0|abc|def')
   })
 })

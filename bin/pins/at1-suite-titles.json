@@ -769,12 +769,6 @@
       "Smoke: Database Initialization should verify the database exists",
       "Smoke: Database Initialization should verify the database exists"
     ],
-    "2eba63f49897c1f0": [
-      "mempool admission of an ACTION with no resolvable source blanks an unattributable ACTION to an empty string and keeps the row",
-      "mempool admission of an ACTION with no resolvable source keeps the ACTION text for a null source when a dispense output makes the tx storable",
-      "mempool admission of an ACTION with no resolvable source keeps the ACTION text when the source resolves",
-      "mempool admission of an ACTION with no resolvable source still writes a blanked row for an actionless tx with no source"
-    ],
     "2ee2031083237da3": [
       "Multisig Integration should appear correctly in the indexer contract query",
       "Multisig Integration should decode an ACTION from a 1-of-3 multisig output",
@@ -1215,6 +1209,15 @@
       "E2E: ACTION Decoding encoding types A2.1:should decode ACTION via direct OP_RETURN",
       "E2E: ACTION Decoding encoding types A2.2:should decode ACTION via 1-of-3 multisig",
       "E2E: ACTION Decoding encoding types A2.3:multisig should strip trailing zeros from short payload"
+    ],
+    "5199ac844e30531f": [
+      "mempool admission of an ACTION with no resolvable source blanks an unattributable ACTION to an empty string and keeps the row",
+      "mempool admission of an ACTION with no resolvable source keeps the ACTION text for a null source when a dispense output makes the tx storable",
+      "mempool admission of an ACTION with no resolvable source keeps the ACTION text when the source resolves",
+      "mempool admission of an ACTION with no resolvable source loads the open-dispenser set with the cancelGraceFloor for the network",
+      "mempool admission of an ACTION with no resolvable source parses against the getAllOpenDispenserAddresses set, so an unattributed ACTION paying an open dispenser keeps its text",
+      "mempool admission of an ACTION with no resolvable source still runs the cycle against an empty set when getAllOpenDispenserAddresses fails",
+      "mempool admission of an ACTION with no resolvable source still writes a blanked row for an actionless tx with no source"
     ],
     "51fbc60e4c509ae1": [
       "Database#hasDispenserTransactions() probes BOTH the top-level and the batch-carried shape",
@@ -3401,7 +3404,7 @@
   "scripts": {
     "test": {
       "fileCount": 223,
-      "titleCount": 1987,
+      "titleCount": 1990,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3536,7 +3539,7 @@
         "test/unit/mempool_first_seen_datetime.test.js": "dde536d960f1a1a5",
         "test/unit/mempool_isolation.test.js": "6207eebcc7c69c98",
         "test/unit/mempool_payload_representation.test.js": "7f339cce97ef3d87",
-        "test/unit/mempool_unattributable_action.test.js": "2eba63f49897c1f0",
+        "test/unit/mempool_unattributable_action.test.js": "5199ac844e30531f",
         "test/unit/migrate.test.js": "826dacd11ea07f42",
         "test/unit/migrate_status.test.js": "4fd0a29c075465f3",
         "test/unit/migration_preconditions.test.js": "54639638d1536735",
@@ -3918,7 +3921,7 @@
     },
     "test:unit": {
       "fileCount": 223,
-      "titleCount": 1987,
+      "titleCount": 1990,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -4053,7 +4056,7 @@
         "test/unit/mempool_first_seen_datetime.test.js": "dde536d960f1a1a5",
         "test/unit/mempool_isolation.test.js": "6207eebcc7c69c98",
         "test/unit/mempool_payload_representation.test.js": "7f339cce97ef3d87",
-        "test/unit/mempool_unattributable_action.test.js": "2eba63f49897c1f0",
+        "test/unit/mempool_unattributable_action.test.js": "5199ac844e30531f",
         "test/unit/migrate.test.js": "826dacd11ea07f42",
         "test/unit/migrate_status.test.js": "4fd0a29c075465f3",
         "test/unit/migration_preconditions.test.js": "54639638d1536735",
