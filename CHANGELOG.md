@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-11
+
+### Added
+- Added dispenser address collapse, purge grace and expiration extension undo, each behind an activation.
+- Enforced newest-first protocol time windows and the protocol time history bound.
+
+### Changed
+- Required unsigned BIGINT transaction id columns and asserted them at startup.
+- Pinned the BIGINT migration checksum rebaseline so the widened ids migration heals in place.
+
+### Fixed
+- Preserved stale mempool read metadata and kept a known reorg halt on a database ping failure.
+- Validated block hashes from the node and carried JSON-RPC error codes on HTTP 200 errors.
+
 ## [0.21.0] - 2026-09-29
 
 ### Added
