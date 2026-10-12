@@ -41,9 +41,10 @@ describe('XChainDecoder fee destination @unit', () => {
 
 // The api.js entry point resolves FEE_DESTINATION through resolveFeeDestination: the vendored
 // coin registry supplies the consensus-pinned default (so a stock install captures fee outputs
-// without env), an env override wins on regtest ONLY, and mainnet AND testnet always use the pin
-// (testnet is an armed multi-operator federation, so honoring the override there forks the ledger
-// exactly as it would on mainnet - same rule as the registry's regtest-only per-coin override).
+// without env), and its regtest-only XCHAIN_FEE_DESTINATION_<COIN>_REGTEST is the one override,
+// shared with the indexer. A bare FEE_DESTINATION env never wins on a recognized coin/network
+// (testnet is an armed multi-operator federation, so honoring it there forks the ledger exactly
+// as it would on mainnet, and on regtest it would split capture from validation).
 describe('resolveFeeDestination @unit', () => {
     it('defaults to the registry pin for every coin and network when no env override is set', () => {
         for (const coin of ['bitcoin', 'litecoin', 'dogecoin']) {
@@ -57,8 +58,28 @@ describe('resolveFeeDestination @unit', () => {
         }
     })
 
-    it('honors an env override on regtest ONLY', () => {
-        assert.strictEqual(resolveFeeDestination('litecoin-regtest', REAL_ADDR), REAL_ADDR)
+    it('ignores a bare env override on regtest too, so capture and indexer validation resolve one address', () => {
+        // The indexer reads only the registry value (XCHAIN_FEE_DESTINATION_<COIN>_REGTEST applied);
+        // a bare FEE_DESTINATION honored here would capture outputs to an address it never validates.
+        for (const [coin, tick] of [['dogecoin', 'DOGE'], ['litecoin', 'LTC'], ['bitcoin', 'BTC']]) {
+            const pinned = getCoinConfig(tick, 'regtest').addresses.FEE_DESTINATION
+            assert.notStrictEqual(pinned, REAL_ADDR)
+            assert.strictEqual(resolveFeeDestination(coin + '-regtest', REAL_ADDR), pinned,
+                coin + '-regtest must ignore the bare env override and use the registry value')
+        }
+    })
+
+    it('follows the registry XCHAIN_FEE_DESTINATION_<COIN>_REGTEST override on regtest', () => {
+        const key = 'XCHAIN_FEE_DESTINATION_LTC_REGTEST'
+        const prior = process.env[key]
+        process.env[key] = REAL_ADDR
+        try {
+            assert.strictEqual(resolveFeeDestination('litecoin-regtest', null), REAL_ADDR)
+            assert.strictEqual(resolveFeeDestination('litecoin-regtest', 'mSomeOtherBareEnvAddress11111111'), REAL_ADDR)
+        } finally {
+            if (prior === undefined) delete process.env[key]
+            else process.env[key] = prior
+        }
     })
 
     it('ignores an env override on mainnet AND testnet and returns the pin (armed-federation fork guard)', () => {

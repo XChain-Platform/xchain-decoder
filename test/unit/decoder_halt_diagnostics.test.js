@@ -186,7 +186,8 @@ describe('api.js GET /status halt surface (source pin)', function () {
     function statusRouteBody() {
         const at = src.indexOf("app.get('/status'")
         assert.ok(at > -1, 'GET /status route missing from api.js')
-        return src.slice(at, at + 3000)
+        // Bounded by the next function, not a byte count, so a new field cannot push a pinned one out.
+        return src.slice(at, src.indexOf('function createJsonRpcController', at))
     }
 
     it('publishes reorg_halt_checked_at beside reorg_halted', function () {

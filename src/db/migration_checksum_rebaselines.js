@@ -86,16 +86,18 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
         from: '027a643d3ff0be087b38889f947fdde2b4d8c696682c3b3642f288553f419068',
         to:   '0b3b2fefb780da1fb96a0d5518967b67b215676cc1ac02efc08ec1672d9091b2',  // deploy-precondition tag (HEAD)
     },
-    // Comment-only edit: the header prose was tidied and a stale operator note
-    // dropped. The executable statements are unchanged since a0f826b, which is
-    // the earliest revision that can be blessed here: 6869813 and older carry a
-    // different statement residue and must still fail the immutability check.
+    // Comment-only edits: the header prose was tidied and a stale operator note
+    // dropped, then the `deploy-precondition=required` tag was added for the
+    // startup assertion. The executable statements are unchanged since a0f826b,
+    // which is the earliest revision that can be blessed here: 6869813 and older
+    // carry a different statement residue and must still fail the immutability check.
     '2026-06-02-widen-ids-to-bigint.sql': {
         from: [
             'e508ea3bcc4ea4f8f6fd241d93c678245a0ddcb9e582094fe4ddbb636b66d6d7',  // a0f826b
             '82865499dd2ccc48c0a0a016535409a9201b415395f49c70b41c73a3aeda8847',  // ec36bd4 (license header)
+            'b03b41b6fcabef9c959851ede9b75cc9089cef7c015bdd69cfcea74ad5acea7a',  // comment tidy
         ],
-        to:   'b03b41b6fcabef9c959851ede9b75cc9089cef7c015bdd69cfcea74ad5acea7a',  // comment tidy (HEAD)
+        to:   '33423de08d0869d7a81829301668383ee3cb47e7226bff587fcfcbf9fa0c7b1c',  // deploy-precondition tag (HEAD)
     },
     // TWO revisions are pinned here and they are blessed for DIFFERENT reasons, so both are
     // stated rather than filed together under the blanket sentence above.

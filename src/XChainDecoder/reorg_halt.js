@@ -37,12 +37,12 @@ function announceReorgHalt(reason, blocksDeleted, canPersist){
             // REORG_HALT_MARKER record below carries the real answer.
             marker_write: canPersist ? 'attempting' : 'unavailable',
             // Spelled out rather than left for the reader to infer from the
-            // field: this is the one halt that /status and /live cannot
-            // report, because the marker they read is never written.
+            // field: this is the one halt /status and /live can report only
+            // from this process's memory, because no marker is ever written.
             detail: canPersist ? undefined
                 : 'db.markReorgHalted is unavailable: the durable halt marker cannot be persisted, '
-                + 'so GET /status, GET /live and the JSON-RPC health method will NOT report this halt. '
-                + 'This log line is the only record of it.'
+                + 'so GET /status, GET /live and the JSON-RPC health method report this halt only from '
+                + 'this process\'s memory and lose it on restart. This log line is the only lasting record of it.'
         })
     } catch (_) { /* a diagnostic must never mask the abort it describes */ }
 }

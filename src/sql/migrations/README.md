@@ -57,3 +57,12 @@ migrate`, i.e. `node src/db/migrate.js`) or with `MIGRATION_STRICT_CHECKSUM=1`, 
 mismatch fails closed (throws) so a diverged schema is caught in CI / by an
 operator; the passive decoder-startup path logs the mismatch at error level and
 continues, to avoid a surprise fleet-wide boot failure.
+
+CI also pins every committed migration, so an in-place edit fails at the commit
+rather than on a fleet: `bin/lib/migration_residue_pin.js` keeps two hashes per
+file in `test/fixtures/migration-executable-residue.json` (the executable residue
+with comments and blank lines dropped, and the whole-file sha256 the ledger
+records). Pin a new migration in the commit that adds it with
+`node bin/lib/migration_residue_pin.js --add`. A comment-only edit to an applied
+file needs a reviewed `MIGRATION_CHECKSUM_REBASELINES` entry; an executable change
+needs a new dated migration instead.

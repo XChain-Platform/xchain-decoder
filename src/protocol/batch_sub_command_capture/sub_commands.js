@@ -110,42 +110,50 @@ function subCommandActionName(command){
 // PROVABLY rejects, taking the whole batch down with it?
 //
 // WHY CAPTURE HAS TO CARE. The indexer's activation scan (batch/validate.js activationError)
-// runs, before any dispatch:
+// runs before any dispatch. In outline, it applies these admission checks to every name:
 //
 //     for(let command of commands){
 //         let action = String(command).split('|')[0];
 //         if(normalize) action = this.normalizeSubAction(action);
-//         if(!error && await this.protocolChanges.isEnabled(action, ...) == false)
+//         if(!error && dispatchedOnly && !DISPATCHED_ACTIONS.has(action))
+//             error = 'invalid: ACTION (unknown)';
+//         else if(!error && await this.protocolChanges.isEnabled(action, ...) == false)
 //             error = 'invalid: ACTION (unknown)';
 //     }
 //
-// and `isEnabled` returns FALSE for any name absent from its registry. One rejected name
-// invalidates the WHOLE batch as a single record, so NO sub-command runs - not even the
-// well-formed ones beside it. Capture that keeps reading those siblings persists outputs
-// for actions the indexer never executes: the same over-capture the DISPENSER prefix
-// tightening closes, reached through a sibling command instead of through the DISPENSER
-// command's own name. `BATCH|0|DISPENSER|0|...;` (one trailing semicolon) registers a
-// dispenser here and none there, and payments to that address are then read as dispenses
-// no indexer will ever settle.
+// `isEnabled` returns FALSE for any name absent from its registry; `dispatchedOnly` is the
+// gate described below. One rejected name invalidates the WHOLE batch as a single record,
+// so NO sub-command runs - not even the well-formed ones beside it. Capture that keeps
+// reading those siblings persists outputs for actions the indexer never executes: the same
+// over-capture the DISPENSER prefix tightening closes, reached through a sibling command
+// instead of through the DISPENSER command's own name. `BATCH|0|DISPENSER|0|...;` (one
+// trailing semicolon) registers a dispenser here and none there, and payments to that
+// address are then read as dispenses no indexer will ever settle.
 //
 // WHY ONLY THE EMPTY NAME, when the scan rejects far more than that. Suppression is the
 // UNDER-capture direction, the money-bearing one: refuse capture for a batch the indexer
 // actually runs and a real settlement output is never persisted. So this may only fire on
-// names it can PROVE are unregistered, and the decoder holds no copy of that registry.
-// Measured against the sibling indexer at this commit, 53 names are enabled there and
-// absent from VALID_ACTION_NAMES here (DISPENSE, XCALL, ORDER_MATCH and every non-action
-// feature-gate flag: UNIFIED_FEES, ISSUANCE_FEE, FIX_OUTPUT_FANOUT, ...), so a gate keyed
-// on the decoder's own known-name set would suppress capture for batches the indexer
-// dispatches normally. The EMPTY name is different in kind rather than in degree: '' is
-// not an ACTION and not a feature-gate flag, no addChange can name it, and it is the one
-// verdict this file can reach on its own evidence.
+// names it can PROVE the indexer rejects, and the decoder holds neither the indexer's
+// protocol-change registry nor its dispatch set.
+//
+// ACTION_ADMISSION_DISPATCHED_ONLY tightens the indexer's scan at its flag day: an enabled
+// registry name must also name a handler in DISPATCHED_ACTIONS. That closes the post-flag
+// path where a non-action feature-gate name could pass admission, but it does not make a
+// decoder-local allowlist sound. Historical replay below the flag still uses registry-only
+// admission, while a newly added dispatched action above it can predate the decoder's
+// vendored list. Even the current decoder set omits dispatched names such as DISPENSE,
+// XCALL and ORDER_MATCH. Treating any such name as a whole-batch rejection would suppress
+// capture for a sibling command the indexer really runs. The EMPTY name is different in
+// kind rather than in degree: '' names neither a registry entry nor a dispatch handler, so
+// it is the one verdict this file can reach on its own evidence in every admission era.
 //
 // The rest of the class is now closed as far as it is provable, in hasProvablyRejectedBatch
 // below: the nested BATCH, the per-ACTION caps, the 250-command cap and the
 // BATCH_COST_WEIGHTING weight budget, against the indexer's tables vendored canonically in
-// src/protocol/indexer_batch_limits.js. The UNKNOWN NAME is still the one cause left open, and
-// deliberately, for the reason this paragraph gives: a vendored name LIST is not closed under
-// registry growth, so a stale one under-captures.
+// src/protocol/indexer_batch_limits.js. An UNKNOWN OR UNDISPATCHED NAME is still the one
+// cause left open, and deliberately, for the reason this paragraph gives: neither a vendored
+// registry list nor a vendored dispatch list is closed under indexer growth, so a stale one
+// under-captures.
 //
 // A '' name is reachable two ways and both are covered, because both are what
 // `split('|')[0]` yields: an EMPTY element (a trailing ';', a ';;', or the whole command

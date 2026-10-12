@@ -37,8 +37,10 @@
  *      action, so the purge cannot have lost anything. --force overrides this one
  *      for an operator who has compared the dispensers table against a known-good
  *      replica; the clear row records that it was forced.
+ *   3. the session passes the decoder's strict sql_mode check. Cannot be forced.
  *
- * Reads DECODER_DB_* from the service environment (.env), like migrate.js.
+ * Reads DECODER_DB_* from the service environment (.env) through src/config.js,
+ * like migrate.js.
  *
  ********************************************************************/
 
@@ -50,6 +52,7 @@
 if (require.main === module) require('dotenv').config()
 
 const Database = require('./db.js')
+const config = require('./config.js')
 
 const EXIT = {
     OK: 0,
@@ -87,12 +90,27 @@ function parseArgs(argv){
     return out
 }
 
+// Render a non-count for the refusal text without throwing on any input.
+function describeCount(value){
+    if (typeof value === 'string') return 'the string ' + JSON.stringify(value)
+    if (typeof value === 'number' || typeof value === 'bigint' || value == null) return String(value)
+    return 'a value of type ' + typeof value
+}
+
 async function checkClearPreconditions(db, args, error){
     // Check 1: the rollback has been re-synced. Not forceable: a halt with blocks
     // still missing above the tip is a rollback in progress, and clearing it lets
     // the next verifyReorg resume past the window.
     const deletesAboveTip = await db.countReorgDeletesAboveTip()
-    if (deletesAboveTip > 0){
+    // Only a proven zero passes, like the dispenser check below: a count that is not
+    // a non-negative integer cannot prove the range was re-parsed.
+    if (!Number.isInteger(deletesAboveTip) || deletesAboveTip < 0){
+        error('clear-reorg-halt: REFUSED. The count of rolled-back blocks above the tip could not be read as a '
+            + 'block count (got ' + describeCount(deletesAboveTip) + '), so this command cannot confirm the rollback '
+            + 'was re-parsed. This check cannot be forced. Nothing was cleared.')
+        return { exitCode: EXIT.NOT_RESYNCED }
+    }
+    if (deletesAboveTip !== 0){
         error('clear-reorg-halt: REFUSED. ' + deletesAboveTip + ' block(s) rolled back above the current tip have not been re-parsed yet. '
             + 'This check cannot be forced. If the decoder is parked on this halt (reorg_halt_parked: true on health, '
             + '/status or /live), it parses nothing and will never re-parse this range: recover with a full resync from '
@@ -126,6 +144,21 @@ function refuseUnpinnableHalt(marker, error){
     return true
 }
 
+// Refuse a session whose sql_mode the decoder itself would refuse at startup. This
+// CLI builds its own pool and never runs runMigrations, so without this check the row
+// that decides halt state could be written on a lax session with no warning.
+async function refuseLaxSqlMode(db, error){
+    try {
+        await db.assertStrictSqlMode()
+        return false
+    } catch (err){
+        error('clear-reorg-halt: REFUSED. This session\'s SQL mode failed the strict-mode check, so the '
+            + 'REORG_HALT_CLEARED row would be written with no strict-mode guarantee. Nothing was cleared. '
+            + ((err && err.message) || err))
+        return true
+    }
+}
+
 // The whole decision, with the database and the output injected so it can be
 // exercised without MariaDB. Returns the process exit code.
 async function run({ db, argv = [], log = console.log, error = console.error }){
@@ -153,6 +186,8 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
     const preconditions = await checkClearPreconditions(db, args, error)
     if (preconditions.exitCode !== undefined) return preconditions.exitCode
     const { checks, dispenserClean, dispensers, dispenserTxs } = preconditions
+    // Before the dry-run branch, so a dry run predicts the same refusal a real run hits.
+    if (await refuseLaxSqlMode(db, error)) return EXIT.FAILED
 
     const verdict = 'checks: rolled-back blocks above tip = 0; dispensers = ' + dispensers + '; DISPENSER actions decoded = ' + dispenserTxs
         + (dispenserClean ? ' (clean)' : ' (FORCED by the operator)')
@@ -188,11 +223,11 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
 }
 
 async function main(){
-    const host = process.env.DECODER_DB_HOST
-    const port = process.env.DECODER_DB_PORT
-    const name = process.env.DECODER_DB_NAME
-    const user = process.env.DECODER_DB_USER
-    const pass = process.env.DECODER_DB_PASS
+    const host = config.DECODER_DB_HOST
+    const port = config.DECODER_DB_PORT
+    const name = config.DECODER_DB_NAME
+    const user = config.DECODER_DB_USER
+    const pass = config.DECODER_DB_PASS
     if (!host || !name || !user){
         console.error('clear-reorg-halt: DECODER_DB_HOST / DECODER_DB_NAME / DECODER_DB_USER must be set (load the service .env).')
         process.exit(EXIT.USAGE)

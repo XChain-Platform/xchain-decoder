@@ -19,11 +19,13 @@
  * The vendored coin registry (src/coins) supplies the consensus-pinned default,
  * so a stock deployment captures fee outputs with no operator env (previously
  * env-only: default installs captured nothing and LTC/DOGE native-fee
- * validation failed closed downstream). A FEE_DESTINATION env override is
- * honored on regtest ONLY; on mainnet AND testnet it is ignored with a warning,
- * because fee-output capture feeds consensus-relevant fee acceptance and must
- * not depend on operator env (same rule as the registry's per-coin override,
- * which is likewise regtest-only). Testnet is an armed multi-operator federation
+ * validation failed closed downstream). The bare FEE_DESTINATION env is ignored
+ * with a warning on every recognized coin/network: the only override is the
+ * registry's regtest-only XCHAIN_FEE_DESTINATION_<COIN>_REGTEST, the same
+ * variable the indexer reads, so the capture side and the validation side of
+ * the native-fee seam always resolve one address. Fee-output capture feeds
+ * consensus-relevant fee acceptance and must not depend on operator env on
+ * mainnet or testnet either. Testnet is an armed multi-operator federation
  * whose consensus_pin hashes only the static bundle, so an env-resolved override
  * there escapes the freeze and would let two honest nodes capture different fee
  * outputs and diverge the block-hashed ledger, the identical fork mainnet is
@@ -38,23 +40,31 @@ const logger = getLogger();
 function resolveFeeDestination(networkName, envOverride) {
     const m = /^([a-z]+)-(mainnet|testnet|regtest)$/.exec(networkName || '')
     let pinned = null
+    let tick = null
     if (m) {
         try {
-            pinned = getCoinConfigByFullName(m[1], m[2]).addresses.FEE_DESTINATION || null
+            const coin = getCoinConfigByFullName(m[1], m[2])
+            pinned = coin.addresses.FEE_DESTINATION || null
+            tick = coin.tick || null
         } catch (e) {
             // Unknown coin/network (e.g. test doubles): no registry default, env-only below.
         }
     }
     if (envOverride) {
-        // Honored on regtest ONLY. On mainnet AND testnet the consensus-pinned registry
-        // default wins (matches src/coins/index.js resolveFeeDestination and the indexer's
-        // config, both regtest-only): the override escapes the consensus_pin freeze, so two
-        // honest nodes with different env would capture different fee outputs and fork the
-        // block-hashed ledger. When there is no pinned default (unknown coin / test double,
-        // pinned === null) the override still resolves so those paths keep working.
-        if (m && m[2] !== 'regtest' && pinned) {
-            if (envOverride !== pinned)
-                logger.info('WARNING: FEE_DESTINATION env is set but IGNORED on ' + m[2] + '; using the consensus-pinned registry address.')
+        // On a recognized coin/network the registry value always wins, on regtest too. It already
+        // carries the regtest-only XCHAIN_FEE_DESTINATION_<COIN>_REGTEST override, the one variable
+        // the indexer reads, so capture and fee validation cannot resolve two different addresses.
+        // On mainnet AND testnet that value is the consensus pin: an env override there escapes the
+        // consensus_pin freeze, so two honest nodes with different env would capture different fee
+        // outputs and fork the block-hashed ledger. With no registry value (unknown coin / test
+        // double, pinned === null) the bare override still resolves so those paths keep working.
+        if (m && pinned) {
+            if (envOverride !== pinned) {
+                const redirect = m[2] === 'regtest'
+                    ? 'set XCHAIN_FEE_DESTINATION_' + (tick || '<COIN>') + '_REGTEST to redirect fees, so the indexer validates the same address.'
+                    : 'using the consensus-pinned registry address.'
+                logger.info('WARNING: FEE_DESTINATION env is set but IGNORED on ' + m[2] + ' (registry resolves ' + pinned + '); ' + redirect)
+            }
             return pinned
         }
         return envOverride

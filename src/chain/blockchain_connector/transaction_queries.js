@@ -14,7 +14,15 @@
 
 const config = require('../../config');
 const { logger } = require('./constants.js')
-const { envInt, sanitizeRpcError } = require('./rpc_helpers.js')
+const { carryErrorIdentity, envInt, sanitizeRpcError } = require('./rpc_helpers.js')
+
+// Return a truthy result only if it is a whole hex string; throw into the retry loop otherwise.
+// (Callers decode outside their tagged try, so a non-hex answer would quarantine as content.)
+function wholeHexResult(result, txid) {
+    if (typeof result === 'string' && result.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(result)) return result
+    const shape = typeof result === 'string' ? `a ${result.length}-char string` : `a ${typeof result}`
+    throw new Error(`getRawTransaction: malformed result for txid ${txid}: expected whole hex, got ${shape}`)
+}
 
 function rawTransactionResponse(response, txid) {
     // A JSON-RPC 2.0 node (Bitcoin Core >= v28) answers an RPC error with
@@ -40,7 +48,7 @@ function rawTransactionResponse(response, txid) {
     // Return (not break) so
     // a success on the final attempt cannot fall through to the failure
     // guard below and inflate rpcErrors on a recovered fetch.
-    if (response.data.result) return response.data.result
+    if (response.data.result) return wholeHexResult(response.data.result, txid)
 
     // Tx no longer retrievable (mined/evicted between getRawMempool and this
     // call, or an empty RPC result): resolve null so a single missing tx does
@@ -101,7 +109,7 @@ async function handleRawTransactionFailure(connector, error, txid, tries, maxTri
         logger.error(`getRawTransaction: attempt ${tries}/${maxTries} for txid ${txid} failed: HTTP ${details.httpStatus !== undefined ? details.httpStatus : 'n/a'} rpcCode ${details.rpcCode !== undefined ? details.rpcCode : 'n/a'}: ${details.lastErrorSummary}`)
     }
     await connector.sleep(details.isQueueFull ? 5000 : 500)
-    return { resolved: false, lastErrorSummary: details.lastErrorSummary }
+    return { resolved: false, lastErrorSummary: details.lastErrorSummary, lastError: error }
 }
 
 async function runRawTransactionRetries(connector, txid, resolve, reject) {
@@ -111,6 +119,7 @@ async function runRawTransactionRetries(connector, txid, resolve, reject) {
     // deterministic misconfiguration (401/404/DNS) is diagnosable instead of
     // surfacing as a bare "failed after 10 attempts" line.
     let lastErrorSummary = null
+    let lastError = null
     while (tries < maxTries){
         tries++
         try {
@@ -131,12 +140,14 @@ async function runRawTransactionRetries(connector, txid, resolve, reject) {
                 return
             }
             lastErrorSummary = outcome.lastErrorSummary
+            lastError = outcome.lastError
         }
     }
 
     if (tries >= maxTries){
         connector.rpcErrors++
-        reject(new Error(`getRawTransaction failed after ${maxTries} attempts for txid ${txid}${lastErrorSummary ? ': ' + lastErrorSummary : ''}`))
+        // Keep the last cause's code/rpcCode so getBlockReassembled can tell an unreachable node from a bad block.
+        reject(carryErrorIdentity(new Error(`getRawTransaction failed after ${maxTries} attempts for txid ${txid}${lastErrorSummary ? ': ' + lastErrorSummary : ''}`), lastError))
     }
 }
 

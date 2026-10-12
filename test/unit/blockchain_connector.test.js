@@ -16,6 +16,9 @@ const BlockchainConnector = require('../../src/chain/blockchain_connector')
 let connector
 let axiosStub
 
+// A well-formed block hash: getBlockHash refuses anything that is not 64 hex characters.
+const BLOCK_HASH = '00000000000000000007' + 'a'.repeat(44)
+
 function registerConnectorHooks() {
     beforeEach(() => {
         connector = new BlockchainConnector('127.0.0.1', 8332, 'testuser', 'testpass')
@@ -111,14 +114,14 @@ describe('BlockchainConnector', () => {
 
     describe('#getBlockHash()', () => {
         it('should return the block hash on success', async () => {
-            axiosStub.resolves({ data: { result: 'abcdef1234' } })
+            axiosStub.resolves({ data: { result: BLOCK_HASH } })
 
             const result = await connector.getBlockHash(100)
-            assert.strictEqual(result, 'abcdef1234')
+            assert.strictEqual(result, BLOCK_HASH)
         })
 
         it('should pass the block index as params', async () => {
-            axiosStub.resolves({ data: { result: 'hash' } })
+            axiosStub.resolves({ data: { result: BLOCK_HASH } })
             await connector.getBlockHash(42)
 
             const callData = axiosStub.firstCall.args[1]
@@ -131,7 +134,7 @@ describe('BlockchainConnector', () => {
         // (decoder never wrote the REORG event → indexer never rolled back). getBlockHash must
         // coerce the height to a Number so the JSON-RPC params are serializable.
         it('should coerce a BigInt block index to a Number param (serializable JSON-RPC body)', async () => {
-            axiosStub.resolves({ data: { result: 'hash' } })
+            axiosStub.resolves({ data: { result: BLOCK_HASH } })
             await connector.getBlockHash(199n)
 
             const callData = axiosStub.firstCall.args[1]
@@ -155,6 +158,46 @@ describe('BlockchainConnector', () => {
                 { message: 'ECONNREFUSED' }
             )
         })
+    })
+})
+
+describe('BlockchainConnector', () => {
+    registerConnectorHooks()
+
+    describe('#getBlockHash() result shape', () => {
+        // The reorg walk deletes a stored block on a hash mismatch, so a malformed
+        // answer must throw into the caller's retry instead of reading as a fork.
+        it('rejects a malformed result and counts it as an RPC error', async () => {
+            const bad = ['', 0, false, {}, [], 12345, 'a'.repeat(63), 'a'.repeat(65), 'g' + 'a'.repeat(63)]
+            for (const result of bad) {
+                axiosStub.resolves({ data: { result } })
+                const before = connector.rpcErrors
+                await assert.rejects(() => connector.getBlockHash(1), /malformed result/, JSON.stringify(result))
+                assert.strictEqual(connector.rpcErrors, before + 1, JSON.stringify(result))
+            }
+        })
+
+        it('returns an uppercase hash lowercased so a case change cannot fake a fork', async () => {
+            axiosStub.resolves({ data: { result: BLOCK_HASH.toUpperCase() } })
+            assert.strictEqual(await connector.getBlockHash(1), BLOCK_HASH)
+        })
+    })
+})
+
+describe('BlockchainConnector', () => {
+    registerConnectorHooks()
+
+    // The HTTP-200 twin of the HTTP-500 rpcCode test: the error leaves the shared
+    // ladder with the node's code and message attached, counted once, never retried.
+    it('getBlockHash rethrows an HTTP-200 JSON-RPC error carrying rpcCode/rpcMessage', async () => {
+        axiosStub.resolves({ status: 200, data: { result: null, error: { code: -8, message: 'Block height out of range' } } })
+        await assert.rejects(() => connector.getBlockHash(999999999), (err) => {
+            assert.strictEqual(err.rpcCode, -8)
+            assert.strictEqual(err.rpcMessage, 'Block height out of range')
+            return true
+        })
+        assert.strictEqual(axiosStub.callCount, 1)
+        assert.strictEqual(connector.rpcErrors, 1)
     })
 })
 
@@ -261,10 +304,10 @@ describe('BlockchainConnector', () => {
 
     describe('#getRawTransaction()', () => {
         it('should return raw tx hex on success', async () => {
-            axiosStub.resolves({ data: { result: 'rawtxhex' } })
+            axiosStub.resolves({ data: { result: '0100beef' } })
 
             const result = await connector.getRawTransaction('txid123')
-            assert.strictEqual(result, 'rawtxhex')
+            assert.strictEqual(result, '0100beef')
         })
 
         it('should resolve null when response has no result (tx mined/evicted)', async () => {
@@ -290,10 +333,10 @@ describe('BlockchainConnector', () => {
         it('should resolve on success after retries', async () => {
             axiosStub.onCall(0).rejects(new Error('fail'))
             axiosStub.onCall(1).rejects(new Error('fail'))
-            axiosStub.onCall(2).resolves({ data: { result: 'txhex' } })
+            axiosStub.onCall(2).resolves({ data: { result: 'aa01' } })
 
             const result = await connector.getRawTransaction('txid')
-            assert.strictEqual(result, 'txhex')
+            assert.strictEqual(result, 'aa01')
         }).timeout(5000)
 
         it('[REGRESSION P2] R-RPC-002: should back off longer on -429 work queue depth exceeded', async () => {
@@ -302,13 +345,13 @@ describe('BlockchainConnector', () => {
             // a JSON body whose error.code === -429 (NOT an actual HTTP 429 response).
             queueError.response = { data: { error: { code: -429, message: 'Work queue depth exceeded' } } }
             axiosStub.onCall(0).rejects(queueError)
-            axiosStub.onCall(1).resolves({ data: { result: 'txhex' } })
+            axiosStub.onCall(1).resolves({ data: { result: 'aa01' } })
 
             const start = Date.now()
             const result = await connector.getRawTransaction('txid')
             const elapsed = Date.now() - start
 
-            assert.strictEqual(result, 'txhex')
+            assert.strictEqual(result, 'aa01')
             // -429 backoff is 5000ms vs normal 500ms
             assert.ok(elapsed >= 4000, `Expected >= 4000ms backoff, got ${elapsed}ms`)
         }).timeout(10000)
@@ -320,11 +363,11 @@ describe('BlockchainConnector', () => {
 
     describe('#getRawTransactions()', () => {
         it('should batch multiple getRawTransaction calls', async () => {
-            axiosStub.resolves({ data: { result: 'txhex' } })
+            axiosStub.resolves({ data: { result: 'aa01' } })
 
             const results = await connector.getRawTransactions(['tx1', 'tx2', 'tx3'])
             assert.strictEqual(results.length, 3)
-            assert.strictEqual(results[0], 'txhex')
+            assert.strictEqual(results[0], 'aa01')
         })
 
         it('should return empty array for empty input', async () => {
@@ -336,12 +379,12 @@ describe('BlockchainConnector', () => {
             // tx2 was evicted between getRawMempool and the fetch: empty RPC result.
             // The batch must still return the other txs with a null hole for the missing one,
             // rather than rejecting and dropping every txid in the batch.
-            axiosStub.onCall(0).resolves({ data: { result: 'txhex1' } })
+            axiosStub.onCall(0).resolves({ data: { result: 'aa11' } })
             axiosStub.onCall(1).resolves({ data: { result: null, error: { message: 'tx not found' } } })
-            axiosStub.onCall(2).resolves({ data: { result: 'txhex3' } })
+            axiosStub.onCall(2).resolves({ data: { result: 'aa33' } })
 
             const results = await connector.getRawTransactions(['tx1', 'tx2', 'tx3'])
-            assert.deepStrictEqual(results, ['txhex1', null, 'txhex3'])
+            assert.deepStrictEqual(results, ['aa11', null, 'aa33'])
         })
     })
 })

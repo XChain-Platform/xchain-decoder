@@ -59,26 +59,24 @@ function isProtocolTimeMtpActive(network){
 
 // The median of the previous MEDIAN_TIME_SPAN block timestamps, Bitcoin-style.
 //
-// `previousBlockTimes` is the timestamps of the blocks BELOW the one being
-// resolved, in any order; only the newest MEDIAN_TIME_SPAN of them are used, so
-// callers may hand over a longer window. Genesis and the blocks just above it
-// have fewer than a full span available: Bitcoin medians whatever exists rather
-// than failing, and so does this.
+// NEWEST-FIRST CONTRACT: `previousBlockTimes` must be ordered by height
+// descending. Only its first MEDIAN_TIME_SPAN entries may participate, even
+// when an older block has a higher timestamp. Genesis and the blocks just above
+// it have fewer than a full span available: Bitcoin medians whatever exists
+// rather than failing, and so does this.
 //
 // Returns null when nothing usable is supplied, so callers fail closed onto the
 // raw stamp rather than medianing to NaN.
 function medianTimePast(previousBlockTimes){
     if (!Array.isArray(previousBlockTimes)) return null
     const times = previousBlockTimes
+        .slice(0, MEDIAN_TIME_SPAN)
         .map(Number)
         .filter((time) => Number.isFinite(time) && time > 0)
 
     if (times.length === 0) return null
-    // Newest MEDIAN_TIME_SPAN first, then median by value. Sorting by value
-    // alone would median the wrong set once a caller passes a longer window.
-    times.sort((a, b) => b - a)
-    const span = times.slice(0, MEDIAN_TIME_SPAN).sort((a, b) => a - b)
-    return span[Math.floor(span.length / 2)]
+    times.sort((a, b) => a - b)
+    return times[Math.floor(times.length / 2)]
 }
 
 // The instant a block's time-keyed decoder gates should read.

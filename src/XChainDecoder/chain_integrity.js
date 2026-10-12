@@ -21,6 +21,22 @@
 const { chainGenesisMismatch, chainGenesisUnpinned } = require('../protocol/chain_identity')
 const { logger, REORG_HALT_PROBE_INTERVAL_MS, AUXPOW_REASSEMBLE_AFTER } = require('./constants.js')
 
+// Read the durable REORG_HALT marker through whichever probe the db exposes, or
+// null when it exposes none (or there is no db) and the cached state must stand.
+async function readReorgHaltMarker(db){
+    if (!db) return null
+    if (typeof db.getReorgHaltMarker === 'function'){
+        return (await db.getReorgHaltMarker()) || { halted: false, at: null, reason: null }
+    }
+    if (typeof db.isReorgHalted === 'function'){
+        // Older/minimal db shapes (and the mocks in the verifyReorg suites)
+        // expose only the boolean probe.
+        const halted = await db.isReorgHalted()
+        return { halted: !!(halted && halted.halted !== undefined ? halted.halted : halted), at: null, reason: null }
+    }
+    return null
+}
+
 module.exports = {
     // Probe the durable REORG_HALT marker and cache the answer, on a TTL, so every
     // operator-facing surface can report a LATENT halt. The marker is written by
@@ -41,16 +57,13 @@ module.exports = {
         if (this._reorgHaltProbeInFlight) return this._reorgHaltProbeInFlight
         this._reorgHaltProbeInFlight = (async () => {
             try {
-                if (!this.db) return this.getReorgHaltStatus()
-                let marker
-                if (typeof this.db.getReorgHaltMarker === 'function'){
-                    marker = await this.db.getReorgHaltMarker()
-                } else if (typeof this.db.isReorgHalted === 'function'){
-                    // Older/minimal db shapes (and the mocks in the verifyReorg suites)
-                    // expose only the boolean probe.
-                    const halted = await this.db.isReorgHalted()
-                    marker = { halted: !!(halted && halted.halted !== undefined ? halted.halted : halted), at: null, reason: null }
-                } else {
+                const marker = await readReorgHaltMarker(this.db)
+                if (marker === null) return this.getReorgHaltStatus()
+                // Keep a halt this process raised but could not record. A failed marker
+                // write leaves no row, so a no-halt read here is that absence, not a
+                // clear; adopting it would publish reorg_halted=false until restart.
+                if (this.reorgHalted && this.reorgHaltMarkerPersisted === false && !marker.halted){
+                    this.reorgHaltCheckedAt = now
                     return this.getReorgHaltStatus()
                 }
                 const wasHalted = this.reorgHalted

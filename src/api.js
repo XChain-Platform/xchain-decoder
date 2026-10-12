@@ -25,12 +25,13 @@ dotenv.config()
 // DECODER_API_PORT check is exactly the line an operator needs levelled and
 // timestamped, and installObservability does not run until ~200 lines further
 // down.
+const config = require('./config');
 const { patchConsole } = require('./observability');
 patchConsole({
     service: 'xchain-decoder',
     version: require('../package.json').version,
-    coin:    process.env.COIN || '',
-    network: process.env.NETWORK || ''
+    coin:    config.COIN || '',
+    network: config.NETWORK || ''
 });
 
 const express = require('express');
@@ -56,22 +57,22 @@ const { reportStartFailure, installCrashHandlers } = require('./api/crash_report
 const { getHealthProbeState } = require('./api/health_probe');
 const { installDecoderObservability } = require('./api/observability_wiring');
 
-const NETWORK = process.env.NETWORK
-const NODE_URL =  process.env.NODE_URL
-const NODE_PORT =  process.env.NODE_PORT
-const NODE_USER =  process.env.NODE_USER
-const NODE_PASSWORD =  process.env.NODE_PASSWORD
-const DB_URL =  process.env.DECODER_DB_HOST
-const DB_PORT =  process.env.DECODER_DB_PORT
-const DECODER_DB_NAME =  process.env.DECODER_DB_NAME
-const DECODER_DB_USER =  process.env.DECODER_DB_USER
-const DB_PASSWORD =  process.env.DECODER_DB_PASS
-const DECODER_API_PORT = parseInt(process.env.DECODER_API_PORT, 10)
-const AUX_POW = process.env.AUX_POW === 'true' || process.env.AUX_POW === '1'
+const NETWORK = config.NETWORK
+const NODE_URL =  config.NODE_URL
+const NODE_PORT =  config.NODE_PORT
+const NODE_USER =  config.NODE_USER
+const NODE_PASSWORD =  config.NODE_PASSWORD
+const DB_URL =  config.DECODER_DB_HOST
+const DB_PORT =  config.DECODER_DB_PORT
+const DECODER_DB_NAME =  config.DECODER_DB_NAME
+const DECODER_DB_USER =  config.DECODER_DB_USER
+const DB_PASSWORD =  config.DECODER_DB_PASS
+const DECODER_API_PORT = parseInt(config.DECODER_API_PORT, 10)
+const AUX_POW = config.AUX_POW === 'true' || config.AUX_POW === '1'
 // Native-coin protocol fee destination for this coin+network: registry-pinned default with a
 // regtest-only env override (see src/protocol/fee_destination.js). When resolved, the decoder persists
 // outputs paying it to transaction_outputs so the indexer can validate native-coin fee payments.
-const FEE_DESTINATION = resolveFeeDestination(NETWORK, process.env.FEE_DESTINATION || null)
+const FEE_DESTINATION = resolveFeeDestination(NETWORK, config.FEE_DESTINATION || null)
 
 
 // The JSON-RPC health payload, built from getHealthProbeState's result. The caller
@@ -118,6 +119,7 @@ function buildHealthResult(decoder, state, decoderRunning, decoderError){
             : null,
         rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors,
         parse_errors: decoder.parseErrors,
+        dispenser_purge_failures: decoder.dispenserPurgeFailures || 0,
         error: decoderError ? decoderError.message : null
     }
 }
@@ -151,6 +153,9 @@ function registerStatusRoute(app, decoder, isDecoderRunning){
             db: dbOk,
             running: decoderRunning,
             lag: syncStatus.lag,
+            // Ships beside lag: a frozen tip reads lag 0, and the bootstrap gate refuses on
+            // this flag. Reported, not gated on, as on /live.
+            node_height_stale: syncStatus.node_height_stale === true,
             reorg_halted:      reorgHalt.halted,
             reorg_halt_reason: reorgHalt.reason,
             reorg_halted_at:   reorgHalt.at,
@@ -234,38 +239,40 @@ function createMempoolMethods(decoder){
         // per-request, so differing limits share one read. A poll-cycle-stale
         // snapshot is fine: updateMempool itself only rewrites every 60s.
         async getmempool(params) {
-            const ttl = parseInt(process.env.GETMEMPOOL_CACHE_MS, 10) || 5000;
+            const ttl = parseInt(config.GETMEMPOOL_CACHE_MS, 10) || 5000;
             const now = Date.now();
             const db  = decoder.mempoolDb || decoder.db;
+            let stale = false;
+            let snapshot = getmempoolCache;
             if (!getmempoolCache || (now - getmempoolCache.t) >= ttl) {
-                let rows = [], total = 0;
                 if (db) {
                     try {
-                        rows  = await db.getMempoolTransactions(500);
-                        total = await db.getMempoolTransactionCount();
+                        const rows  = await db.getMempoolTransactions(500);
+                        const total = await db.getMempoolTransactionCount();
+                        getmempoolCache = { t: now, rows, total, read_ok_at: Date.now() };
                     } catch (err) {
                         // Serve the stale snapshot if we have one; a mempool read
                         // must never surface as an API error to remote explorers.
                         console.error('getmempool: mempool read failed:', err);
-                        rows  = getmempoolCache ? getmempoolCache.rows  : [];
-                        total = getmempoolCache ? getmempoolCache.total : 0;
+                        stale = true;
                     }
+                } else {
+                    getmempoolCache = { t: now, rows: [], total: 0, read_ok_at: null };
                 }
-                getmempoolCache = { t: now, rows, total };
+                snapshot = getmempoolCache || { rows: [], total: 0, read_ok_at: null };
             }
             const limit = Math.max(1, Math.min(parseInt(params && params.limit, 10) || 500, 500));
             return {
                 node_tx_count: decoder.nodeMempoolTxCount,
                 node_updated_at: decoder.nodeMempoolUpdatedAt,
-                total: getmempoolCache.total,
-                rows: getmempoolCache.rows.slice(0, limit).map(r => ({
-                    tx_hash:    r.tx_hash,
-                    source:     r.source,
-                    // TEXT can come back as a Buffer depending on driver options;
-                    // normalize so the JSON body always carries the UTF-8 string.
-                    data:       Buffer.isBuffer(r.data) ? r.data.toString('utf8') : r.data,
-                    first_seen: (r.first_seen instanceof Date) ? Math.floor(r.first_seen.getTime() / 1000)
-                              : (r.first_seen != null ? r.first_seen : null)
+                stale,
+                read_ok_at: snapshot.read_ok_at,
+                total: snapshot.total,
+                rows: snapshot.rows.slice(0, limit).map(r => ({
+                    tx_hash: r.tx_hash,
+                    source: r.source,
+                    data: Buffer.isBuffer(r.data) ? r.data.toString('utf8') : r.data,
+                    first_seen: Number.isFinite(r.first_seen) ? r.first_seen : null
                 }))
             };
         }
@@ -280,7 +287,7 @@ function installAppMiddleware(app, decoder){
     // Rate limiting (requests per minute per IP; override with DECODER_RATE_LIMIT_RPM)
     app.use(rateLimit({
         windowMs: 60 * 1000,
-        limit: parseInt(process.env.DECODER_RATE_LIMIT_RPM, 10) || 100,
+        limit: parseInt(config.DECODER_RATE_LIMIT_RPM, 10) || 100,
         standardHeaders: true,
         legacyHeaders: false
     }));
@@ -290,7 +297,7 @@ function installAppMiddleware(app, decoder){
     // there is nothing a cross-origin caller can reach that a direct one cannot.
     app.use(cors());
 
-    installDecoderObservability(app, decoder, { COIN: process.env.COIN, NETWORK })
+    installDecoderObservability(app, decoder, { COIN: config.COIN, NETWORK })
 }
 
 // Routes in registration order: GET /status, GET /live, the batch guard, the
@@ -301,7 +308,7 @@ function registerRoutes(app, decoder, isDecoderRunning, getDecoderError){
 
     // Bound JSON-RPC batch size (see makeRpcBatchGuard). Must run after bodyParser
     // (req.body parsed) and before the router (dispatch).
-    app.use(makeRpcBatchGuard(parseInt(process.env.DECODER_RPC_MAX_BATCH, 10) || 20))
+    app.use(makeRpcBatchGuard(parseInt(config.DECODER_RPC_MAX_BATCH, 10) || 20))
 
     // Express 5 / body-parser 2.x leaves req.body undefined when a request carries
     // no JSON body (a GET, or a POST without application/json), whereas body-parser
@@ -318,7 +325,7 @@ async function startApi(){
     // bind a random OS-assigned port, making the container appear healthy while every
     // downstream caller gets connection-refused. Checked here (not at module load) so the
     // module can be required by tests without a valid port set.
-    if (!process.env.DECODER_API_PORT || isNaN(DECODER_API_PORT) || DECODER_API_PORT < 1 || DECODER_API_PORT > 65535) {
+    if (!config.DECODER_API_PORT || isNaN(DECODER_API_PORT) || DECODER_API_PORT < 1 || DECODER_API_PORT > 65535) {
         console.error('DECODER_API_PORT is not set or invalid. Set a valid port (1-65535) in the environment.')
         process.exit(1)
     }
@@ -379,4 +386,4 @@ if (require.main === module) startApi()
 // startApi is exported so the crash handlers it installs can be driven for real
 // rather than asserted against the source text; the require.main guard above
 // still keeps a plain require from opening a port or a DB connection.
-module.exports = { makeRpcBatchGuard, registerLiveRoute, startApi, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
+module.exports = { makeRpcBatchGuard, registerLiveRoute, registerStatusRoute, startApi, createMempoolMethods, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }

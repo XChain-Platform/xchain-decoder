@@ -120,6 +120,7 @@ function buildDecoder(txSpecs, model, opts) {
         insertDispenser:                     (d) => model.insertDispenser(d),
         extendOpenDispenserExpirationBySource: (s, e) => model.extendOpenDispenserExpirationBySource(s, e),
         deleteOpenDispensers:                (b, m) => model.deleteOpenDispensers(b, m),
+        recordDispenserExtensionUndo: async () => true,
         purgeExpiredDispensers:              (h) => model.purgeExpiredDispensers(h),
         getAllOpenDispenserAddresses:        () => model.getAllOpenDispenserAddresses(),
         // opts.oracleLookup stands in for whichever accessor the flag-day routes to, so a

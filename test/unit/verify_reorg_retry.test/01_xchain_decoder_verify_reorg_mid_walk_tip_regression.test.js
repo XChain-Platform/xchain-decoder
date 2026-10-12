@@ -205,3 +205,61 @@ describe('XChainDecoder.verifyReorg mid-walk tip regression', function () {
     assert.ok(sleeps >= 3, 'retries through the node outage instead of crashing')
   })
 })
+
+// Build a decoder whose node regresses to tip 102 mid-walk and reports `infos` in turn
+// (the last one repeats); `exitAfterSleeps` ends a deliberately parked walk.
+function catchingUpWalk(infos, exitAfterSleeps) {
+  const decoder = new XChainDecoder(
+    'bitcoin-mainnet', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+  )
+  decoder.startBlockIndex = 0
+  decoder.chainGenesisHash = OUR_GENESIS
+  const state = { top: 105, deleted: [], sleeps: 0, infoReads: 0 }
+  decoder.sleep = async () => {
+    if (exitAfterSleeps && ++state.sleeps >= exitAfterSleeps) state.top = -1
+  }
+  const dbHash = { 105: 'db105', 104: 'db104', 103: 'db103', 102: 'match102', 101: 'match101', 100: 'match100' }
+  decoder.connector = {
+    getBlockHash: async (h) => {
+      if (h === 0) return OUR_GENESIS
+      if (h > 102) throw new Error('Block height out of range')
+      return 'match' + h
+    },
+    getBlockchainInfo: async () => infos[Math.min(state.infoReads++, infos.length - 1)]
+  }
+  decoder.db = {
+    getLastBlockIndex: async () => state.top,
+    getBlockByIndex: async (h) => (h < 0 ? null : { block_hash: dbHash[h] }),
+    deleteBlockByIndex: async (h) => { state.deleted.push(h); state.top = h - 1 },
+    insertEvent: async () => true,
+    isReorgHalted: async () => false,
+    markReorgHalted: async () => {}
+  }
+  return { decoder, state }
+}
+
+describe('XChainDecoder.verifyReorg mid-walk tip refresh from a catching-up node', function () {
+  this.timeout(0)
+
+  it('ignores a refreshed tip while the node reports initial block download', async function () {
+    const ibd = { blocks: 102, chain: 'main', initialblockdownload: true, verificationprogress: 0.9999 }
+    const { decoder, state } = catchingUpWalk([ibd], 3)
+    assert.strictEqual(await decoder.verifyReorg(105), true)
+    assert.deepStrictEqual(state.deleted, [], 'a catching-up node is waited on, never rolled back')
+  })
+
+  it('ignores a refreshed tip while verification progress is below the parse threshold', async function () {
+    const slow = { blocks: 102, chain: 'main', initialblockdownload: false, verificationprogress: 0.5 }
+    const { decoder, state } = catchingUpWalk([slow], 3)
+    assert.strictEqual(await decoder.verifyReorg(105), true)
+    assert.deepStrictEqual(state.deleted, [], 'an unsynced node tip must not drive above-tip deletes')
+  })
+
+  it('accepts the refreshed tip once the node has finished catching up', async function () {
+    const ibd = { blocks: 102, chain: 'main', initialblockdownload: true, verificationprogress: 0.9999 }
+    const synced = { blocks: 102, chain: 'main', initialblockdownload: false, verificationprogress: 1 }
+    const { decoder, state } = catchingUpWalk([ibd, ibd, synced])
+    assert.strictEqual(await decoder.verifyReorg(105), true)
+    assert.deepStrictEqual(state.deleted, [105, 104, 103], 'the wait resolves once the node is synced')
+  })
+})

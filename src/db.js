@@ -53,8 +53,9 @@ class Database {
             password: this.pass,
             database: this.dbName,
             port:     this.port,
-            // mariadb 3.5.3 issues SET time_zone='+00:00' on every connection and
-            // encodes/decodes Dates as UTC, aligning SQL timestamps and first_seen.
+            // Issue SET time_zone='+00:00' on every connection. The driver still decodes
+            // DATETIME/TIMESTAMP text as host-local Dates, so a read that needs an instant
+            // converts in SQL (UNIX_TIMESTAMP) rather than trusting a returned Date.
             timezone:          'Z',
             connectionLimit:  10,
             insertIdAsNumber: true,

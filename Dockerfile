@@ -1,11 +1,14 @@
-FROM node:25.9.0
-
-RUN mkdir /XChainDecoder/
+FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS dependencies
+WORKDIR /XChainDecoder
 COPY ./package.json /XChainDecoder/package.json
 COPY ./package-lock.json /XChainDecoder/package-lock.json
-WORKDIR /XChainDecoder
 RUN npm ci --omit=dev
 
+FROM node:25.9.0@sha256:78839ac448c23517f8eab2e8f7943d9b4f73979eb7f8bed2c73dbf72ff869e7b AS decoder
+WORKDIR /XChainDecoder
+COPY ./package.json /XChainDecoder/package.json
+COPY ./package-lock.json /XChainDecoder/package-lock.json
+COPY --from=dependencies /XChainDecoder/node_modules /XChainDecoder/node_modules
 COPY ./src /XChainDecoder/src
 # Patch bitcoinjs-lib's bufferutils with a BigInt-aware 64-bit reader. The stock
 # readUInt64 throws "RangeError: value out of range" for output values above

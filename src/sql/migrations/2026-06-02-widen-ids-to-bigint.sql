@@ -12,7 +12,7 @@
 --
 --********************************************************************
 
--- xchain:migration mode=manual
+-- xchain:migration mode=manual deploy-precondition=required
 -- (manual: a one-time column TYPE change across all id/key columns -- run with
 --  the decoder stopped, take a backup first; see HOW TO RUN below.)
 -- Migration: widen all 32-bit unsigned id/key columns to 64-bit

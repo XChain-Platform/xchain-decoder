@@ -32,8 +32,8 @@
  *     framed with OP_PUSHDATA4, which the legacy compiledPushSize re-measure
  *     does not model -- the envelope must never route through it);
  *  5. constants conformance: decoder == encoder == documentation for
- *     ENVELOPE_MAX_PAYLOAD and the recognition-height map (skip-if-absent
- *     sibling checkout, matching the compiledPushSizeConformance convention);
+ *     ENVELOPE_MAX_PAYLOAD and the recognition-height map (siblings gated
+ *     through test/helpers/sibling_checkout.js, as compiledPushSizeConformance is);
  *  6. wire fidelity: a REAL encoder-built, fully signed reveal parses
  *     byte-identically (sibling-gated on xchain-encoder).
  */
@@ -42,6 +42,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js')
 const {
     assert,
     sinon,
@@ -93,9 +94,7 @@ const VECTORS_PATH = path.join(DOCS_DIR, 'protocol', 'test-vectors', 'taproot_en
 
 // Skip without the sibling checkout, unless XCHAIN_REQUIRE_SIBLINGS=1 makes absence a failure.
 function requireDocsSibling(){
-    if (fs.existsSync(VECTORS_PATH)) return
-    if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-documentation sibling not found at ' + VECTORS_PATH + ' but XCHAIN_REQUIRE_SIBLINGS=1')
-    this.skip()
+    skipOrFail(this, siblingCheckout(__dirname, VECTORS_PATH), 'the taproot envelope golden-vector guard')
 }
 
 function carriesBytes(adv){
@@ -141,6 +140,8 @@ describe('Taproot envelope recognition', function () {
             assert.strictEqual(XChainDecoder.ENVELOPE_MAX_PAYLOAD, CONSTANTS.ENVELOPE_MAX_PAYLOAD)
             assert.strictEqual(CONSTANTS.ENVELOPE_MAX_PAYLOAD, 390000)
             assert.deepStrictEqual(XChainDecoder.ENVELOPE_RECOGNITION_ACTIVATION, CONSTANTS.ENVELOPE_RECOGNITION_ACTIVATION)
+            assert.strictEqual(XChainDecoder.DISPENSER_WIDE_EXPIRATION_ACTIVATION,
+                CONSTANTS.DISPENSER_WIDE_EXPIRATION_ACTIVATION)
         })
 
         // Pins the ARMED map exactly (operator §7 cohort call, 2026-08-01). Every value
@@ -151,6 +152,17 @@ describe('Taproot envelope recognition', function () {
             assert.deepStrictEqual(CONSTANTS.ENVELOPE_RECOGNITION_ACTIVATION, {
                 BTC:  { mainnet: 960850, testnet: 0, regtest: 0 },
                 LTC:  { mainnet: 3153500, testnet: 0, regtest: 0 },
+                DOGE: { mainnet: null, testnet: null, regtest: null },
+            })
+        })
+
+        // Pins the carrier-recognition map literally, for the same fork reason as the map
+        // above; the docs-parity case below skips without the sibling and only compares copies.
+        // Arming a mainnet height is a deploy-train act and must edit this assertion on purpose.
+        it('the carrier-recognition map is exactly the shipped shape: mainnet unarmed, genesis-active test networks, DOGE never', function () {
+            assert.deepStrictEqual(CONSTANTS.ENVELOPE_CARRIER_RECOGNITION_ACTIVATION, {
+                BTC:  { mainnet: null, testnet: 0, regtest: 0 },
+                LTC:  { mainnet: null, testnet: 0, regtest: 0 },
                 DOGE: { mainnet: null, testnet: null, regtest: null },
             })
         })
@@ -165,7 +177,7 @@ describe('Taproot envelope recognition', function () {
             const DOCS = process.env.XCHAIN_DOCUMENTATION_DIR ||
                 path.join(__dirname, '..', '..', '..', '..', 'xchain-documentation')
             const DOCS_CONSTANTS = path.join(DOCS, 'protocol', 'constants.js')
-            before(function () { if (!fs.existsSync(DOCS_CONSTANTS)) { if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-documentation sibling not found at ' + DOCS_CONSTANTS + ' but XCHAIN_REQUIRE_SIBLINGS=1'); this.skip(); } })
+            before(function () { skipOrFail(this, siblingCheckout(__dirname, DOCS_CONSTANTS), 'the envelope constants parity guard against xchain-documentation') })
 
             it('ENVELOPE_MAX_PAYLOAD and both activation maps are byte-equal to the canonical copy', function () {
                 const docs = require(DOCS_CONSTANTS)
@@ -262,7 +274,7 @@ describe('Taproot envelope recognition', function () {
             const ENCODER = process.env.XCHAIN_ENCODER_DIR ||
                 path.join(__dirname, '..', '..', '..', '..', 'xchain-encoder')
             const VALIDATOR = path.join(ENCODER, 'src', 'common', 'validator.js')
-            before(function () { if (!fs.existsSync(VALIDATOR)) { if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('xchain-encoder sibling not found at ' + VALIDATOR + ' but XCHAIN_REQUIRE_SIBLINGS=1'); this.skip(); } })
+            before(function () { skipOrFail(this, siblingCheckout(__dirname, VALIDATOR), 'the ENVELOPE_MAX_PAYLOAD parity guard against xchain-encoder') })
 
             it('ENVELOPE_MAX_PAYLOAD stays equal across the two services', function () {
                 const v = require(VALIDATOR)

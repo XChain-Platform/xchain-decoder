@@ -202,9 +202,19 @@ function fakeDb({ halted = true, haltId = 7, deletesAboveTip = 0, dispensers = 0
         countReorgDeletesAboveTip: async () => deletesAboveTip,
         countDispensers:           async () => dispensers,
         hasDispenserTransactions:  async () => dispenserTxs,
-        clearReorgHalt:            async (opts) => { calls.clear.push(opts); return clearResult }
+        clearReorgHalt:            async (opts) => { calls.clear.push(opts); return clearResult },
+        // A strict session by default; the sql_mode cases below wire in the real guard.
+        assertStrictSqlMode:       async () => {}
     }
     return { db, calls }
+}
+
+// Wire the decoder's real strict-mode guard onto a fake db whose session reports `mode`.
+function withSessionMode(db, mode) {
+    db.assertStrictSqlMode = Database.prototype.assertStrictSqlMode
+    db.transactionConnection = null
+    db.getConnection = async () => ({ query: async () => [{ mode }], release: async () => {} })
+    return db
 }
 const quiet = { log: () => {}, error: () => {} }
 const REASON = 'BTC mainnet decoder, no dispensers exist yet, block range intact'
@@ -254,6 +264,28 @@ describe('clear-reorg-halt CLI', function () {
         assert.match(refusal, /reorg_halt_parked: true/)
         assert.match(refusal, /full resync from a known-good snapshot/)
         assert.match(refusal, /cannot be forced/)
+    })
+})
+
+describe('clear-reorg-halt CLI', function () {
+
+    // fakeDb's destructuring default turns an undefined count into 0, so each value
+    // is wired onto the method directly.
+    it('refuses, and cannot be forced, when the above-tip count is not a non-negative integer', async function () {
+        for (const value of [undefined, null, NaN, '0', {}, -1, 1.5]){
+            for (const argv of [['--reason', REASON, '--force'], ['--dry-run']]){
+                const { db, calls } = fakeDb()
+                db.countReorgDeletesAboveTip = async () => value
+                const errors = []
+                const exit = await run({ db, argv, log: () => {}, error: (l) => errors.push(l) })
+                const label = String(typeof value) + ' ' + String(value) + ' ' + argv.join(' ')
+                assert.strictEqual(exit, EXIT.NOT_RESYNCED, label)
+                assert.strictEqual(calls.clear.length, 0, label)
+                const refusal = errors.join('\n')
+                assert.match(refusal, /cannot be forced/, label)
+                assert.doesNotMatch(refusal, /undefined block|NaN block|null block/, label)
+            }
+        }
     })
 })
 
@@ -315,5 +347,29 @@ describe('clear-reorg-halt CLI', function () {
             assert.strictEqual(calls.clear.length, 0)
             assert.ok(errors.some(l => /REFUSED/.test(l) && /events id could not be read/.test(l)))
         }
+    })
+})
+
+describe('clear-reorg-halt CLI', function () {
+    // The CLI builds its own pool and never runs runMigrations, so it checks the
+    // session itself: the row it writes decides halt state for every reader.
+    it('refuses a lax or NO_BACKSLASH_ESCAPES session, dry run included, and never clears', async function () {
+        for (const mode of ['', 'NO_ENGINE_SUBSTITUTION', 'STRICT_TRANS_TABLES,NO_BACKSLASH_ESCAPES']) {
+            for (const argv of [['--reason', REASON], ['--dry-run']]) {
+                const { db, calls } = fakeDb()
+                withSessionMode(db, mode)
+                const errors = []
+                assert.strictEqual(await run({ db, argv, log: () => {}, error: (l) => errors.push(l) }), EXIT.FAILED, mode)
+                assert.strictEqual(calls.clear.length, 0)
+                assert.ok(errors.some(l => /REFUSED/.test(l) && /strict-mode check/.test(l)), mode)
+            }
+        }
+    })
+
+    it('still clears on the stock strict session', async function () {
+        const { db, calls } = fakeDb()
+        withSessionMode(db, 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION')
+        assert.strictEqual(await run({ db, argv: ['--reason', REASON], ...quiet }), EXIT.OK)
+        assert.strictEqual(calls.clear.length, 1)
     })
 })

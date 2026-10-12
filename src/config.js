@@ -21,8 +21,7 @@
  * name with different fallbacks disagree with each other silently. One home
  * makes the whole surface one file long.
  *
- * WHAT LIVES HERE, AND WHAT DOES NOT. Every name a module outside the entry
- * points reads lives here, as the raw string the environment holds (or
+ * WHAT LIVES HERE, AND WHAT DOES NOT. Every name any module reads lives here, as the raw string the environment holds (or
  * undefined). Coercion does NOT: a read site
  * that parses a number, applies a floor or derives a fallback from another
  * setting keeps that code where it is and only takes the raw value from here.
@@ -39,10 +38,10 @@
  * boot-time values and only a test that changes one mid-run would notice.
  * So the exported object is accessors over the block below, not a copy of it.
  *
- * The three process entry points (api.js, migrate.js, clear_reorg_halt.js)
- * read the environment directly and are exempt: they validate and report on
- * their configuration before anything else is loaded, which is the one job
- * that cannot go through a module that has already resolved it.
+ * The two process entry points (migrate.js, clear_reorg_halt.js) read their
+ * DECODER_DB_* settings here too. They load the service .env into the
+ * environment first and only then read, and since every read below is live,
+ * a value dotenv sets after this module was required is still the value they get.
  *
  ********************************************************************/
 
@@ -58,6 +57,23 @@
 function currentEnvironment() {
     return {
     // codemod:env-entries
+    COIN: process.env.COIN,
+    NETWORK: process.env.NETWORK,
+    NODE_URL: process.env.NODE_URL,
+    NODE_PORT: process.env.NODE_PORT,
+    NODE_USER: process.env.NODE_USER,
+    NODE_PASSWORD: process.env.NODE_PASSWORD,
+    DECODER_DB_HOST: process.env.DECODER_DB_HOST,
+    DECODER_DB_PORT: process.env.DECODER_DB_PORT,
+    DECODER_DB_NAME: process.env.DECODER_DB_NAME,
+    DECODER_DB_USER: process.env.DECODER_DB_USER,
+    DECODER_DB_PASS: process.env.DECODER_DB_PASS,
+    DECODER_API_PORT: process.env.DECODER_API_PORT,
+    AUX_POW: process.env.AUX_POW,
+    FEE_DESTINATION: process.env.FEE_DESTINATION,
+    GETMEMPOOL_CACHE_MS: process.env.GETMEMPOOL_CACHE_MS,
+    DECODER_RATE_LIMIT_RPM: process.env.DECODER_RATE_LIMIT_RPM,
+    DECODER_RPC_MAX_BATCH: process.env.DECODER_RPC_MAX_BATCH,
         DB_QUERY_TIMEOUT: process.env.DB_QUERY_TIMEOUT,
     DECODER_POLL_SILENT_MS: process.env.DECODER_POLL_SILENT_MS,
     DECODER_RPC_CONCURRENCY: process.env.DECODER_RPC_CONCURRENCY,

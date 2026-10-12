@@ -29,7 +29,7 @@ Transaction extraction service for the XChain Platform. Polls the coin nodes of 
 - **ACTION validation**: 34-name allowlist plus 5 short-form aliases (e.g. TRANSFER -> SEND) expanded before database writes
 - **Parse-failure quarantine**: tx-level decode failures retry up to 3 times, then are quarantined as PARSE_ERROR events rather than halting the block
 - **Source pubkey capture**: records the source address pubkey per transaction in a dedicated table for downstream use by the indexer
-- **Native-coin fee tracking**: when FEE_DESTINATION is set, outputs paying that address are persisted to transaction_outputs for indexer fee validation
+- **Native-coin fee tracking**: outputs paying the coin registry's FEE_DESTINATION are persisted to transaction_outputs for indexer fee validation; on regtest only, `XCHAIN_FEE_DESTINATION_<COIN>_REGTEST` redirects it for the decoder and indexer alike, and a bare `FEE_DESTINATION` env is ignored with a warning
 - **Graceful shutdown**: SIGTERM/SIGINT handlers complete in-flight work
 - **Node RPC failover**: rotates through `NODE_URL_FALLBACK` endpoints after `NODE_FAILOVER_THRESHOLD` consecutive connection failures, round-robin, so a recovered primary is retried again if the fallback also dies
 - **1300+ tests**: unit, integration, e2e, security, fuzz, chaos, mutation, regression, benchmarks, smoke

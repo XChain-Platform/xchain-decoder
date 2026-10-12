@@ -21,6 +21,12 @@
 const { logger } = require('./constants.js')
 const { oracleAddressFromCreate, V0_GIVE_COIN_INDEX, V0_GET_COIN_INDEX, V0_GET_ADDRESS_INDEX, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('../protocol/oracle_fee_output')
 const { isBatchSubCommandCaptureActive } = require('../protocol/batch_sub_command_capture')
+const {
+    hasValidExpirationToken,
+    isExactIntegerExpirationActive,
+    isExactIntegerToken,
+    normalizeDispenserExpiration,
+} = require('./dispenser_wide_expiration.js')
 
 //Catch any dispenser message to add it to
 //the list of possible dispenses.
@@ -199,34 +205,20 @@ function pushV0DispenserCreate(decodedDataSplit, dispenserCreateCandidates, pars
         expiration = this.getDefaultExpiration(block.timestamp)
     } else {
         expiration = Number(expirationToken)
+        expiration = normalizeDispenserExpiration(
+            expirationToken, this.consensusNetwork, block.timestamp, expiration)
     }
 
-    // Require an INTEGER, matching the indexer, which rejects any
-    // non-integer EXPIRATION outright (isInteger, see
-    // xchain-indexer/src/actions/dispenser/validate_format.js). dispensers.expiration
-    // is BIGINT UNSIGNED, so a fractional value like 1700000000.5
-    // either fails the write under a strict sql_mode - wedging the
-    // block loop, which then retries the same deterministic tx
-    // forever - or truncates under a lax one, leaving the decoder
-    // holding a dispenser the indexer never registered.
-    // Number.isSafeInteger already excludes NaN and Infinity, so it
-    // subsumes the isNaN test it replaces; the default expiration is
-    // integral by construction (block timestamp + whole days).
+    // Require an integer: dispensers.expiration is BIGINT UNSIGNED, so a fractional
+    // value wedges the block loop or leaves a dispenser the indexer never registered.
+    // At/above EXACT_INTEGER_EXPIRATION_ACTIVATION the wire token is checked in exact
+    // decimal space as the indexer does; below it the Number-based decision is kept
+    // for historical replay. The default expiration is integral by construction.
     //
-    // SAFE integer, not merely integer, and no u32 ceiling. The old
-    // `expiration > 4294967295` reject was recognition drift: the
-    // indexer escrows any non-negative integer EXPIRATION into its own
-    // BIGINT UNSIGNED column, so a dispenser opened past year 2106 (or
-    // spelled 9999999999 for "never") stayed open and escrowed there
-    // while the decoder skipped registration, and a later coin payment
-    // to it was never flagged as a dispense. Number.isSafeInteger is
-    // the bound that actually holds: at or below it Number() round-trips
-    // the payload token exactly, so the decoder stores the same value
-    // the indexer does, and it stays far inside BIGINT UNSIGNED.
-    // Dropping the ceiling outright would NOT be safe - Number.isInteger
-    // is true for 1e300, which overflows the column and wedges the block
-    // loop on the same deterministic tx forever.
-    if (!Number.isSafeInteger(expiration) || expiration < 0) {
+    // Above the wide-expiration gate, exact unsigned u64 values beyond Number's safe
+    // range clamp to its largest exact integer, keeping the advisory row open without
+    // rounding the wire value. Overflow and invalid spellings remain rejected.
+    if (!hasValidExpirationToken(expirationToken, expiration, this.consensusNetwork, block.timestamp)) {
         this.parseErrors++
         logger.error(`Skipping dispenser in tx ${nextTransactionHash}: invalid expiration value '${decodedDataSplit[V0_EXPIRATION_INDEX]}'`)
     } else if (this.dispenserOpensForThisChain(giveCoin, getCoin)){
@@ -330,17 +322,11 @@ function dispenserEditExtension(dispenserCommand, dispenserCommandPrefix, parseR
         const editExpirationToken = decodedDataSplit[V2_EXPIRATION_INDEX]
         if (editSource && editSource.length > 0 &&
             editExpirationToken !== undefined && editExpirationToken !== ""){
-            const newExpiration = Number(editExpirationToken)
-            // Same integer contract as the create guard above: the edit
-            // path writes through extendOpenDispenserExpirationBySource
-            // into the same BIGINT UNSIGNED column, and the indexer
-            // rejects a fractional edit EXPIRATION with the identical
-            // isInteger test, and the same SAFE-integer ceiling rather than
-            // a u32 one (see the create guard: a u32 reject here would
-            // silently decline to mirror an extend the indexer accepted,
-            // closing the decoder's row early on a dispenser that is still
-            // open and escrowed).
-            if (Number.isSafeInteger(newExpiration) && newExpiration >= 0 &&
+            const convertedExpiration = Number(editExpirationToken)
+            const newExpiration = normalizeDispenserExpiration(
+                editExpirationToken, this.consensusNetwork, block.timestamp, convertedExpiration)
+            // Same gated exact-or-clamped contract as the create guard above.
+            if (hasValidExpirationToken(editExpirationToken, newExpiration, this.consensusNetwork, block.timestamp) &&
                 newExpiration > block.timestamp){
                 return { editSource, newExpiration }
             }
@@ -379,10 +365,14 @@ async function extendEditedDispenser(extension, nextBlockHeight){
     // The clear below stays for the legacy era it was written
     // for, where it is still the only thing ending the
     // PERSISTENT divergence.
+    // Pre-image first, so a reorg of this block can restore what the extend overwrites.
+    if ((await this.db.recordDispenserExtensionUndo(editSource, nextBlockHeight)) === false){
+        return 'rollback'
+    }
     if ((await this.db.extendOpenDispenserExpirationBySource(editSource, newExpiration, nextBlockHeight)) === false){
         // extendOpenDispenserExpirationBySource's error path already rolled the block back.
         return 'rollback'
     }
 }
 
-module.exports = { dispenserCommandPrefixFor, collectDispenserCreates, registerDispenser, dispenserEditExtension, extendEditedDispenser }
+module.exports = { dispenserCommandPrefixFor, collectDispenserCreates, registerDispenser, dispenserEditExtension, extendEditedDispenser, isExactIntegerExpirationActive, isExactIntegerToken }

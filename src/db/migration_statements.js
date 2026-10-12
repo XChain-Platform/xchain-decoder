@@ -12,7 +12,9 @@
  *
  **********************************************************************/
 
-const { opensBackslashEscape } = require('./query_helpers.js')
+const { opensBackslashEscape, createNamesNonInnoDb, dropTargetDestroys } = require('./query_helpers.js')
+const { ensureLedgerAppliedAtDatetime } = require('./migration_ledger.js')
+const { stripBlockComments } = require('./migration_live_schema_guard.js')
 
 // True when a `#` sits outside every quoted span - a line comment
 // stripSqlLineComments should already have removed. Quote-aware so a `#`
@@ -37,6 +39,14 @@ function hasUnquotedHash(s){
     return false;
 }
 
+// True for the only session SETs an auto file may carry: SET NAMES and a single UTC time_zone,
+// the zone the pool is configured for (timezone 'Z'), so neither can relax a strict-mode check.
+// Kept in step with the xchain-indexer classifier.
+function autoEligibleSet(stmt){
+    if(/^SET\s+NAMES\s+['"]?\w+['"]?(?:\s+COLLATE\s+['"]?\w+['"]?)?$/i.test(stmt)) return true;
+    return /^SET\s+(?:SESSION\s+|LOCAL\s+|@@SESSION\.|@@LOCAL\.|@@)?time_zone\s*=\s*'\+00:00'$/i.test(stmt);
+}
+
 function isSimpleDestructiveStatement(stmt){
     // Server-side indirection escapes a statement-prefix classifier: a mode=auto
     // file can smuggle destructive SQL past every keyword check below via dynamic
@@ -44,12 +54,17 @@ function isSimpleDestructiveStatement(stmt){
     // or a `CALL proc()` whose body the scanner cannot see. None of these are used
     // by any committed auto migration, so treat them as non-auto-eligible. SET of a
     // user variable (`SET @s = ...`) exists to stage dynamic SQL for PREPARE, so
-    // flag it too - but NOT system-variable SETs (`SET NAMES ...`, `SET sql_mode
-    // = ...`, `SET @@session...`), which are benign and stay auto-eligible.
+    // flag it too.
     if(/^PREPARE\b/i.test(stmt)) return true;
     if(/^EXECUTE\b/i.test(stmt)) return true;
     if(/^CALL\b/i.test(stmt)) return true;
     if(/^SET\s+@(?!@)/i.test(stmt)) return true;
+    // Any other SET is an allow-list, not a deny-list: only SET NAMES and a single
+    // UTC time_zone stay auto-eligible. A SET sql_mode (or foreign_key_checks, ...) turns
+    // off the strict-mode backstop, so a later narrowing MODIFY in the same file truncates
+    // silently instead of failing; and SET STATEMENT v=x FOR <stmt> hides a statement
+    // behind the SET keyword from every check below.
+    if(/^SET\b/i.test(stmt) && !autoEligibleSet(stmt)) return true;
     if(/^DROP\s+(TABLE|DATABASE|SCHEMA)\b/i.test(stmt)) return true;
     // CREATE OR REPLACE TABLE is an atomic DROP TABLE IF EXISTS + CREATE: it destroys
     // every existing row. Plain CREATE TABLE / CREATE TABLE IF NOT EXISTS are additive
@@ -81,13 +96,13 @@ function isSimpleDestructiveStatement(stmt){
     return /^LOAD\s+DATA\b/i.test(stmt);
 }
 
-// True for any CREATE other than a table or an index. A trigger, event, routine or view
-// carries SQL this classifier never reads, and the server runs it later (a trigger on every
-// row write), the same blind spot as CALL above.
+// True for any CREATE other than an InnoDB table or an index. A trigger, event, routine or
+// view carries SQL this classifier never reads, and the server runs it later (a trigger on
+// every row write), the same blind spot as CALL above.
 function createOutsideAllowList(stmt){
     if(!/^CREATE\b/i.test(stmt)) return false;
     // Allow the additive forms committed auto migrations use: [TEMPORARY] TABLE and INDEX.
-    if(/^CREATE\s+(?:TEMPORARY\s+)?TABLE\b/i.test(stmt)) return false;
+    if(/^CREATE\s+(?:TEMPORARY\s+)?TABLE\b/i.test(stmt)) return createNamesNonInnoDb(stmt);
     return !/^CREATE\s+(?:(?:UNIQUE|FULLTEXT|SPATIAL)\s+)?INDEX\b/i.test(stmt);
 }
 
@@ -101,18 +116,19 @@ function isDestructiveAlter(stmt, safeAlterDrop){
     // so the whole class is non-auto-eligible - re-tag mode=manual to run one.
     if(/\bPARTITION(?:ING)?\b/i.test(stmt)) return true;
     if(/\bTABLESPACE\b/i.test(stmt)) return true;
+    // Any ENGINE option rebuilds the whole table by copy, and a non-InnoDB engine loses rows on
+    // restart (MEMORY) or escapes the reorg rollback (MyISAM, Aria), so it runs manual only.
+    if(/\bENGINE\b/i.test(stmt)) return true;
     // Every DROP inside the ALTER must target a safe (metadata-only) object.
-    let m;
-    const dropRe = /\bDROP\s+([A-Za-z_]+|`[^`]+`)/gi;
-    while((m = dropRe.exec(stmt)) !== null){
-        const target = m[1].replace(/`/g, '').toUpperCase();
-        if(!safeAlterDrop.has(target)) return true;
-    }
+    if(dropTargetDestroys(stmt, safeAlterDrop)) return true;
     // RENAME TO / RENAME COLUMN / bare RENAME lose the old name; only
     // RENAME INDEX/KEY is a metadata-only rename.
     if(/\bRENAME\b(?!\s+(INDEX|KEY)\b)/i.test(stmt)) return true;
     // CHANGE [COLUMN] renames and retypes in one clause - manual only.
     if(/\bCHANGE\b/i.test(stmt)) return true;
+    // CONVERT TO CHARACTER SET rewrites every text column of the table and can truncate or
+    // re-encode row data.
+    if(/\bCONVERT\s+TO\b/i.test(stmt)) return true;
     // MODIFY that adds NOT NULL narrows the column domain - except an
     // AUTO_INCREMENT attribute repair: an AUTO_INCREMENT column is
     // definitionally NOT NULL, so no domain is narrowed (see the
@@ -133,20 +149,12 @@ function isDestructiveAlter(stmt, safeAlterDrop){
     for(const clause of mClauses){
         if(/\bMODIFY\b[\s\S]*\bNOT\s+NULL\b/i.test(clause) &&
            !/\bAUTO_INCREMENT\b/i.test(clause)) return true;
+        // A MODIFY restates the whole column, so restating id without AUTO_INCREMENT strips
+        // the attribute and every later insert loses its generated key.
+        if(/^\s*(?:ALTER\s+(?:ONLINE\s+)?TABLE\s+(?:`[^`]+`|[A-Za-z0-9_$.]+)\s+)?MODIFY\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?`?id`?(?=[\s,]|$)/i.test(clause) &&
+           !/\bAUTO_INCREMENT\b/i.test(clause)) return true;
     }
     return false;
-}
-
-async function ensureLedgerAppliedAtDatetime(conn){
-    const rows = await conn.query(
-        'SELECT DATA_TYPE AS dataType FROM information_schema.COLUMNS ' +
-        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schema_migrations' " +
-        "AND COLUMN_NAME = 'applied_at'"
-    );
-    if(String(rows[0]?.dataType || '').toLowerCase() !== 'timestamp') return;
-    await conn.query(
-        'ALTER TABLE schema_migrations MODIFY applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
-    );
 }
 
 module.exports = {
@@ -185,20 +193,22 @@ module.exports = {
     // committed AUTO_INCREMENT id=0 repair),
     // ALTER TABLE ... DROP <column|partition|bare identifier>,
     // ALTER TABLE ... RENAME (except RENAME INDEX/KEY), ALTER TABLE ... CHANGE
-    // (rename+retype), MODIFY ... NOT NULL (the statically detectable
-    // narrowing; a width reduction cannot be seen without the live schema and
-    // stays covered by the manual-tag convention), any ALTER TABLE PARTITION or
-    // TABLESPACE clause, ALTER IGNORE TABLE (deletes duplicate-key rows), any other
-    // ALTER than ALTER [ONLINE] TABLE, and any CREATE other than [TEMPORARY] TABLE and
+    // (rename+retype), CONVERT TO (rewrites every text column), MODIFY ... NOT NULL
+    // (the statically detectable narrowing; the runner's live-schema guard catches a
+    // width cut or a dropped attribute), MODIFY id without AUTO_INCREMENT (strips the
+    // generated key), any ALTER TABLE PARTITION, TABLESPACE or ENGINE clause, ALTER IGNORE
+    // TABLE (deletes duplicate-key rows), any other ALTER than ALTER [ONLINE] TABLE, a CREATE
+    // TABLE naming an engine other than InnoDB, and any CREATE other than [TEMPORARY] TABLE and
     // [UNIQUE|FULLTEXT|SPATIAL] INDEX (triggers, events, routines and views run SQL
-    // the scanner cannot read).
+    // the scanner cannot read), and any SET other than SET NAMES or a single UTC
+    // time_zone (session variables relax strict mode; SET STATEMENT ... FOR hides a statement).
     //
     // Deliberately NOT flagged (legitimate existing auto patterns): DROP INDEX/KEY,
-    // DROP FOREIGN KEY/CONSTRAINT/CHECK/DEFAULT/PRIMARY KEY (structural, no row
-    // data lost), ADD ..., plain CREATE TABLE / CREATE TABLE IF NOT EXISTS (additive;
-    // but CREATE OR REPLACE TABLE IS flagged - it is an atomic DROP+CREATE), CREATE
-    // [UNIQUE] INDEX, MODIFY that widens/nullables a column, and ALTER ONLINE TABLE
-    // under the same clause rules as plain ALTER TABLE.
+    // DROP FOREIGN KEY/CONSTRAINT/CHECK/DEFAULT/PRIMARY KEY with the keyword bare and
+    // unquoted (structural, no row data lost), ADD ..., plain InnoDB or engine-less CREATE
+    // TABLE / CREATE TABLE IF NOT EXISTS (additive; but CREATE OR REPLACE TABLE IS flagged -
+    // it is an atomic DROP+CREATE), CREATE [UNIQUE] INDEX, MODIFY that widens/nullables a
+    // column, and ALTER ONLINE TABLE under the same clause rules as plain ALTER TABLE.
     destructiveAutoStatement(statements){
         // Drops that remove metadata only; anything else after DROP inside an
         // ALTER (COLUMN, PARTITION, or a bare column identifier) loses data.
@@ -213,9 +223,9 @@ module.exports = {
             // something a prefix classifier cannot see - and no committed auto migration
             // uses one, so treat any statement carrying one as non-auto-eligible.
             if(/\/\*(?:!|M!)/i.test(String(raw)))                return raw;
-            // Belt-and-braces: strip /* */ block comments (line comments are already
-            // gone) so a keyword inside comment prose never triggers or hides a hit.
-            const stmt = String(raw).replace(/\/\*[\s\S]*?\*\//g, ' ').trim();
+            // Strip /* */ comments (line comments are gone) so comment prose never triggers or hides
+            // a hit; quote-aware, so a '/*' literal and a later '*/' literal hide no real clause.
+            const stmt = stripBlockComments(raw).trim();
             if(!stmt) continue;
             // Second layer behind stripSqlLineComments: MariaDB/MySQL honour `#` to
             // end-of-line as a comment, so `# note\nDROP TABLE balances` is a DROP every

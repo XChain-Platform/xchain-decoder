@@ -19,6 +19,8 @@
 const assert = require('assert')
 const XChainDecoder = require('../../src/XChainDecoder')
 const Database = require('../../src/db.js')
+const { haltReorg } = require('../../src/XChainDecoder/reorg_halt.js')
+const { REORG_HALT_PROBE_INTERVAL_MS } = require('../../src/XChainDecoder/constants.js')
 
 function makeDecoder() {
     return new XChainDecoder(
@@ -287,5 +289,69 @@ describe('Database.markReorgHalted reports the row, not the ack', function () {
         const { db, calls } = stubMarkerDb({ alreadyHalted: true })
         assert.strictEqual(await db.markReorgHalted('over-deep'), true)
         assert.strictEqual(calls.insert, 0)
+    })
+})
+
+// A halt whose marker write failed leaves no row, so the first probe after the TTL
+// reads "not halted". That absence is not a clear: the halt must survive it, or every
+// surface publishes reorg_halted=false for the one halt a restart silently resumes.
+const NO_ROW = { halted: false, at: null, reason: null }
+
+async function haltedUnrecorded(db) {
+    const decoder = makeDecoder()
+    decoder.db = db
+    await haltReorg.call(decoder, 'over-deep rollback past safe-depth', [])
+    return decoder
+}
+
+async function assertStillHalted(decoder) {
+    const before = decoder.getReorgHaltStatus()
+    const later = Date.now() + REORG_HALT_PROBE_INTERVAL_MS + 1000
+    const status = await decoder.checkReorgHalt({ now: later })
+    assert.strictEqual(status.halted, true, 'an unrecorded halt must not read as cleared')
+    assert.strictEqual(status.reason, before.reason)
+    assert.strictEqual(status.at, before.at)
+    assert.strictEqual(status.marker_persisted, false)
+    assert.strictEqual(status.checked_at, later, 'the probe still stamps checked_at')
+}
+
+describe('XChainDecoder keeps an unrecorded halt across the TTL re-probe', function () {
+    it('keeps the halt when the write returned false and the read finds no row', async function () {
+        await assertStillHalted(await haltedUnrecorded({
+            markReorgHalted: async () => false, getReorgHaltMarker: async () => NO_ROW
+        }))
+    })
+
+    it('keeps the halt when db.markReorgHalted does not exist', async function () {
+        await assertStillHalted(await haltedUnrecorded({ getReorgHaltMarker: async () => NO_ROW }))
+    })
+
+    it('keeps the halt when the newest row is an older operator clear', async function () {
+        await assertStillHalted(await haltedUnrecorded({
+            markReorgHalted: async () => false,
+            getReorgHaltMarker: async () => ({ ...NO_ROW, cleared_at: '2026-01-01T00:00:00.000Z', cleared_reason: 'old clear' })
+        }))
+    })
+})
+
+describe('XChainDecoder keeps an unrecorded halt across the TTL re-probe', function () {
+    it('adopts the row when the write reported failure but the read finds the halt', async function () {
+        const decoder = await haltedUnrecorded({
+            markReorgHalted: async () => false,
+            getReorgHaltMarker: async () => ({ halted: true, at: '2026-10-01T00:00:00.000Z', reason: 'landed late' })
+        })
+        const status = await decoder.checkReorgHalt({ force: true })
+        assert.strictEqual(status.halted, true)
+        assert.strictEqual(status.marker_persisted, true)
+    })
+
+    it('still clears a recorded halt once an operator clear is read', async function () {
+        let row = { halted: true, at: '2026-10-01T00:00:00.000Z', reason: 'over-deep' }
+        const decoder = await haltedUnrecorded({ markReorgHalted: async () => true, getReorgHaltMarker: async () => row })
+        assert.strictEqual(decoder.getReorgHaltStatus().marker_persisted, true)
+        row = { ...NO_ROW, cleared_at: '2026-10-02T00:00:00.000Z', cleared_reason: 'verified' }
+        const status = await decoder.checkReorgHalt({ force: true })
+        assert.strictEqual(status.halted, false, 'an operator clear of a recorded halt must still land')
+        assert.strictEqual(status.cleared_reason, 'verified')
     })
 })

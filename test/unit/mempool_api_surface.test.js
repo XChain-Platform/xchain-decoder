@@ -29,6 +29,7 @@ const path         = require('path');
 const sinon        = require('sinon');
 const XChainDecoder = require('../../src/XChainDecoder');
 const Database      = require('../../src/db.js');
+const { createMempoolMethods } = require('../../src/api');
 
 function makeDecoder() {
     return new XChainDecoder(
@@ -84,14 +85,14 @@ describe('Database#getMempoolTransactions()', () => {
 
     it('reads the raw-string columns + first_seen in tx_hash order with a clamped limit', async () => {
         const db  = new Database('127.0.0.1', 3306, 'xchain_btc', 'u', 'p');
-        const row = { tx_hash: 'aa', source: 's', data: 'MINT|0|TOK|1', first_seen: new Date() };
+        const row = { tx_hash: 'aa', source: 's', data: 'MINT|0|TOK|1', first_seen: 1767225600n };
         const q   = sinon.stub().resolves([row]);
         const { pool, conn } = withConn(q);
         db.pool = pool;
         const rows = await db.getMempoolTransactions(9999);
-        assert.deepStrictEqual(rows, [row]);
+        assert.deepStrictEqual(rows, [{ ...row, first_seen: 1767225600 }]);
         const sql = q.firstCall.args[0];
-        assert.ok(sql.includes('tx_hash, source, data, first_seen'));
+        assert.ok(sql.includes('tx_hash, source, data, UNIX_TIMESTAMP(first_seen) AS first_seen'));
         // Action-carrying rows only: the table holds a row for EVERY mempool tx
         // (data blanked to '' when the tx carried no valid ACTION), so an
         // unfiltered window fills with actionless rows on a busy chain and the
@@ -102,6 +103,19 @@ describe('Database#getMempoolTransactions()', () => {
         // limit clamps to the same 500-row cap the explorer window uses.
         assert.ok(/ORDER BY tx_hash\s+LIMIT 500/.test(sql));
         assert.ok(conn.release.calledOnce);
+    });
+
+    it('returns first_seen as plain unix seconds whatever the host time zone', async () => {
+        const db = new Database('127.0.0.1', 3306, 'xchain_btc', 'u', 'p');
+        const q  = sinon.stub().resolves([
+            { tx_hash: 'aa', source: 's', data: 'd', first_seen: 1767225600n },
+            { tx_hash: 'bb', source: 's', data: 'd', first_seen: '1767225601' },
+            { tx_hash: 'cc', source: 's', data: 'd', first_seen: null },
+        ]);
+        db.pool = withConn(q).pool;
+        const rows = await db.getMempoolTransactions(10);
+        assert.deepStrictEqual(rows.map(r => r.first_seen), [1767225600, 1767225601, null]);
+        assert.doesNotThrow(() => JSON.stringify(rows));
     });
 
     it('releases the connection even when the query throws', async () => {
@@ -135,11 +149,56 @@ describe('Database#getMempoolTransactionCount()', () => {
     });
 });
 
-// api.js builds its JSON-RPC controller inside startApi() (it is not exported),
-// so the getmempool contract is pinned at the source level, the same way the
-// explorer pins this repo's mempool INSERT site: the method must exist, consult
-// its TTL cache before the DB, clamp the row window, and map the decoder's
-// node-mempool snapshot fields into the response.
+describe('api.js getmempool stale fallback', () => {
+    let clock;
+    let previousTtl;
+
+    beforeEach(() => {
+        previousTtl = process.env.GETMEMPOOL_CACHE_MS;
+        process.env.GETMEMPOOL_CACHE_MS = '5000';
+        clock = sinon.useFakeTimers({ now: 1000, toFake: ['Date'] });
+        sinon.stub(console, 'error');
+    });
+
+    afterEach(() => {
+        clock.restore();
+        sinon.restore();
+        if (previousTtl === undefined) delete process.env.GETMEMPOOL_CACHE_MS;
+        else process.env.GETMEMPOOL_CACHE_MS = previousTtl;
+    });
+
+    it('marks a failed refresh stale and preserves the last successful read', async () => {
+        const getRows = sinon.stub();
+        getRows.onFirstCall().resolves([
+            { tx_hash: 'aa', source: 'alice', data: 'first', first_seen: 11 }
+        ]);
+        getRows.onSecondCall().rejects(new Error('read failed'));
+        const decoder = {
+            nodeMempoolTxCount: 12,
+            nodeMempoolUpdatedAt: 900,
+            mempoolDb: {
+                getMempoolTransactions: getRows,
+                getMempoolTransactionCount: sinon.stub().resolves(7)
+            }
+        };
+        const getmempool = createMempoolMethods(decoder).getmempool;
+
+        const fresh = await getmempool({ limit: 500 });
+        clock.tick(5000);
+        const failed = await getmempool({ limit: 500 });
+
+        assert.strictEqual(fresh.stale, false);
+        assert.strictEqual(fresh.read_ok_at, 1000);
+        assert.strictEqual(failed.stale, true);
+        assert.strictEqual(failed.read_ok_at, fresh.read_ok_at);
+        assert.strictEqual(failed.total, fresh.total);
+        assert.deepStrictEqual(failed.rows, fresh.rows);
+    });
+});
+
+// Keep the source contract pinned alongside the runtime behavior: the method
+// must exist, consult its TTL cache before the DB, clamp the row window, and map
+// the decoder's node-mempool snapshot fields into the response.
 describe('api.js getmempool method (source pin)', () => {
     const src = fs.readFileSync(path.join(__dirname, '../../src/api.js'), 'utf8');
 
@@ -160,6 +219,13 @@ describe('api.js getmempool method (source pin)', () => {
         assert.ok(body.includes('getMempoolTransactions(500)'), 'getmempool must read the full bounded window once');
         assert.ok(body.includes('getMempoolTransactionCount()'), 'getmempool must report the true total');
         assert.ok(/Math\.min\(parseInt\(params && params\.limit, 10\) \|\| 500, 500\)/.test(body), 'per-request limit clamp missing');
+    });
+
+    it('serves first_seen as the SQL-read unix seconds, never a driver Date', () => {
+        const at = src.indexOf('async getmempool(');
+        const body = src.slice(at, at + 3000);
+        assert.ok(!body.includes('getTime()'), 'getmempool must not convert a host-local driver Date');
+        assert.ok(body.includes('Number.isFinite(r.first_seen)'), 'first_seen must pass through as a number or null');
     });
 
     it('maps the node-mempool observation snapshot into the response', () => {

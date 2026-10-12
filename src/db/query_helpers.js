@@ -61,8 +61,34 @@ function opensBackslashEscape(str, i, quote){
     return str[i] === '\\' && quote !== '`' && i + 1 < str.length;
 }
 
+// destructiveAutoStatement, the CREATE TABLE engine check: true when any ENGINE option names
+// an engine other than InnoDB. MEMORY loses every row on restart, and MyISAM or Aria sit
+// outside the transaction a reorg rollback undoes.
+function createNamesNonInnoDb(stmt){
+    const engineRe = /\bENGINE\b\s*=?\s*[`'"]?(\w*)/gi;
+    let m;
+    while((m = engineRe.exec(stmt)) !== null){
+        if(m[1].toLowerCase() !== 'innodb') return true;
+    }
+    return false;
+}
+
+// destructiveAutoStatement, the ALTER TABLE DROP check: true unless every DROP is followed by a
+// bare, unquoted metadata keyword. A quoted name is always a column to the server, a word that
+// only starts with a keyword (key1) is a column, and a token the scan cannot read is not safe.
+function dropTargetDestroys(stmt, safeDrop){
+    const dropRe = /\bDROP\b/gi;
+    while(dropRe.exec(stmt) !== null){
+        const next = /^\s+([A-Za-z_]+)(?=[\s,;()`]|$)/.exec(stmt.slice(dropRe.lastIndex));
+        if(!next || !safeDrop.has(next[1].toUpperCase())) return true;
+    }
+    return false;
+}
+
 module.exports = {
     resolveQueryTimeout,
     jsonBigIntSafe,
     opensBackslashEscape,
+    createNamesNonInnoDb,
+    dropTargetDestroys,
 }

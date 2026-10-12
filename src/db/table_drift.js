@@ -16,6 +16,38 @@ const fs = require('fs');
 const util = require('../util')
 const { logger } = require('./constants.js')
 
+// alterTableForDrift, a column live as NOT NULL that the source declares nullable: relaxed
+// only when the bare MODIFY that does it would lose nothing.
+async function relaxNullability(db, table, exp, cur){
+    // NEVER relax a primary-key or auto-increment column: a PK can't be
+    // NULL anyway, and a bare `MODIFY <type> NULL` silently strips the
+    // AUTO_INCREMENT attribute (mirror-cursor corruption). parseExpectedColumns
+    // already treats such sources as NOT NULL; this guards against any parse gap.
+    const isPk      = String(cur.COLUMN_KEY || '').toUpperCase() === 'PRI';
+    const isAutoInc = /auto_increment/i.test(String(cur.EXTRA || ''));
+    if(isPk || isAutoInc){
+        logger.info('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL - SKIPPING relax (' + (isPk ? 'PRIMARY KEY' : 'AUTO_INCREMENT') + ' column; a bare MODIFY would strip attributes).');
+        return;
+    }
+    // A MODIFY restates the whole column, so a live DEFAULT, COMMENT, ON UPDATE or generation
+    // expression the statement omits is dropped. Rebuilding those clauses from
+    // information_schema has its own quoting traps, so relax only when nothing would be lost.
+    const lossy = [];
+    if(cur.COLUMN_DEFAULT !== null && cur.COLUMN_DEFAULT !== undefined) lossy.push('DEFAULT');
+    if(String(cur.COLUMN_COMMENT || '') !== '')                         lossy.push('COMMENT');
+    if(String(cur.GENERATION_EXPRESSION || '') !== '')                  lossy.push('generation expression');
+    if(/on update/i.test(String(cur.EXTRA || '')))                      lossy.push('ON UPDATE');
+    if(lossy.length){
+        logger.warn('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL - SKIPPING relax (a bare MODIFY would drop ' + lossy.join(', ') + '). Relax it in a dated migration that restates the full column instead.');
+        return;
+    }
+    // Restate the live collation: it is a bare identifier (no quoting hazard) and
+    // omitting it re-collates an explicitly-collated column to the table default.
+    const collate = /^[A-Za-z0-9_]+$/.test(String(cur.COLLATION_NAME || '')) ? ' COLLATE ' + cur.COLLATION_NAME : '';
+    logger.info('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL. Relaxing constraint.');
+    await db.query('ALTER TABLE `' + table + '` MODIFY `' + exp.name + '` ' + cur.COLUMN_TYPE + collate + ' NULL');
+}
+
 module.exports = {
     // Parse a CREATE TABLE statement to extract expected columns. Conservative:
     // only used for drift detection, not full schema management. Returns array of
@@ -67,7 +99,7 @@ module.exports = {
     //      with a loud warning rather than aborting startup.)
     //   2. Nullability: only relaxes NOT NULL -> NULL (the safe direction; never
     //      strengthens to NOT NULL since live rows might hold NULLs that would
-    //      block the ALTER).
+    //      block the ALTER), and skips the relax when it would drop a live attribute.
     // Doesn't touch types, defaults of existing columns, or indexes. Each applied
     // ALTER is loudly logged. Reuses the caller's connection (`db`).
     async alterTableForDrift(file, db){
@@ -84,7 +116,8 @@ module.exports = {
             return;
         }
         const live = await db.query(
-            "SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE, COLUMN_KEY, EXTRA FROM information_schema.columns WHERE table_schema = ? AND table_name = ?",
+            "SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE, COLUMN_KEY, EXTRA, COLUMN_DEFAULT, COLUMN_COMMENT, GENERATION_EXPRESSION, COLLATION_NAME " +
+            "FROM information_schema.columns WHERE table_schema = ? AND table_name = ?",
             [this.dbName, table]
         );
         const liveByName = new Map(live.map(c => [c.COLUMN_NAME.toLowerCase(), c]));
@@ -99,21 +132,7 @@ module.exports = {
                 await db.query('ALTER TABLE `' + table + '` ADD COLUMN ' + exp.definition);
                 continue;
             }
-            const liveIsNullable = cur.IS_NULLABLE === 'YES';
-            if(!liveIsNullable && exp.nullable){
-                // NEVER relax a primary-key or auto-increment column: a PK can't be
-                // NULL anyway, and a bare `MODIFY <type> NULL` silently strips the
-                // AUTO_INCREMENT attribute (mirror-cursor corruption). parseExpectedColumns
-                // already treats such sources as NOT NULL; this guards against any parse gap.
-                const isPk      = String(cur.COLUMN_KEY || '').toUpperCase() === 'PRI';
-                const isAutoInc = /auto_increment/i.test(String(cur.EXTRA || ''));
-                if(isPk || isAutoInc){
-                    logger.info('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL - SKIPPING relax (' + (isPk ? 'PRIMARY KEY' : 'AUTO_INCREMENT') + ' column; a bare MODIFY would strip attributes).');
-                    continue;
-                }
-                logger.info('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL. Relaxing constraint.');
-                await db.query('ALTER TABLE `' + table + '` MODIFY `' + exp.name + '` ' + cur.COLUMN_TYPE + ' NULL');
-            }
+            if(cur.IS_NULLABLE !== 'YES' && exp.nullable) await relaxNullability(db, table, exp, cur);
         }
     },
 

@@ -162,6 +162,25 @@ describe('malformed-AuxPoW block reassembly fallback', function () {
     })
 })
 
+// The node's own RPC code is the other half of telling an unreachable or warming
+// node apart from unusable block bytes, so it must survive the wrap like error.code.
+describe('malformed-AuxPoW block reassembly fallback', function () {
+    it('getBlockReassembled carries rpcCode/rpcMessage through the wrap, untagged', async function () {
+        const rpcErr = new Error('block header: RPC error -28: Loading block index...')
+        Object.defineProperty(rpcErr, 'rpcCode', { value: -28, enumerable: false, configurable: true })
+        Object.defineProperty(rpcErr, 'rpcMessage', { value: 'Loading block index...', enumerable: false, configurable: true })
+        const connector = makeConnector({ getBlockHeader: async () => { throw rpcErr } })
+        await assert.rejects(() => connector.getBlockReassembled('hash'), (err) => {
+            assert.strictEqual(err.rpcCode, -28)
+            assert.strictEqual(err.rpcMessage, 'Loading block index...')
+            assert.strictEqual(err.propertyIsEnumerable('rpcCode'), false)
+            assert.strictEqual(err.cause, rpcErr)
+            assert.strictEqual(err.auxPowParseFailure, undefined)
+            return true
+        })
+    })
+})
+
 describe('malformed-AuxPoW block reassembly fallback', function () {
 
     describe('BlockchainConnector.probeTxIndex', function () {
@@ -316,6 +335,25 @@ describe('malformed-AuxPoW block reassembly fallback', function () {
                     return true
                 }
             )
+        })
+    })
+})
+
+// The per-tx fan-out is where a saturated node shows up, so the real getRawTransaction
+// ladder's exhaustion must still hand the wrapper a transport code to copy.
+describe('malformed-AuxPoW block reassembly fallback', function () {
+    it('getBlockReassembled keeps error.code when the real getRawTransaction ladder exhausts', async function () {
+        const connector = makeConnector({
+            getBlockHeader: async () => HEADER_HEX,
+            getBlockVerbose: async () => ({ tx: [TXID] }),
+            sleep: async () => {},
+            rpcPost: async () => { throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) },
+        })
+        await assert.rejects(() => connector.getBlockReassembled('hash'), (err) => {
+            assert.match(err.message, /failed after 10 attempts/)
+            assert.strictEqual(err.code, 'ECONNRESET', 'the transport code must reach the wrapper')
+            assert.strictEqual(err.auxPowParseFailure, undefined)
+            return true
         })
     })
 })

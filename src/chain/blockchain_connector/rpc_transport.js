@@ -16,7 +16,7 @@ const axios = require('axios');
 const config = require('../../config');
 const { format: formatLogLine } = require('node:util');
 const { CONNECTION_ERROR_CODES, logger } = require('./constants.js')
-const { envInt, nodeReachabilityFrom, rpcResult, sanitizeRpcError } = require('./rpc_helpers.js')
+const { carryErrorIdentity, envInt, nodeReachabilityFrom, rpcResult, sanitizeRpcError } = require('./rpc_helpers.js')
 
 module.exports = {
     // Node reachability as the health surfaces publish it. Cheap and never throws,
@@ -108,6 +108,7 @@ module.exports = {
     async rpcCallWithTimeoutRetry(data, label, { resultLabel, exhausted } = {}){
         let tries = 10
         let lastErrorSummary = null
+        let lastError = null
 
         while (tries > 0) {
             try {
@@ -119,6 +120,7 @@ module.exports = {
                     tries = tries - 1
                     logger.info(`Getting timeout trying to get ${label}, trying again...`)
                     lastErrorSummary = sanitizeRpcError(error)
+                    lastError = error
                     await this.backoffOnTimeout()
                 } else {
                     this.rpcErrors++
@@ -130,6 +132,6 @@ module.exports = {
 
         this.rpcErrors++
         const message = exhausted || `There were problems getting ${label}.`
-        throw new Error(lastErrorSummary ? `${message} ${lastErrorSummary}` : message)
+        throw carryErrorIdentity(new Error(lastErrorSummary ? `${message} ${lastErrorSummary}` : message), lastError)
     },
 }

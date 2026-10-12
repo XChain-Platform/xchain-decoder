@@ -283,12 +283,13 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         sinon.stub(decoder, 'sleep').resolves()
         const verifyStub = sinon.stub(decoder, 'verifyReorg').resolves(true)
 
-        const { logs } = await captureConsole(async () => {
+        const { warnings } = await captureConsole(async () => {
             await decoder.start()
         })
 
         assert.ok(verifyStub.calledWith(5), 'should reconcile via verifyReorg with the current node tip')
-        assert.ok(logs.some(l => l.includes('Reconciling orphan blocks')), 'should log the node-tip regression reconcile')
+        // Warn, not info: a rollback must reach a warn-and-above alerting rule on every entry path.
+        assert.ok(warnings.some(l => l.includes('Reconciling orphan blocks')), 'should log the node-tip regression reconcile')
         assert.ok(mockDb.endTransaction.called, 'should end any open transaction before reconciling')
     })
 })

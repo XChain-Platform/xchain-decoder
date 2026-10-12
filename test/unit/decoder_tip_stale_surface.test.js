@@ -250,7 +250,7 @@ describe('registerDecoderMetrics() feed-freshness gauges', function () {
     });
 
     it('emits no last-poll timestamp before the first iteration, but still reports not-silent', function () {
-        // lastPollAt 0 means the loop has not run yet (long initial sync), which
+        // lastPollAt 0 means the loop has not run yet (pre-loop boot), which
         // isPollSilent() reads as not silent; a 0 timestamp series would read as 1970.
         const registry = new Registry();
         registerDecoderMetrics(registry, makeDecoder());
