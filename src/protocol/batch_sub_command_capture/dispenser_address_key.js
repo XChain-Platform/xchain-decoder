@@ -14,8 +14,11 @@
 
 'use strict'
 
-function dispenserAddressKey(address){
-    return address.replace(/[A-Z]/g, letter => letter.toLowerCase()).replace(/ +$/, '')
+async function dispenserAddressKey(address, addressIdOf){
+    const addressId = await addressIdOf(address)
+    return addressId === null || addressId === undefined
+        ? 'address:' + address
+        : 'address-id:' + String(addressId)
 }
 
 module.exports = { dispenserAddressKey }
