@@ -147,6 +147,19 @@ describe('Database.STARTUP_ASSERTED_MIGRATIONS @regression @tier1', function () 
 
 describe('Database.STARTUP_ASSERTED_MIGRATIONS @regression @tier1', function () {
 
+    Database.STARTUP_ASSERTED_MIGRATIONS.forEach(function (entry) {
+        it(entry.file + ': carries a MIGRATION_PRECONDITIONS baseline predicate', function () {
+            const pre = Database.MIGRATION_PRECONDITIONS[entry.file];
+            assert.ok(pre && typeof pre.sql === 'string' && typeof pre.skipWhen === 'function',
+                entry.file + ' is a startup-asserted manual migration with no baseline predicate, so on a ' +
+                'database built from the current src/sql it parks PENDING with no ledger row and the deploy ' +
+                'tool refuses every update on a requirement the schema already satisfies.');
+        });
+    });
+});
+
+describe('Database.STARTUP_ASSERTED_MIGRATIONS @regression @tier1', function () {
+
     describe('startupAssertedMigrationFile()', function () {
         it('resolves each registered assertion to its migration filename', function () {
             assert.strictEqual(Database.startupAssertedMigrationFile('assertTransactionIdsAreBigint'),

@@ -23,15 +23,20 @@ const { logger, REORG_HALT_PROBE_INTERVAL_MS, AUXPOW_REASSEMBLE_AFTER } = requir
 
 // Read the durable REORG_HALT marker through whichever probe the db exposes, or
 // null when it exposes none (or there is no db) and the cached state must stand.
+// A probe that exists but answers with nothing throws instead, so checkReorgHalt
+// logs the fault and keeps the cached state: an empty answer is never a clear.
 async function readReorgHaltMarker(db){
     if (!db) return null
     if (typeof db.getReorgHaltMarker === 'function'){
-        return (await db.getReorgHaltMarker()) || { halted: false, at: null, reason: null }
+        const marker = await db.getReorgHaltMarker()
+        if (!marker || typeof marker !== 'object') throw new Error('getReorgHaltMarker returned no marker')
+        return marker
     }
     if (typeof db.isReorgHalted === 'function'){
         // Older/minimal db shapes (and the mocks in the verifyReorg suites)
         // expose only the boolean probe.
         const halted = await db.isReorgHalted()
+        if (halted == null) throw new Error('isReorgHalted returned no answer')
         return { halted: !!(halted && halted.halted !== undefined ? halted.halted : halted), at: null, reason: null }
     }
     return null

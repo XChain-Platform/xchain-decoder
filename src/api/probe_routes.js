@@ -211,6 +211,11 @@ function sendLiveResponse(res, decoder, state) {
         node_height: syncStatus.node_height,
         lag: syncStatus.lag,
         parse_errors: decoder.parseErrors,
+        // Transactions skipped for good, reported but never gating: a restart cannot undo a skip.
+        quarantined_txs: decoder.quarantinedTxs || 0,
+        last_quarantined_block: decoder.lastQuarantinedBlock ?? null,
+        last_quarantined_tx_hash: decoder.lastQuarantinedTxHash || null,
+        last_quarantined_at: decoder.lastQuarantinedAt || null,
         rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors
     })
 }

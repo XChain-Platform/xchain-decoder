@@ -119,6 +119,9 @@ function buildHealthResult(decoder, state, decoderRunning, decoderError){
             : null,
         rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors,
         parse_errors: decoder.parseErrors,
+        quarantined_txs: decoder.quarantinedTxs || 0,
+        last_quarantined_block: decoder.lastQuarantinedBlock ?? null,
+        last_quarantined_tx_hash: decoder.lastQuarantinedTxHash || null,
         dispenser_purge_failures: decoder.dispenserPurgeFailures || 0,
         error: decoderError ? decoderError.message : null
     }

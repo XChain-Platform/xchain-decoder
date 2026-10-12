@@ -45,6 +45,15 @@ function clearQuarantineState(loop){
     loop.insertQuarantine.clear()
 }
 
+// Count a transaction this decoder skipped for good, apart from the routine rejections
+// parseErrors also counts. A later whole-block rollback can count one position twice.
+function noteQuarantine(decoder, height, hash){
+    decoder.quarantinedTxs = (decoder.quarantinedTxs || 0) + 1
+    decoder.lastQuarantinedBlock = height
+    decoder.lastQuarantinedTxHash = hash || null
+    decoder.lastQuarantinedAt = new Date().toISOString()
+}
+
 async function skipQuarantinedTransaction(block, nextBlockHeight, nextTransaction, txIndex){
     this.parseErrors++
     let quarantinedHash = null
@@ -59,6 +68,7 @@ async function skipQuarantinedTransaction(block, nextBlockHeight, nextTransactio
         // insertEvent already rolled the block transaction back
         return 'rollback'
     }
+    noteQuarantine(this, nextBlockHeight, quarantinedHash)
     return 'continue'
 }
 
@@ -100,6 +110,7 @@ async function handleParseFailure(loop, e, block, nextBlockHeight, nextTransacti
         // insertEvent already rolled the block transaction back
         return 'rollback'
     }
+    noteQuarantine(this, nextBlockHeight, nextTransactionHash)
     return 'continue'
 }
 

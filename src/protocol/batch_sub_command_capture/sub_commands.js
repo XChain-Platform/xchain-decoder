@@ -115,7 +115,7 @@ function subCommandActionName(command){
 //     for(let command of commands){
 //         let action = String(command).split('|')[0];
 //         if(normalize) action = this.normalizeSubAction(action);
-//         if(!error && dispatchedOnly && !DISPATCHED_ACTIONS.has(action))
+//         if(!error && dispatchedOnly && action && !DISPATCHED_ACTIONS.has(action))
 //             error = 'invalid: ACTION (unknown)';
 //         else if(!error && await this.protocolChanges.isEnabled(action, ...) == false)
 //             error = 'invalid: ACTION (unknown)';

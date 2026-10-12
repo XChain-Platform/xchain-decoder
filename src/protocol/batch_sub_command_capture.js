@@ -157,32 +157,15 @@ function isDispenserAddressIdCollapseActive(consensusNetwork, blockTime){
 // Registering ONE of the two is strictly better than the pre-gate behaviour, where a
 // batch registers NEITHER.
 //
-// Above the address-id collapse gate, use the same collation key as index_addresses so
-// spellings that resolve to one address_id cannot attempt two inserts for the same primary
-// key. Raw spellings remain distinct below the gate for historical replay compatibility.
+// Above the address-id collapse gate, fold ASCII case and trailing spaces: this matches
+// index_addresses for base58 and bech32 spellings but NOT for the accent and other non-ASCII
+// equalities of utf8_unicode_ci, so arming it publicly first needs an exact key (the resolved id).
+// Raw spellings remain distinct below the gate for historical replay compatibility.
 function collapseDispenserRegistrations(candidates, consensusNetwork, blockTime){
     if (isDispenserAddressIdCollapseActive(consensusNetwork, blockTime))
         return collapseRegistrationsByKey(candidates, dispenserAddressKey)
-    const collapsed = new Map()
-    if (!Array.isArray(candidates)) return []
-    for (const candidate of candidates){
-        if (!candidate || !candidate.address) continue
-        const existing = collapsed.get(candidate.address)
-        if (existing === undefined){
-            collapsed.set(candidate.address, {
-                address:       candidate.address,
-                sourceAddress: candidate.sourceAddress,
-                oracleAddress: candidate.oracleAddress || null,
-                expiration:    candidate.expiration,
-            })
-            continue
-        }
-        if (candidate.expiration > existing.expiration)
-            existing.expiration = candidate.expiration
-        if (!existing.oracleAddress && candidate.oracleAddress)
-            existing.oracleAddress = candidate.oracleAddress
-    }
-    return [...collapsed.values()]
+    // Pinned by the frozen-reference test: a merge-rule change here needs its own gate.
+    return collapseRegistrationsByKey(candidates, null)
 }
 
 module.exports = {

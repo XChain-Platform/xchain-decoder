@@ -170,3 +170,55 @@ describe('runMigrations() migration preconditions @regression', function () {
             .then((r) => assert.strictEqual(r, null, 'unlisted files short-circuit without a query'));
     });
 });
+
+// The startup run (no includeManual) on a database built from the current src/sql
+// records widen-ids, so the deploy tool finds its ledger row; a still-INT database
+// keeps it PENDING for the operator run.
+describe('runMigrations() migration preconditions @regression', function () {
+
+    const WIDEN = '2026-06-02-widen-ids-to-bigint.sql';
+    const PAIRS = {
+        index_addresses: ['id'], index_transactions: ['id'], pubkeys: ['address_id'],
+        blocks: ['block_index', 'block_time', 'block_hash_id', 'previous_block_hash_id'],
+        transactions: ['tx_index', 'tx_hash_id', 'block_index', 'source_id', 'destination_id'],
+        dispensers: ['tx_index', 'address_id'], transaction_outputs: ['tx_index', 'vout', 'destination_id'],
+    };
+
+    function widenDb(addressIdType) {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'decoder-widen-'));
+        fs.mkdirSync(path.join(root, 'migrations'));
+        fs.copyFileSync(path.join(__dirname, '..', '..', '..', 'src', 'sql', 'migrations', WIDEN),
+            path.join(root, 'migrations', WIDEN));
+        const rows = [];
+        for (const [tbl, cols] of Object.entries(PAIRS)) for (const col of cols) {
+            const type = (tbl === 'pubkeys') ? addressIdType : 'bigint(20) unsigned';
+            rows.push({ tbl, col, dataType: type.split('(')[0], columnType: type,
+                extra: col === 'id' ? 'auto_increment' : '', fkCount: 1n });
+        }
+        const { db, ledgered, executed } = makeDb(root, 'bigint');
+        const base = db.getConnection;
+        db.getConnection = async () => {
+            const conn = await base();
+            const query = conn.query;
+            return { ...conn, query: async (sql, params) => (/pubkeys_ibfk_1/.test(sql) && /information_schema\.columns/.test(sql))
+                ? rows : query(sql, params) };
+        };
+        return { db, ledgered, executed };
+    }
+
+    it('baselines widen-ids at startup on a fresh-shape database', async function () {
+        const { db, ledgered, executed } = widenDb('bigint(20) unsigned');
+        const res = await db.runMigrations();
+        assert.deepStrictEqual(res.baselined, [WIDEN]);
+        assert.deepStrictEqual(ledgered, [WIDEN], 'the ledger row the deploy tool reads is written');
+        assert.deepStrictEqual(executed, [], 'no statement of the file ran');
+    });
+
+    it('keeps widen-ids PENDING at startup while a column is still INT', async function () {
+        const { db, ledgered, executed } = widenDb('int(10) unsigned');
+        const res = await db.runMigrations();
+        assert.deepStrictEqual(res.pending, [WIDEN]);
+        assert.deepStrictEqual(ledgered, []);
+        assert.deepStrictEqual(executed, []);
+    });
+});
