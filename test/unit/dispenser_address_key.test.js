@@ -23,10 +23,16 @@ describe('dispenserAddressKey', function () {
     })
 
     it('drops trailing spaces', async function () {
-        const addressIdOf = async () => 12
+        const resolved = []
+        const addressIdOf = async address => {
+            resolved.push(address)
+            if (address === 'mAbC  ' || address === 'mabc') return 12
+            throw new Error('unexpected address: ' + address)
+        }
         assert.strictEqual(
             await dispenserAddressKey('mAbC  ', addressIdOf),
             await dispenserAddressKey('mabc', addressIdOf))
+        assert.deepStrictEqual(resolved, ['mAbC  ', 'mabc'])
     })
 
     it('keeps leading spaces and other characters', async function () {
