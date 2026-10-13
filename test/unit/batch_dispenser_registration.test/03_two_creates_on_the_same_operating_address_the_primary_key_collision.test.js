@@ -47,9 +47,7 @@ describe('BATCH dispenser registration', function () {
             ].join(';'), ABOVE_GATE)
             assert.strictEqual(decoder.model.rows.length, 1)
             assert.strictEqual(decoder.model.rows[0].expiration, EXP_LATE)
-        })
 
-        it('collapses different spellings that resolve to the same address id', async () => {
             const firstAddress = 'Málaga'
             const secondAddress = 'malaga'
             const action = 'BATCH|0|' + [
@@ -57,16 +55,16 @@ describe('BATCH dispenser registration', function () {
                 create({ getAddress: secondAddress, expiration: EXP_LATE }),
             ].join(';')
             const model = new DispenserModel()
-            const decoder = buildDecoder([
+            const addressIdDecoder = buildDecoder([
                 { id: 'tx01', action, source: SOURCE, outputs: [] },
             ], model, ABOVE_GATE)
             const resolved = []
-            decoder.db.createAddress = async address => {
+            addressIdDecoder.db.createAddress = async address => {
                 resolved.push(address)
                 return 73
             }
 
-            await decoder.start()
+            await addressIdDecoder.start()
 
             assert.deepStrictEqual(resolved, [firstAddress, secondAddress])
             assert.strictEqual(model.insertCalls, 1)
