@@ -19,7 +19,7 @@
  ********************************************************************/
 
 const { chainGenesisMismatch, chainGenesisUnpinned } = require('../protocol/chain_identity')
-const { logger, REORG_HALT_PROBE_INTERVAL_MS, AUXPOW_REASSEMBLE_AFTER } = require('./constants.js')
+const { logger, REORG_HALT_PROBE_INTERVAL_MS, AUXPOW_REASSEMBLE_AFTER, TIP_SETTLE_DELAY_MS, TIP_SETTLE_MAX_READS } = require('./constants.js')
 
 // Read the durable REORG_HALT marker through whichever probe the db exposes, or
 // null when it exposes none (or there is no db) and the cached state must stand.
@@ -241,5 +241,24 @@ module.exports = {
         // refresh the timestamp, so the refusal is re-proved on every retry.
         if (!mismatch) this.chainGenesisCheckedAt = Date.now()
         return mismatch
+    },
+
+    // Re-read with readOnce() until two readings TIP_SETTLE_DELAY_MS apart agree, starting
+    // from `first`, the reading that raised the question. readOnce() returns null when the
+    // node cannot be read or a gate refuses the reply. Returns the settled reading, or null
+    // when a re-read fails or the reading is still moving after TIP_SETTLE_MAX_READS, so
+    // the caller ends its pass with nothing deleted and the next pass reads afresh.
+    async settleNodeReading(first, readOnce, what){
+        let previous = first
+        for (let read = 0; read < TIP_SETTLE_MAX_READS; read++){
+            await this.sleep(TIP_SETTLE_DELAY_MS)
+            const next = await readOnce()
+            if (next === null) return null
+            if (next === previous) return next
+            previous = next
+        }
+        logger.warn('The ' + what + ' is still moving after ' + TIP_SETTLE_MAX_READS + ' readings (last ' + previous
+            + '); not rolling back on a moving reading, re-checking next pass.')
+        return null
     }
 }

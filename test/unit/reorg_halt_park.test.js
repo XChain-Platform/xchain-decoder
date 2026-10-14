@@ -290,10 +290,10 @@ describe('a parked decoder resumes on the clear, with no restart', function () {
         let probes = 0
         let halted = true
         const { decoder } = buildDecoder({
-            // Once the operator has cleared, the node is also past our tip again, so the
-            // resumed loop leaves the reconcile branch and reaches the parse path.
-            nodeTips: [NODE_TIP, STORED_TIP + 50],
-            maxSleeps: 6,
+            // The low tip is read twice (a lower tip is reconciled only once two readings agree,
+            // one more sleep); once cleared the node is past our tip, so the loop reaches the parse path.
+            nodeTips: [NODE_TIP, NODE_TIP, STORED_TIP + 50],
+            maxSleeps: 7,
             dbOverrides: {
                 isReorgHalted: async () => { probes++; if (probes >= 3) halted = false; return halted }
             }

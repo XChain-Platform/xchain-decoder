@@ -207,7 +207,27 @@ async function reconcileTipRegression(loop, lastProcessedBlockIndex, lastBlockch
     return await reconcileOrphanBlocks.call(this, loop, lastProcessedBlockIndex)
 }
 
+// Settle a node tip below ours before anything is rolled back against it. One stale
+// getblockchaininfo reply (a failover onto a lagging endpoint) otherwise deletes every
+// valid block above it and writes a REORG marker for each. Runs before endTransaction,
+// so a reading that does not hold leaves the open batch and the cursor as they were.
+// Returns true only when two readings agree on a tip still below lastProcessedBlockIndex.
+async function settleTipBelow(loop, lastProcessedBlockIndex){
+    const settled = await this.settleNodeReading(this.blockchainInfoLastBlock, async () => {
+        if ((await fetchChainTip.call(this, loop)) === 'continue') return null
+        // A node that went back into initial block download is the wait branch's case.
+        if (nodeStillCatchingUp(loop.lastBlockchainInfo)) return null
+        return this.blockchainInfoLastBlock
+    }, 'node tip')
+    if (settled === null) return false
+    if (settled < lastProcessedBlockIndex) return true
+    this.log("A node tip below the last processed block (" + lastProcessedBlockIndex + ") did not hold: the node settled at "
+        + settled + ", so nothing is rolled back.")
+    return false
+}
+
 async function reconcileOrphanBlocks(loop, lastProcessedBlockIndex){
+    if (!(await settleTipBelow.call(this, loop, lastProcessedBlockIndex))) return 'continue'
     // The node's tip has dropped BELOW our last-processed height (deep
     // reorg, node rollback, or restart onto a shorter/different chain).
     // The forward hash-compare reorg path (below) is unreachable in this
@@ -217,8 +237,8 @@ async function reconcileOrphanBlocks(loop, lastProcessedBlockIndex){
     // inherits as permanently divergent history. Reconcile now:
     // verifyReorg(tip) deletes every stored block above the tip via a
     // deterministic height compare, then walks the hash-compare back to
-    // the fork point. blockchainInfoLastBlock was just refreshed above, so
-    // the tip is current.
+    // the fork point. blockchainInfoLastBlock holds the settled reading
+    // from settleTipBelow, so the tip is current and not a one-off reply.
     if (!loop.tipBelowStoredTipRefused){
         this.logWarn("The last processed block height ("+lastProcessedBlockIndex+") is greater than the last block from the node ("+this.blockchainInfoLastBlock+"). Reconciling orphan blocks...")
     }

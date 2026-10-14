@@ -174,7 +174,10 @@ function nodeTipStillCatchingUp(info){
     return nodeStillCatchingUp(info) || info["verificationprogress"] < MIN_VERIFICATION_PROGRESS_TO_PARSE
 }
 
-async function refreshReorgTip(nodeTip){
+// Read the node tip through the block loop's gates. Answers nodeTip unchanged when the
+// node cannot be read or a gate refuses the reply (foreign tier, foreign genesis, a node
+// still catching up), so a refused reading is never below the tip the walk already has.
+async function readReorgTip(nodeTip){
     try {
         const info = await this.connector.getBlockchainInfo()
         // Apply the block loop's chain-identity gate here too. This is
@@ -206,6 +209,18 @@ async function refreshReorgTip(nodeTip){
         }
     } catch (refreshErr) { /* node unreachable; retry with the existing tip */ }
     return nodeTip
+}
+
+// Re-read the node tip after a failed hash read mid-walk. A higher or equal tip deletes
+// nothing by height and is taken at once; a lower one becomes the height every stored
+// block above it is deleted against, so it is taken only once two readings agree. A
+// reading that does not settle keeps the current tip and the walk retries. A refused
+// re-read answers the current tip, so only two real readings can settle a lower one.
+async function refreshReorgTip(nodeTip){
+    const tip = await readReorgTip.call(this, nodeTip)
+    if (tip === nodeTip || (nodeTip != null && tip >= nodeTip)) return tip
+    const settled = await this.settleNodeReading(tip, () => readReorgTip.call(this, nodeTip), 'mid-walk node tip')
+    return settled === null ? nodeTip : settled
 }
 
 async function deleteForkedBlock(lastBlockIndex, lastBlock, priorDepth, blocksDeleted, retryCount){
