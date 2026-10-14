@@ -169,9 +169,37 @@ async function getLiveProbeState(decoder, isDecoderRunning) {
     return { decoderRunning, dbOk, stalled, pollSilent, reorgHalt, syncStatus, healthy }
 }
 
-function sendLiveResponse(res, decoder, state) {
+// The READINESS verdict over one /live probe state: whether this decoder is serving
+// the chain, as distinct from whether its process is worth keeping alive. Returns the
+// ordered list of every condition that holds, empty when ready. Every liveness fault
+// is a readiness fault; on top of those, a live REORG_HALT marker (latent or parked),
+// a marker probe that has never completed, since "no answer yet" is not "clear", and
+// a frozen node tip, under which no height this decoder reports can be trusted as current.
+//
+// These extra reasons are exactly the ones /live must NOT gate on: the marker survives
+// restarts and is released only by an audited operator clear, and a node outage is
+// upstream, so autoheal would restart-loop the container on them. They are answered by GET /ready instead, and
+// carried on the /live body as ready / not_ready_reasons for anything already polling it.
+function decoderNotReadyReasons(state) {
+    const { decoderRunning, dbOk, stalled, pollSilent, reorgHalt, syncStatus } = state
+    const reasons = []
+    if (!decoderRunning) reasons.push('not_running')
+    if (!dbOk) reasons.push('db_unreachable')
+    if (stalled) reasons.push('stalled')
+    if (pollSilent) reasons.push('poll_silent')
+    if (reorgHalt && reorgHalt.halted === true) reasons.push('reorg_halt')
+    if (reorgHalt && reorgHalt.parked === true) reasons.push('reorg_halt_parked')
+    if (!reorgHalt || !reorgHalt.checked_at) reasons.push('reorg_halt_unchecked')
+    if (syncStatus && syncStatus.node_height_stale === true) reasons.push('node_height_stale')
+    return reasons
+}
+
+// The /live JSON body. /live and /ready answer the same body and differ only in which
+// verdict sets the status code.
+function liveBody(decoder, state) {
     const { decoderRunning, dbOk, stalled, pollSilent, reorgHalt, syncStatus, healthy } = state
-    res.status(healthy ? 200 : 503).json({
+    const notReady = decoderNotReadyReasons(state)
+    return {
         status: healthy ? 'healthy' : 'unhealthy',
         db: dbOk,
         running: decoderRunning,
@@ -216,8 +244,16 @@ function sendLiveResponse(res, decoder, state) {
         last_quarantined_block: decoder.lastQuarantinedBlock ?? null,
         last_quarantined_tx_hash: decoder.lastQuarantinedTxHash || null,
         last_quarantined_at: decoder.lastQuarantinedAt || null,
-        rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors
-    })
+        rpc_errors: decoder.rpcErrors + decoder.connector.rpcErrors,
+        // The readiness verdict (decoderNotReadyReasons above). Reported here, never
+        // gating this route: GET /ready answers it as a status code.
+        ready: notReady.length === 0,
+        not_ready_reasons: notReady
+    }
+}
+
+function sendLiveResponse(res, decoder, state) {
+    res.status(state.healthy ? 200 : 503).json(liveBody(decoder, state))
 }
 
 function registerLiveRoute(app, decoder, isDecoderRunning){
@@ -226,4 +262,16 @@ function registerLiveRoute(app, decoder, isDecoderRunning){
     })
 }
 
-module.exports = { makeRpcBatchGuard, registerLiveRoute, readReorgHaltForProbe, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
+// GET /ready, the READINESS probe: the /live body, answering 503 while
+// not_ready_reasons is non-empty. Meant for monitors, load balancers and anything
+// deciding whether to trust this decoder's tip, never for the container
+// healthcheck: autoheal restarts on that 503, and a REORG_HALT outlives a restart.
+function registerReadyRoute(app, decoder, isDecoderRunning){
+    app.get('/ready', async (req, res) => {
+        const state = await getLiveProbeState(decoder, isDecoderRunning)
+        const body = liveBody(decoder, state)
+        res.status(body.ready ? 200 : 503).json(body)
+    })
+}
+
+module.exports = { makeRpcBatchGuard, registerLiveRoute, registerReadyRoute, decoderNotReadyReasons, readReorgHaltForProbe, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }

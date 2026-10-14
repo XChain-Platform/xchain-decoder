@@ -46,6 +46,7 @@ const jsonRouter = require('express-json-rpc-router')
 const {
     makeRpcBatchGuard,
     registerLiveRoute,
+    registerReadyRoute,
     readReorgHaltForProbe,
     noteProbeFailure,
     nodeReachabilityFields,
@@ -303,11 +304,12 @@ function installAppMiddleware(app, decoder){
     installDecoderObservability(app, decoder, { COIN: config.COIN, NETWORK })
 }
 
-// Routes in registration order: GET /status, GET /live, the batch guard, the
+// Routes in registration order: GET /status, GET /live, GET /ready, the batch guard, the
 // empty-body default, then the JSON-RPC router mounted at the root.
 function registerRoutes(app, decoder, isDecoderRunning, getDecoderError){
     registerStatusRoute(app, decoder, isDecoderRunning)
     registerLiveRoute(app, decoder, isDecoderRunning)
+    registerReadyRoute(app, decoder, isDecoderRunning)
 
     // Bound JSON-RPC batch size (see makeRpcBatchGuard). Must run after bodyParser
     // (req.body parsed) and before the router (dispatch).
@@ -389,4 +391,4 @@ if (require.main === module) startApi()
 // startApi is exported so the crash handlers it installs can be driven for real
 // rather than asserted against the source text; the require.main guard above
 // still keeps a plain require from opening a port or a DB connection.
-module.exports = { makeRpcBatchGuard, registerLiveRoute, registerStatusRoute, startApi, createMempoolMethods, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
+module.exports = { makeRpcBatchGuard, registerLiveRoute, registerReadyRoute, registerStatusRoute, startApi, createMempoolMethods, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
