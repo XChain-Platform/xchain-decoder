@@ -16,6 +16,14 @@ const { getLogger } = require('../observability')
 const { format: formatLogLine } = require('node:util');
 const { DETERMINISTIC_WRITE_ERRNOS, logger } = require('./constants.js')
 
+// Rethrow a lookup failure inside the block transaction so the block rolls back instead of
+// committing a NULL id; outside it (the mempool handle) the null fallback stays.
+function rethrowInTransaction(database, err){
+    if (database.transactionConnection == null) return
+    if (err && typeof err === 'object') err.dbLookupFailure = true
+    throw err
+}
+
 async function insertTransactionRow(database, connection, query, tx){
     let txHashId = await database.createTransaction(tx.hash)
     let sourceId = await database.createAddress(tx.source)
@@ -27,9 +35,9 @@ async function insertTransactionRow(database, connection, query, tx){
     // first-ever action from an address leaves source_pubkey permanently NULL
     // across the decoder->indexer seam. Inside the block's open transaction, so
     // it commits or rolls back with the block. Sentinel id 1 (empty address) is
-    // never a real source. insertPubkey is INSERT IGNORE against a PRIMARY KEY
-    // and swallows its own errors, so a pubkey hiccup can never turn a good
-    // transaction into a quarantined poison row.
+    // never a real source. insertPubkey is INSERT IGNORE against a PRIMARY KEY and
+    // swallows a deterministic content error, so a pubkey can never turn a good
+    // transaction into a quarantined poison row; a transient one rolls the block back.
     if (tx.source_pubkey && sourceId != null && sourceId !== 1){
         await database.insertPubkey(sourceId, tx.source_pubkey)
     }
@@ -182,6 +190,8 @@ module.exports = {
             return true
         } catch (err) {
             if (err.errno == 1062){
+                // Name the colliding key (PRIMARY tx_index or the tx_hash_id unique key) for the caller's stall.
+                logger.error(formatLogLine('Duplicate key inserting transaction:', err));
                 return this.DUPLICATED_TRANSACTION
             } else {
                 logger.error(formatLogLine('Error inserting transaction:', err));
@@ -212,6 +222,7 @@ module.exports = {
                 id = rows[0].id;
         } catch (err) {
             logger.error(formatLogLine('Error looking up hash record id in index_transactions table:', err));
+            rethrowInTransaction(this, err)
         } finally {
             if (this.transactionConnection == null){
                 await db.release()
@@ -238,6 +249,7 @@ module.exports = {
                 await db.query(query, [hash]);
             } catch (err) {
                 logger.error(formatLogLine('Error trying to create hash record in index_transactions table:', err));
+                rethrowInTransaction(this, err)
             } finally {
                 if (this.transactionConnection == null){
                     await db.release()

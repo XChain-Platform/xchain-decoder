@@ -73,6 +73,14 @@ async function skipQuarantinedTransaction(block, nextBlockHeight, nextTransactio
 }
 
 async function handleParseFailure(loop, e, block, nextBlockHeight, nextTransactionHash, txIndex, retryKey){
+    if (e && e.dbLookupFailure){
+        // A DB lookup failed inside the block transaction (a timeout, a lock wait, a
+        // dropped connection). Infrastructure trouble like the RPC case below, never a
+        // poison transaction, so retry the block indefinitely rather than quarantine.
+        logger.error(formatLogLine(`DB lookup failed in block ${nextBlockHeight} (tx position ${txIndex}), retrying block:`, e))
+        await this.db.endTransaction()
+        return 'rollback'
+    }
     if (e && e.rpcLookupFailure){
         // A prevout/fee-output RPC lookup failed even after the
         // connector's internal retries. That is node/infrastructure
@@ -160,6 +168,13 @@ async function insertTransactionRow(loop, parseResult, nextTransactionHash, next
         // Transient INSERT failure; insertTransaction's error path
         // already rolled the block back. Retry indefinitely (never skip
         // a tx a healthy instance accepts).
+        return 'rollback'
+    } else if (insertResult === this.db.DUPLICATED_TRANSACTION){
+        // A duplicate tx_index or tx hash never happens on a clean instance; writing the outputs
+        // anyway would attach them to another row, so roll back (a drifted counter re-reads
+        // MAX(tx_index), a stale pre-reorg row stalls here loudly). The transaction is still open.
+        logger.error(`insertTransaction hit a duplicate key in block ${nextBlockHeight} (tx position ${txIndex}, tx_index ${loop.lastProcessedTxIndex}, hash ${nextTransactionHash}); possible stale pre-reorg row, rolling the block back`)
+        await this.db.endTransaction()
         return 'rollback'
     }
 }
@@ -272,8 +287,16 @@ async function persistTransaction(loop, block, nextBlockHeight, openDispenserAdd
     const addressIdOf = typeof this.db.createAddress === 'function'
         ? address => this.db.createAddress(address)
         : undefined
-    const dispenserRegistrations = await collapseDispenserRegistrations(
-        dispenserCreateCandidates, this.consensusNetwork, block.timestamp, addressIdOf)
+    let dispenserRegistrations
+    try {
+        dispenserRegistrations = await collapseDispenserRegistrations(
+            dispenserCreateCandidates, this.consensusNetwork, block.timestamp, addressIdOf)
+    } catch (e) {
+        // An address lookup failed in the block transaction: roll back and retry the block.
+        logger.error(formatLogLine(`dispenser address lookup failed at block ${nextBlockHeight}; block rolled back, retrying:`, e))
+        await this.db.endTransaction()
+        return 'rollback'
+    }
     for (const nextRegistration of dispenserRegistrations){
         if ((await registerDispenser.call(this, loop, nextRegistration, openDispenserAddresses)) === 'rollback') return 'rollback'
     }

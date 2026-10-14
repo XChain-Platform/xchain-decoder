@@ -15,6 +15,16 @@
 const { format: formatLogLine } = require('node:util');
 const { logger } = require('./constants.js')
 const { jsonBigIntSafe } = require('./query_helpers.js')
+const { DETERMINISTIC_WRITE_ERRNOS } = require('./constants.js')
+
+// Inside the block transaction a failed lookup must roll the block back: a swallowed error
+// hands back a NULL id that commits with the block. Outside it (the mempool handle) the
+// caller keeps its null or false fallback, so this returns and the caller logs and goes on.
+function rethrowInTransaction(database, err){
+    if (database.transactionConnection == null) return
+    if (err && typeof err === 'object') err.dbLookupFailure = true
+    throw err
+}
 
 module.exports = {
     async getAddressId(address){
@@ -27,6 +37,7 @@ module.exports = {
                 id = rows[0].id;
         } catch (err) {
             logger.error(formatLogLine('Error looking up address record id in index_addresses table:', err));
+            rethrowInTransaction(this, err)
         } finally {
             if (this.transactionConnection == null){
                 await db.release()
@@ -50,6 +61,7 @@ module.exports = {
                 await db.query(query, [address]);
             } catch (err) {
                 logger.error(formatLogLine('Error trying to create address record in index_addresses table:', err));
+                rethrowInTransaction(this, err)
             } finally {
                 if (this.transactionConnection == null){
                     await db.release()
@@ -67,6 +79,7 @@ module.exports = {
             return rows.length > 0
         } catch (err) {
             logger.error(formatLogLine('Error checking pubkey existence:', err))
+            rethrowInTransaction(this, err)
             return false
         } finally {
             if (this.transactionConnection == null){
@@ -82,6 +95,9 @@ module.exports = {
             return true
         } catch (err) {
             logger.error(formatLogLine('Error inserting pubkey:', err))
+            // A deterministic content error on a pubkey never fails the block (it would
+            // quarantine a good transaction); only a transient one rolls the block back.
+            if (!DETERMINISTIC_WRITE_ERRNOS.has(err && err.errno)) rethrowInTransaction(this, err)
             return false
         } finally {
             if (this.transactionConnection == null){

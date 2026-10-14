@@ -12,6 +12,15 @@
  *
  **********************************************************************/
 
+// Reason reported for a clear row that lifts nothing (see readReorgHaltState).
+const UNAUDITED_CLEAR_REASON = 'unreadable or unaudited REORG_HALT_CLEARED row, treated as a live halt'
+
+// Check a clear row's payload carries the reason bar clearReorgHalt enforces.
+function isAuditedClear(payload){
+    if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) return false
+    return typeof payload.reason === 'string' && payload.reason.trim().length >= 8
+}
+
 module.exports = {
     // Durable reorg-halt flag. verifyReorg's fail-closed safe-depth
     // ceiling is a per-invocation counter: on a reorg deeper than
@@ -36,6 +45,8 @@ module.exports = {
     // index. Returns { halted, id, at, reason, cleared_at, cleared_reason }.
     // Fail-closed: a halt row whose id or payload cannot be read still counts as
     // live, because "we could not tell" must never reach a caller as "not halted".
+    // The same holds for a clear row: one without the audited shape clearReorgHalt
+    // writes reads as a live halt flagged unaudited_clear, not as a clear.
     async readReorgHaltState(){
         const query = `SELECT id, time, code, data FROM events WHERE code IN ('REORG_HALT', 'REORG_HALT_CLEARED') ORDER BY id DESC LIMIT 1;`
         const none = { halted: false, id: null, at: null, reason: null, cleared_at: null, cleared_reason: null }
@@ -53,9 +64,6 @@ module.exports = {
             }
             const at = (payload && payload.at) ? payload.at : (row.time != null ? String(row.time) : null)
             const reason = (payload && payload.reason) ? payload.reason : null
-            if (row.code === 'REORG_HALT_CLEARED'){
-                return { ...none, cleared_at: at, cleared_reason: reason }
-            }
             // events.id is a BIGINT column, and the pool below sets insertIdAsNumber
             // but not bigIntAsNumber, so the driver hands row.id back as a JS BigInt.
             // An events id never approaches Number.MAX_SAFE_INTEGER, so normalise to a
@@ -63,6 +71,11 @@ module.exports = {
             // audit payload (clearReorgHalt's cleared_halt_id) gets a safe value
             // instead of a BigInt that JSON.stringify throws on.
             const id = (row.id != null) ? Number(row.id) : null
+            if (row.code === 'REORG_HALT_CLEARED'){
+                if (isAuditedClear(payload)) return { ...none, cleared_at: at, cleared_reason: reason }
+                // Live under the clear row's own id, so clear-reorg-halt can pin it.
+                return { halted: true, id: id, at: at, reason: UNAUDITED_CLEAR_REASON, cleared_at: null, cleared_reason: null, unaudited_clear: true }
+            }
             // Any other shape (the expected REORG_HALT, or a row whose code could not
             // be read) is a live halt.
             return { halted: true, id: id, at: at, reason: reason, cleared_at: null, cleared_reason: null }
@@ -218,7 +231,10 @@ module.exports = {
     // silently resumed over-deep rollback, and every consumer of it (the entry
     // guard, the health surfaces, the bootstrap gate) reads the ROW, not the ack.
     async markReorgHalted(reason){
-        if (await this.isReorgHalted()) return true
+        // An unaudited clear row reads as halted but is no REORG_HALT row, and the
+        // bootstrap gate counts only those rows, so that halt still gets one written.
+        const live = await this.readReorgHaltState()
+        if (live.halted && !live.unaudited_clear) return true
         const written = await this.insertEvent('REORG_HALT', { reason: reason, at: new Date().toISOString() })
         // Anything other than a clean insert is a failure. DUPLICATED_TRANSACTION
         // is truthy and would otherwise read as success, so the read-back below

@@ -5,6 +5,9 @@
     "test/unit/db_queries.test/04_delete_block_by_index.test.js": {
       "Database#deleteBlockByIndex() executes 4 DELETE queries and returns true on success": "Database#deleteBlockByIndex() executes 5 DELETE queries and returns true on success"
     },
+    "test/unit/db_queries.test/20_error_path_transaction_connection_branches.test.js": {
+      "Database error-path transactionConnection branches createAddress: swallows INSERT error even with active transactionConnection": "Database error-path transactionConnection branches createAddress: rethrows an INSERT error inside an active transaction so the block rolls back"
+    },
     "test/unit/fee_destination.test.js": {
       "resolveFeeDestination @unit honors an env override on regtest ONLY": "resolveFeeDestination @unit ignores a bare env override on regtest too, so capture and indexer validation resolve one address"
     },

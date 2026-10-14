@@ -115,32 +115,50 @@ module.exports = {
         }
     },
 
+    // Every step after the lock is taken sits inside one guard that releases the lock
+    // exactly once on failure, so a DB outage (getConnection gives up after its retry
+    // budget) cannot leave the lock held and wedge the next caller, such as a reorg retry.
     async beginTransaction(){
         await this.acquireTransactionLock()
-
-        if (this.transactionConnection != null){
-            await this.endTransaction()
-        }
-
-        this.transactionConnection = await this.getConnection()
         try {
+            if (this.transactionConnection != null){
+                await this.discardStaleTransactionConnection()
+            }
+            this.transactionConnection = await this.getConnection()
             await this.transactionConnection.beginTransaction()
         } catch(err){
-            await this.transactionConnection.release()
-            this.transactionConnection = null
+            await this.releaseTransactionConnectionQuietly()
             this.releaseTransactionLock()
             throw err
         }
     },
 
+    // Roll back and drop a connection left over from an earlier transaction without
+    // touching the lock: the caller has just acquired it and still holds it.
+    async discardStaleTransactionConnection(){
+        try { await this.transactionConnection.rollback() } catch(_){}
+        await this.releaseTransactionConnectionQuietly()
+    },
+
+    // Release the transaction connection, ignoring a release error on a dead connection.
+    async releaseTransactionConnectionQuietly(){
+        if (this.transactionConnection == null) return
+        try { await this.transactionConnection.release() } catch(_){}
+        this.transactionConnection = null
+    },
+
+    // The lock is released in a finally, so a rollback that throws on a dead
+    // connection still frees it; the rollback error itself is passed on.
     async endTransaction(){
-        if (this.transactionConnection != null){
-            logger.info("rolling back")
-            await this.transactionConnection.rollback()
-            await this.transactionConnection.release()
-            this.transactionConnection = null
+        try {
+            if (this.transactionConnection != null){
+                logger.info("rolling back")
+                await this.transactionConnection.rollback()
+            }
+        } finally {
+            await this.releaseTransactionConnectionQuietly()
+            this.releaseTransactionLock()
         }
-        this.releaseTransactionLock()
     },
 
     async commitTransaction(){
@@ -153,7 +171,10 @@ module.exports = {
                 return true
             } catch (e){
                 logger.error("There was an error trying to commit a transaction: " + e.code)
-                await this.endTransaction()
+                // A failed commit reports false to the caller even when the rollback after it also fails.
+                try { await this.endTransaction() } catch(rollbackErr){
+                    logger.error("Rollback after a failed commit also failed: " + (rollbackErr && rollbackErr.code))
+                }
             }
         }
 
