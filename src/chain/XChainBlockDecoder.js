@@ -29,7 +29,8 @@ const LITECOIN_MWEB_SEGWIT_FLAG = 0x09
 // an unimplemented family fails loudly at construction instead of silently
 // falling through to the strict default parser and misparsing at its first
 // special block.
-const HANDLED_WIRE_FORMATS = new Set(['default', 'mweb', 'auxpow'])
+const { KaspaBlockDecoder } = require('./kaspa/kaspa_block_decoder.js')
+const HANDLED_WIRE_FORMATS = new Set(['default', 'mweb', 'auxpow', 'kaspa'])   // 'kaspa' = the new family: blake3 txids, borsh framing, carrier in the transaction payload. See chain/kaspa/.
 
 function readMwebTransactions(bufferReader, block) {
     const readTransaction = () => {
@@ -96,6 +97,23 @@ class XChainBlockDecoder {
                 '" (network "' + networkName + '"). Declare a handled wireFormat (default/mweb/auxpow) ' +
                 'on the coin in src/coins before onboarding the chain.')
         }
+        // Kaspa family: kaspad answers with structured wRPC blocks, not raw hex, so this
+        // decoder keeps a family adapter that presents the same surface to the ingest path
+        // (see chain/kaspa/kaspa_block_decoder.js, and the delegate tests).
+        this.kaspa = (this.wireFormat === 'kaspa') ? new KaspaBlockDecoder(networkName) : null
+    }
+
+    // Structured entry points for the Kaspa family. Callers that hold an
+    // XChainBlockDecoder use these instead of the buffer-based ones, so the family
+    // switch lives here rather than in every caller.
+    blockFromObject(rawBlock) {
+        if (!this.kaspa) throw new Error('XChainBlockDecoder.blockFromObject: only the kaspa wire-format takes structured blocks')
+        return this.kaspa.blockFromObject(rawBlock)
+    }
+
+    transactionFromObject(rawTransaction) {
+        if (!this.kaspa) throw new Error('XChainBlockDecoder.transactionFromObject: only the kaspa wire-format takes structured transactions')
+        return this.kaspa.transactionFromObject(rawTransaction)
     }
     
     blockFromHex(blockHex){
@@ -149,7 +167,18 @@ class XChainBlockDecoder {
                 // This Block contains a witness commit
                 if (witnessCommit) block.witnessCommit = witnessCommit;
                 return block; 
+            case "kaspa":
+                // Kaspa is not a bitcoinjs family (blake3 txids, borsh framing, carrier in the
+                // transaction payload). Parsing these bytes with bitcoinjs produces rows that
+                // look valid — the failure mode this file header warns about — so the byte-level
+                // entry points stay loud. The structured entry points live on this class
+                // (blockFromObject / transactionFromObject) and delegate to chain/kaspa/, which
+                // presents the same surface the ingest path already consumes.
+                throw new KaspaBlockDecoder('kaspa').blockFromBuffer(buffer)
             default:
+                // The bitcoinjs families (bitcoin, dogecoin): unchanged, and it must stay the
+                // default arm — putting the kaspa case above it once made every bitcoin and
+                // dogecoin block take the Kaspa path (caught by test/smoke/block_decoder.test.js).
                 return bitcoinjs.Block.fromBuffer(buffer)
         }
     }

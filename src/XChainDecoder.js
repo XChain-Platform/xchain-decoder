@@ -38,6 +38,7 @@ const reorgVerificationMethods = require('./XChainDecoder/reorg_verification.js'
 const startupMethods = require('./XChainDecoder/startup.js')
 const mempoolRefreshMethods = require('./XChainDecoder/mempool_refresh.js')
 const { DISPENSER_WIDE_EXPIRATION_ACTIVATION } = require('./protocol/constants.js')
+const kaspaSyncMethods = require('./XChainDecoder/kaspa_sync.js')
 
 //We need to init the ecc to parse taproot addresses from output scripts
 bitcoin.initEccLib(ecc);
@@ -305,7 +306,8 @@ Object.assign(XChainDecoder.prototype,
     transactionParsingMethods,
     reorgVerificationMethods,
     startupMethods,
-    mempoolRefreshMethods)
+    mempoolRefreshMethods,
+    kaspaSyncMethods)
 
 // The class IS the export, and everything below hangs off it. Attached with one
 // Object.assign rather than a run of `module.exports.X =` lines: `module.exports`

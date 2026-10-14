@@ -8,6 +8,7 @@
     "url": "https://github.com/XChain-Platform/xchain-decoder.git"
   },
   "dependencies": {
+    "ws": "8.21.3",
     "axios": "^1.18.1",
     "bip32": "4.0.0",
     "bip39": "^3.1.0",
