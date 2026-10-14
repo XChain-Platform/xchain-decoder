@@ -23,7 +23,8 @@
 
 const coins = require('../coins');
 
-const SUPPORTED = 'bitcoin-mainnet, bitcoin-testnet, bitcoin-regtest, dogecoin-mainnet, ' +
+const SUPPORTED = 'kaspa-mainnet, kaspa-testnet, kaspa-regtest, ' +
+    'bitcoin-mainnet, bitcoin-testnet, bitcoin-regtest, dogecoin-mainnet, ' +
     'dogecoin-testnet, dogecoin-regtest, litecoin-mainnet, litecoin-testnet, litecoin-regtest';
 
 // Split a "<fullname>-<network>" key (e.g. "bitcoin-mainnet") into a canonical
@@ -43,7 +44,12 @@ class CryptoNetworks {
     static getBitcoinJsNetwork(networkName){
         const p = parseNetworkName(networkName);
         if(!p) throw new TypeError(`Unknown network: "${networkName}". Supported: ${SUPPORTED}`);
-        return coins.getCoinConfig(p.tick, p.net).net;
+        const cfg = coins.getCoinConfig(p.tick, p.net);
+        // Non-bitcoinjs families (Kaspa and friends) declare net: null in their coin file, so fail
+        // loudly here rather than handing a half-filled object to bitcoinjs - that turns into an
+        if(!cfg.net)
+            throw new TypeError(`Network "${networkName}" has no bitcoinjs network object: coin "${p.tick}" declares wireFormat "${cfg.wireFormat}". Consumers must branch on the wireFormat family.`);
+        return cfg.net;
     }
 
     // Uppercase native-coin ticker ('BTC'|'DOGE'|'LTC') for a network key. This is

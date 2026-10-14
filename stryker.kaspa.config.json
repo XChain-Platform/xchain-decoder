@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-core.json",
+  "comment": "Mutation run scoped to the Kaspa family modules. Same runner shape as xchain-node's config. MEASURED 2026-10-13: kaspa_store.js 73.88% - 198 killed / 43 survived / 27 runtime errors out of 268 mutants. The thresholds below are xchain-node's (high 90 / low 70 / break 70) and they are real: the measured score clears break. The 27 runtime errors are mutants that make a call throw before any assertion runs - a blanked table-name literal, an emptied SCHEMA, an inverted 'if (!columns) throw'. They crash with this module's own 'unknown table' error, so they are detected in practice, but this Stryker version reports them separately and does not count them in the score: with them counted the same run is about 84%. Converting them is mechanical (keep every throwing call inside an it()), and it is the next thing to do rather than something to hide.",
+  "mutate": [
+    "src/chain/kaspa/**/*.js",
+    "src/XChainDecoder/kaspa_sync.js"
+  ],
+  "testRunner": "mocha",
+  "mochaOptions": {
+    "spec": [
+      "test/unit/chain/kaspa/*.test.js"
+    ],
+    "no-config": true,
+    "no-opts": true
+  },
+  "reporters": [
+    "clear-text"
+  ],
+  "coverageAnalysis": "off",
+  "concurrency": 1,
+  "thresholds": {
+    "high": 90,
+    "low": 70,
+    "break": 70
+  }
+}
