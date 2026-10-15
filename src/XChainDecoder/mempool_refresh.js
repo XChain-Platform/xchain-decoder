@@ -130,13 +130,23 @@ function admitMempoolAction(parseResult, nextTransactionHash){
     return this.buildStoredActionRecord(parseResult, nextTransactionHash, true)
 }
 
-function* storeMempoolTransaction(nextTxHex, nextTxHexIndex, openDispenserAddresses){
+// The row is keyed on the txid the node listed, and the parsed tx must hash to it.
+// A mismatch means this parse read different bytes than the node's (an unhandled
+// serialization), so its source, outputs and payload cannot be trusted: the tx is
+// skipped and counted in parseErrors, and the next cycle tries it again.
+function* storeMempoolTransaction(nodeTxid, nextTxHex, nextTxHexIndex, openDispenserAddresses){
     let nextTx = decodeMempoolTransaction.call(this, nextTxHex, nextTxHexIndex)
     if (nextTx == null) {
         return false
     }
 
-    let nextTransactionHash = nextTx.getId()
+    const computedTxid = nextTx.getId()
+    if (computedTxid !== nodeTxid) {
+        this.parseErrors++
+        logger.error(`Mempool: tx ${nodeTxid} parses to txid ${computedTxid}, skipping`)
+        return false
+    }
+    let nextTransactionHash = nodeTxid
 
     let parseResult = yield* parseMempoolTransaction.call(this, nextTx, nextTransactionHash, openDispenserAddresses)
     if (parseResult == null) {
@@ -198,7 +208,9 @@ function* storeMempoolBatches(rawMempool, openDispenserAddresses){
                 continue
             }
 
-            if (yield* storeMempoolTransaction.call(this, nextTxHex, nextTxHexIndex, openDispenserAddresses)) {
+            // getRawTransactions answers in request order, so the index names the node txid.
+            const nodeTxid = nextRawMempoolChunk[nextTxHexIndex]
+            if (yield* storeMempoolTransaction.call(this, nodeTxid, nextTxHex, nextTxHexIndex, openDispenserAddresses)) {
                 validTransactionsCount = validTransactionsCount + 1
             }
         }

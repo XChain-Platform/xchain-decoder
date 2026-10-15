@@ -16,6 +16,7 @@
  * Provides mock factories and fault injection utilities for testing
  * the decoder's resilience without requiring real infrastructure.
  */
+const crypto = require('crypto')
 const sinon = require('sinon')
 const EventEmitter = require('events')
 
@@ -107,15 +108,6 @@ function createMockConnector(overrides = {}) {
  */
 function createMinimalBlockHex() {
     // A minimal valid block: 80-byte header + 1 coinbase tx
-    // Version 1, prev hash all zeros, merkle root, timestamp, bits, nonce
-    const header = '01000000' +
-        '0000000000000000000000000000000000000000000000000000000000000000' +
-        '3ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a' +
-        '29ab5f49' +
-        'ffff001d' +
-        '1dac2b7c'
-    // varint 1 tx
-    const txCount = '01'
     // Minimal coinbase tx
     const coinbaseTx =
         '01000000' + // version
@@ -130,6 +122,18 @@ function createMinimalBlockHex() {
         '43' + // script length (67 bytes)
         '4104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac' +
         '00000000' // locktime
+    // Version 1, prev hash all zeros, merkle root, timestamp, bits, nonce. A block of
+    // one tx has that tx's hash as its merkle root; the decoder refuses a mismatch.
+    const merkleRoot = crypto.createHash('sha256')
+        .update(crypto.createHash('sha256').update(Buffer.from(coinbaseTx, 'hex')).digest()).digest('hex')
+    const header = '01000000' +
+        '0000000000000000000000000000000000000000000000000000000000000000' +
+        merkleRoot +
+        '29ab5f49' +
+        'ffff001d' +
+        '1dac2b7c'
+    // varint 1 tx
+    const txCount = '01'
 
     return header + txCount + coinbaseTx
 }

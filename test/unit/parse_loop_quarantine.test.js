@@ -181,9 +181,11 @@ describe('XChainDecoder parse-loop quarantine', function () {
         )
         decoder.sleep = async () => {}
 
+        // Each stub tx hashes to the txid the node listed for it, so both reach the
+        // parser (a tx whose id differs from the node txid is skipped before it).
         decoder.connector = {
-            getRawMempool: async () => ['aa', 'bb'],
-            getRawTransactions: async () => ['deadbeef01', 'deadbeef02']
+            getRawMempool: async () => ['deadbeef01', 'deadbeef02'],
+            getRawTransactions: async (txids) => txids
         }
         decoder.xchainBlockDecoder = {
             transactionFromHex: (hex) => ({ ins: [{}], outs: [], getId: () => hex })
@@ -206,7 +208,7 @@ describe('XChainDecoder parse-loop quarantine', function () {
 
         await decoder.updateMempool()
 
-        assert.deepStrictEqual(parsed, ['deadbeef01', 'deadbeef02'], 'the second tx must still be processed after the first throws')
+        assert.deepStrictEqual(parsed.slice().sort(), ['deadbeef01', 'deadbeef02'], 'the second tx must still be processed after the first throws')
         assert.strictEqual(decoder.parseErrors, 1)
         assert.strictEqual(decoder.mempoolBusy, false, 'the busy flag must be released')
     })
