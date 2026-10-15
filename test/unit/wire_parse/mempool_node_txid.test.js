@@ -71,5 +71,14 @@ describe('decoder mempool rows keyed on the node txid @regression', function () 
             assert.deepStrictEqual(seen.parsed, [])
             assert.strictEqual(decoder.parseErrors, before + 1)
         })
+
+        it('handles a typed malformed-transaction error without aborting the mempool cycle', async function () {
+            const { decoder, seen } = buildDecoder('cd'.repeat(32), 'not-hex')
+            const before = decoder.parseErrors
+            await decoder.updateMempool()
+            assert.deepStrictEqual(seen.rows, [])
+            assert.deepStrictEqual(seen.parsed, [])
+            assert.strictEqual(decoder.parseErrors, before + 1)
+        })
     })
 })
