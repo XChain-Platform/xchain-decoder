@@ -102,11 +102,9 @@ function isDispenserCancelGraceActive(consensusNetwork, blockTime){
 
 // The capture floor for a block: the oldest expiration still eligible for payment capture.
 //
-// Returns null below the gate, which getAllOpenDispenserAddresses reads as "keep the
-// unwidened set", so a from-genesis re-decode of pre-flag-day history reproduces the output
-// set the fleet wrote live, byte for byte. Above the parent-floor gate, the earlier of the
-// candidate block and its parent protocol time carries the capture set across the first block
-// whose clock passes the close boundary.
+// Returns null below the gate, preserving the pre-flag-day capture set. Above the
+// parent-floor gate, the earlier of the candidate block and its parent protocol time
+// carries the capture set across the first block past the close boundary.
 function isDispenserCancelGraceParentFloorActive(consensusNetwork, blockTime){
     const activation = DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION[consensusNetwork]
     if (typeof activation !== 'number') return false

@@ -138,6 +138,16 @@ function makeDecoder(consensusNetwork){
     return decoder
 }
 
+function configureBlockDecoder(decoder, blockTimes){
+    decoder.xchainBlockDecoder = {
+        blockFromHex: (hex) => ({
+            prevHash: Buffer.from(PREV_WIRE),
+            timestamp: blockTimes[Number(String(hex).split(':')[1])],
+            transactions: [fakeTx('tx-at-' + String(hex))],
+        })
+    }
+}
+
 // Drive the real block loop over the supplied protocol times on `consensusNetwork`.
 // Nothing is pre-stamped by hand: the stamp under test is written by the production
 // deleteOpenDispensers call site.
@@ -194,13 +204,7 @@ function runBlocks(consensusNetwork, blockTimes, model){
         getOpenDispenserOracleAddressesBySource: (s) => model.getOpenDispenserOracleAddressesBySource(s),
     }
 
-    decoder.xchainBlockDecoder = {
-        blockFromHex: (hex) => ({
-            prevHash: Buffer.from(PREV_WIRE),
-            timestamp: blockTimes[Number(String(hex).split(':')[1])],
-            transactions: [fakeTx('tx-at-' + String(hex))],
-        })
-    }
+    configureBlockDecoder(decoder, blockTimes)
 
     return decoder.start().then(() => ({ setsSeenByParse }))
 }
@@ -306,11 +310,9 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
     })
 
     it('closes capture after the parent clock has passed the grace window', async () => {
-        // The grace is a window, not an amnesty: past mark + grace the address leaves the
-        // capture set, and by then the indexer stopped matching the dispenser long ago.
-        // The window is measured from the SOFT-EXPIRE MARK block, which is the last block a
-        // cancel can be accepted in. The first block across that boundary is retained, then
-        // the next block proves the parent clock advances the floor.
+        // The grace is measured from the last block that can accept a cancel.
+        // The first block across that boundary is retained; the next block proves
+        // that advancing the parent clock advances the floor.
         const markAt = EXPIRATION + 1
         const payAt  = markAt + DISPENSER_CANCEL_GRACE_SECONDS + 2
         assert.ok(!indexerStillSettlesFill(payAt),
