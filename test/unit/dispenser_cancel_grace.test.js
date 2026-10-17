@@ -309,7 +309,7 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
             'mainnet is armed at genesis, so the grace carries the address into the capture set')
     })
 
-    it('closes capture after the parent clock has passed the grace window', async () => {
+    it('closes capture once the indexer can no longer settle a fill', async () => {
         // The grace is measured from the last block that can accept a cancel.
         // The first block across that boundary is retained; the next block proves
         // that advancing the parent clock advances the floor.
@@ -396,7 +396,7 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
                 'a payment the indexer would still settle must be captured by the decoder')
         })
 
-        it('captures INDEXER_CLOSE + 1, then closes after that time becomes the parent', async () => {
+        it('stops capturing once the indexer has closed the boundary-cancelled dispenser', async () => {
             const payAt = INDEXER_CLOSE + 1
             const model = fundedCancelledDispenser()
             await runBlocks('regtest', [MARK_AT, payAt, payAt + 1], model)
