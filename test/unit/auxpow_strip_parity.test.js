@@ -31,6 +31,7 @@
 // of green-by-skip.
 
 const assert = require('assert')
+const crypto = require('crypto')
 const fs     = require('fs')
 const path   = require('path')
 
@@ -54,6 +55,7 @@ const SHARED_FUNCTIONS = [
     'readVarint',
     'encodeVarintHex',
     'skipAuxPow',
+    'assertWholeBlock',
     'stripAuxPowFromBlockHex',
 ]
 
@@ -72,12 +74,6 @@ function extractFunction(source, name) {
     return lines.slice(start, end + 1).join('\n')
 }
 
-// 80-byte header, version 0x00620104 little-endian: AuxPoW bit (0x100) SET.
-const AUXPOW_HEADER = '04016200' + '11'.repeat(76)
-// Same header with the AuxPoW bit clear (version 2).
-const PLAIN_HEADER = '02000000' + '11'.repeat(76)
-const TX_COUNT_AND_TXS = '01' + '0a'.repeat(60)
-
 // Minimal legacy coinbase tx: 1 input, 1 empty-script output.
 const COINBASE =
     '01000000' +
@@ -85,6 +81,15 @@ const COINBASE =
     '00'.repeat(32) + 'ffffffff' + '00' + 'ffffffff' +
     '01' + '0100000000000000' + '00' +
     '00000000'
+// The coinbase is the block's only tx, so the header's merkle root is its txid
+// in internal byte order; the strip refuses a block whose root does not match.
+const COINBASE_MERKLE_ROOT = crypto.createHash('sha256')
+    .update(crypto.createHash('sha256').update(Buffer.from(COINBASE, 'hex')).digest()).digest('hex')
+// 80-byte header, version 0x00620104 little-endian: AuxPoW bit (0x100) SET.
+const AUXPOW_HEADER = '04016200' + '11'.repeat(32) + COINBASE_MERKLE_ROOT + '11'.repeat(12)
+// Same header with the AuxPoW bit clear (version 2).
+const PLAIN_HEADER = '02000000' + '11'.repeat(32) + COINBASE_MERKLE_ROOT + '11'.repeat(12)
+const TX_COUNT_AND_TXS = '01' + COINBASE
 // AuxPoW tail: parent hash (32 B) + empty coinbase branch (count 0 + index 4 B)
 // + empty chain branch + parent header (80 B).
 const AUXPOW_TAIL =

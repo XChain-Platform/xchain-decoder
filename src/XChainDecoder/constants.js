@@ -28,6 +28,14 @@ const lenientTextDecoder = new TextDecoder('utf-8')
 const CHECK_BLOCK_DELAY_MS = 1000 //1 second to continously ask for new block when all has been parsed
 const BLOCKCHAIN_INFO_REFRESH_MS = 30000 //Re-poll the node tip at least this often during catch-up so reported lag stays accurate
 const MEMPOOL_INTERVAL = 60000 //60 seconds between mempool checks
+// A node tip below the stored tip, or a different block at the stored height, is acted
+// on only once two readings TIP_SETTLE_DELAY_MS apart agree; a reading that keeps
+// changing for TIP_SETTLE_MAX_READS re-reads ends the pass with nothing deleted. One
+// stale reply (an RPC failover onto a lagging endpoint) otherwise rolls back valid
+// blocks and writes REORG markers for a reorg that never happened. Same values as
+// xchain-utxo-tracker, which settles its tip the same way before a rollback.
+const TIP_SETTLE_DELAY_MS = 2000
+const TIP_SETTLE_MAX_READS = 5
 // How often a health surface may re-probe the durable REORG_HALT marker. The marker
 // changes at most once in a decoder's life, so a slow TTL is ample; the point of the
 // cache is that an unauthenticated health endpoint must not turn into one DB query
@@ -164,6 +172,8 @@ module.exports = {
     CHECK_BLOCK_DELAY_MS,
     BLOCKCHAIN_INFO_REFRESH_MS,
     MEMPOOL_INTERVAL,
+    TIP_SETTLE_DELAY_MS,
+    TIP_SETTLE_MAX_READS,
     REORG_HALT_PROBE_INTERVAL_MS,
     REORG_HALT_PARK_TICK_MS,
     STALL_ALERT_MS,

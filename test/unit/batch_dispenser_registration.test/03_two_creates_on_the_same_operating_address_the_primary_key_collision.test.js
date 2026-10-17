@@ -14,7 +14,10 @@ const {
     EXP_LATE,
     ORACLE_A,
     ORACLE_B,
+    SOURCE,
+    DispenserModel,
     assert,
+    buildDecoder,
     create,
     runOne,
 } = require('./support/helpers.js')
@@ -44,6 +47,29 @@ describe('BATCH dispenser registration', function () {
             ].join(';'), ABOVE_GATE)
             assert.strictEqual(decoder.model.rows.length, 1)
             assert.strictEqual(decoder.model.rows[0].expiration, EXP_LATE)
+
+            const firstAddress = 'Málaga'
+            const secondAddress = 'malaga'
+            const action = 'BATCH|0|' + [
+                create({ getAddress: firstAddress, expiration: EXP_EARLY }),
+                create({ getAddress: secondAddress, expiration: EXP_LATE }),
+            ].join(';')
+            const model = new DispenserModel()
+            const addressIdDecoder = buildDecoder([
+                { id: 'tx01', action, source: SOURCE, outputs: [] },
+            ], model, ABOVE_GATE)
+            const resolved = []
+            addressIdDecoder.db.createAddress = async address => {
+                resolved.push(address)
+                return 73
+            }
+
+            await addressIdDecoder.start()
+
+            assert.deepStrictEqual(resolved, [firstAddress, secondAddress])
+            assert.strictEqual(model.insertCalls, 1)
+            assert.strictEqual(model.rows[0].address, firstAddress)
+            assert.strictEqual(model.rows[0].expiration, EXP_LATE)
         })
     })
 })

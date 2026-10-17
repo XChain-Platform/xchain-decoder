@@ -11,7 +11,14 @@
 const assert = require('assert')
 const sinon = require('sinon')
 const axios = require('axios')
+const crypto = require('crypto')
 const BlockchainConnector = require('../../../src/chain/blockchain_connector')
+
+// A coinbase tx and the merkle root of a block holding only it (its txid, in
+// internal byte order): the strip refuses a block whose root does not match.
+const COINBASE_HEX = '01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0704ffff001d0104ffffffff0100f2052a010000001976a914aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88ac00000000'
+const COINBASE_ROOT = crypto.createHash('sha256')
+    .update(crypto.createHash('sha256').update(Buffer.from(COINBASE_HEX, 'hex')).digest()).digest('hex')
 
 let connector
 let axiosStub
@@ -34,10 +41,12 @@ describe('BlockchainConnector', () => {
         it('[REGRESSION P2] R-NET-003: should strip AuxPoW data from block hex', async () => {
             // Header = 200 hex chars (100 bytes, includes 20 bytes of AuxPoW)
             // Standard bitcoin header = 160 hex chars (80 bytes)
-            // So dataToRemove = 200 - 160 = 40 hex chars
-            const auxPowHeader = 'a'.repeat(200)
-            const blockBody = 'b'.repeat(100)
-            const fullBlockHex = auxPowHeader.substring(0, 160) + 'x'.repeat(40) + blockBody
+            // So dataToRemove = 200 - 160 = 40 hex chars. The body is a real one-tx
+            // block body under a header carrying its merkle root.
+            const baseHeader = '00016200' + 'aa'.repeat(32) + COINBASE_ROOT + 'aa'.repeat(12)
+            const auxPowHeader = baseHeader + 'cc'.repeat(20)
+            const blockBody = '01' + COINBASE_HEX
+            const fullBlockHex = baseHeader + 'cc'.repeat(20) + blockBody
 
             // getBlockHeader returns the full header including AuxPoW
             axiosStub.onCall(0).resolves({ data: { result: auxPowHeader } }) // getBlockHeader
@@ -101,7 +110,7 @@ describe('BlockchainConnector', () => {
             const BASE_HEADER_HEX =
                 '00016200' +  // version 0x00620100 (LE), AuxPoW flag (0x100) set
                 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +  // prevHash 32 bytes
-                'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' +  // merkleRoot 32 bytes
+                COINBASE_ROOT +  // merkleRoot 32 bytes: the coinbase txid
                 '00f15365' +  // timestamp 1700000000 (LE)
                 'ffff001d' +  // bits
                 '39300000'    // nonce
@@ -153,7 +162,7 @@ describe('BlockchainConnector', () => {
             const BASE_HEADER_HEX =
                 '00016200' +  // version 0x00620100 (LE), AuxPoW flag (0x100) set
                 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +  // prevHash 32 bytes
-                'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' +  // merkleRoot 32 bytes
+                COINBASE_ROOT +  // merkleRoot 32 bytes: the coinbase txid
                 '00f15365' +  // timestamp 1700000000 (LE)
                 'ffff001d' +  // bits
                 '39300000'    // nonce

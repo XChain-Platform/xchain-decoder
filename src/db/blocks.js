@@ -255,9 +255,6 @@ module.exports = {
         ) VALUES (?, ?, ?, ?);
         `;
 
-        let blockHashId = await this.createTransaction(block.block_hash)
-        let previousBlockHashId = await this.createTransaction(block.previous_block_hash)
-
         let connection = await this.getConnection()
         // Snapshot whether WE acquired this lease. Inside a block transaction
         // getConnection() returns the shared this.transactionConnection, and the catch
@@ -267,6 +264,10 @@ module.exports = {
         const ownLease = (this.transactionConnection == null)
 
         try {
+            // Inside the try, so a lookup that fails in the block transaction rolls it back
+            // through the catch below instead of escaping the block loop.
+            let blockHashId = await this.createTransaction(block.block_hash)
+            let previousBlockHashId = await this.createTransaction(block.previous_block_hash)
             await connection.query(query, [
                 block.block_index,
                 blockHashId,

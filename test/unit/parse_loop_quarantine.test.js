@@ -113,6 +113,7 @@ describe('XChainDecoder parse-loop quarantine', function () {
         assert.strictEqual(calls.insertBlock, 1, 'the block should be inserted on the successful retry')
         assert.strictEqual(calls.endTransaction, 1, 'the failed attempt should roll back')
         assert.strictEqual(decoder.parseErrors, 1)
+        assert.strictEqual(decoder.quarantinedTxs, 0, 'a retried block skips nothing')
         assert.strictEqual(calls.insertEvent.length, 0, 'a block-level failure is never quarantined')
     })
 })
@@ -138,6 +139,7 @@ describe('XChainDecoder parse-loop quarantine', function () {
         assert.strictEqual(calls.endTransaction, 1, 'the failed attempt should roll back')
         assert.strictEqual(calls.commitTransaction, 1, 'the block should commit on the retry')
         assert.strictEqual(calls.insertEvent.length, 0, 'a transiently failing tx must NOT be quarantined')
+        assert.strictEqual(decoder.quarantinedTxs, 0, 'a retried tx is not counted as skipped')
     })
 })
 
@@ -164,6 +166,9 @@ describe('XChainDecoder parse-loop quarantine', function () {
         assert.strictEqual(calls.insertEvent[0].data.tx_hash, 'cafe01')
         assert.strictEqual(calls.insertEvent[0].data.block_index, 0)
         assert.strictEqual(calls.insertEvent[0].data.error, 'poison transaction')
+        assert.strictEqual(decoder.quarantinedTxs, 1, 'the skip has its own count, apart from parse_errors')
+        assert.strictEqual(decoder.lastQuarantinedBlock, 0)
+        assert.strictEqual(decoder.lastQuarantinedTxHash, 'cafe01')
     })
 })
 
@@ -176,9 +181,11 @@ describe('XChainDecoder parse-loop quarantine', function () {
         )
         decoder.sleep = async () => {}
 
+        // Each stub tx hashes to the txid the node listed for it, so both reach the
+        // parser (a tx whose id differs from the node txid is skipped before it).
         decoder.connector = {
-            getRawMempool: async () => ['aa', 'bb'],
-            getRawTransactions: async () => ['deadbeef01', 'deadbeef02']
+            getRawMempool: async () => ['deadbeef01', 'deadbeef02'],
+            getRawTransactions: async (txids) => txids
         }
         decoder.xchainBlockDecoder = {
             transactionFromHex: (hex) => ({ ins: [{}], outs: [], getId: () => hex })
@@ -201,7 +208,7 @@ describe('XChainDecoder parse-loop quarantine', function () {
 
         await decoder.updateMempool()
 
-        assert.deepStrictEqual(parsed, ['deadbeef01', 'deadbeef02'], 'the second tx must still be processed after the first throws')
+        assert.deepStrictEqual(parsed.slice().sort(), ['deadbeef01', 'deadbeef02'], 'the second tx must still be processed after the first throws')
         assert.strictEqual(decoder.parseErrors, 1)
         assert.strictEqual(decoder.mempoolBusy, false, 'the busy flag must be released')
     })
@@ -360,5 +367,8 @@ describe('quarantine retry state is per tx position and per block', function () 
         assert.strictEqual(calls.commit, 1, 'the block commits')
         assert.deepStrictEqual([...new Set(quarantinedHashes(calls))], ['cafe01'], 'only the poison row is quarantined')
         assert.deepStrictEqual(calls.inserted, ['beef02'], 'the second tx is inserted on its retry')
+        assert.ok(decoder.quarantinedTxs >= 1, 'an INSERT quarantine is counted as a skip')
+        assert.strictEqual(decoder.quarantinedTxs, quarantinedHashes(calls).length, 'one count per recorded PARSE_ERROR')
+        assert.strictEqual(decoder.lastQuarantinedTxHash, 'cafe01')
     })
 })

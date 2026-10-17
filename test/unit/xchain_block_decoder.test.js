@@ -188,24 +188,33 @@ describe('XChainBlockDecoder', () => {
 
         it('[REGRESSION P2] R-NET-002: should strip MWEB flag (0x08) from litecoin transactions', () => {
             const ltcDecoder = new XChainBlockDecoder('litecoin-mainnet')
-            // Build a v2 tx with marker=0x00, flag=0x08 (MWEB)
-            // version(4) + marker(1) + flag(1) + varint inputs(1)=0 + varint outputs(1)=0 + locktime(4)
-            const txHex = '02000000' + '00' + '08' + '00' + '00' + '00000000'
-            // After stripping marker+flag: 02000000 + 00 + 00 + 00000000
-            // This is a tx with 0 inputs, 0 outputs
+            // An MWEB-only v2 tx: version(4) + marker 0x00 + flag 0x08 + no inputs +
+            // no outputs + MWEB tag 0x01 and an (opaque) MWEB body + locktime(4).
+            const txHex = '02000000' + '00' + '08' + '00' + '00' + '01' + 'ab'.repeat(8) + '00000000'
             const tx = ltcDecoder.transactionFromHex(txHex)
             assert.ok(tx)
             assert.strictEqual(tx.ins.length, 0)
+            assert.strictEqual(tx.outs.length, 0)
         })
 
         it('[REGRESSION P2] R-NET-002: should strip MWEB+segwit flag (0x09) from litecoin transactions', () => {
             const ltcDecoder = new XChainBlockDecoder('litecoin-mainnet')
-            const txHex = '02000000' + '00' + '09' + '00' + '00' + '00000000'
+            // marker 0x00 + flag 0x09 (witness and MWEB): one input, no outputs, one
+            // witness item 0xaa, MWEB tag 0x01 and an (opaque) MWEB body, locktime 7.
+            const txHex = '02000000' + '00' + '09' +
+                '01' + '07'.repeat(32) + '00000000' + '00' + 'ffffffff' + '00' +
+                '01' + '01' + 'aa' + '01' + 'ab'.repeat(8) + '07000000'
             const tx = ltcDecoder.transactionFromHex(txHex)
             assert.ok(tx)
-            assert.strictEqual(tx.ins.length, 0)
+            assert.strictEqual(tx.ins.length, 1)
+            assert.deepStrictEqual(tx.ins[0].witness, [Buffer.from('aa', 'hex')])
+            assert.strictEqual(tx.locktime, 7)
         })
+    })
+})
 
+describe('XChainBlockDecoder', () => {
+    describe('#transactionFromHex()', () => {
         it('[REGRESSION P2] R-NET-002: should not strip flags for bitcoin transactions', () => {
             const btcDecoder = new XChainBlockDecoder('bitcoin-regtest')
             // A v1 tx with no special flags, just 0 inputs/outputs

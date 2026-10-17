@@ -44,8 +44,12 @@ function createDecoder() {
 }
 
 // Errors thrown by bitcoinjs-lib during Transaction.fromHex/fromBuffer are expected
-// when we feed it corrupted hex. These are not decoder bugs.
+// when we feed it corrupted hex. These are not decoder bugs. transactionFromHex
+// refuses malformed, truncated and trailing-byte hex with a TransactionParseError,
+// keyed here on its code rather than its message, so a refusal stops counting as
+// expected the moment the decoder stops typing it.
 function isBitcoinjsParseError(err) {
+    if (err != null && err.code === 'ERR_TRANSACTION_PARSE') return true
     const msg = err.message || ''
     return msg.includes('Cannot read slice out of bounds') ||
            msg.includes('Transaction has unexpected data') ||

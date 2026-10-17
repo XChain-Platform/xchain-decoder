@@ -15,24 +15,42 @@ const { dispenserAddressKey } = require('../../src/protocol/batch_sub_command_ca
 
 describe('dispenserAddressKey', function () {
 
-    it('folds ASCII letters to lower case', function () {
-        assert.strictEqual(dispenserAddressKey('BCRT1QXYZ'), 'bcrt1qxyz')
-        assert.strictEqual(dispenserAddressKey('mAbC'), dispenserAddressKey('mabc'))
+    it('folds ASCII letters to lower case', async function () {
+        const addressIdOf = async address => address === 'BCRT1QXYZ' || address === 'bcrt1qxyz' ? 41 : 42
+        assert.strictEqual(
+            await dispenserAddressKey('BCRT1QXYZ', addressIdOf),
+            await dispenserAddressKey('bcrt1qxyz', addressIdOf))
     })
 
-    it('drops trailing spaces', function () {
-        assert.strictEqual(dispenserAddressKey('mAbC  '), 'mabc')
-        assert.strictEqual(dispenserAddressKey('   '), '')
+    it('drops trailing spaces', async function () {
+        const resolved = []
+        const addressIdOf = async address => {
+            resolved.push(address)
+            if (address === 'mAbC  ' || address === 'mabc') return 12
+            throw new Error('unexpected address: ' + address)
+        }
+        assert.strictEqual(
+            await dispenserAddressKey('mAbC  ', addressIdOf),
+            await dispenserAddressKey('mabc', addressIdOf))
+        assert.deepStrictEqual(resolved, ['mAbC  ', 'mabc'])
     })
 
-    it('keeps leading spaces and other characters', function () {
-        assert.notStrictEqual(dispenserAddressKey(' mabc'), dispenserAddressKey('mabc'))
-        assert.strictEqual(dispenserAddressKey(' MABC '), ' mabc')
-        assert.strictEqual(dispenserAddressKey('ÄBC\t\u00a0'), 'Äbc\t\u00a0')
+    it('keeps leading spaces and other characters', async function () {
+        const addressIdOf = async address => address === ' MABC ' ? 7 : 8
+        assert.notStrictEqual(
+            await dispenserAddressKey(' MABC ', addressIdOf),
+            await dispenserAddressKey('mabc', addressIdOf))
     })
 
-    it('keeps distinct addresses distinct', function () {
-        assert.notStrictEqual(dispenserAddressKey('mabc'), dispenserAddressKey('mabd'))
-        assert.strictEqual(typeof dispenserAddressKey('mAbC'), 'string')
+    it('keeps distinct addresses distinct', async function () {
+        assert.notStrictEqual(
+            await dispenserAddressKey('first', async () => 7),
+            await dispenserAddressKey('second', async () => 8))
+        assert.strictEqual(
+            await dispenserAddressKey('first', async () => 12),
+            await dispenserAddressKey('second', async () => '12'))
+        assert.notStrictEqual(
+            await dispenserAddressKey('Málaga', async () => null),
+            await dispenserAddressKey('malaga', async () => undefined))
     })
 })

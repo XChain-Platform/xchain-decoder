@@ -49,7 +49,7 @@ function injectPool(db, pool) {
 describe('Database error-path transactionConnection branches', () => {
     afterEach(() => sinon.restore());
 
-    it('createAddress: swallows INSERT error even with active transactionConnection', async () => {
+    it('createAddress: rethrows an INSERT error inside an active transaction so the block rolls back', async () => {
         const db = makeDb();
         // Use a fake transactionConnection so getConnection returns it
         const txConn = {
@@ -63,10 +63,22 @@ describe('Database error-path transactionConnection branches', () => {
         };
         db.transactionConnection = txConn;
         db._transactionLock = true;
-        // Should not throw; error in INSERT catch is logged and swallowed
-        const id = await db.createAddress('newaddr2');
-        // id may be 11 from re-fetch or null if re-fetch also fails; just assert no throw
-        assert.ok(id === 11 || id === null);
+        // A swallowed error would hand back a NULL id that commits with the block.
+        await assert.rejects(db.createAddress('newaddr2'), (err) => err.dbLookupFailure === true && /insert addr fail/.test(err.message));
+        assert.strictEqual(txConn.query.callCount, 2, 'no re-fetch runs after the failed INSERT');
+    });
+
+    it('createAddress: still swallows an INSERT error with no transaction open (mempool handle)', async () => {
+        const db = makeDb();
+        const conn = {
+            query: sinon.stub()
+                .onFirstCall().resolves([])
+                .onSecondCall().rejects(new Error('insert addr fail'))
+                .onThirdCall().resolves([{ id: 11 }]),
+            release: sinon.stub().resolves(),
+        };
+        injectPool(db, { getConnection: sinon.stub().resolves(conn) });
+        assert.strictEqual(await db.createAddress('newaddr2'), 11);
     });
 
     // Regression guard: on a generic error inside an active transaction, insertEvent

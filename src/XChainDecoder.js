@@ -210,6 +210,10 @@ function initializeDecoderMode(decoder) {
 
     decoder.rpcErrors = 0
     decoder.parseErrors = 0
+    decoder.quarantinedTxs = 0
+    decoder.lastQuarantinedBlock = null
+    decoder.lastQuarantinedTxHash = null
+    decoder.lastQuarantinedAt = null
     decoder.dispenserPurgeFailures = 0
 }
 

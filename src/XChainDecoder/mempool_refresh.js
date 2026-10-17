@@ -19,7 +19,11 @@
  ********************************************************************/
 
 const { format: formatLogLine } = require('node:util')
-const { cancelGraceFloor } = require('../protocol/dispenser_cancel_grace')
+const {
+    cancelGraceFloor,
+    isDispenserCancelGraceParentFloorActive,
+} = require('../protocol/dispenser_cancel_grace')
+const protocolTime = require('../protocol/protocol_time')
 const { logger, MEMPOOL_BATCH_SIZE } = require('./constants.js')
 
 function dedupNodeMempool(rawMempoolUnordered){
@@ -73,8 +77,36 @@ function decodeMempoolTransaction(nextTxHex, nextTxHexIndex){
 // an empty set: the mempool view is non-consensus, so a pending row that blanks an
 // unattributed ACTION for one poll is corrected by the block path on confirm, and the
 // rest of the cycle (pruning, new arrivals) still runs.
+function* loadMempoolParentProtocolTime(blockTime){
+    if (!isDispenserCancelGraceParentFloorActive(this.consensusNetwork, blockTime)) return null
+    if (this.lastProcessedBlockIndex < 0 ||
+        typeof this.mempoolDb.getBlockByIndex !== 'function') return null
+
+    const span = protocolTime.isProtocolTimeMtpActive(this.consensusNetwork)
+        ? protocolTime.MEDIAN_TIME_SPAN + 1
+        : 1
+    const previousBlockTimes = []
+    for (let height = this.lastProcessedBlockIndex;
+        height >= 0 && previousBlockTimes.length < span; height--){
+        let block
+        try {
+            block = yield this.mempoolDb.getBlockByIndex(height)
+        } catch (err) {
+            logger.error(formatLogLine('Mempool: failed to resolve parent protocol time:', err))
+            return null
+        }
+        if (!block) break
+        previousBlockTimes.push(block.block_time)
+    }
+    if (previousBlockTimes.length === 0) return null
+    return protocolTime.protocolTime(
+        this.consensusNetwork, previousBlockTimes[0], previousBlockTimes.slice(1))
+}
+
 function* loadMempoolOpenDispenserAddresses(){
-    const floor = cancelGraceFloor(this.consensusNetwork, Math.floor(Date.now() / 1000))
+    const blockTime = Math.floor(Date.now() / 1000)
+    const parentProtocolTime = yield* loadMempoolParentProtocolTime.call(this, blockTime)
+    const floor = cancelGraceFloor(this.consensusNetwork, blockTime, parentProtocolTime)
     let openDispenserAddresses = null
     try {
         openDispenserAddresses = yield this.mempoolDb.getAllOpenDispenserAddresses(floor)
@@ -130,13 +162,23 @@ function admitMempoolAction(parseResult, nextTransactionHash){
     return this.buildStoredActionRecord(parseResult, nextTransactionHash, true)
 }
 
-function* storeMempoolTransaction(nextTxHex, nextTxHexIndex, openDispenserAddresses){
+// The row is keyed on the txid the node listed, and the parsed tx must hash to it.
+// A mismatch means this parse read different bytes than the node's (an unhandled
+// serialization), so its source, outputs and payload cannot be trusted: the tx is
+// skipped and counted in parseErrors, and the next cycle tries it again.
+function* storeMempoolTransaction(nodeTxid, nextTxHex, nextTxHexIndex, openDispenserAddresses){
     let nextTx = decodeMempoolTransaction.call(this, nextTxHex, nextTxHexIndex)
     if (nextTx == null) {
         return false
     }
 
-    let nextTransactionHash = nextTx.getId()
+    const computedTxid = nextTx.getId()
+    if (computedTxid !== nodeTxid) {
+        this.parseErrors++
+        logger.error(`Mempool: tx ${nodeTxid} parses to txid ${computedTxid}, skipping`)
+        return false
+    }
+    let nextTransactionHash = nodeTxid
 
     let parseResult = yield* parseMempoolTransaction.call(this, nextTx, nextTransactionHash, openDispenserAddresses)
     if (parseResult == null) {
@@ -198,7 +240,9 @@ function* storeMempoolBatches(rawMempool, openDispenserAddresses){
                 continue
             }
 
-            if (yield* storeMempoolTransaction.call(this, nextTxHex, nextTxHexIndex, openDispenserAddresses)) {
+            // getRawTransactions answers in request order, so the index names the node txid.
+            const nodeTxid = nextRawMempoolChunk[nextTxHexIndex]
+            if (yield* storeMempoolTransaction.call(this, nodeTxid, nextTxHex, nextTxHexIndex, openDispenserAddresses)) {
                 validTransactionsCount = validTransactionsCount + 1
             }
         }

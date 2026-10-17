@@ -54,19 +54,46 @@ function buildMinimalTxBuf({ version = 1, markerFlag = null } = {}) {
     const locktime = Buffer.alloc(4, 0)
 
     if (markerFlag) {
-        // Segwit / MWEB style: version + 0x00 marker + flag + inputs + outputs + locktime.
-        // With zero inputs there are no witness stacks to serialize between the two.
+        // MWEB style: version + 0x00 marker + flag + inputs + outputs + MWEB tag +
+        // locktime. With zero inputs there are no witness stacks to serialize, and the
+        // MWEB tag 0x00 says there is no MWEB part (as in a HogEx).
         const marker = Buffer.from([0x00, markerFlag])
-        // For segwit: after 0-input 0-output, we need witnesses (one per input = 0) and locktime
-        return Buffer.concat([versionBuf, marker, varint(0), varint(0), locktime])
+        return Buffer.concat([versionBuf, marker, varint(0), varint(0), Buffer.from([0x00]), locktime])
     }
     // Standard: version + 0 inputs + 0 outputs + locktime
     return Buffer.concat([versionBuf, varint(0), varint(0), locktime])
 }
 
-// Compose a block buffer: header + varint(txCount) + tx1 bytes + ... + txN bytes
+const dsha = (buf) => crypto.createHash('sha256').update(crypto.createHash('sha256').update(buf).digest()).digest()
+
+// The hash a tx's txid is read from: its plain serialization. The MWEB-flagged txs
+// built above have no witness and a null MWEB tag, so the plain form drops the
+// marker, flag and tag.
+function plainTxHash(txBuf) {
+    if (txBuf[4] === 0x00 && (txBuf[5] === 0x08 || txBuf[5] === 0x09)) {
+        return dsha(Buffer.concat([txBuf.subarray(0, 4), txBuf.subarray(6, txBuf.length - 5), txBuf.subarray(txBuf.length - 4)]))
+    }
+    return bitcoin.Transaction.fromBuffer(txBuf).getHash()
+}
+
+// The merkle root over tx hashes, the last one doubled on an odd level.
+function merkleRoot(hashes) {
+    let level = hashes
+    while (level.length > 1) {
+        if (level.length % 2) level = level.concat([level[level.length - 1]])
+        const next = []
+        for (let i = 0; i < level.length; i += 2) next.push(dsha(Buffer.concat([level[i], level[i + 1]])))
+        level = next
+    }
+    return level[0]
+}
+
+// Compose a block buffer: header + varint(txCount) + tx1 bytes + ... + txN bytes,
+// with the header's merkle root set to the txs' root (the decoder refuses a mismatch).
 function buildBlockBuf(header, txBuffers) {
-    return Buffer.concat([header, varint(txBuffers.length), ...txBuffers])
+    const rooted = Buffer.from(header)
+    merkleRoot(txBuffers.map(plainTxHash)).copy(rooted, 36)
+    return Buffer.concat([rooted, varint(txBuffers.length), ...txBuffers])
 }
 
 // ─── tests ──────────────────────────────────────────────────────────────────
@@ -197,15 +224,7 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
         //   - the coinbase's first input has a 32-byte witness (satisfies txesHaveWitnessCommit)
         //   - the coinbase output #1 is OP_RETURN 0xaa21a9ed + 32-byte witness root hash
         // This exercises the `if (witnessCommit) block.witnessCommit = witnessCommit` branch.
-        const SEGWIT_LITECOIN_BLOCK_HEX =
-            '04000000' +                                                          // version 4
-            'aa'.repeat(32) +                                                     // prevHash
-            'bb'.repeat(32) +                                                     // merkleRoot
-            '00f15365' +                                                          // timestamp
-            'ffff001d' +                                                          // bits
-            '78563412' +                                                          // nonce
-            '01' +                                                                // 1 transaction
-            // coinbase segwit tx:
+        const SEGWIT_COINBASE_HEX =
             '01000000' +                                                          // version
             '00' +                                                                // segwit marker
             '01' +                                                                // segwit flag
@@ -218,6 +237,15 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
             '01' +                                                                // 1 witness stack item
             '20' + '00'.repeat(32) +                                              // 32-byte reserved value
             '00000000'                                                             // locktime
+        const SEGWIT_LITECOIN_BLOCK_HEX =
+            '04000000' +                                                          // version 4
+            'aa'.repeat(32) +                                                     // prevHash
+            plainTxHash(Buffer.from(SEGWIT_COINBASE_HEX, 'hex')).toString('hex') + // merkleRoot: the coinbase txid
+            '00f15365' +                                                          // timestamp
+            'ffff001d' +                                                          // bits
+            '78563412' +                                                          // nonce
+            '01' +                                                                // 1 transaction
+            SEGWIT_COINBASE_HEX
 
         const block = decoder.blockFromBuffer(Buffer.from(SEGWIT_LITECOIN_BLOCK_HEX, 'hex'))
 

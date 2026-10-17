@@ -53,7 +53,7 @@ function* fetchPrevoutTransaction(txId, outputIndex){
     // deterministic. start() refuses to run a Dogecoin decoder whose BigInt-safe
     // bufferutils reader is inactive for the same reason: that is the one decode fault
     // that would differ between instances.
-    // MUST parse through transactionFromHex (strips the LTC MWEB marker+flag), not
+    // MUST parse through transactionFromHex (reads the LTC MWEB serialization), not
     // bitcoin.Transaction.fromHex: a Litecoin funding/prevout tx can carry the MWEB
     // flag (0x08/0x09) and vanilla strict parsing throws a UInt64 range error on it.
     // transactionFromHex is the same parser the block path uses; for BTC/DOGE and
@@ -179,7 +179,7 @@ module.exports = {
 
     async parseRawTransaction(rawTransaction){
         // Parse via xchainBlockDecoder.transactionFromHex, not bitcoin.Transaction.fromHex:
-        // the former strips the LTC MWEB marker+flag (0x08/0x09) that makes vanilla strict
+        // the former reads the LTC MWEB marker+flag (0x08/0x09) form that makes vanilla strict
         // parsing throw a deterministic UInt64 range error. See getSourceFromOutput.
         return await this.parseTransaction(this.xchainBlockDecoder.transactionFromHex(rawTransaction))
     },

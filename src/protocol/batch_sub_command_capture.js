@@ -157,32 +157,37 @@ function isDispenserAddressIdCollapseActive(consensusNetwork, blockTime){
 // Registering ONE of the two is strictly better than the pre-gate behaviour, where a
 // batch registers NEITHER.
 //
-// Above the address-id collapse gate, use the same collation key as index_addresses so
-// spellings that resolve to one address_id cannot attempt two inserts for the same primary
-// key. Raw spellings remain distinct below the gate for historical replay compatibility.
-function collapseDispenserRegistrations(candidates, consensusNetwork, blockTime){
-    if (isDispenserAddressIdCollapseActive(consensusNetwork, blockTime))
-        return collapseRegistrationsByKey(candidates, dispenserAddressKey)
-    const collapsed = new Map()
+// Above the address-id collapse gate, use the resolved index_addresses id so every
+// equality of the table's collation shares one key. Raw spellings remain distinct below
+// the gate for historical replay compatibility.
+async function collapseRegistrationsByAddressId(candidates, addressIdOf){
     if (!Array.isArray(candidates)) return []
+    const rawAddresses = new Set()
     for (const candidate of candidates){
-        if (!candidate || !candidate.address) continue
-        const existing = collapsed.get(candidate.address)
-        if (existing === undefined){
-            collapsed.set(candidate.address, {
-                address:       candidate.address,
-                sourceAddress: candidate.sourceAddress,
-                oracleAddress: candidate.oracleAddress || null,
-                expiration:    candidate.expiration,
-            })
-            continue
-        }
-        if (candidate.expiration > existing.expiration)
-            existing.expiration = candidate.expiration
-        if (!existing.oracleAddress && candidate.oracleAddress)
-            existing.oracleAddress = candidate.oracleAddress
+        if (candidate && candidate.address) rawAddresses.add(candidate.address)
     }
-    return [...collapsed.values()]
+    if (rawAddresses.size < 2) return collapseRegistrationsByKey(candidates, null)
+
+    const keys = new Map()
+    for (const candidate of candidates){
+        if (!candidate || !candidate.address || keys.has(candidate.address)) continue
+        keys.set(candidate.address, await dispenserAddressKey(candidate.address, addressIdOf))
+    }
+    return collapseRegistrationsByKey(candidates, address => keys.get(address))
+}
+
+function legacyDispenserAddressKey(address){
+    return address.replace(/[A-Z]/g, letter => letter.toLowerCase()).replace(/ +$/, '')
+}
+
+function collapseDispenserRegistrations(candidates, consensusNetwork, blockTime, addressIdOf){
+    if (isDispenserAddressIdCollapseActive(consensusNetwork, blockTime)){
+        if (typeof addressIdOf === 'function')
+            return collapseRegistrationsByAddressId(candidates, addressIdOf)
+        return collapseRegistrationsByKey(candidates, legacyDispenserAddressKey)
+    }
+    // Pinned by the frozen-reference test: a merge-rule change here needs its own gate.
+    return collapseRegistrationsByKey(candidates, null)
 }
 
 module.exports = {

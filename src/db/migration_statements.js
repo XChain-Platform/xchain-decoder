@@ -14,7 +14,7 @@
 
 const { opensBackslashEscape, createNamesNonInnoDb, dropTargetDestroys } = require('./query_helpers.js')
 const { ensureLedgerAppliedAtDatetime } = require('./migration_ledger.js')
-const { stripBlockComments } = require('./migration_live_schema_guard.js')
+const { stripBlockComments, alterSpecs, blankLiterals } = require('./migration_live_schema_guard.js')
 
 // True when a `#` sits outside every quoted span - a line comment
 // stripSqlLineComments should already have removed. Quote-aware so a `#`
@@ -129,14 +129,9 @@ function isDestructiveAlter(stmt, safeAlterDrop){
     // CONVERT TO CHARACTER SET rewrites every text column of the table and can truncate or
     // re-encode row data.
     if(/\bCONVERT\s+TO\b/i.test(stmt)) return true;
-    // MODIFY that adds NOT NULL narrows the column domain - except an
-    // AUTO_INCREMENT attribute repair: an AUTO_INCREMENT column is
-    // definitionally NOT NULL, so no domain is narrowed (see the
-    // committed 2026-06-10-mirror-id-autoincrement-repair.sql pattern).
-    // Check per top-level clause: a statement-wide AUTO_INCREMENT test
-    // would let one AUTO_INCREMENT clause exempt a sibling NOT NULL clause
-    // in the same multi-clause ALTER (e.g. `MODIFY id ... AUTO_INCREMENT,
-    // MODIFY source VARCHAR(255) NOT NULL`).
+    // MODIFY that adds NOT NULL narrows the column domain, except an AUTO_INCREMENT repair
+    // (definitionally NOT NULL; 2026-06-10-mirror-id-autoincrement-repair.sql). Checked per
+    // top-level clause, so one AUTO_INCREMENT clause cannot exempt a sibling NOT NULL clause.
     let mDepth = 0, mStart = 0;
     const mClauses = [];
     for(let i=0;i<stmt.length;i++){
@@ -149,10 +144,15 @@ function isDestructiveAlter(stmt, safeAlterDrop){
     for(const clause of mClauses){
         if(/\bMODIFY\b[\s\S]*\bNOT\s+NULL\b/i.test(clause) &&
            !/\bAUTO_INCREMENT\b/i.test(clause)) return true;
-        // A MODIFY restates the whole column, so restating id without AUTO_INCREMENT strips
-        // the attribute and every later insert loses its generated key.
-        if(/^\s*(?:ALTER\s+(?:ONLINE\s+)?TABLE\s+(?:`[^`]+`|[A-Za-z0-9_$.]+)\s+)?MODIFY\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?`?id`?(?=[\s,]|$)/i.test(clause) &&
-           !/\bAUTO_INCREMENT\b/i.test(clause)) return true;
+    }
+    // Read each alter_spec past the head and any WAIT n / NOWAIT (an unparsed head is one spec).
+    const parsed = alterSpecs(stmt);
+    for(const spec of (parsed ? parsed.specs : [stmt])){
+        // Restating id without AUTO_INCREMENT strips the attribute, so later inserts lose their key.
+        if(/^\s*MODIFY\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?`?id`?(?=\s|$)/i.test(spec) &&
+           !/\bAUTO_INCREMENT\b/i.test(spec)) return true;
+        // A MODIFY keyword that does not open its spec is one no check here can place.
+        if(/\bMODIFY\b/i.test(blankLiterals(spec)) && !/^\s*MODIFY\b/i.test(spec)) return true;
     }
     return false;
 }
@@ -196,7 +196,8 @@ module.exports = {
     // (rename+retype), CONVERT TO (rewrites every text column), MODIFY ... NOT NULL
     // (the statically detectable narrowing; the runner's live-schema guard catches a
     // width cut or a dropped attribute), MODIFY id without AUTO_INCREMENT (strips the
-    // generated key), any ALTER TABLE PARTITION, TABLESPACE or ENGINE clause, ALTER IGNORE
+    // generated key), a MODIFY not opening its alter_spec (WAIT n / NOWAIT belongs to the head),
+    // any ALTER TABLE PARTITION, TABLESPACE or ENGINE clause, ALTER IGNORE
     // TABLE (deletes duplicate-key rows), any other ALTER than ALTER [ONLINE] TABLE, a CREATE
     // TABLE naming an engine other than InnoDB, and any CREATE other than [TEMPORARY] TABLE and
     // [UNIQUE|FULLTEXT|SPATIAL] INDEX (triggers, events, routines and views run SQL

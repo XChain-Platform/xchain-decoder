@@ -12,6 +12,11 @@
  *
  ********************************************************************/
 
+const bitcoinjs = require('bitcoinjs-lib')
+// BigInt-safe 64-bit reader, so a Dogecoin output above 2^53-1 sat parses in
+// assertWholeBlock exactly as it does in the block decoder.
+require('../apply_bufferutils_patch')
+
 // Decode a Bitcoin-style varint from `buf` at `offset`.
 // Returns { value, bytes } where `bytes` is the number of bytes consumed.
 // Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector/auxpow_codec.js readVarint.
@@ -136,12 +141,41 @@ function skipAuxPow(buf, start) {
     return offset
 }
 
+// Check that a stripped block hex is one whole block: at least one transaction (the
+// coinbase), no bytes after the last transaction, and a merkle root over the parsed
+// txids equal to the header's. bitcoinjs Block.fromBuffer checks none of these, so a
+// cut that lands a few bytes off (one changed branch-count byte is enough) can still
+// read as a block, often one whose tx count is 0 with the real transactions ignored
+// as trailing bytes. Throwing here keeps that inside the caller's AuxPoW try, which
+// tags it auxPowParseFailure so the fetch path escalates to per-tx reassembly.
+// Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector/auxpow_codec.js assertWholeBlock.
+function assertWholeBlock(blockHex) {
+    const buf = Buffer.from(blockHex, 'hex')
+    if (buf.length * 2 !== blockHex.length) throw new Error('AuxPoW parse: stripped block is not whole hex bytes')
+    let block
+    try {
+        block = bitcoinjs.Block.fromBuffer(buf)
+    } catch (err) {
+        throw new Error('AuxPoW parse: stripped block does not parse: ' + err.message)
+    }
+    const txs = block.transactions || []
+    if (txs.length < 1) throw new Error('AuxPoW parse: stripped block holds no transactions')
+    const used = block.byteLength()
+    if (used !== buf.length) {
+        throw new Error('AuxPoW parse: stripped block has ' + (buf.length - used) + ' bytes after its last transaction')
+    }
+    if (!bitcoinjs.Block.calculateMerkleRoot(txs).equals(block.merkleRoot)) {
+        throw new Error('AuxPoW parse: stripped block merkle root does not match its transactions')
+    }
+}
+
 // Strip the AuxPoW section from a merge-mined block's hex, preserving the 80-byte
 // (160 hex char) standard header. Two daemon behaviors are handled: an older daemon
 // whose getblockheader already includes the AuxPoW bytes (length-based strip via the
 // header/block length delta), and Dogecoin Core 1.14 whose getblockheader always
 // returns exactly 160 chars, requiring the AuxPoW size to be parsed structurally from
-// the block hex (skipAuxPow). Non-AuxPoW blocks pass through unchanged.
+// the block hex (skipAuxPow). Either cut must leave one whole block (assertWholeBlock).
+// Non-AuxPoW blocks pass through unchanged.
 // Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector/auxpow_codec.js stripAuxPowFromBlockHex.
 // test/unit/auxpow_strip_parity.test.js asserts byte identity of the two function bodies,
 // so a strip correction cannot land in one repo alone.
@@ -149,7 +183,9 @@ function stripAuxPowFromBlockHex(headerHex, blockHex) {
     const dataToRemove = headerHex.length - 160  // 160 hex chars = 80-byte standard header
     if (dataToRemove > 0) {
         // Legacy path: getblockheader included AuxPoW bytes (older daemon).
-        return blockHex.substring(0, 160) + blockHex.substring(160 + dataToRemove)
+        const stripped = blockHex.substring(0, 160) + blockHex.substring(160 + dataToRemove)
+        assertWholeBlock(stripped)
+        return stripped
     }
     if (blockHex.length >= 8) {
         const versionLE = parseInt(blockHex.substring(0, 8), 16)
@@ -160,7 +196,9 @@ function stripAuxPowFromBlockHex(headerHex, blockHex) {
             // (Dogecoin Core 1.14). Parse the AuxPoW size from the block hex directly.
             const blockBuf = Buffer.from(blockHex, 'hex')
             const afterAuxPow = skipAuxPow(blockBuf, 80)
-            return blockHex.substring(0, 160) + blockHex.substring(afterAuxPow * 2)
+            const stripped = blockHex.substring(0, 160) + blockHex.substring(afterAuxPow * 2)
+            assertWholeBlock(stripped)
+            return stripped
         }
     }
     return blockHex
@@ -170,5 +208,6 @@ module.exports = {
     readVarint,
     encodeVarintHex,
     skipAuxPow,
+    assertWholeBlock,
     stripAuxPowFromBlockHex,
 }

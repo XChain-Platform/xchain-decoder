@@ -57,17 +57,38 @@ async function leaveReorgHaltPark(loop){
     loop.lastBlockchainInfo = null
 }
 
+// A different hash at the stored height is a reorg only once two readings of it agree:
+// one stray answer (a failover onto an endpoint on another branch) must not roll back
+// the stored tip. An unreadable re-read (the node's tip dropped below this height) ends
+// the check with nothing deleted; the tip-regression branch takes that case next pass.
+async function equalHeightSwapHolds(height, nodeHash, storedHash){
+    const settled = await this.settleNodeReading(nodeHash, async () => {
+        try {
+            return (await this.connector.getBlockHash(height)) || null
+        } catch (e){
+            logger.error(formatLogLine('Error re-reading the node block hash at height ' + height + ' before a reconcile:', e))
+            return null
+        }
+    }, 'node block hash at height ' + height)
+    return settled !== null && settled !== storedHash
+}
+
 async function reconcileEqualHeightTip(loop){
     loop.tipHashCheckedAt = loop.lastBlockchainInfoRefreshAt
     // Guard ONLY the detection reads: an RPC/DB blip there is transient and
     // should log-and-skip until the next refresh, as before.
     let needsReconcile = false
+    let nodeHash = null
+    let storedBlock = null
     try {
-        const nodeHash = await this.connector.getBlockHash(loop.lastProcessedBlockIndex)
-        const storedBlock = await this.db.getBlockByIndex(loop.lastProcessedBlockIndex)
+        nodeHash = await this.connector.getBlockHash(loop.lastProcessedBlockIndex)
+        storedBlock = await this.db.getBlockByIndex(loop.lastProcessedBlockIndex)
         needsReconcile = !!(storedBlock && nodeHash && storedBlock.block_hash !== nodeHash)
     } catch (e){
         logger.error(formatLogLine('Error during equal-height tip-hash detection reads, skipping:', e))
+    }
+    if (needsReconcile){
+        needsReconcile = await equalHeightSwapHolds.call(this, loop.lastProcessedBlockIndex, nodeHash, storedBlock.block_hash)
     }
     if (needsReconcile){
         // Run the reconcile OUTSIDE the detection try so a fail-closed verifyReorg

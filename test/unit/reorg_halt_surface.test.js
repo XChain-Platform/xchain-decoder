@@ -249,9 +249,13 @@ describe('Database.markReorgHalted reports the row, not the ack', function () {
     function stubMarkerDb({ alreadyHalted = false, insertResult = true, readBack = true, readBackThrows = false } = {}) {
         const db = new Database('127.0.0.1', 3306, 'test_db', 'u', 'p')
         const calls = { insert: 0, probes: 0 }
+        // The entry probe reads the full state; the read-back after the write asks isReorgHalted.
+        db.readReorgHaltState = async () => {
+            calls.probes++
+            return { halted: alreadyHalted }
+        }
         db.isReorgHalted = async () => {
             calls.probes++
-            if (calls.probes === 1) return alreadyHalted
             if (readBackThrows) throw new Error('connection lost during read-back')
             return readBack
         }

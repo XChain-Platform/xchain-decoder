@@ -254,7 +254,7 @@ function* parseTransactionSteps(transaction, openDispenserAddresses, db, blockHe
     if (!db) db = this.db
     // A zero-input transaction has no ins[0] to dereference below (the coinbase/
     // standard_input guard also reads ins[0]). An LTC MWEB/HogEx integration tx can
-    // parse to zero canonical inputs after marker+flag stripping; such a tx carries no
+    // parse to zero canonical inputs once its MWEB part is set aside; such a tx carries no
     // XChain data. Skip it cleanly here, mirroring the mempool path's ins.length guard,
     // so it never throws a TypeError that costs 3 wasted block re-parses + a spurious
     // PARSE_ERROR quarantine event.

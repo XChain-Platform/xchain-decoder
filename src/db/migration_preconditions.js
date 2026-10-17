@@ -27,7 +27,63 @@ const Database = require('../db.js')
 // both properties intact and covers every invocation route (startup, blanket
 // `node src/db/migrate.js`, and a targeted `--file` rollout), since all three funnel through
 // this loop.
+const BIGINT_ID_MIGRATION = '2026-06-02-widen-ids-to-bigint.sql';
+
+// Every (table, column) pair BIGINT_ID_MIGRATION MODIFYs, in file order.
+const BIGINT_ID_COLUMNS = {
+    index_addresses:     ['id'],
+    index_transactions:  ['id'],
+    pubkeys:             ['address_id'],
+    blocks:              ['block_index', 'block_time', 'block_hash_id', 'previous_block_hash_id'],
+    transactions:        ['tx_index', 'tx_hash_id', 'block_index', 'source_id', 'destination_id'],
+    dispensers:          ['tx_index', 'address_id'],
+    transaction_outputs: ['tx_index', 'vout', 'destination_id'],
+};
+
 Database.MIGRATION_PRECONDITIONS = {
+    // Widens every id/key column to BIGINT UNSIGNED and re-adds pubkeys_ibfk_1. It is
+    // mode=manual and a deploy precondition, so on a database built from the current
+    // src/sql (already BIGINT UNSIGNED, with the unnamed pubkeys FK auto-named
+    // pubkeys_ibfk_1) it would sit PENDING with no ledger row, and the deploy tool
+    // refuses every update while a required file has no row.
+    //
+    // Baseline only when all 17 columns the file MODIFYs are already BIGINT UNSIGNED,
+    // both surrogate keys keep AUTO_INCREMENT, and the FK is present. Any narrower,
+    // signed, absent or unreadable column, or a missing FK (a crash between the file's
+    // drop and re-add), is deliberately NOT baselined: the file still has work to do.
+    [BIGINT_ID_MIGRATION]: {
+        sql: "SELECT c.TABLE_NAME AS tbl, c.COLUMN_NAME AS col, c.DATA_TYPE AS dataType, " +
+             "c.COLUMN_TYPE AS columnType, c.EXTRA AS extra, " +
+             "(SELECT COUNT(*) FROM information_schema.key_column_usage k " +
+             "WHERE k.table_schema = c.table_schema AND k.table_name = 'pubkeys' " +
+             "AND k.column_name = 'address_id' AND k.constraint_name = 'pubkeys_ibfk_1' " +
+             "AND k.referenced_table_name = 'index_addresses' AND k.referenced_column_name = 'id') AS fkCount " +
+             "FROM information_schema.columns c WHERE c.table_schema = ? AND c.table_name IN (" +
+             Object.keys(BIGINT_ID_COLUMNS).map(t => "'" + t + "'").join(', ') + ")",
+        skipWhen: (rows) => {
+            if(!Array.isArray(rows) || !rows.length) return null;
+            const live = new Map();
+            let fk = false;
+            for(const row of rows){
+                if(!row || row.tbl == null || row.col == null) continue;
+                live.set(String(row.tbl).toLowerCase() + '.' + String(row.col).toLowerCase(), row);
+                if(row.fkCount != null && Number(row.fkCount) >= 1) fk = true;
+            }
+            if(!fk) return null;
+            for(const [table, columns] of Object.entries(BIGINT_ID_COLUMNS)){
+                for(const column of columns){
+                    const row = live.get(table + '.' + column);
+                    if(!row || row.dataType == null || row.columnType == null) return null;
+                    if(String(row.dataType).toLowerCase() !== 'bigint') return null;
+                    if(!/\bunsigned\b/.test(String(row.columnType).toLowerCase())) return null;
+                    if(column === 'id' && !/\bauto_increment\b/.test(String(row.extra || '').toLowerCase())) return null;
+                }
+            }
+            return 'every id/key column widen-ids MODIFYs is already BIGINT UNSIGNED and pubkeys_ibfk_1 is present, ' +
+                   'so there is nothing to widen.';
+        }
+    },
+
     // DATETIME -> BIGINT UNSIGNED converter. It is mode=manual, so it stays PENDING on a
     // database created from the current dispensers.sql (already BIGINT UNSIGNED) - and the
     // documented blanket `npm run migrate` applies every pending manual file. Run against a
@@ -201,8 +257,6 @@ Database.backdatedFrontierViolation = function(pendingName, appliedNames){
 // startup that sees it, so it can never be the missing precondition.
 Database.DEPLOY_PRECONDITION_TAG = 'deploy-precondition=required';
 
-const BIGINT_ID_MIGRATION = '2026-06-02-widen-ids-to-bigint.sql';
-
 // Migrations this tree ASSERTS at startup: the service refuses to run when the
 // target database has not applied them.
 //
@@ -224,7 +278,9 @@ const BIGINT_ID_MIGRATION = '2026-06-02-widen-ids-to-bigint.sql';
 // here must exist, be mode=manual, and carry the tag.
 //
 // ADDING A STARTUP ASSERTION: register it here and tag its migration file, or the
-// next fleet deploy discovers the requirement as a crash-loop again. A server-setting
+// next fleet deploy discovers the requirement as a crash-loop again. Give the file a
+// MIGRATION_PRECONDITIONS baseline too, or a database built from the current src/sql
+// never records it and the deploy tool refuses every update. A server-setting
 // assertion with no migration behind it (assertStrictSqlMode) is not registered: the
 // pool pins what it checks, so it holds by construction and cannot crash-loop a deploy.
 Database.STARTUP_ASSERTED_MIGRATIONS = [

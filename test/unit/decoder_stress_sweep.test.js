@@ -24,8 +24,10 @@ const { makeRpcBatchGuard } = require('../../src/api')
 const CANONICAL_TX_HEX = '0200000001aabbccdd11223344eeff5566778899001122334455667788aabbccddeeff0011010000006b4830303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303021020202020202020202020202020202020202020202020202020202020202020202ffffffff020000000000000000166a145ed141846fd6cbef65cb28316aff11ba07152fcf00e1f505000000001976a914aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa88ac00000000'
 
 // The same tx with the LTC MWEB marker (0x00) + flag (0x08) injected after the
-// 4-byte version, exactly as a HogEx/MWEB-carrying LTC tx serializes on the wire.
-const MWEB_FLAGGED_TX_HEX = '02000000' + '0008' + CANONICAL_TX_HEX.substr(8)
+// 4-byte version and the MWEB tag 0x00 (no MWEB part) before the locktime,
+// exactly as a HogEx/MWEB-carrying LTC tx serializes on the wire.
+const MWEB_FLAGGED_TX_HEX = '02000000' + '0008' +
+    CANONICAL_TX_HEX.slice(8, -8) + '00' + CANONICAL_TX_HEX.slice(-8)
 
 function newDecoder(network){
     return new XChainDecoder(network, 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null)
