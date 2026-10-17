@@ -14,17 +14,21 @@
 
 const { format: formatLogLine } = require('node:util')
 const { isDispenserExpiryRealignActive } = require('../protocol/dispenser_expiry_realign')
-const { cancelGraceFloor, purgeGraceFloor } = require('../protocol/dispenser_cancel_grace')
+const {
+    cancelGraceFloor,
+    isDispenserCancelGraceParentFloorActive,
+    purgeGraceFloor,
+} = require('../protocol/dispenser_cancel_grace')
 const protocolTime = require('../protocol/protocol_time')
 const { logger, SYNCED_THRESHOLD, DB_TRANSACTION_BLOCKS_QUANTITY, LOG_BLOCK_INTERVAL, DISPENSER_EXPIRE_SAFE_DEPTH } = require('./constants.js')
 const { ingestTransaction, clearQuarantineState } = require('./transaction_ingest.js')
 
-async function loadOpenDispenserAddresses(block, nextBlockHeight){
+async function loadOpenDispenserAddresses(block, nextBlockHeight, parentProtocolTime){
     // Load the set once per block after any legacy expiry and before the
     // realigned end-of-block expiry. The grace floor preserves dispensers
     // that the indexer still considers fillable during cancellation grace.
     let openDispenserAddresses = await this.db.getAllOpenDispenserAddresses(
-        cancelGraceFloor(this.consensusNetwork, block.timestamp))
+        cancelGraceFloor(this.consensusNetwork, block.timestamp, parentProtocolTime))
     if (openDispenserAddresses == null){
         logger.error(`Could not load open dispenser addresses for block ${nextBlockHeight}; retrying block`)
         await this.db.endTransaction()
@@ -129,13 +133,11 @@ async function finishBlock(loop, block, nextBlockHeight, nextBlockHash, openDisp
     this.lastAdvanceAt = Date.now()
 }
 
-async function fetchPreviousBlockTimes(nextBlockHeight, span){
-    // Walk strictly backward so the result is newest first by block height and
-    // never wider than the median span, even when asked for more. A failed
+async function fetchBlockTimes(nextBlockHeight, span){
+    // Walk strictly backward so the result is newest first by block height. A failed
     // lookup returns no partial window, avoiding mixed reorg states.
-    const boundedSpan = Math.min(span, protocolTime.MEDIAN_TIME_SPAN)
     let previousBlockTimes = []
-    for (let height = nextBlockHeight - 1; height >= 0 && previousBlockTimes.length < boundedSpan; height--){
+    for (let height = nextBlockHeight - 1; height >= 0 && previousBlockTimes.length < span; height--){
         let previousBlock
         try {
             previousBlock = await this.db.getBlockByIndex(height)
@@ -149,18 +151,34 @@ async function fetchPreviousBlockTimes(nextBlockHeight, span){
     return previousBlockTimes
 }
 
+async function fetchPreviousBlockTimes(nextBlockHeight, span){
+    return fetchBlockTimes.call(
+        this, nextBlockHeight, Math.min(span, protocolTime.MEDIAN_TIME_SPAN))
+}
+
 async function resolveBlockTimeContext(block, nextBlockHeight){
-    // MTP networks resolve against the previous MEDIAN_TIME_SPAN blocks.
+    const mtpActive = protocolTime.isProtocolTimeMtpActive(this.consensusNetwork)
+    const parentFloorActive = isDispenserCancelGraceParentFloorActive(
+        this.consensusNetwork, block.timestamp)
+    const historySpan = mtpActive
+        ? protocolTime.MEDIAN_TIME_SPAN + (parentFloorActive ? 1 : 0)
+        : (parentFloorActive ? 1 : 0)
     let previousBlockTimes = []
-    if (protocolTime.isProtocolTimeMtpActive(this.consensusNetwork)){
-        previousBlockTimes = await fetchPreviousBlockTimes.call(this, nextBlockHeight, protocolTime.MEDIAN_TIME_SPAN)
+    if (historySpan > 0){
+        previousBlockTimes = await fetchBlockTimes.call(this, nextBlockHeight, historySpan)
         if (previousBlockTimes === null){
             await this.db.endTransaction()
             return null
         }
     }
-    return protocolTime.createBlockTimeContext(
-        this.consensusNetwork, block.timestamp, previousBlockTimes)
+    const current = protocolTime.createBlockTimeContext(
+        this.consensusNetwork, block.timestamp,
+        previousBlockTimes.slice(0, protocolTime.MEDIAN_TIME_SPAN))
+    const parentProtocolTime = previousBlockTimes.length === 0
+        ? null
+        : protocolTime.protocolTime(
+            this.consensusNetwork, previousBlockTimes[0], previousBlockTimes.slice(1))
+    return Object.freeze({ ...current, parentProtocolTime })
 }
 
 async function insertBlockRecord(blockTimeContext, nextBlockHeight, nextBlockHash, previousBlockHash){
@@ -203,7 +221,8 @@ async function storeBlock(loop, block, nextBlockHeight, nextBlockHash, previousB
     if ((await expireDispensersAtBlockStart.call(
         this, block, nextBlockHeight, expireAtEnd)) === 'rollback') return 'rollback'
 
-    const openAddresses = await loadOpenDispenserAddresses.call(this, block, nextBlockHeight)
+    const openAddresses = await loadOpenDispenserAddresses.call(
+        this, block, nextBlockHeight, blockTimeContext.parentProtocolTime)
     if (openAddresses === 'rollback') return 'rollback'
     return await finishBlock.call(
         this, loop, block, nextBlockHeight, nextBlockHash, openAddresses, expireAtEnd)

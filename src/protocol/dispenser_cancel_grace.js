@@ -67,6 +67,7 @@
 const {
     DISPENSER_CANCEL_GRACE_ACTIVATION,
     DISPENSER_PURGE_GRACE_ACTIVATION,
+    DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION,
 } = require('./constants.js')
 
 // Seconds a soft-expired dispenser stays an eligible payment destination at/above the gate.
@@ -99,15 +100,27 @@ function isDispenserCancelGraceActive(consensusNetwork, blockTime){
     return t >= activation
 }
 
-// The capture floor for a block: the oldest expiration still eligible for payment capture.
-//
-// Returns null below the gate, which getAllOpenDispenserAddresses reads as "keep the
-// unwidened set", so a from-genesis re-decode of pre-flag-day history reproduces the output
-// set the fleet wrote live, byte for byte. Above it the floor is a pure function of the
-// block's own header time, so two honest nodes load the identical capture set.
-function cancelGraceFloor(consensusNetwork, blockTime){
+// The capture floor is null below the gate, preserving the pre-flag-day set. Above the
+// parent-floor gate, the earlier block or parent protocol time carries capture across
+// the first block past the close boundary.
+function isDispenserCancelGraceParentFloorActive(consensusNetwork, blockTime){
+    const activation = DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION[consensusNetwork]
+    if (typeof activation !== 'number') return false
+    const t = Number(blockTime)
+    if (!Number.isFinite(t)) return false
+    return t >= activation
+}
+
+function cancelGraceFloor(consensusNetwork, blockTime, parentProtocolTime){
     if (!isDispenserCancelGraceActive(consensusNetwork, blockTime)) return null
-    return Number(blockTime) - DISPENSER_CANCEL_GRACE_SECONDS
+    const block = Number(blockTime)
+    let anchor = block
+    if (isDispenserCancelGraceParentFloorActive(consensusNetwork, block)){
+        const parent = Number(parentProtocolTime)
+        if (parentProtocolTime !== null && parentProtocolTime !== undefined &&
+            Number.isFinite(parent)) anchor = Math.min(block, parent)
+    }
+    return anchor - DISPENSER_CANCEL_GRACE_SECONDS
 }
 
 function isDispenserPurgeGraceActive(consensusNetwork, blockTime){
@@ -126,8 +139,10 @@ function purgeGraceFloor(consensusNetwork, blockTime){
 module.exports = {
     DISPENSER_CANCEL_GRACE_ACTIVATION,
     DISPENSER_PURGE_GRACE_ACTIVATION,
+    DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION,
     DISPENSER_CANCEL_GRACE_SECONDS,
     isDispenserCancelGraceActive,
+    isDispenserCancelGraceParentFloorActive,
     cancelGraceFloor,
     isDispenserPurgeGraceActive,
     purgeGraceFloor,
