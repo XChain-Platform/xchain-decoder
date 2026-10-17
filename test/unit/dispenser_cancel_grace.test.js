@@ -138,15 +138,12 @@ function makeDecoder(consensusNetwork){
     return decoder
 }
 
-// Drive the real block loop over two blocks on `consensusNetwork`:
-//   block 0 at `expireAt` - the decoder's own soft-expire stamps the dispenser here;
-//   block 1 at `payAt`    - the payment block whose capture set the test asserts on.
+// Drive the real block loop over the supplied protocol times on `consensusNetwork`.
 // Nothing is pre-stamped by hand: the stamp under test is written by the production
 // deleteOpenDispensers call site.
-function runTwoBlocks(consensusNetwork, expireAt, payAt, model){
+function runBlocks(consensusNetwork, blockTimes, model){
     const decoder = makeDecoder(consensusNetwork)
 
-    const timesByHeight = { 0: expireAt, 1: payAt }
     const setsSeenByParse = []
     decoder.parseTransaction = async (tx, openDispenserAddresses) => {
         setsSeenByParse.push(openDispenserAddresses)
@@ -154,12 +151,13 @@ function runTwoBlocks(consensusNetwork, expireAt, payAt, model){
     }
 
     decoder.connector = {
-        getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: 1 }),
+        getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: blockTimes.length - 1 }),
         getBlockHash:      async (height) => 'height:' + height,
         getBlock:          async (hash) => hash,
     }
 
     let commits = 0
+    const storedBlocks = new Map()
     decoder.db = {
         createDatabase: async () => true,
         verifyDatabase: async () => true,
@@ -170,11 +168,17 @@ function runTwoBlocks(consensusNetwork, expireAt, payAt, model){
         // Block 1 runs the reorg check against block 0's stored hash. Both blocks carry the
         // same PREV_WIRE, so answering with that value keeps the chain contiguous and the loop
         // out of its reorg branch, which this suite does not exercise.
-        getBlockByIndex:   async () => ({ block_hash: PREV_HASH }),
+        getBlockByIndex:   async (height) => storedBlocks.get(height) || null,
         beginTransaction:  async () => {},
         endTransaction:    async () => {},
-        commitTransaction: async () => { if (++commits >= 2) decoder.stopFlag = true; return true },
-        insertBlock:       async () => true,
+        commitTransaction: async () => {
+            if (++commits >= blockTimes.length) decoder.stopFlag = true
+            return true
+        },
+        insertBlock:       async (row) => {
+            storedBlocks.set(row.block_index, { ...row, block_hash: PREV_HASH })
+            return true
+        },
         insertEvent:       async () => true,
         insertTransaction: async () => true,
         insertTransactionOutput: async () => true,
@@ -193,12 +197,16 @@ function runTwoBlocks(consensusNetwork, expireAt, payAt, model){
     decoder.xchainBlockDecoder = {
         blockFromHex: (hex) => ({
             prevHash: Buffer.from(PREV_WIRE),
-            timestamp: timesByHeight[Number(String(hex).split(':')[1])],
+            timestamp: blockTimes[Number(String(hex).split(':')[1])],
             transactions: [fakeTx('tx-at-' + String(hex))],
         })
     }
 
     return decoder.start().then(() => ({ setsSeenByParse }))
+}
+
+function runTwoBlocks(consensusNetwork, expireAt, payAt, model){
+    return runBlocks(consensusNetwork, [expireAt, payAt], model)
 }
 
 // One funded dispenser, cancelled shortly before its expiration, as the decoder holds it:
@@ -228,8 +236,8 @@ function registerPostExpiryCaptureTest(){
 
         assert.strictEqual(model.captureLoads.length, 2)
         const payLoad = model.captureLoads[1]
-        assert.strictEqual(payLoad.floor, payAt - DISPENSER_CANCEL_GRACE_SECONDS,
-            'the block loop must pass the grace floor derived from this block header time')
+        assert.strictEqual(payLoad.floor, EXPIRATION + 1 - DISPENSER_CANCEL_GRACE_SECONDS,
+            'the block loop must anchor the grace floor to the parent protocol time')
         assert.deepStrictEqual(model.purgeCalls[1], {
             safeHeight: 1 - XChainDecoder.DISPENSER_EXPIRE_SAFE_DEPTH,
             graceFloor: payAt - DISPENSER_CANCEL_GRACE_SECONDS,
@@ -297,20 +305,23 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
             'mainnet is armed at genesis, so the grace carries the address into the capture set')
     })
 
-    it('closes capture once the indexer can no longer settle a fill', async () => {
+    it('closes capture after the parent clock has passed the grace window', async () => {
         // The grace is a window, not an amnesty: past mark + grace the address leaves the
         // capture set, and by then the indexer stopped matching the dispenser long ago.
         // The window is measured from the SOFT-EXPIRE MARK block, which is the last block a
-        // cancel can be accepted in, so the probe steps one second past mark + grace.
+        // cancel can be accepted in. The first block across that boundary is retained, then
+        // the next block proves the parent clock advances the floor.
         const markAt = EXPIRATION + 1
-        const payAt  = markAt + DISPENSER_CANCEL_GRACE_SECONDS + 1
+        const payAt  = markAt + DISPENSER_CANCEL_GRACE_SECONDS + 2
         assert.ok(!indexerStillSettlesFill(payAt),
             'the probe block must be one the indexer has already closed')
 
         const model = fundedCancelledDispenser()
-        await runTwoBlocks('regtest', markAt, payAt, model)
+        await runBlocks('regtest', [markAt, payAt - 1, payAt], model)
 
-        assert.ok(!model.captureLoads[1].set.has(ADDR),
+        assert.ok(model.captureLoads[1].set.has(ADDR),
+            'the first block across the close boundary remains conservatively captured')
+        assert.ok(!model.captureLoads[2].set.has(ADDR),
             'past the grace window the dispenser leaves the capture set')
     })
 })
@@ -334,11 +345,8 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
                     `block time ${payAt}: the indexer still settles fills here, so the decoder ` +
                     'must still capture payments to the dispenser')
             }
-            // Outside the indexer's window capture is merely allowed to continue to the end of
-            // the grace: over-capture is the direction the advisory contract calls safe, and
-            // the indexer drops the surplus.
-            if (payAt > markAt + DISPENSER_CANCEL_GRACE_SECONDS)
-                assert.ok(!captured, `block time ${payAt}: capture must end with the grace window`)
+            // A two-block jump deliberately anchors this candidate block to the mark block's
+            // protocol time. The next sequential block is what advances the floor.
         }
         // Guard against a vacuous sweep: an arithmetic slip that made the window empty would
         // otherwise pass every assertion above.
@@ -381,19 +389,21 @@ describe('dispenser cancellation grace: decoder capture outlasts the indexer fil
             assert.strictEqual(model.rows[0].expiredBlockTime, MARK_AT,
                 'the production soft-expire must stamp the mark block header time')
             const payLoad = model.captureLoads[1]
-            assert.strictEqual(payLoad.floor, payAt - DISPENSER_CANCEL_GRACE_SECONDS)
+            assert.strictEqual(payLoad.floor, MARK_AT - DISPENSER_CANCEL_GRACE_SECONDS)
             assert.ok(payLoad.set.has(ADDR),
                 'a payment the indexer would still settle must be captured by the decoder')
         })
 
-        it('stops capturing once the indexer has closed the boundary-cancelled dispenser', async () => {
+        it('captures INDEXER_CLOSE + 1, then closes after that time becomes the parent', async () => {
             const payAt = INDEXER_CLOSE + 1
             const model = fundedCancelledDispenser()
-            await runTwoBlocks('regtest', MARK_AT, payAt, model)
+            await runBlocks('regtest', [MARK_AT, payAt, payAt + 1], model)
 
             assert.strictEqual(model.rows[0].expiredBlockTime, MARK_AT)
-            assert.ok(!model.captureLoads[1].set.has(ADDR),
-                'past the indexer close the dispenser leaves the capture set')
+            assert.ok(model.captureLoads[1].set.has(ADDR),
+                'the first block after close must use the parent protocol clock')
+            assert.ok(!model.captureLoads[2].set.has(ADDR),
+                'the following block leaves the capture set after its parent advances')
         })
     })
 })
