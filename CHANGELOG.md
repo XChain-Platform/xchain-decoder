@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-17
+
+### Added
+- Added a ready endpoint and reported readiness on the live endpoint.
+- Added the dispenser parent-floor activation that anchors dispenser grace to the parent protocol time.
+
+### Fixed
+- Refused a block whose transactions do not fill it or match its merkle root, and parsed LTC MWEB-form transactions.
+- Refused unsafe MWEB CompactSize values and trailing transaction bytes with a typed parse error.
+- Settled a lower node tip with two agreeing readings before rolling back, and bounded the current block MTP history.
+
+### Security
+- Bumped ip-address, axios and proxy-addr past their advisories.
+
 ## [0.23.0] - 2026-10-11
 
 ### Added
