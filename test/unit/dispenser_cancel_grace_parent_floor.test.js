@@ -26,6 +26,8 @@ function makeBlockStoreContext(blockReads, floors){
     return {
         consensusNetwork: 'testnet',
         blockchainInfoLastBlock: 100,
+        log: () => {},
+        millisecondsToTimeString: () => '',
         db: {
             beginTransaction: async () => {},
             getBlockByIndex: async (height) => {
@@ -109,6 +111,12 @@ describe('dispenser cancellation grace parent protocol floor', function () {
 
         assert.deepStrictEqual(blockReads, [7])
         assert.deepStrictEqual(floors, [9000 - DISPENSER_CANCEL_GRACE_SECONDS])
+    })
+})
+
+describe('dispenser cancellation grace parent protocol floor', function () {
+    afterEach(function () {
+        sinon.restore()
     })
 
     it('keeps the current block MTP window bounded when resolving its parent clock', async function () {
