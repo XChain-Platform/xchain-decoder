@@ -172,7 +172,8 @@ async function resolveBlockTimeContext(block, nextBlockHeight){
         }
     }
     const current = protocolTime.createBlockTimeContext(
-        this.consensusNetwork, block.timestamp, previousBlockTimes)
+        this.consensusNetwork, block.timestamp,
+        previousBlockTimes.slice(0, protocolTime.MEDIAN_TIME_SPAN))
     const parentProtocolTime = previousBlockTimes.length === 0
         ? null
         : protocolTime.protocolTime(

@@ -14,10 +14,49 @@ const assert = require('assert')
 const sinon = require('sinon')
 
 const XChainDecoder = require('../../src/XChainDecoder')
+const { storeBlock } = require('../../src/XChainDecoder/block_store')
+const protocolTime = require('../../src/protocol/protocol_time')
 const {
+    DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION,
     DISPENSER_CANCEL_GRACE_SECONDS,
     cancelGraceFloor,
 } = require('../../src/protocol/dispenser_cancel_grace')
+
+function makeBlockStoreContext(blockReads, floors){
+    return {
+        consensusNetwork: 'testnet',
+        blockchainInfoLastBlock: 100,
+        db: {
+            beginTransaction: async () => {},
+            getBlockByIndex: async (height) => {
+                blockReads.push(height)
+                return { block_time: 100 + height }
+            },
+            insertBlock: async () => true,
+            deleteOpenDispensers: async () => true,
+            commitTransaction: async () => true,
+            purgeExpiredDispensers: async () => true,
+            getAllOpenDispenserAddresses: async (floor) => {
+                floors.push(floor)
+                return new Set()
+            },
+        },
+    }
+}
+
+function makeBlockLoop(){
+    return {
+        blocksQuantity: 0,
+        blocksCount: 0,
+        transactionsCount: 0,
+        validTransactionsCount: 0,
+        outputCount: 0,
+        startTimeStamp: Date.now(),
+        txParseRetryCounts: new Map(),
+        insertQuarantineCounts: new Map(),
+        insertQuarantine: new Set(),
+    }
+}
 
 describe('dispenser cancellation grace parent protocol floor', function () {
     afterEach(function () {
@@ -70,5 +109,26 @@ describe('dispenser cancellation grace parent protocol floor', function () {
 
         assert.deepStrictEqual(blockReads, [7])
         assert.deepStrictEqual(floors, [9000 - DISPENSER_CANCEL_GRACE_SECONDS])
+    })
+
+    it('keeps the current block MTP window bounded when resolving its parent clock', async function () {
+        const activation = DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION
+        const previousActivation = activation.testnet
+        activation.testnet = 0
+        const createContext = sinon.spy(protocolTime, 'createBlockTimeContext')
+        const blockReads = []
+        const floors = []
+        const context = makeBlockStoreContext(blockReads, floors)
+
+        try {
+            await storeBlock.call(
+                context, makeBlockLoop(), { timestamp: 500, transactions: [] }, 12, 'hash', 'parent')
+        } finally {
+            activation.testnet = previousActivation
+        }
+
+        assert.deepStrictEqual(blockReads, [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0])
+        assert.strictEqual(createContext.firstCall.args[2].length, protocolTime.MEDIAN_TIME_SPAN)
+        assert.deepStrictEqual(floors, [105 - DISPENSER_CANCEL_GRACE_SECONDS])
     })
 })
