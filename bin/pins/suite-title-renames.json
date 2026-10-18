@@ -8,6 +8,12 @@
     "test/unit/db_queries.test/20_error_path_transaction_connection_branches.test.js": {
       "Database error-path transactionConnection branches createAddress: swallows INSERT error even with active transactionConnection": "Database error-path transactionConnection branches createAddress: rethrows an INSERT error inside an active transaction so the block rolls back"
     },
+    "test/unit/dispenser_address_id_collapse_activation.test.js": {
+      "DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION conformance keeps mainnet and testnet inert while regtest is genesis-active": "DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION conformance keeps mainnet inert and regtest genesis-active while testnet is armable"
+    },
+    "test/unit/dispenser_purge_grace_activation.test.js": {
+      "DISPENSER_PURGE_GRACE_ACTIVATION conformance keeps mainnet and testnet unarmed while regtest is genesis-active": "DISPENSER_PURGE_GRACE_ACTIVATION conformance keeps mainnet unarmed and regtest genesis-active while testnet is armable"
+    },
     "test/unit/fee_destination.test.js": {
       "resolveFeeDestination @unit honors an env override on regtest ONLY": "resolveFeeDestination @unit ignores a bare env override on regtest too, so capture and indexer validation resolve one address"
     },

@@ -17,6 +17,9 @@ const path = require('path');
 const activationPath = path.join(__dirname, '..', '..', 'src', 'protocol', 'constants', 'activation.js');
 const activation = require(activationPath);
 const constants = require('../../src/protocol/constants.js');
+const {
+    assertMainnetUnarmedTestnetArmable,
+} = require('../helpers/block_time_gate_map.js');
 
 const EXPLICIT_DOCS_DIR = process.env.XCHAIN_DOCS_DIR;
 const DOCS_CONSTANTS = EXPLICIT_DOCS_DIR
@@ -35,12 +38,8 @@ function declaration(source) {
 
 describe('DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION conformance', function () {
 
-    it('keeps mainnet and testnet inert while regtest is genesis-active', function () {
-        assert.deepStrictEqual(activation[NAME], {
-            mainnet: 9999999999,
-            testnet: 9999999999,
-            regtest: 0,
-        });
+    it('keeps mainnet inert and regtest genesis-active while testnet is armable', function () {
+        assertMainnetUnarmedTestnetArmable(activation[NAME], NAME);
     });
 
     it('is re-exported by the public constants module', function () {

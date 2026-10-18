@@ -14,17 +14,16 @@ const assert = require('assert');
 
 const activation = require('../../src/protocol/constants/activation.js');
 const constants = require('../../src/protocol/constants.js');
+const {
+    assertMainnetUnarmedTestnetArmable,
+} = require('../helpers/block_time_gate_map.js');
 
 const NAME = 'DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION';
 
 describe('DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION conformance', function () {
 
-    it('keeps mainnet and testnet inert while regtest is genesis-active', function () {
-        assert.deepStrictEqual(activation[NAME], {
-            mainnet: 9999999999,
-            testnet: 9999999999,
-            regtest: 0,
-        });
+    it('keeps mainnet inert and regtest genesis-active while testnet is armable', function () {
+        assertMainnetUnarmedTestnetArmable(activation[NAME], NAME);
     });
 
     it('is re-exported by the public constants module', function () {
