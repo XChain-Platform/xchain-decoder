@@ -255,19 +255,19 @@ const DISPENSER_CANCEL_GRACE_ACTIVATION = {
 // Regtest is genesis-active so the grace-aware purge path is exercised there.
 const DISPENSER_PURGE_GRACE_ACTIVATION = {
     mainnet: 9999999999,
-    testnet: 1792416600,
+    testnet: 1792432800,
     regtest: 0,
 };
 
 const DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION = {
     mainnet: 9999999999,
-    testnet: 1792416600,
+    testnet: 1792432800,
     regtest: 0,
 };
 
 const DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION = {
     mainnet: 9999999999,
-    testnet: 1792416600,
+    testnet: 1792432800,
     regtest: 0,
 };
 
