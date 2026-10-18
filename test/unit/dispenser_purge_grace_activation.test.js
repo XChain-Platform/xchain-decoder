@@ -15,6 +15,9 @@ const fs = require('fs');
 const path = require('path');
 
 const { DISPENSER_PURGE_GRACE_ACTIVATION } = require('../../src/protocol/constants.js');
+const {
+    assertMainnetUnarmedTestnetArmable,
+} = require('../helpers/block_time_gate_map.js');
 
 const EXPLICIT_DOC_CONSTANTS = process.env.XC_DOC_CONSTANTS;
 const DOC_CONSTANTS = EXPLICIT_DOC_CONSTANTS || (process.env.XCHAIN_DOCS_DIR
@@ -23,12 +26,11 @@ const DOC_CONSTANTS = EXPLICIT_DOC_CONSTANTS || (process.env.XCHAIN_DOCS_DIR
 
 describe('DISPENSER_PURGE_GRACE_ACTIVATION conformance', function () {
 
-    it('keeps mainnet and testnet unarmed while regtest is genesis-active', function () {
-        assert.deepStrictEqual(DISPENSER_PURGE_GRACE_ACTIVATION, {
-            mainnet: 9999999999,
-            testnet: 9999999999,
-            regtest: 0,
-        });
+    it('keeps mainnet unarmed and regtest genesis-active while testnet is armable', function () {
+        assertMainnetUnarmedTestnetArmable(
+            DISPENSER_PURGE_GRACE_ACTIVATION,
+            'DISPENSER_PURGE_GRACE_ACTIVATION'
+        );
     });
 
     it('is value-identical to the canonical map in xchain-documentation', function () {
