@@ -196,8 +196,6 @@ class MockDatabase {
         return null
     }
 
-    async dropDatabase() {}
-
     async getConnection() {
         return {
             query: async () => [],

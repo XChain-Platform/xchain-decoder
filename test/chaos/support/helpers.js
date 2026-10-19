@@ -62,7 +62,6 @@ function createMockDatabase(overrides = {}) {
         isThereADispenserForAddress: sinon.stub().resolves(false),
         getAllOpenDispenserAddresses: sinon.stub().resolves(new Set()),
         deleteBlockByIndex: sinon.stub().resolves(true),
-        dropDatabase: sinon.stub().resolves(),
         getConnection: sinon.stub().resolves({
             query: sinon.stub().resolves([]),
             release: sinon.stub().resolves(),

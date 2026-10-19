@@ -2851,11 +2851,11 @@
       "applyBufferutilsPatch patches the shared bitcoinjs-lib bufferutils module in place"
     ],
     "d029e0b6b043e754": [
-      "Database#dropDatabase() executes all DROP TABLE queries without throwing",
       "Database#getConnection() retries on transient failure and succeeds on second attempt",
       "Database#getConnection() returns transactionConnection when one is set",
       "Database#getConnection() succeeds on first pool.getConnection call",
-      "Database#getConnection() throws after maxAttempts (30) consecutive failures"
+      "Database#getConnection() throws after maxAttempts (30) consecutive failures",
+      "dropAllTables() executes all DROP TABLE queries without throwing"
     ],
     "d104a881d7ea316d": [
       "bufferutils patch twin parity with xchain-utxo-tracker @regression src/chain/apply_bufferutils_patch.js is byte-identical in both repos",
