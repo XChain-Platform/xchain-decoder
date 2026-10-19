@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-18
+
+### Changed
+- Let the dispenser block-time gates take a testnet activation map so they arm on testnet in this train, and added fail-closed tests for unaudited clear rows.
+
 ## [0.24.0] - 2026-10-17
 
 ### Added
