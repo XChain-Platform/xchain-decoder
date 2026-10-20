@@ -31,6 +31,9 @@ const AGED_DB = PREFIX + 'xchain_decoder_first_seen_datetime_aged'
 const FRESH_DB = PREFIX + 'xchain_decoder_first_seen_datetime_fresh'
 const SEEDED_DB = PREFIX + 'xchain_decoder_first_seen_datetime_seeded'
 const target = dbTarget()
+// Both stored times read back six hours early in a -06:00 session, and as observed once retyped
+const SHIFTED_SIX_HOURS = { firstSeen: '2026-01-15 06:34:56', appliedAt: '2026-01-15 06:34:56' }
+const AS_OBSERVED = { firstSeen: OBSERVED_AT, appliedAt: OBSERVED_AT }
 
 function makeDatabase(name) {
     return new Database(target.host, target.port, name, target.user, target.password)
@@ -111,6 +114,22 @@ async function prepareAgedDatabase(db) {
     })
 }
 
+// The ledger names recorded for MIGRATION
+async function recordedMigrationNames(db) {
+    const rows = await withPoolConnection(db, conn => conn.query(
+        'SELECT name FROM schema_migrations WHERE name = ?', [MIGRATION]
+    ))
+    return rows.map(row => row.name)
+}
+
+// Run MIGRATION alone and read the first_seen definition on either side of it
+async function targetedFirstSeenRun(db) {
+    const beforeShape = await readColumnShape(db, 'mempool_transactions', 'first_seen')
+    const result = await db.runMigrations({ includeManual: true, only: [MIGRATION] })
+    const afterShape = await readColumnShape(db, 'mempool_transactions', 'first_seen')
+    return { result, beforeShape, afterShape }
+}
+
 async function dropDatabases(databases) {
     for (const db of databases) {
         if (db) await db.close()
@@ -144,11 +163,7 @@ describe('mempool first_seen DATETIME migration on MariaDB', function () {
         await dropDatabases([agedDb, freshDb, seededDb])
     })
     it('reproduces session-dependent reads on the aged TIMESTAMP columns', async function () {
-        const values = await readStoredTimes(AGED_DB, '-06:00')
-        assert.deepStrictEqual(values, {
-            firstSeen: '2026-01-15 06:34:56',
-            appliedAt: '2026-01-15 06:34:56'
-        })
+        assert.deepStrictEqual(await readStoredTimes(AGED_DB, '-06:00'), SHIFTED_SIX_HOURS)
     })
     it('retypes the observation and ledger columns without shifting their values', async function () {
         const result = await agedDb.runMigrations({ includeManual: true, only: [MIGRATION] })
@@ -156,10 +171,7 @@ describe('mempool first_seen DATETIME migration on MariaDB', function () {
         migratedShapes = await readMigrationShapes(agedDb)
         assert.strictEqual(migratedShapes.firstSeen.DATA_TYPE, 'datetime')
         assert.strictEqual(migratedShapes.appliedAt.DATA_TYPE, 'datetime')
-        assert.deepStrictEqual(await readStoredTimes(AGED_DB, '-06:00'), {
-            firstSeen: OBSERVED_AT,
-            appliedAt: OBSERVED_AT
-        })
+        assert.deepStrictEqual(await readStoredTimes(AGED_DB, '-06:00'), AS_OBSERVED)
     })
     it('leaves both migrated column definitions unchanged on a targeted rerun', async function () {
         const beforeShapes = await readMigrationShapes(agedDb)
@@ -173,15 +185,10 @@ describe('mempool first_seen DATETIME migration on MariaDB', function () {
         freshDb = makeDatabase(FRESH_DB)
         await freshDb.createDatabase()
         await buildWithoutSeed(freshDb)
-        const beforeShape = await readColumnShape(freshDb, 'mempool_transactions', 'first_seen')
-
-        const result = await freshDb.runMigrations({ includeManual: true, only: [MIGRATION] })
-        const afterShape = await readColumnShape(freshDb, 'mempool_transactions', 'first_seen')
-        const recorded = await withPoolConnection(freshDb, conn => conn.query(
-            'SELECT name FROM schema_migrations WHERE name = ?', [MIGRATION]
-        ))
+        const { result, beforeShape, afterShape } = await targetedFirstSeenRun(freshDb)
+        const recorded = await recordedMigrationNames(freshDb)
         assert.ok(result.baselined.includes(MIGRATION))
-        assert.deepStrictEqual(recorded.map(row => row.name), [MIGRATION])
+        assert.deepStrictEqual(recorded, [MIGRATION])
         assert.deepStrictEqual(afterShape, beforeShape)
         assert.deepStrictEqual(afterShape, migratedShapes.firstSeen)
     })
@@ -190,14 +197,8 @@ describe('mempool first_seen DATETIME migration on MariaDB', function () {
         seededDb = makeDatabase(SEEDED_DB)
         await seededDb.createDatabase()
         await seededDb.verifyTables()
-        const recorded = await withPoolConnection(seededDb, conn => conn.query(
-            'SELECT name FROM schema_migrations WHERE name = ?', [MIGRATION]
-        ))
-        assert.deepStrictEqual(recorded.map(row => row.name), [MIGRATION])
-
-        const beforeShape = await readColumnShape(seededDb, 'mempool_transactions', 'first_seen')
-        const result = await seededDb.runMigrations({ includeManual: true, only: [MIGRATION] })
-        const afterShape = await readColumnShape(seededDb, 'mempool_transactions', 'first_seen')
+        assert.deepStrictEqual(await recordedMigrationNames(seededDb), [MIGRATION])
+        const { result, beforeShape, afterShape } = await targetedFirstSeenRun(seededDb)
         assert.ok(!result.applied.includes(MIGRATION))
         assert.ok(!result.baselined.includes(MIGRATION))
         assert.deepStrictEqual(afterShape, beforeShape)

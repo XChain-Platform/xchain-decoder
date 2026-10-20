@@ -11,7 +11,7 @@
 'use strict'
 
 const assert = require('assert')
-const XChainDecoder = require('../../src/XChainDecoder')
+const XChainDecoder = require('../../../src/XChainDecoder')
 
 // Passes of one block before a test calls the loop wedged and stops it.
 const PASS_LIMIT = 8

@@ -24,7 +24,8 @@
 
 'use strict';
 
-const { stripBlockComments, blankLiterals } = require('./migration_live_schema_guard.js');
+const fs = require('fs');
+const { stripBlockComments, blankLiterals } = require('../migration_live_schema_guard.js');
 
 const IDENT = '(?:`[^`]+`|[A-Za-z_$][\\w$]*)';
 const QUALIFIED_IDENT = IDENT + '(?:\\s*\\.\\s*' + IDENT + ')?';
@@ -158,4 +159,17 @@ async function assertUniqueKeyWitness(conn, dbName, file, statements, declaredUn
     }
 }
 
-module.exports = { keyDependentTargets, assertUniqueKeyWitness };
+// The UNIQUE indexes a table's src/sql file declares, or none when the table has no source file
+function declaredUniqueIndexes(database, table){
+    // Only a plain identifier can name a src/sql file
+    if(!/^[\w$]+$/.test(table)) return [];
+    let data;
+    try { data = fs.readFileSync(database.sqlPath + '/' + table + '.sql', 'utf8'); }
+    catch(err){
+        if(err && err.code === 'ENOENT') return [];
+        throw err;
+    }
+    return database.parseExpectedIndexes(data, table).filter(index => index.unique);
+}
+
+module.exports = { keyDependentTargets, assertUniqueKeyWitness, declaredUniqueIndexes };

@@ -23,7 +23,7 @@ const os     = require('os');
 const path   = require('path');
 
 const Database = require('../../../src/db');
-const { keyDependentTargets, assertUniqueKeyWitness } = require('../../../src/db/migration_key_witness.js');
+const { keyDependentTargets, assertUniqueKeyWitness } = require('../../../src/db/migration_guards/key_witness.js');
 
 const MIGRATIONS = path.join(__dirname, '../../../src/sql/migrations');
 // Reviewed map of committed auto files to the tables their key-dependent writes target
@@ -35,6 +35,18 @@ const row = (name, nonUnique, column, seq) => ({
     INDEX_NAME: name, NON_UNIQUE: nonUnique, COLUMN_NAME: column, SEQ_IN_INDEX: seq,
 });
 const exists = (value) => ({ TABLE_EXISTS: value ? 1 : 0 });
+
+// Every committed auto file's key-dependent write targets, keyed by file name
+function committedKeyDependentTargets() {
+    const found = {};
+    for(const file of fs.readdirSync(MIGRATIONS).filter(name => name.endsWith('.sql')).sort()){
+        const raw = fs.readFileSync(path.join(MIGRATIONS, file), 'utf8');
+        if(Database.prototype.migrationMode(raw) !== 'auto') continue;
+        const targets = keyDependentTargets(Database.prototype.splitSqlStatements.call(Database.prototype, raw));
+        if(targets.length) found[file] = targets;
+    }
+    return found;
+}
 
 describe('decoder migration unique-key witness @regression', function () {
     it('finds each key-dependent write and ignores one inside a quoted literal', function () {
@@ -92,14 +104,7 @@ describe('decoder migration unique-key witness @regression', function () {
     });
 
     it('keeps every committed auto file to the reviewed key-dependent map', function () {
-        const found = {};
-        for(const file of fs.readdirSync(MIGRATIONS).filter(name => name.endsWith('.sql')).sort()){
-            const raw = fs.readFileSync(path.join(MIGRATIONS, file), 'utf8');
-            if(Database.prototype.migrationMode(raw) !== 'auto') continue;
-            const targets = keyDependentTargets(Database.prototype.splitSqlStatements.call(Database.prototype, raw));
-            if(targets.length) found[file] = targets;
-        }
-        assert.deepStrictEqual(found, PINNED);
+        assert.deepStrictEqual(committedKeyDependentTargets(), PINNED);
     });
 });
 

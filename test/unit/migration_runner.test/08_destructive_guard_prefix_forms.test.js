@@ -30,6 +30,11 @@ const scanOf  = Database.prototype.destructiveAutoStatement.bind(Database.protot
 const splitOf = (raw) => Database.prototype.splitSqlStatements.call(Database.prototype, raw);
 const scanSql = (sql) => scanOf(splitOf(sql));
 
+// Top-level DROPs of an object other than an index or a temporary table
+const NON_INDEX_DROPS = ['DROP SEQUENCE IF EXISTS s;', 'DROP TRIGGER trg;', 'DROP TRIGGER IF EXISTS trg;',
+    'DROP VIEW v;', 'DROP EVENT e;', 'DROP PROCEDURE p;', 'DROP FUNCTION f;', 'DROP PACKAGE BODY pk;',
+    'DROP USER u;', 'DROP ROLE r;', 'DROP SERVER s;', 'drop\n  trigger trg;', '/* note */ DROP VIEW v;'];
+
 describe('Database.destructiveAutoStatement() prefix forms @regression', function () {
     it('runs the ALTER clause checks on ALTER ONLINE TABLE', function () {
         assert.ok(scanSql('ALTER ONLINE TABLE t DROP COLUMN c;'));
@@ -71,10 +76,7 @@ describe('Database.destructiveAutoStatement() prefix forms @regression', functio
     });
 
     it('flags every top-level DROP other than a standalone index or temporary-table drop', function () {
-        for (const sql of ['DROP SEQUENCE IF EXISTS s;', 'DROP TRIGGER trg;', 'DROP TRIGGER IF EXISTS trg;',
-            'DROP VIEW v;', 'DROP EVENT e;', 'DROP PROCEDURE p;', 'DROP FUNCTION f;', 'DROP PACKAGE BODY pk;',
-            'DROP USER u;', 'DROP ROLE r;', 'DROP SERVER s;', 'drop\n  trigger trg;', '/* note */ DROP VIEW v;'])
-            assert.ok(scanSql(sql), sql);
+        for (const sql of NON_INDEX_DROPS) assert.ok(scanSql(sql), sql);
     });
 
     it('still allows a standalone DROP INDEX and a DROP TEMPORARY TABLE', function () {
