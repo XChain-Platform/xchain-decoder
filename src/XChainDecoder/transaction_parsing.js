@@ -152,7 +152,7 @@ function buildParseResult(dataBuffer, compiledDataLength, rawData, source, sourc
     }
 }
 
-function* resolveXChainTransaction(transaction, db, nextTxId, firstInputTxId, dispenseOutputs, paymentOutputs, parsed){
+function* resolveXChainTransaction(transaction, db, blockHeight, nextTxId, firstInputTxId, dispenseOutputs, paymentOutputs, parsed){
     let { source, dataBuffer, rawData, getSource, p2shFundingTxId, envelopeCarrier, envelopeCommitTransaction } = parsed
     // compiledDataLength starts as the raw accumulated byte count.
     // For P2SH/P2WSH/OP_RETURN this equals the compiled push size (the
@@ -181,7 +181,7 @@ function* resolveXChainTransaction(transaction, db, nextTxId, firstInputTxId, di
     if (getSource && (source == null)){
         source = envelopeCarrier
             ? yield this.getEnvelopeSourceFromCommit(envelopeCommitTransaction)
-            : yield this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index, sourceCommitCapture)
+            : yield this.getSourceFromOutput(firstInputTxId, transaction.ins[0].index, sourceCommitCapture, blockHeight)
     }
 
     // Read the key from the input that spent the source's UTXO. For an envelope that
@@ -239,7 +239,7 @@ function* parseXChainTransaction(transaction, openDispenserAddresses, db, blockH
 
     ;({ dataBuffer, p2shFundingTxId, envelopeCarrier, envelopeCommitTransaction } = yield* arbitrateEnvelope.call(this, envelopeActive, envelopeInputs, blockHeight, nextTxId, firstInputTxId, otherCarrierRecognized, { dataBuffer, p2shFundingTxId, envelopeCarrier, envelopeCommitTransaction }))
 
-    return yield* resolveXChainTransaction.call(this, transaction, db, nextTxId, firstInputTxId, dispenseOutputs, paymentOutputs, { source, dataBuffer, rawData, getSource, p2shFundingTxId, envelopeCarrier, envelopeCommitTransaction })
+    return yield* resolveXChainTransaction.call(this, transaction, db, blockHeight, nextTxId, firstInputTxId, dispenseOutputs, paymentOutputs, { source, dataBuffer, rawData, getSource, p2shFundingTxId, envelopeCarrier, envelopeCommitTransaction })
 }
 
 function* parseTransactionSteps(transaction, openDispenserAddresses, db, blockHeight){

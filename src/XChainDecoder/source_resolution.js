@@ -23,6 +23,7 @@ const crypto = require('crypto')
 const bitcoin = require('bitcoinjs-lib')
 const { format: formatLogLine } = require('node:util')
 const { logger } = require('./constants.js')
+const { P2WSH_WALKBACK_SEGWIT_GATE_ACTIVATION } = require('../protocol/constants/activation.js')
 
 function* fetchPrevoutTransaction(txId, outputIndex){
     // A prevout lookup that FAILS is not a prevout that does not exist. Swallowing
@@ -61,7 +62,7 @@ function* fetchPrevoutTransaction(txId, outputIndex){
     return this.xchainBlockDecoder.transactionFromHex(outputRawTransaction)
 }
 
-function isRevealCarrierScript(script){
+function revealCarrierType(script){
     let isP2sh = (
         (script.length == 23) //23 bytes for a standard p2sh
         && (script[0] == 0xa9) //OP_HASH160
@@ -73,7 +74,19 @@ function isRevealCarrierScript(script){
         && (script[0] == 0x00) //OP_0 (witness v0)
         && (script[1] == 0x20) //PUSH 32 bytes
     )
-    return isP2sh || isP2wsh
+    if (isP2sh) return 'p2sh'
+    if (isP2wsh) return 'p2wsh'
+    return null
+}
+
+function p2wshWalkbackEnabled(decoder, blockHeight){
+    if (decoder.network.supportsSegwit !== false) return true
+    const coinMap = P2WSH_WALKBACK_SEGWIT_GATE_ACTIVATION[decoder.coinTick]
+    const activation = coinMap ? coinMap[decoder.consensusNetwork] : null
+    const gateActive = typeof activation === 'number'
+        && typeof blockHeight === 'number'
+        && blockHeight >= activation
+    return !gateActive
 }
 
 function* fetchCommitFundingOutput(outputTransaction){
@@ -99,7 +112,7 @@ function* fetchCommitFundingOutput(outputTransaction){
     return prevTransaction.outs[prevOutputIndex]
 }
 
-function* resolveSourceFromOutput(txId, outputIndex, capture){
+function* resolveSourceFromOutput(txId, outputIndex, capture, blockHeight){
     let source = null
     let output = null
     let outputTransaction = null
@@ -122,7 +135,9 @@ function* resolveSourceFromOutput(txId, outputIndex, capture){
         //THAT prev output's address (the funder/issuer). Without the P2WSH branch
         //the source of every P2WSH-encoded action resolved to the bech32 script
         //address (bcrt1q...), which holds no gas → spurious "insufficient funds (FEE)".
-        if (isRevealCarrierScript(script)){
+        const carrierType = revealCarrierType(script)
+        if (carrierType === 'p2sh'
+            || (carrierType === 'p2wsh' && p2wshWalkbackEnabled(this, blockHeight))){
             output = yield* fetchCommitFundingOutput.call(this, outputTransaction)
         }
 
@@ -191,13 +206,13 @@ module.exports = {
     // a widened return value on purpose: the return contract (a source address or null)
     // is stubbed and asserted across the suite, and a caller that ignores `capture`
     // behaves exactly as before.
-    async getSourceFromOutput(txId, outputIndex, capture = null){
+    async getSourceFromOutput(txId, outputIndex, capture = null, blockHeight){
         // The lookup steps are generators that yield each node read to this
         // loop, so the method suspends only while a read is pending, once per
         // read, and the decode and walk-back after a read run in the same
         // stretch. An async helper awaited here would add a suspension after
         // each read settles.
-        const steps = resolveSourceFromOutput.call(this, txId, outputIndex, capture)
+        const steps = resolveSourceFromOutput.call(this, txId, outputIndex, capture, blockHeight)
         let next = steps.next()
         while (!next.done){
             let settled
