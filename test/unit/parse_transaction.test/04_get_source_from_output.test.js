@@ -116,4 +116,34 @@ describe('XChainDecoder#getSourceFromOutput()', () => {
         // Should have chased one level
         assert.ok(decoder.connector.getRawTransaction.calledTwice)
     })
+
+    it('does not chase P2WSH-shaped outputs on non-segwit chains after activation', async () => {
+        decoder = new XChainDecoder(
+            'dogecoin-regtest', null, null, null, null, null,
+            '127.0.0.1', 18443, 'rpc', 'rpc', false
+        )
+        const outerTx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
+        outerTx.outs[1].script = Buffer.from('0020' + 'aa'.repeat(32), 'hex')
+        decoder.connector = { getRawTransaction: sinon.stub().resolves(outerTx.toHex()) }
+
+        await decoder.getSourceFromOutput('sometxid', 1, null, 0)
+
+        assert.strictEqual(decoder.connector.getRawTransaction.callCount, 1)
+    })
+
+    it('preserves the P2WSH walk-back below an unarmed non-segwit gate', async () => {
+        decoder = new XChainDecoder(
+            'dogecoin-mainnet', null, null, null, null, null,
+            '127.0.0.1', 22555, 'rpc', 'rpc', false
+        )
+        const outerTx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
+        outerTx.outs[1].script = Buffer.from('0020' + 'aa'.repeat(32), 'hex')
+        decoder.connector = { getRawTransaction: sinon.stub() }
+        decoder.connector.getRawTransaction.onFirstCall().resolves(outerTx.toHex())
+        decoder.connector.getRawTransaction.onSecondCall().resolves(TX_HEX.opReturn)
+
+        await decoder.getSourceFromOutput('sometxid', 1, null, 9999999)
+
+        assert.strictEqual(decoder.connector.getRawTransaction.callCount, 2)
+    })
 })
