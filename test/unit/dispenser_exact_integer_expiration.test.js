@@ -30,15 +30,16 @@ function restoreActivationAround() {
 describe('DISPENSER exact integer EXPIRATION activation', function () {
     restoreActivationAround()
 
-    it('is public, UNARMED on mainnet and testnet, and genesis-active on regtest', function () {
+    it('is public, never active on mainnet, dark on testnet, and genesis-active on regtest', function () {
         assert.deepStrictEqual(activation[NAME], {
             mainnet: null,
-            testnet: null,
+            testnet: 9999999999,
             regtest: 0,
         })
         assert.strictEqual(constants[NAME], activation[NAME])
-        for (const network of ['mainnet', 'testnet'])
-            assert.strictEqual(isExactIntegerExpirationActive(network, 4000000000), false)
+        assert.strictEqual(isExactIntegerExpirationActive('mainnet', 4000000000), false)
+        assert.strictEqual(isExactIntegerExpirationActive('testnet', 9999999998), false)
+        assert.strictEqual(isExactIntegerExpirationActive('testnet', 9999999999), true)
         assert.strictEqual(isExactIntegerExpirationActive('regtest', 0), true)
         assert.strictEqual(isExactIntegerExpirationActive('regtest', 4000000000), true)
         assert.strictEqual(isExactIntegerExpirationActive('unknown', 4000000000), false)

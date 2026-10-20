@@ -281,14 +281,16 @@ const DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION = {
 // action the indexer did not accept.
 //
 // This recognition change is consensus-affecting because it can remove an address from
-// the decoder's payment-output capture set. Mainnet and testnet therefore remain UNARMED
-// until an operator audit establishes a safe flag-day and the matching indexer gate is
-// armed. Regtest is genesis-active so every regtest matrix runs the exact path; a regtest
-// indexer arms its matching rule through EXACT_INTEGER_WIRE_FIELDS_REGTEST_TIME. null
-// means never active; unknown networks and invalid block times fail closed.
+// the decoder's payment-output capture set, so it must open no earlier than the indexer's
+// EXACT_INTEGER_WIRE_FIELDS on the same network. Mainnet stays null (never active) until
+// an operator audit sets a mainnet flag day. Testnet takes the cut's flag day under the
+// operator ruling of 2026-10-17 that every testnet gate arms; 9999999999 holds it dark
+// until the cut writes that instant, and the indexer's testnet gate is already armed.
+// Regtest is genesis-active, as is the indexer's regtest row, so every regtest matrix
+// runs the exact path. Unknown networks and invalid block times fail closed.
 const EXACT_INTEGER_EXPIRATION_ACTIVATION = {
     mainnet: null,
-    testnet: null,
+    testnet: 9999999999,
     regtest: 0,
 };
 
