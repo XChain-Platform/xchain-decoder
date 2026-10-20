@@ -33,13 +33,13 @@ describe('DISPENSER exact integer EXPIRATION activation', function () {
     it('is public, never active on mainnet, dark on testnet, and genesis-active on regtest', function () {
         assert.deepStrictEqual(activation[NAME], {
             mainnet: null,
-            testnet: 9999999999,
+            testnet: 1792605600,
             regtest: 0,
         })
         assert.strictEqual(constants[NAME], activation[NAME])
         assert.strictEqual(isExactIntegerExpirationActive('mainnet', 4000000000), false)
-        assert.strictEqual(isExactIntegerExpirationActive('testnet', 9999999998), false)
-        assert.strictEqual(isExactIntegerExpirationActive('testnet', 9999999999), true)
+        assert.strictEqual(isExactIntegerExpirationActive('testnet', 1792605599), false)
+        assert.strictEqual(isExactIntegerExpirationActive('testnet', 1792605600), true)
         assert.strictEqual(isExactIntegerExpirationActive('regtest', 0), true)
         assert.strictEqual(isExactIntegerExpirationActive('regtest', 4000000000), true)
         assert.strictEqual(isExactIntegerExpirationActive('unknown', 4000000000), false)

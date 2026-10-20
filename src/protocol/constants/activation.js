@@ -290,7 +290,7 @@ const DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION = {
 // runs the exact path. Unknown networks and invalid block times fail closed.
 const EXACT_INTEGER_EXPIRATION_ACTIVATION = {
     mainnet: null,
-    testnet: 9999999999,
+    testnet: 1792605600,
     regtest: 0,
 };
 

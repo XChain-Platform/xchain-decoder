@@ -61,7 +61,7 @@ describe('DISPENSER wide expiration', function () {
     it('pins the activation map and public constants export', function () {
         assert.deepStrictEqual(DISPENSER_WIDE_EXPIRATION_ACTIVATION, {
             mainnet: 9999999999,
-            testnet: 9999999999,
+            testnet: 1792605600,
             regtest: 0,
         })
         assert.strictEqual(
