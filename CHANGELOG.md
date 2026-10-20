@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-20
+
+### Added
+- Exposed the reorg-halt state.
+
+### Changed
+- Gated the P2WSH source walk-back by chain activation.
+- Armed exact-integer dispenser expiration on regtest from genesis.
+- Pinned the decoder runtime to the Node 22 glibc image.
+- Armed DISPENSER_WIDE_EXPIRATION_GATES and EXACT_INTEGER_EXPIRATION_ACTIVATION on testnet at block time 1792605600.
+
+### Fixed
+- Hardened migration guards, duplicate output handling and mempool re-parsing.
+
 ## [0.25.0] - 2026-10-18
 
 ### Changed

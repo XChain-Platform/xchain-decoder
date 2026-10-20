@@ -20,7 +20,7 @@
 // genesis-active so the widened recognition path is continuously exercised.
 const DISPENSER_WIDE_EXPIRATION_GATES = {
     mainnet: 9999999999,
-    testnet: 9999999999,
+    testnet: 1792605600,
     regtest: 0,
 };
 
