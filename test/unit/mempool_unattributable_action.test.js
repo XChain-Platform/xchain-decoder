@@ -106,3 +106,56 @@ describe('mempool admission of an ACTION with no resolvable source', function ()
     assert.strictEqual(inserted[0].data, 'COINPAY|0|abc|def')
   })
 })
+
+// The block path sees a gate-skipped tx (oversized or unknown ACTION, no outputs) once.
+// The mempool path must too: a stateful seen-set fake runs two polls over the same txid.
+describe('mempool admission of a gate-skipped ACTION', function () {
+  this.timeout(0)
+
+  async function runTwoMempoolCycles(parseResult) {
+    const decoder = new XChainDecoder(
+      'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
+    )
+    const stored = new Map()
+    let fetched = 0
+    decoder.mempoolDb = {
+      getAllOpenDispenserAddresses: async () => new Set(),
+      // Mirrors the real diff: txids already stored leave the list in place.
+      deleteAndCompareTxsNotInList: async (list) => {
+        const remaining = list.filter((h) => !stored.has(h))
+        list.length = 0
+        remaining.forEach((h) => list.push(h))
+        return { transactionsDeleted: 0 }
+      },
+      insertMempoolTransaction: async (row) => { stored.set(row.hash, row); return true },
+    }
+    decoder.db = {}
+    decoder.connector = {
+      getRawMempool: async () => ['txid1'],
+      getRawTransactions: async (chunk) => { fetched += chunk.length; return chunk.map(() => 'hexdata') },
+    }
+    decoder.xchainBlockDecoder = { transactionFromHex: () => ({ ins: [{}], getId: () => 'txid1' }) }
+    decoder.parseTransaction = async () => parseResult
+    await decoder.updateMempool()
+    await decoder.updateMempool()
+    return { decoder, stored, fetched }
+  }
+
+  it('stores an unknown ACTION as a blanked seen-set row, fetched and counted once', async () => {
+    const unknown = Buffer.from('NOTANACTION|0|x')
+    const { decoder, stored, fetched } = await runTwoMempoolCycles(
+      actionResult('src', { data: unknown, compiledDataLength: unknown.length + 1 }))
+    assert.strictEqual(fetched, 1, 'the second poll must not re-fetch a tx the first one rejected')
+    assert.strictEqual(decoder.parseErrors, 1, 'parse_errors counts the rejection once, as the block path does')
+    assert.strictEqual(stored.get('txid1').data, '', 'a rejected ACTION must not be published as pending')
+    assert.strictEqual(stored.get('txid1').raw_data, null)
+  })
+
+  it('stores an oversized ACTION as a blanked seen-set row, fetched and counted once', async () => {
+    const { decoder, stored, fetched } = await runTwoMempoolCycles(
+      actionResult('src', { compiledDataLength: 1000000 }))
+    assert.strictEqual(fetched, 1, 'the second poll must not re-fetch a tx the first one rejected')
+    assert.strictEqual(decoder.parseErrors, 1, 'parse_errors counts the rejection once, as the block path does')
+    assert.strictEqual(stored.get('txid1').data, '')
+  })
+})
