@@ -27,7 +27,8 @@ const Database = require('../db.js')
 // bottom, and the 8151979 revision of the unique-index one.
 // Applied fleet-wide through code deploy: both the startup auto-run and
 // `node src/db/migrate.js` pass through this heal before the mismatch guard, so no
-// direct schema_migrations SQL is ever needed. Mirrors xchain-indexer/src/db/index.js.
+// direct schema_migrations SQL is ever needed. Mirrors
+// xchain-indexer/src/db/migration/checksum_rebaselines.js:MIGRATION_CHECKSUM_REBASELINES.
 Database.MIGRATION_CHECKSUM_REBASELINES = {
     // Comment-only edits: 3a1c435 rewrote the validator note into the follower
     // ordering note (and dropped an em-dash), ec36bd4 added the license header.

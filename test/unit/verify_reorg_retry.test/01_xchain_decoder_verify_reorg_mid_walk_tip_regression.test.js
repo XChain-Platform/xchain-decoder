@@ -55,7 +55,7 @@ describe('XChainDecoder.verifyReorg mid-walk tip regression', function () {
         if (h > REGRESSED_TIP) throw new Error('Block height out of range')
         return 'match' + h
       },
-      getBlockchainInfo: async () => ({ blocks: REGRESSED_TIP })
+      getBlockchainInfo: async () => ({ blocks: REGRESSED_TIP, verificationprogress: 1 })
     }
     decoder.db = {
       getLastBlockIndex: async () => top,
@@ -106,7 +106,7 @@ describe('XChainDecoder.verifyReorg mid-walk tip regression', function () {
         if (h > 102) throw new Error('Block height out of range')
         return 'match' + h
       },
-      getBlockchainInfo: async () => ({ blocks: 102, chain: 'main' })
+      getBlockchainInfo: async () => ({ blocks: 102, chain: 'main', verificationprogress: 1 })
     }
     decoder.db = {
       getLastBlockIndex: async () => top,
@@ -152,7 +152,7 @@ describe('XChainDecoder.verifyReorg mid-walk tip regression', function () {
         if (h > REGRESSED_TIP) throw new Error('Block height out of range')
         return 'match' + h
       },
-      getBlockchainInfo: async () => ({ blocks: REGRESSED_TIP, chain: 'main' })
+      getBlockchainInfo: async () => ({ blocks: REGRESSED_TIP, chain: 'main', verificationprogress: 1 })
     }
     decoder.db = {
       getLastBlockIndex: async () => top,
@@ -261,5 +261,31 @@ describe('XChainDecoder.verifyReorg mid-walk tip refresh from a catching-up node
     const { decoder, state } = catchingUpWalk([ibd, ibd, synced])
     assert.strictEqual(await decoder.verifyReorg(105), true)
     assert.deepStrictEqual(state.deleted, [105, 104, 103], 'the wait resolves once the node is synced')
+  })
+})
+
+describe('XChainDecoder.verifyReorg mid-walk tip refresh from a malformed reply', function () {
+  this.timeout(0)
+
+  it('ignores a refreshed tip whose reply omits verificationprogress', async function () {
+    const trimmed = { blocks: 102, chain: 'main' }
+    const { decoder, state } = catchingUpWalk([trimmed], 3)
+    assert.strictEqual(await decoder.verifyReorg(105), true)
+    assert.deepStrictEqual(state.deleted, [], 'a reply the block loop refuses must not drive above-tip deletes')
+  })
+
+  it('ignores a refreshed tip whose verificationprogress is not a number', async function () {
+    const stringly = { blocks: 102, chain: 'main', initialblockdownload: false, verificationprogress: '1' }
+    const { decoder, state } = catchingUpWalk([stringly], 3)
+    assert.strictEqual(await decoder.verifyReorg(105), true)
+    assert.deepStrictEqual(state.deleted, [], 'a non-numeric progress is a malformed reply, not a synced node')
+  })
+
+  it('accepts the refreshed tip once a well-formed reply follows the malformed one', async function () {
+    const trimmed = { blocks: 102, chain: 'main' }
+    const synced = { blocks: 102, chain: 'main', initialblockdownload: false, verificationprogress: 1 }
+    const { decoder, state } = catchingUpWalk([trimmed, trimmed, synced])
+    assert.strictEqual(await decoder.verifyReorg(105), true)
+    assert.deepStrictEqual(state.deleted, [105, 104, 103], 'the walk resumes on the first well-formed reading')
   })
 })

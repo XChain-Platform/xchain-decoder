@@ -19,6 +19,7 @@ const { logger } = require('./constants.js')
 const { migrationSession, retireMigrationConnection } = require('./migration_query_timeout.js')
 const { assertNoLiveColumnLoss } = require('./migration_live_schema_guard.js')
 const { assertUniqueKeyWitness, declaredUniqueIndexes } = require('./migration_guards/key_witness.js')
+const { assertNoDeclaredKeyDrop } = require('./migration_guards/declared_key_drop.js')
 const { reconcileAppliedMigration, guardMigrationFrontier } = require('./migration_guards/applied_ledger.js')
 
 function validateMigrationTargets(files, only, dir){
@@ -92,7 +93,7 @@ async function applyMigrationFile(database, context, file, raw, checksum, mode){
     // to lose or rename data must NEVER run unattended at startup (nor slip
     // through migrate.js under the wrong tag) - block startup with an
     // actionable error instead of executing it against every validator's DB.
-    // Mirrors xchain-indexer/src/db/index.js.
+    // Mirrors xchain-indexer/src/db/database/migration_runner.js:applyMigrationFile.
     if(mode === 'auto'){
         const offender = database.destructiveAutoStatement(statements);
         if(offender){
@@ -100,6 +101,16 @@ async function applyMigrationFile(database, context, file, raw, checksum, mode){
                 offender.slice(0, 160) + (offender.length > 160 ? '...' : '') + '". ' +
                 'Re-tag the file `-- xchain:migration mode=manual` and apply it deliberately via `node src/db/migrate.js`.');
         }
+        // Refuse a drop of a key src/sql still declares UNIQUE or PRIMARY, which verifyTables
+        // already ran past this boot and so would leave missing until the next one.
+        assertNoDeclaredKeyDrop(file, statements, table => {
+            if(!/^[\w$]+$/.test(table)) return null;
+            try { return fs.readFileSync(database.sqlPath + '/' + table + '.sql', 'utf8'); }
+            catch(err){
+                if(err && err.code === 'ENOENT') return null;
+                throw err;
+            }
+        });
         // The text scan cannot see what a MODIFY drops from the live column; this check can.
         await assertNoLiveColumnLoss(context.conn, file, statements);
         // INSERT IGNORE dedupes nothing while a declared UNIQUE key is missing live, so require the key first.

@@ -17,6 +17,7 @@ const { ensureLedgerAppliedAtDatetime } = require('./migration_ledger.js')
 const { stripBlockComments } = require('./migration_live_schema_guard.js')
 const {
     hasUnquotedHash, isSimpleDestructiveStatement, createOutsideAllowList, isDestructiveAlter,
+    statementOutsideAllowList,
 } = require('./migration_guards/destructive_statement_rules.js')
 
 module.exports = {
@@ -66,6 +67,9 @@ module.exports = {
     // [UNIQUE|FULLTEXT|SPATIAL] INDEX (triggers, events, routines and views run SQL
     // the scanner cannot read), and any SET other than SET NAMES or a single UTC
     // time_zone (session variables relax strict mode; SET STATEMENT ... FOR hides a statement).
+    // Finally, any statement that does not open with ALTER [ONLINE] TABLE, CREATE [TEMPORARY]
+    // TABLE, CREATE [UNIQUE|FULLTEXT|SPATIAL] INDEX, DROP INDEX, DROP TEMPORARY TABLE, INSERT,
+    // UPDATE or SET is flagged (BINLOG, DO, SELECT, PURGE, RESET, INSTALL and every other form).
     //
     // Deliberately NOT flagged (legitimate existing auto patterns): DROP INDEX/KEY,
     // DROP FOREIGN KEY/CONSTRAINT/CHECK/DEFAULT/PRIMARY KEY with the keyword bare and
@@ -113,6 +117,8 @@ module.exports = {
             if(alterHead && isDestructiveAlter(stmt, SAFE_ALTER_DROP)) return raw;
             // Any other ALTER (EVENT, VIEW, DATABASE, ...) is outside the allow-list, like CREATE.
             if(!alterHead && /^ALTER\b/i.test(stmt)) return raw;
+            // Every statement must open with an allowed form; the checks above narrow each one.
+            if(statementOutsideAllowList(stmt)) return raw;
         }
         return null;
     },
@@ -227,7 +233,7 @@ module.exports = {
     // real statements. `--` and `#` line comments are stripped first (same rule as
     // the callers used); the quote model matches stripSqlLineComments exactly
     // (single/double-quote and backtick spans, doubled-quote and backslash escapes).
-    // Returns trimmed, non-empty statements. Mirrors xchain-indexer/src/db/index.js.
+    // Returns trimmed, non-empty statements. Mirrors xchain-indexer/src/db/database/sql_text.js:splitSqlStatements.
     splitSqlStatements(sql){
         const stripped = this.stripSqlLineComments(sql);
         const statements = [];

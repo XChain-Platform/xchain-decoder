@@ -213,7 +213,8 @@ Database.MIGRATION_PRECONDITIONS = {
     },
 };
 
-// Backdating guard for the auto-apply path, mirroring xchain-indexer/src/db/index.js. Apply
+// Backdating guard for the auto-apply path, mirroring
+// xchain-indexer/src/db/database/migration_registry.js:backdatedFrontierViolation. Apply
 // order is lexical, so a migration added with a date EARLIER than one already applied
 // runs in a different position on a fresh database (in its date slot) than on an aged
 // one (after the frontier), and the two schemas diverge across the fleet. Given a

@@ -811,6 +811,11 @@
       "DISPENSER wire field offsets pins the offsets the decode path was written against",
       "DISPENSER wire field offsets reads ORACLE_ADDRESS from the pinned slot and not a neighbouring one"
     ],
+    "2d79fc18db20fb8c": [
+      "registerDecoderMetrics() REORG_HALT gauges exports a latent halt on a decoder that is still parsing",
+      "registerDecoderMetrics() REORG_HALT gauges exports a parked halt beside the stale tip it causes",
+      "registerDecoderMetrics() REORG_HALT gauges omits the halt flag until the first marker probe, then reports a clear decoder as 0"
+    ],
     "2e7f48116c3bbab3": [
       "Smoke: Database Initialization should create and verify all tables",
       "Smoke: Database Initialization should create and verify all tables",
@@ -1520,13 +1525,6 @@
       "BATCH sub-command ACTION-name gate and alias expansion sub-command ACTION names are alias-expanded above the gate reads only OWN properties, so a prototype name is not a table hit",
       "BATCH sub-command ACTION-name gate and alias expansion sub-command ACTION names are alias-expanded above the gate rewrites the NAME and returns every later byte verbatim"
     ],
-    "5bfafba200cdf61c": [
-      "XChainDecoder#getSourceFromOutput() should chase P2SH outputs one level deeper",
-      "XChainDecoder#getSourceFromOutput() should return an address for a valid P2PKH output",
-      "XChainDecoder#getSourceFromOutput() should return null for OP_RETURN output (no valid address)",
-      "XChainDecoder#getSourceFromOutput() should return null when output index is out of bounds",
-      "XChainDecoder#getSourceFromOutput() should throw a tagged rpcLookupFailure when the connector throws (a failed lookup is not a null source)"
-    ],
     "5cc2b8143bdd5808": [
       "Security: remediated dependency advisories @regression @tier4 ADV-10: the installed mariadb reports a patched runtime version",
       "Security: remediated dependency advisories @regression @tier4 ADV-1: package.json pins axios at or above 1.18.0",
@@ -1798,16 +1796,6 @@
       "Boundary: AES-128-CTR Deobfuscation (D-1 through D-7) [REGRESSION P0] R-DEC-004 D-1: should handle empty buffer without crash",
       "Boundary: AES-128-CTR Deobfuscation (D-1 through D-7) [REGRESSION P0] R-DEC-005 D-6: should decrypt with all-zero txid (valid AES key/IV)",
       "Boundary: AES-128-CTR Deobfuscation (D-1 through D-7) [REGRESSION P0] R-DEC-005 D-7: should decrypt with all-f txid (valid AES key/IV)"
-    ],
-    "7155fc1fd1894f02": [
-      "Database.destructiveAutoStatement() prefix forms @regression catches ALTER IGNORE and CREATE TRIGGER end to end from raw file text",
-      "Database.destructiveAutoStatement() prefix forms @regression flags CREATE TRIGGER / EVENT / routine / view and any non-table ALTER",
-      "Database.destructiveAutoStatement() prefix forms @regression flags every ALTER IGNORE TABLE (IGNORE deletes duplicate-key rows)",
-      "Database.destructiveAutoStatement() prefix forms @regression flags every top-level DROP other than a standalone index or temporary-table drop",
-      "Database.destructiveAutoStatement() prefix forms @regression runs the ALTER clause checks on ALTER ONLINE TABLE",
-      "Database.destructiveAutoStatement() prefix forms @regression still allows a standalone DROP INDEX and a DROP TEMPORARY TABLE",
-      "Database.destructiveAutoStatement() prefix forms @regression still allows additive ALTER ONLINE TABLE and a table merely named ignore",
-      "Database.destructiveAutoStatement() prefix forms @regression still allows the committed CREATE TABLE / CREATE INDEX forms"
     ],
     "72a971c9a8d36046": [
       "BATCH dispenser registration the money-bearing end: payments to a batch-created dispenser a top-level create captures the same way, on both sides of the gate",
@@ -2178,6 +2166,19 @@
       "Taproot envelope published chunk vectors recognizes and reassembles the published chunk_rebalance vector",
       "Taproot envelope published chunk vectors recognizes and reassembles the published envelope_chunking vector"
     ],
+    "9256abaf91bbe0da": [
+      "Database.destructiveAutoStatement() prefix forms @regression catches ALTER IGNORE and CREATE TRIGGER end to end from raw file text",
+      "Database.destructiveAutoStatement() prefix forms @regression flags CREATE TRIGGER / EVENT / routine / view and any non-table ALTER",
+      "Database.destructiveAutoStatement() prefix forms @regression flags every ALTER IGNORE TABLE (IGNORE deletes duplicate-key rows)",
+      "Database.destructiveAutoStatement() prefix forms @regression flags every top-level DROP other than a standalone index or temporary-table drop",
+      "Database.destructiveAutoStatement() prefix forms @regression runs the ALTER clause checks on ALTER ONLINE TABLE",
+      "Database.destructiveAutoStatement() prefix forms @regression still allows a standalone DROP INDEX and a DROP TEMPORARY TABLE",
+      "Database.destructiveAutoStatement() prefix forms @regression still allows additive ALTER ONLINE TABLE and a table merely named ignore",
+      "Database.destructiveAutoStatement() prefix forms @regression still allows the committed CREATE TABLE / CREATE INDEX forms",
+      "Database.destructiveAutoStatement() statement-form allow-list @regression flags an unlisted form that follows an allowed one in the same file",
+      "Database.destructiveAutoStatement() statement-form allow-list @regression flags every statement form outside the allow-list",
+      "Database.destructiveAutoStatement() statement-form allow-list @regression keeps every allowed form auto-eligible"
+    ],
     "9287c127d042af8f": [
       "Security: Connection Handling Transaction lock mechanism [REGRESSION P0] R-SEC-003: should acquire lock on first call",
       "Security: Connection Handling Transaction lock mechanism should initialize lock state correctly",
@@ -2389,6 +2390,18 @@
       "BATCH sub-command ACTION-name gate and alias expansion the indexer side of the argument, driven not asserted enables names this decoder does not know, which is why the gate stops at the empty one",
       "BATCH sub-command ACTION-name gate and alias expansion the indexer side of the argument, driven not asserted really does reject the EMPTY ACTION name, which is what suppression rests on",
       "BATCH sub-command ACTION-name gate and alias expansion the indexer side of the argument, driven not asserted rejects an ALIAS name, so expansion must never run below BATCH_SUBACTION_NORMALIZATION"
+    ],
+    "9cf7a9676a09ed58": [
+      "XChainDecoder.verifyReorg mid-walk tip refresh from a catching-up node accepts the refreshed tip once the node has finished catching up",
+      "XChainDecoder.verifyReorg mid-walk tip refresh from a catching-up node ignores a refreshed tip while the node reports initial block download",
+      "XChainDecoder.verifyReorg mid-walk tip refresh from a catching-up node ignores a refreshed tip while verification progress is below the parse threshold",
+      "XChainDecoder.verifyReorg mid-walk tip refresh from a malformed reply accepts the refreshed tip once a well-formed reply follows the malformed one",
+      "XChainDecoder.verifyReorg mid-walk tip refresh from a malformed reply ignores a refreshed tip whose reply omits verificationprogress",
+      "XChainDecoder.verifyReorg mid-walk tip refresh from a malformed reply ignores a refreshed tip whose verificationprogress is not a number",
+      "XChainDecoder.verifyReorg mid-walk tip regression keeps retrying (does not crash) when the node is fully unreachable",
+      "XChainDecoder.verifyReorg mid-walk tip regression refreshes nodeTip on out-of-range so a regressed tip self-heals instead of wedging",
+      "XChainDecoder.verifyReorg mid-walk tip regression refuses a same-tier foreign endpoint tip refresh (genesis pin mismatch) and deletes no local blocks",
+      "XChainDecoder.verifyReorg mid-walk tip regression still accepts the refreshed tip when block 0 agrees, so the self-heal happy path is unchanged"
     ],
     "9d0527ed17a1692f": [
       "BATCH dispenser registration two creates on the SAME operating address (the PRIMARY KEY collision) collapses three same-address creates to one row",
@@ -2653,6 +2666,14 @@
       "BATCH dispenser registration the DISPENSER prefix carries its delimiter above the gate at the TOP LEVEL, where VALID_ACTION_NAMES already closed it registers nothing for a near-miss name on EITHER side of the gate",
       "BATCH dispenser registration the DISPENSER prefix carries its delimiter above the gate at the TOP LEVEL, where VALID_ACTION_NAMES already closed it registers nothing for the bare token DISPENSER, on both sides"
     ],
+    "b2f89504900651c4": [
+      "decoder declared-key drop guard @regression allows a drop the same file re-creates under the same name and kind",
+      "decoder declared-key drop guard @regression allows a table with no src/sql file and fails closed on a drop it cannot read",
+      "decoder declared-key drop guard @regression passes every committed mode=auto migration",
+      "decoder declared-key drop guard @regression refuses a drop of a declared UNIQUE or PRIMARY key that the file never re-creates",
+      "decoder migration runner applies the declared-key drop guard to auto files @regression refuses an auto drop of the declared UNIQUE address key before running it",
+      "decoder migration runner applies the declared-key drop guard to auto files @regression runs the same drop when the file re-creates the key"
+    ],
     "b3bae8599c655a50": [
       "decoder boot consensus-pin verification derives the consensus network from the \"<fullname>-<network>\" key",
       "decoder boot consensus-pin verification start() halts fail-closed on a pin mismatch, before any DB work",
@@ -2711,15 +2732,6 @@
       "graceful shutdown resolveTimeoutMs prefers an explicit budget, then the env var, then the default",
       "graceful shutdown resolveTimeoutMs stays under the 120 s budget xchain-node gives a decoder",
       "graceful shutdown resolveTimeoutMs stays under the stop budget in xchain-node's own table when that checkout is beside this one"
-    ],
-    "b7c9218357c1b1f2": [
-      "XChainDecoder.verifyReorg mid-walk tip refresh from a catching-up node accepts the refreshed tip once the node has finished catching up",
-      "XChainDecoder.verifyReorg mid-walk tip refresh from a catching-up node ignores a refreshed tip while the node reports initial block download",
-      "XChainDecoder.verifyReorg mid-walk tip refresh from a catching-up node ignores a refreshed tip while verification progress is below the parse threshold",
-      "XChainDecoder.verifyReorg mid-walk tip regression keeps retrying (does not crash) when the node is fully unreachable",
-      "XChainDecoder.verifyReorg mid-walk tip regression refreshes nodeTip on out-of-range so a regressed tip self-heals instead of wedging",
-      "XChainDecoder.verifyReorg mid-walk tip regression refuses a same-tier foreign endpoint tip refresh (genesis pin mismatch) and deletes no local blocks",
-      "XChainDecoder.verifyReorg mid-walk tip regression still accepts the refreshed tip when block 0 agrees, so the self-heal happy path is unchanged"
     ],
     "b890eff5e5d00764": [
       "roundtrip conformance fixture: byte-identity to encoder original vendored test/fixtures/roundtrip-conformance.json is byte-identical to the encoder original"
@@ -3297,6 +3309,15 @@
       "BATCH dispenser registration batched v2 refill / v1 cancel captures the oracle fee of a create+refill batch from the CREATE payload",
       "BATCH dispenser registration batched v2 refill / v1 cancel runs one extend per v2 sub-command and none for other actions"
     ],
+    "e593e0d867a3ce4f": [
+      "XChainDecoder#getSourceFromOutput() P2WSH walk-back gate does not chase P2WSH-shaped outputs on non-segwit chains after activation",
+      "XChainDecoder#getSourceFromOutput() P2WSH walk-back gate preserves the P2WSH walk-back below an unarmed non-segwit gate",
+      "XChainDecoder#getSourceFromOutput() should chase P2SH outputs one level deeper",
+      "XChainDecoder#getSourceFromOutput() should return an address for a valid P2PKH output",
+      "XChainDecoder#getSourceFromOutput() should return null for OP_RETURN output (no valid address)",
+      "XChainDecoder#getSourceFromOutput() should return null when output index is out of bounds",
+      "XChainDecoder#getSourceFromOutput() should throw a tagged rpcLookupFailure when the connector throws (a failed lookup is not a null source)"
+    ],
     "e594278f2f7a35c1": [
       "BATCH sub-command ACTION-name gate and alias expansion a provably-rejected sub-command suppresses the whole capture view a sibling empty element does not disturb a TOP-LEVEL action",
       "BATCH sub-command ACTION-name gate and alias expansion a provably-rejected sub-command suppresses the whole capture view below the gate, where nothing may move a top-level DISPENSER still registers below the gate",
@@ -3619,8 +3640,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 244,
-      "titleCount": 2148,
+      "fileCount": 246,
+      "titleCount": 2165,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3726,6 +3747,7 @@
         "test/unit/decoder_ready_probe.test/01_ready_route_reports_reorg_halt.test.js": "437c4eefedb348ac",
         "test/unit/decoder_stress_sweep.test.js": "973dda09a83b0b1a",
         "test/unit/decoder_tip_stale_surface.test.js": "cdab1aa16d30bd48",
+        "test/unit/decoder_tip_stale_surface.test/01_reorg_halt_gauges.test.js": "2d79fc18db20fb8c",
         "test/unit/dispenser_address_id_collapse_activation.test.js": "43609e549b3dee84",
         "test/unit/dispenser_address_key.test.js": "6579d4ea0926bf01",
         "test/unit/dispenser_cancel_edit_db.test.js": "80d233d9d6bb2811",
@@ -3778,7 +3800,7 @@
         "test/unit/migration_runner.test/05_run_migrations_migration_preconditions.test.js": "b9d84db0edbc4eae",
         "test/unit/migration_runner.test/06_database_split_sql_statements.test.js": "45857eb89566bdb3",
         "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "de71dddc3a70f32b",
-        "test/unit/migration_runner.test/08_destructive_guard_prefix_forms.test.js": "7155fc1fd1894f02",
+        "test/unit/migration_runner.test/08_destructive_guard_prefix_forms.test.js": "9256abaf91bbe0da",
         "test/unit/migration_runner.test/09_migration_query_timeout.test.js": "97b9a29072a0f010",
         "test/unit/migration_runner.test/10_migration_executable_residue_pin.test.js": "4eb10f6c301434ed",
         "test/unit/migration_runner.test/11_destructive_guard_session_set.test.js": "8b1bac8a4cab2cbd",
@@ -3790,6 +3812,7 @@
         "test/unit/migration_runner.test/17_live_schema_guard_types.test.js": "8a5d5b0d051bc1ea",
         "test/unit/migration_runner.test/18_destructive_guard_lock_wait.test.js": "cdee7ff351a1e063",
         "test/unit/migration_runner.test/19_key_witness_guard.test.js": "9bd15abd96c0f43f",
+        "test/unit/migration_runner.test/20_declared_key_drop_guard.test.js": "b2f89504900651c4",
         "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
         "test/unit/node_catch_up_wait.test.js": "4763aa60db951190",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
@@ -3801,7 +3824,7 @@
         "test/unit/parse_transaction.test/01_parse_transaction_multisig_and_extraction.test.js": "e2dc1e87963a2b20",
         "test/unit/parse_transaction.test/02_parse_transaction_outputs_and_defaults.test.js": "d9b3257c562c64ff",
         "test/unit/parse_transaction.test/03_is_future_segwit_script.test.js": "aaf7aa8a7e0a3dd3",
-        "test/unit/parse_transaction.test/04_get_source_from_output.test.js": "5bfafba200cdf61c",
+        "test/unit/parse_transaction.test/04_get_source_from_output.test.js": "e593e0d867a3ce4f",
         "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js": "6a95ee16117e8e38",
         "test/unit/protocol_constants.test.js": "13584cc3d862a5a2",
         "test/unit/protocol_time.test.js": "8383b3fc6d715636",
@@ -3850,7 +3873,7 @@
         "test/unit/util_extra.test.js": "3a87e525ae152e17",
         "test/unit/valid_action_names_flag_day.test.js": "48102ba3278bff5c",
         "test/unit/verify_reorg_retry.test.js": "fd57b09815088f6a",
-        "test/unit/verify_reorg_retry.test/01_xchain_decoder_verify_reorg_mid_walk_tip_regression.test.js": "b7c9218357c1b1f2",
+        "test/unit/verify_reorg_retry.test/01_xchain_decoder_verify_reorg_mid_walk_tip_regression.test.js": "9cf7a9676a09ed58",
         "test/unit/verify_reorg_retry.test/02_xchain_decoder_verify_reorg_does_not_mistake_a_failed_db_read_for_an_exhausted_table.test.js": "5aede94bd4bed74a",
         "test/unit/verify_reorg_retry.test/03_reorg_entry_paths_log_at_warn.test.js": "aa473d78908111d8",
         "test/unit/verify_reorg_retry.test/04_settle_the_node_tip_before_a_rollback.test.js": "94f602d41143890d",
@@ -4167,8 +4190,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 244,
-      "titleCount": 2148,
+      "fileCount": 246,
+      "titleCount": 2165,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -4274,6 +4297,7 @@
         "test/unit/decoder_ready_probe.test/01_ready_route_reports_reorg_halt.test.js": "437c4eefedb348ac",
         "test/unit/decoder_stress_sweep.test.js": "973dda09a83b0b1a",
         "test/unit/decoder_tip_stale_surface.test.js": "cdab1aa16d30bd48",
+        "test/unit/decoder_tip_stale_surface.test/01_reorg_halt_gauges.test.js": "2d79fc18db20fb8c",
         "test/unit/dispenser_address_id_collapse_activation.test.js": "43609e549b3dee84",
         "test/unit/dispenser_address_key.test.js": "6579d4ea0926bf01",
         "test/unit/dispenser_cancel_edit_db.test.js": "80d233d9d6bb2811",
@@ -4326,7 +4350,7 @@
         "test/unit/migration_runner.test/05_run_migrations_migration_preconditions.test.js": "b9d84db0edbc4eae",
         "test/unit/migration_runner.test/06_database_split_sql_statements.test.js": "45857eb89566bdb3",
         "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "de71dddc3a70f32b",
-        "test/unit/migration_runner.test/08_destructive_guard_prefix_forms.test.js": "7155fc1fd1894f02",
+        "test/unit/migration_runner.test/08_destructive_guard_prefix_forms.test.js": "9256abaf91bbe0da",
         "test/unit/migration_runner.test/09_migration_query_timeout.test.js": "97b9a29072a0f010",
         "test/unit/migration_runner.test/10_migration_executable_residue_pin.test.js": "4eb10f6c301434ed",
         "test/unit/migration_runner.test/11_destructive_guard_session_set.test.js": "8b1bac8a4cab2cbd",
@@ -4338,6 +4362,7 @@
         "test/unit/migration_runner.test/17_live_schema_guard_types.test.js": "8a5d5b0d051bc1ea",
         "test/unit/migration_runner.test/18_destructive_guard_lock_wait.test.js": "cdee7ff351a1e063",
         "test/unit/migration_runner.test/19_key_witness_guard.test.js": "9bd15abd96c0f43f",
+        "test/unit/migration_runner.test/20_declared_key_drop_guard.test.js": "b2f89504900651c4",
         "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
         "test/unit/node_catch_up_wait.test.js": "4763aa60db951190",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
@@ -4349,7 +4374,7 @@
         "test/unit/parse_transaction.test/01_parse_transaction_multisig_and_extraction.test.js": "e2dc1e87963a2b20",
         "test/unit/parse_transaction.test/02_parse_transaction_outputs_and_defaults.test.js": "d9b3257c562c64ff",
         "test/unit/parse_transaction.test/03_is_future_segwit_script.test.js": "aaf7aa8a7e0a3dd3",
-        "test/unit/parse_transaction.test/04_get_source_from_output.test.js": "5bfafba200cdf61c",
+        "test/unit/parse_transaction.test/04_get_source_from_output.test.js": "e593e0d867a3ce4f",
         "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js": "6a95ee16117e8e38",
         "test/unit/protocol_constants.test.js": "13584cc3d862a5a2",
         "test/unit/protocol_time.test.js": "8383b3fc6d715636",
@@ -4398,7 +4423,7 @@
         "test/unit/util_extra.test.js": "3a87e525ae152e17",
         "test/unit/valid_action_names_flag_day.test.js": "48102ba3278bff5c",
         "test/unit/verify_reorg_retry.test.js": "fd57b09815088f6a",
-        "test/unit/verify_reorg_retry.test/01_xchain_decoder_verify_reorg_mid_walk_tip_regression.test.js": "b7c9218357c1b1f2",
+        "test/unit/verify_reorg_retry.test/01_xchain_decoder_verify_reorg_mid_walk_tip_regression.test.js": "9cf7a9676a09ed58",
         "test/unit/verify_reorg_retry.test/02_xchain_decoder_verify_reorg_does_not_mistake_a_failed_db_read_for_an_exhausted_table.test.js": "5aede94bd4bed74a",
         "test/unit/verify_reorg_retry.test/03_reorg_entry_paths_log_at_warn.test.js": "aa473d78908111d8",
         "test/unit/verify_reorg_retry.test/04_settle_the_node_tip_before_a_rollback.test.js": "94f602d41143890d",

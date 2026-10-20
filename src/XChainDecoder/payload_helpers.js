@@ -35,6 +35,13 @@ function nodeStillCatchingUp(info){
     return !!info && info["initialblockdownload"] === true
 }
 
+// Check a getblockchaininfo reply carries numeric `blocks` and `verificationprogress`.
+// A trimmed proxy reply makes `undefined < threshold` false and passes the not-synced
+// gate, so both node-tip paths (fetchChainTip, readReorgTip) refuse it through this.
+function blockchainInfoWellFormed(info){
+    return !!info && typeof info["blocks"] === 'number' && typeof info["verificationprogress"] === 'number'
+}
+
 // Compiled size of a single script push once bitcoin.script.compile adds its
 // length prefix: a direct push opcode for <=75 bytes, OP_PUSHDATA1 (+2) for
 // <=255, or OP_PUSHDATA2 (+3) beyond that. Single source for measuring both
@@ -103,4 +110,4 @@ function bigIntBufferutilsActive(bufferutils){
         return false
     }
 }
-module.exports = { nodeStillCatchingUp, compiledPushSize, canonicalizeActionPayload, bigIntBufferutilsActive }
+module.exports = { nodeStillCatchingUp, blockchainInfoWellFormed, compiledPushSize, canonicalizeActionPayload, bigIntBufferutilsActive }

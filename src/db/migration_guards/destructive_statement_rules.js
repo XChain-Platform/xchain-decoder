@@ -108,6 +108,13 @@ function createOutsideAllowList(stmt){
     return !/^CREATE\s+(?:(?:UNIQUE|FULLTEXT|SPATIAL)\s+)?INDEX\b/i.test(stmt);
 }
 
+// The closing allow-list: true unless the statement opens with a form an auto file may use.
+// Any other form (BINLOG, DO, SELECT, PURGE, RESET, INSTALL, ...) can make the server do
+// something this prefix classifier cannot see, the same blind spot as CALL above.
+function statementOutsideAllowList(stmt){
+    return !/^(?:ALTER\s+(?:ONLINE\s+)?TABLE|CREATE\s+(?:TEMPORARY\s+)?TABLE|CREATE\s+(?:(?:UNIQUE|FULLTEXT|SPATIAL)\s+)?INDEX|DROP\s+(?:INDEX|TEMPORARY\s+TABLE)|INSERT|UPDATE|SET)\b/i.test(stmt);
+}
+
 function isDestructiveAlter(stmt, safeAlterDrop){
     // Partition and tablespace clauses move or discard row data while carrying
     // none of the keywords the checks below look for: TRUNCATE PARTITION empties
@@ -159,4 +166,6 @@ function isDestructiveAlter(stmt, safeAlterDrop){
     return false;
 }
 
-module.exports = { hasUnquotedHash, isSimpleDestructiveStatement, createOutsideAllowList, isDestructiveAlter }
+module.exports = {
+    hasUnquotedHash, isSimpleDestructiveStatement, createOutsideAllowList, isDestructiveAlter, statementOutsideAllowList,
+}

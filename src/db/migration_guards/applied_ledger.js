@@ -44,7 +44,7 @@ async function reconcileAppliedMigration(context, file, checksum){
     // mode fail closed so a diverged schema is caught in CI / by an operator
     // instead of silently continuing. Default auto-startup stays non-fatal
     // (console.error, not warn) to avoid a surprise fleet-wide boot failure.
-    // Mirrors xchain-indexer/src/db/index.js.
+    // Mirrors xchain-indexer/src/db/database/migration_runner.js:checkAppliedChecksum.
     if(context.includeManual || config.MIGRATION_STRICT_CHECKSUM === '1'){
         // Tailor the remedy to which branch actually fired. The operator path
         // (includeManual, `node src/db/migrate.js`) ALWAYS fails closed by design, so
@@ -77,7 +77,7 @@ function guardMigrationFrontier(context, file, mode){
     // baselined by THIS run never move it and a resumed partial run is fine.
     // Auto files only - see Database.backdatedFrontierViolation for why a
     // deferred mode=manual file cannot be told apart from a backdated one.
-    // Mirrors xchain-indexer/src/db/index.js.
+    // Mirrors xchain-indexer/src/db/database/migration_runner.js:guardBackdatedFrontier.
     if(mode !== 'auto') return;
     const frontier = Database.backdatedFrontierViolation(file, context.appliedByName.keys());
     if(!frontier) return;
