@@ -117,6 +117,15 @@ describe('XChainDecoder#getSourceFromOutput()', () => {
         assert.ok(decoder.connector.getRawTransaction.calledTwice)
     })
 
+})
+
+describe('XChainDecoder#getSourceFromOutput() P2WSH walk-back gate', () => {
+    let decoder
+
+    afterEach(() => {
+        sinon.restore()
+    })
+
     it('does not chase P2WSH-shaped outputs on non-segwit chains after activation', async () => {
         decoder = new XChainDecoder(
             'dogecoin-regtest', null, null, null, null, null,

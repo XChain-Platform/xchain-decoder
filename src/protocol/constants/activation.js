@@ -326,10 +326,9 @@ const ENVELOPE_CARRIER_RECOGNITION_ACTIVATION = {
     DOGE: { mainnet: null, testnet: null, regtest: null },
 };
 
-// Stops treating an arbitrary OP_0 <32-byte> output as a P2WSH commit on chains
-// that do not support segwit. The pre-gate walk-back remains replay-compatible.
+// Stops walking back through OP_0 <32-byte> outputs on chains without segwit.
 // DOGE mainnet and testnet stay unarmed until their histories have been scanned;
-// regtest starts at genesis so the guarded behavior is continuously exercised.
+// regtest starts at genesis.
 const P2WSH_WALKBACK_SEGWIT_GATE_ACTIVATION = {
     BTC:  { mainnet: 0, testnet: 0, regtest: 0 },
     LTC:  { mainnet: 0, testnet: 0, regtest: 0 },
