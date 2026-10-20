@@ -30,15 +30,17 @@ function restoreActivationAround() {
 describe('DISPENSER exact integer EXPIRATION activation', function () {
     restoreActivationAround()
 
-    it('is public and UNARMED on every network', function () {
+    it('is public, UNARMED on mainnet and testnet, and genesis-active on regtest', function () {
         assert.deepStrictEqual(activation[NAME], {
             mainnet: null,
             testnet: null,
-            regtest: null,
+            regtest: 0,
         })
         assert.strictEqual(constants[NAME], activation[NAME])
-        for (const network of Object.keys(activation[NAME]))
+        for (const network of ['mainnet', 'testnet'])
             assert.strictEqual(isExactIntegerExpirationActive(network, 4000000000), false)
+        assert.strictEqual(isExactIntegerExpirationActive('regtest', 0), true)
+        assert.strictEqual(isExactIntegerExpirationActive('regtest', 4000000000), true)
         assert.strictEqual(isExactIntegerExpirationActive('unknown', 4000000000), false)
         assert.strictEqual(isExactIntegerExpirationActive('regtest', NaN), false)
     })
@@ -63,6 +65,7 @@ describe('DISPENSER exact integer EXPIRATION decoding', function () {
     restoreActivationAround()
 
     it('preserves precision-rounded create and edit behavior below the gate', async function () {
+        activation[NAME].regtest = null
         const model = new DispenserModel()
         const createToken = `${T0 + 1000000}.0000000001`
         const editToken = `${T0 + 2000000}.0000000001`
