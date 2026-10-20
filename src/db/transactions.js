@@ -291,8 +291,10 @@ module.exports = {
             await seedMempoolSnapshot(connection, TMP, txidList, INSERT_CHUNK)
             return await reconcileMempoolSnapshot(connection, TMP, txidList)
         } catch (err) {
+            // Rethrow so updateMempool skips the cycle (a resolved result would leave the
+            // whole node mempool in txidList and re-fetch every txid from the node).
             logger.error(formatLogLine('Error diffing mempool_transactions:', err));
-            return { transactionsDeleted: 0 }
+            throw err
         } finally {
             await dropMempoolSnapshot(connection, TMP)
             if (ownLease) {

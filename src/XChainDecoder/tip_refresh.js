@@ -21,7 +21,7 @@
 const { format: formatLogLine } = require('node:util')
 const { chainTierMismatch, chainFieldMissing, chainGenesisUnpinned } = require('../protocol/chain_identity')
 const { logger, BLOCKCHAIN_INFO_REFRESH_MS, MIN_VERIFICATION_PROGRESS_TO_PARSE } = require('./constants.js')
-const { nodeStillCatchingUp } = require('./payload_helpers.js')
+const { nodeStillCatchingUp, blockchainInfoWellFormed } = require('./payload_helpers.js')
 const { parkOrRethrow } = require('./sync_loop.js')
 
 // lastBlockchainInfo is the reply fetchChainTip just stored on the loop, passed in
@@ -104,12 +104,10 @@ async function fetchChainTip(loop){
         // response or a per-coin getblockchaininfo variant could omit these
         // fields; without this guard `undefined < 0.99` is false (the
         // not-synced gate silently passes) and `blocks` becomes undefined
-        // (every later height comparison quietly goes wrong). Mirror the
-        // typeof-number discipline verifyReorg's tip refresh already applies
-        // and treat a malformed result like the RPC-failure branch below.
-        if (!loop.lastBlockchainInfo
-            || typeof loop.lastBlockchainInfo["blocks"] !== 'number'
-            || typeof loop.lastBlockchainInfo["verificationprogress"] !== 'number'){
+        // (every later height comparison quietly goes wrong). verifyReorg's
+        // mid-walk tip refresh applies the same shared check, and a malformed
+        // result is treated like the RPC-failure branch below.
+        if (!blockchainInfoWellFormed(loop.lastBlockchainInfo)){
             logger.error("Malformed getblockchaininfo response (missing or non-numeric 'blocks'/'verificationprogress'). Trying again...")
             loop.lastBlockchainInfo = null
             await this.sleep(3000)

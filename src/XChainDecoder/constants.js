@@ -101,8 +101,9 @@ const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // money-bearing dispenser on the reorged node. Standard networks use 126 and
 // Litecoin testnet uses 5006. Invariant: SAFE_DEPTH >= matching undo window +
 // margin. The +6 margin means a small undo-window re-tune
-// cannot land exactly at the purge threshold; dispenserSafeDepth.test.js
-// enforces the invariant with a conformance read of undo-blocks.js.
+// cannot land exactly at the purge threshold; test/unit/dispenser_safe_depth.test.js
+// enforces the invariant with a conformance read of DEFAULT_UNDO_BLOCKS in
+// xchain-utxo-tracker/src/chain/undo_blocks.js.
 // Purging deeper is the conservative direction (rows are merely retained longer
 // before hard-purge; expiry semantics and action evaluation are unchanged).
 const DISPENSER_EXPIRE_SAFE_DEPTH = 126 // 120 (deepest standard window) + 6 margin

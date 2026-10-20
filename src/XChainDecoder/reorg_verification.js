@@ -22,7 +22,7 @@ const { format: formatLogLine } = require('node:util')
 const { chainTierMismatch } = require('../protocol/chain_identity')
 const { logger, DISPENSER_EXPIRE_SAFE_DEPTH, MIN_VERIFICATION_PROGRESS_TO_PARSE } = require('./constants.js')
 const { haltReorg } = require('./reorg_halt.js')
-const { nodeStillCatchingUp } = require('./payload_helpers.js')
+const { nodeStillCatchingUp, blockchainInfoWellFormed } = require('./payload_helpers.js')
 
 function safeDepthFor(decoder){
     return decoder.dispenserExpireSafeDepth || DISPENSER_EXPIRE_SAFE_DEPTH
@@ -175,11 +175,18 @@ function nodeTipStillCatchingUp(info){
 }
 
 // Read the node tip through the block loop's gates. Answers nodeTip unchanged when the
-// node cannot be read or a gate refuses the reply (foreign tier, foreign genesis, a node
-// still catching up), so a refused reading is never below the tip the walk already has.
+// node cannot be read or a gate refuses the reply (malformed shape, foreign tier, foreign
+// genesis, a node still catching up), so a refused reading is never below the tip the walk
+// already has.
 async function readReorgTip(nodeTip){
     try {
         const info = await this.connector.getBlockchainInfo()
+        // Refuse the same malformed shape fetchChainTip refuses: without a numeric
+        // verificationprogress the catching-up gate below cannot fire.
+        if (info && !blockchainInfoWellFormed(info)){
+            this.logWarn('reorg: ignoring a malformed tip refresh (missing or non-numeric blocks/verificationprogress)')
+            return nodeTip
+        }
         // Apply the block loop's chain-identity gate here too. This is
         // the SECOND path a node tip reaches nodeTip, and nodeTip is exactly what
         // the above-tip branch deletes valid local blocks against, so a foreign
@@ -190,7 +197,7 @@ async function readReorgTip(nodeTip){
         const reorgChainMismatch = info ? chainTierMismatch(this.consensusNetwork, info["chain"]) : null
         if (reorgChainMismatch){
             this.logError('reorg: ignoring a tip refresh from a foreign endpoint: ' + reorgChainMismatch)
-        } else if (info && typeof info.blocks === 'number') {
+        } else if (info) {
             // Tier agreement is not chain identity: a same-tier foreign node (BTC-mainnet
             // and DOGE-mainnet both report chain="main") passes the tier gate above, so
             // re-prove the chain with the genesis pin too, exactly as the block loop does

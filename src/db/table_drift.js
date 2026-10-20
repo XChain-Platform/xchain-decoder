@@ -78,7 +78,8 @@ module.exports = {
             // NOT NULL, so a MODIFY ... NULL on one is a silent no-op (PK) or, worse,
             // silently STRIPS the AUTO_INCREMENT attribute - the mirror-cursor
             // corruption the indexer hit live on 2026-06-10. Mirrors
-            // xchain-indexer/src/db/index.js so both reconcilers infer NOT NULL identically.
+            // xchain-indexer/src/db/database/schema_drift.js:parseExpectedColumns so both
+            // reconcilers infer NOT NULL identically.
             const nullable   = !/\bNOT\s+NULL\b/i.test(line) && !/\bPRIMARY\s+KEY\b/i.test(line) && !/\bAUTO_INCREMENT\b/i.test(line);
             const notNull    = !nullable;
             const hasDefault = /\bDEFAULT\b/i.test(line);

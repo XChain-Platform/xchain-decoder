@@ -5,6 +5,9 @@
     "test/unit/db_queries.test/04_delete_block_by_index.test.js": {
       "Database#deleteBlockByIndex() executes 4 DELETE queries and returns true on success": "Database#deleteBlockByIndex() executes 5 DELETE queries and returns true on success"
     },
+    "test/unit/db_queries.test/15_delete_and_compare_txs_not_in_list.test.js": {
+      "Database#deleteAndCompareTxsNotInList() returns transactionsDeleted=0 on query error": "Database#deleteAndCompareTxsNotInList() rejects on query error, leaving txidList whole and releasing the connection"
+    },
     "test/unit/db_queries.test/20_error_path_transaction_connection_branches.test.js": {
       "Database error-path transactionConnection branches createAddress: swallows INSERT error even with active transactionConnection": "Database error-path transactionConnection branches createAddress: rethrows an INSERT error inside an active transaction so the block rolls back"
     },

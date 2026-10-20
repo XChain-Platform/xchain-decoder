@@ -41,6 +41,7 @@ const BitcoinCore = require('bitcoin-core')
 const nodeHelper = require('../../helpers/node_helper')
 const XChainDecoder = require('../../../src/XChainDecoder')
 const Database = require('../../../src/db.js')
+const { dropAllTables } = require('../../support/drop_tables')
 const fixturePorts = require('../../../bin/fixture-ports.js')
 
 // Fixture venue. Must match fixtures/docker-compose.test.yml.
@@ -118,7 +119,7 @@ exports.mochaHooks = {
         // Prepare DB
         global.db = new Database(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
         await global.db.createDatabase()
-        await global.db.dropDatabase()
+        await dropAllTables(global.db)
         await global.db.verifyTables()
 
         console.log('[integration] Funding test wallet')

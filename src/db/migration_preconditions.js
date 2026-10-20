@@ -213,7 +213,8 @@ Database.MIGRATION_PRECONDITIONS = {
     },
 };
 
-// Backdating guard for the auto-apply path, mirroring xchain-indexer/src/db/index.js. Apply
+// Backdating guard for the auto-apply path, mirroring
+// xchain-indexer/src/db/database/migration_registry.js:backdatedFrontierViolation. Apply
 // order is lexical, so a migration added with a date EARLIER than one already applied
 // runs in a different position on a fresh database (in its date slot) than on an aged
 // one (after the frontier), and the two schemas diverge across the fleet. Given a
@@ -279,8 +280,9 @@ Database.DEPLOY_PRECONDITION_TAG = 'deploy-precondition=required';
 //
 // ADDING A STARTUP ASSERTION: register it here and tag its migration file, or the
 // next fleet deploy discovers the requirement as a crash-loop again. Give the file a
-// MIGRATION_PRECONDITIONS baseline too, or a database built from the current src/sql
-// never records it and the deploy tool refuses every update. A server-setting
+// MIGRATION_PRECONDITIONS baseline too: verifyTables records every committed file only on
+// a database it builds from empty, so one built from src/sql by an earlier release never
+// records it and the deploy tool refuses every update. A server-setting
 // assertion with no migration behind it (assertStrictSqlMode) is not registered: the
 // pool pins what it checks, so it holds by construction and cannot crash-loop a deploy.
 Database.STARTUP_ASSERTED_MIGRATIONS = [

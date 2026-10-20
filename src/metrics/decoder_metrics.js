@@ -40,7 +40,9 @@ const DECODER_GAUGES = [
     ['stalled',                               '1 when the block loop is wedged on one height (/live gates on poll_silent too)'],
     ['poll_silent',                           '1 when the block loop has stopped ITERATING; gates /live health beside stalled'],
     ['last_poll_timestamp_seconds',           'Unix time of the last block-loop iteration, whether or not a block arrived'],
-    ['last_reorg_depth',                      'Blocks rolled back by the most recent reorg']
+    ['last_reorg_depth',                      'Blocks rolled back by the most recent reorg'],
+    ['reorg_halted',                          '1 when a REORG_HALT marker is held (latent or parked); absent until the first marker probe'],
+    ['reorg_halt_parked',                     '1 when the parse loop has stopped on a REORG_HALT; node_height_stale also reads 1 while parked']
 ];
 
 const DECODER_COUNTERS = [
@@ -99,6 +101,14 @@ function collectDecoderMetrics(decoder, gauges, counters) {
     // deployed; these read the decoder's own lifetime counters at scrape time.
     setIf(gauges.last_reorg_depth, decoder.lastReorgDepth);
     counters.reorgs_total.setMonotonic({}, decoder.reorgCount || 0);
+
+    // Export the REORG_HALT state /live and /ready already carry: a parked loop skips
+    // the tip refresh, so without these it reads as a stale node tip. The halt flag stays
+    // absent until a probe has answered, since "never looked" is not "not halted".
+    if (decoder.reorgHaltCheckedAt > 0 || decoder.reorgHalted === true) {
+        gauges.reorg_halted.set({}, decoder.reorgHalted === true ? 1 : 0);
+    }
+    gauges.reorg_halt_parked.set({}, decoder.reorgHaltParked === true ? 1 : 0);
 }
 
 // Only finite numbers reach the registry: Gauge#set throws on NaN/undefined,

@@ -196,7 +196,9 @@ function* storeMempoolTransaction(nodeTxid, nextTxHex, nextTxHexIndex, openDispe
     // confirmed twin silently mismatches (uuid:26220713). A rejected ACTION
     // on a money-bearing tx blanks to '' (never SQL NULL) for the same reason.
     const stored = admitMempoolAction.call(this, parseResult, nextTransactionHash)
-    if (stored.skip) return false
+    // Store a gate-skipped tx blanked as its seen-set entry (the block path rejects it
+    // once; without a row every poll re-fetches it and re-counts its parse error).
+    const blanked = stored.skip
 
     if (!(yield this.mempoolDb.insertMempoolTransaction({
         hash: nextTransactionHash,
@@ -204,14 +206,14 @@ function* storeMempoolTransaction(nodeTxid, nextTxHex, nextTxHexIndex, openDispe
         destination: parseResult["destination"],
         amount: parseResult["amount"],
         fee: 0,
-        data: stored.data,
-        raw_data: stored.rawData
+        data: blanked ? "" : stored.data,
+        raw_data: blanked ? null : stored.rawData
 
     }))) {
         yield this.sleep(3000)
         return false
     } else {
-        return !stored.unattributed && (parseResult["data"] != null) && (parseResult["data"].length > 0)
+        return !blanked && !stored.unattributed && (parseResult["data"] != null) && (parseResult["data"].length > 0)
     }
 }
 

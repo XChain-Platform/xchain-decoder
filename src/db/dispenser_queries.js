@@ -285,15 +285,17 @@ module.exports = {
     // LIMIT 1 stops at the first hit; a database with none scans the table once,
     // which is acceptable for a one-off operator command.
     //
-    // BOTH arms are load-bearing. A dispenser opened inside a BATCH is stored as
-    // `BATCH|0|DISPENSER|0|...`, which a top-level `DISPENSER|%` prefix test cannot
-    // see, and the decoder does register those (the batch sub-command capture gate is
-    // in force on every network). Over-matching is deliberate and fail-safe: this
+    // ALL THREE arms are load-bearing. A dispenser opened inside a BATCH is stored as
+    // `BATCH|0|DISPENSER|0|...` when it is the first sub-command and as
+    // `BATCH|0|SEND|0|...;DISPENSER|0|...` at any later position (sub-commands are
+    // ';'-joined), so a top-level `DISPENSER|%` prefix test sees neither, and the
+    // decoder does register both (the batch sub-command capture gate is in force on
+    // every network). Over-matching is deliberate and fail-safe: this
     // probe backs a REFUSAL, so a false positive costs the operator one replica
     // comparison plus an explicit --force, while a false negative silently certifies
     // a cleanliness that was never established. Do not narrow it again.
     async hasDispenserTransactions(){
-        const query = `SELECT 1 FROM transactions WHERE data LIKE 'DISPENSER|%' OR data LIKE '%|DISPENSER|%' LIMIT 1;`
+        const query = `SELECT 1 FROM transactions WHERE data LIKE 'DISPENSER|%' OR data LIKE '%|DISPENSER|%' OR data LIKE '%;DISPENSER|%' LIMIT 1;`
         let connection = await this.getConnection()
         const ownLease = (this.transactionConnection == null)
         try {

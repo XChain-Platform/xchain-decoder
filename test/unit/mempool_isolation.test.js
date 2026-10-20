@@ -161,4 +161,20 @@ describe('updateMempool DB isolation', function () {
     assert.match(summary, /3 in mempool/, 'the summary must report the size the node reported')
     assert.match(summary, /0 new/, 'the post-diff length is the new-arrival count and must be labelled so')
   })
+
+  // Drives the REAL Database diff over a failing connection: a swallowed failure left the
+  // whole node mempool in the list and the batch phase re-fetched every txid each poll.
+  it('skips the fetch phase when the mempool diff fails in the database', async () => {
+    const Database = require('../../src/db.js')
+    const { decoder } = buildDecoder(true)
+    const realDb = new Database('127.0.0.1', 3306, 'xchain_btc_regtest', 'u', 'p')
+    const conn = { query: async () => { throw new Error('CREATE TEMPORARY TABLE denied') }, release: async () => {} }
+    realDb.pool = { getConnection: async () => conn }
+    decoder.mempoolDb.deleteAndCompareTxsNotInList = (list) => realDb.deleteAndCompareTxsNotInList(list)
+    let fetched = 0
+    decoder.connector.getRawTransactions = async (chunk) => { fetched += chunk.length; return [] }
+    await assert.rejects(decoder.updateMempool(), /CREATE TEMPORARY TABLE denied/)
+    assert.strictEqual(fetched, 0, 'a failed diff must not fall through to getRawTransactions')
+    assert.strictEqual(decoder.mempoolBusy, false, 'the next poll must be free to retry the diff')
+  })
 })

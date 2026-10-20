@@ -11,7 +11,7 @@
 // Unit tests for Database query methods (no real DB).
 // Covers: all async query methods, getConnection retry/give-up,
 // releaseConnection, beginTransaction, endTransaction, commitTransaction,
-// verifyDatabase, createDatabase, dropDatabase, and related helpers.
+// verifyDatabase, createDatabase, and related helpers.
 // Uses sinon to inject a fake pool (no proxyquire).
 
 'use strict';
@@ -19,6 +19,7 @@
 const assert   = require('assert');
 const sinon    = require('sinon');
 const Database = require('../../../src/db.js');
+const { DROP_ORDER, dropAllTables } = require('../../support/drop_tables');
 
 
 function makeDb(name = 'xchain_btc_mainnet') {
@@ -43,7 +44,7 @@ function injectPool(db, pool) {
     db.pool = pool;
 }
 
-describe('Database#dropDatabase()', () => {
+describe('dropAllTables()', () => {
     afterEach(() => sinon.restore());
 
     it('executes all DROP TABLE queries without throwing', async () => {
@@ -51,9 +52,8 @@ describe('Database#dropDatabase()', () => {
         const q  = sinon.stub().resolves([]);
         const { pool, conn } = withConn(q);
         injectPool(db, pool);
-        await db.dropDatabase();
-        // Should have called query at least 9 times (9 tables)
-        assert.ok(conn.query.callCount >= 9);
+        await dropAllTables(db);
+        assert.strictEqual(conn.query.callCount, DROP_ORDER.length);
         const sqls = conn.query.getCalls().map(c => c.args[0]);
         assert.ok(sqls.some(s => /DROP TABLE IF EXISTS blocks/i.test(s)));
         assert.ok(sqls.some(s => /DROP TABLE IF EXISTS transactions/i.test(s)));

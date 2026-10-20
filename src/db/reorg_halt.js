@@ -187,15 +187,17 @@ module.exports = {
         }
     },
 
-    // Read the durable halt marker WITH its detail. isReorgHalted() above
-    // answers the one question verifyReorg asks (may I roll back?) and deliberately
-    // stays a bare existence probe on the hot reorg path. Operator-facing surfaces
-    // (health, GET /status, the bootstrap publisher's source gate) need to say WHEN
-    // the decoder halted and WHY, because a latent marker is otherwise invisible
-    // until a reorg trips it days later. Returns { halted, at, reason }; `at`/`reason`
-    // are null when the row exists but its payload is unreadable (an older marker, or
-    // JSON written by a different revision), which must never turn a real halt into a
-    // reported non-halt.
+    // Read the durable halt marker WITH its detail. isReorgHalted() above is the
+    // boolean view of the same readReorgHaltState() read: the newest REORG_HALT /
+    // REORG_HALT_CLEARED row by id decides, so a bare `code = 'REORG_HALT'` existence
+    // check would report a cleared halt as live. Operator-facing surfaces (health,
+    // GET /status, the bootstrap publisher's source gate) need to say WHEN the decoder
+    // halted and WHY, because a latent marker is otherwise invisible until a reorg
+    // trips it days later. Returns readReorgHaltState() without its unaudited_clear
+    // flag: { halted, id, at, reason, cleared_at, cleared_reason }. A halt row with an
+    // unreadable payload still reads as halted, with `reason` null and `at` falling
+    // back to the row time; an unaudited clear reads as halted with the
+    // unaudited-clear reason.
     //
     // `id` is the events row id of the live halt (null when not halted, or when the
     // id could not be read). It is the identity clear-reorg-halt pins its
@@ -231,8 +233,8 @@ module.exports = {
     // silently resumed over-deep rollback, and every consumer of it (the entry
     // guard, the health surfaces, the bootstrap gate) reads the ROW, not the ack.
     async markReorgHalted(reason){
-        // An unaudited clear row reads as halted but is no REORG_HALT row, and the
-        // bootstrap gate counts only those rows, so that halt still gets one written.
+        // An unaudited clear row reads as halted but is no REORG_HALT row, and older
+        // bootstrap gates count only those rows, so that halt still gets one written.
         const live = await this.readReorgHaltState()
         if (live.halted && !live.unaudited_clear) return true
         const written = await this.insertEvent('REORG_HALT', { reason: reason, at: new Date().toISOString() })
