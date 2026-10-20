@@ -34,6 +34,12 @@
       "Database error-path transactionConnection branches insertTransactionOutput: calls endTransaction when transactionConnection is active on generic error",
       "Database#ensureMigrationsLedger() calls CREATE TABLE IF NOT EXISTS schema_migrations on the connection"
     ],
+    "05c22e4bac27a7bd": [
+      "fresh decoder database records its migrations before creating tables leaves the ledger exactly as it was across a second boot",
+      "fresh decoder database records its migrations before creating tables matches the schema a full migration run produces on an unseeded build",
+      "fresh decoder database records its migrations before creating tables records every committed migration with the runner checksum and mode, and replays none",
+      "fresh decoder database records its migrations before creating tables seeds nothing on a database that already holds a declared table"
+    ],
     "05ef33730e0f85a6": [
       "BATCH dispenser registration a dispenser created inside a BATCH registers NOTHING below the gate (the live defect, preserved for replay)",
       "BATCH dispenser registration a dispenser created inside a BATCH registers above the gate, exactly as a top-level create does",
@@ -3219,6 +3225,13 @@
       "Security: SQL Parameterization Database name validation should reject an empty database name",
       "Security: SQL Parameterization deleteAndCompareTxsNotInList parameterization [REGRESSION P0] R-SEC-001: should use parameterized placeholders instead of string concatenation"
     ],
+    "eb333e06c5c0a538": [
+      "mempool first_seen DATETIME migration on MariaDB baselines a fresh schema and preserves its matching first_seen definition",
+      "mempool first_seen DATETIME migration on MariaDB leaves both migrated column definitions unchanged on a targeted rerun",
+      "mempool first_seen DATETIME migration on MariaDB records the migration when it builds the schema from empty, with first_seen already at its migrated definition",
+      "mempool first_seen DATETIME migration on MariaDB reproduces session-dependent reads on the aged TIMESTAMP columns",
+      "mempool first_seen DATETIME migration on MariaDB retypes the observation and ledger columns without shifting their values"
+    ],
     "eb458618fc930251": [
       "XChainDecoder.verifyReorg does not mistake a failed DB read for an exhausted table [REGRESSION P0] retries the walk through failed reads and still rolls every orphan block back"
     ],
@@ -3359,12 +3372,6 @@
       "ORACLE_FEE_SET_CAPTURE_ACTIVATION conformance carries a block time or null (DISARMED) per network, regtest genesis-on",
       "ORACLE_FEE_SET_CAPTURE_ACTIVATION conformance is value-identical to the canonical map in xchain-documentation",
       "ORACLE_FEE_SET_CAPTURE_ACTIVATION conformance never precedes the base oracle-fee capture gate on any network"
-    ],
-    "f826f2a2639c2bf3": [
-      "mempool first_seen DATETIME migration on MariaDB baselines a fresh schema and preserves its matching first_seen definition",
-      "mempool first_seen DATETIME migration on MariaDB leaves both migrated column definitions unchanged on a targeted rerun",
-      "mempool first_seen DATETIME migration on MariaDB reproduces session-dependent reads on the aged TIMESTAMP columns",
-      "mempool first_seen DATETIME migration on MariaDB retypes the observation and ledger columns without shifting their values"
     ],
     "f9ea8bf6004987f7": [
       "Security: Connection Handling Transaction lock mechanism [REGRESSION P0] R-SEC-003: should acquire lock on first call",
@@ -3792,13 +3799,14 @@
       "skipped": "not a mocha command (runs node)"
     },
     "test:integration:mocha": {
-      "fileCount": 6,
-      "titleCount": 34,
+      "fileCount": 7,
+      "titleCount": 39,
       "files": {
         "test/integration/dispensers.test.js": "4ddee0a65a60fc97",
+        "test/integration/fresh_schema_ledger_seed_real.test.js": "05c22e4bac27a7bd",
         "test/integration/indexer_contract.test.js": "577e505c41e8c55b",
         "test/integration/malformed.test.js": "a1f7b506ab91b517",
-        "test/integration/mempool_first_seen_datetime_real.test.js": "f826f2a2639c2bf3",
+        "test/integration/mempool_first_seen_datetime_real.test.js": "eb333e06c5c0a538",
         "test/integration/multisig.test.js": "2ee2031083237da3",
         "test/integration/op_return.test.js": "7530468e8b9c8c69"
       }

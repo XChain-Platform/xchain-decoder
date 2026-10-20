@@ -231,8 +231,8 @@ module.exports = {
     // silently resumed over-deep rollback, and every consumer of it (the entry
     // guard, the health surfaces, the bootstrap gate) reads the ROW, not the ack.
     async markReorgHalted(reason){
-        // An unaudited clear row reads as halted but is no REORG_HALT row, and the
-        // bootstrap gate counts only those rows, so that halt still gets one written.
+        // An unaudited clear row reads as halted but is no REORG_HALT row, and older
+        // bootstrap gates count only those rows, so that halt still gets one written.
         const live = await this.readReorgHaltState()
         if (live.halted && !live.unaudited_clear) return true
         const written = await this.insertEvent('REORG_HALT', { reason: reason, at: new Date().toISOString() })

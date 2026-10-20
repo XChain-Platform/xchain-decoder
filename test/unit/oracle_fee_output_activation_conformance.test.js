@@ -23,8 +23,9 @@
 // Three tiers, so a one-sided edit fails somewhere no matter which checkout is present:
 //   1. PIN     - the vendored value equals the pinned flag-day instant, in this repo alone.
 //   2. DOCS    - it equals the canonical map in xchain-documentation/protocol/constants.js.
-//   3. INDEXER - it is >= the indexer's FIX_OUTPUT_FANOUT mainnet block-time, so capture can
-//                never begin in a block the indexer would halt on.
+//   3. INDEXER - on every network it is >= the indexer's FIX_OUTPUT_FANOUT block-time, and that
+//                row carries no height gate, so capture can never begin in a block the
+//                indexer would halt on.
 // Tiers 2 and 3 skip when the sibling checkout is absent (standalone deploy); set
 // XCHAIN_REQUIRE_SIBLINGS=1 in CI so a missing sibling hard-fails instead of green-by-skip.
 
@@ -101,17 +102,48 @@ describe('ORACLE_FEE_OUTPUT_ACTIVATION conformance', function () {
         // regtest_block), written either as the historical addChange(...) call or as the
         // array literal the registry parts hold; both spellings are accepted so the guard
         // reads the same row through either layout.
-        const src = indexerChangesCorpus();
-        const m = /(?:addChange\(|\[)\s*'FIX_OUTPUT_FANOUT'\s*,\s*'[^']*'\s*,\s*(\d+)\s*,/.exec(src);
-        assert.ok(m, 'FIX_OUTPUT_FANOUT must be registered in xchain-indexer/src/protocol_changes.js ' +
-            'or one of its registry parts under src/protocol_changes/');
-        const fanoutMainnetTime = parseInt(m[1], 10);
-        assert.ok(ORACLE_FEE_OUTPUT_ACTIVATION.mainnet >= fanoutMainnetTime,
-            'oracle-fee capture (' + ORACLE_FEE_OUTPUT_ACTIVATION.mainnet + ') must not begin before ' +
-            'FIX_OUTPUT_FANOUT (' + fanoutMainnetTime + '): a second stored output below that ' +
-            'flag-day is a consensus-critical fan-out fault that halts the block');
+        const row = fixOutputFanoutRow();
+        for (const network of ['mainnet', 'testnet', 'regtest']) {
+            const fanoutTime = row[network + '_time'];
+            assert.ok(ORACLE_FEE_OUTPUT_ACTIVATION[network] >= fanoutTime,
+                network + ' oracle-fee capture (' + ORACLE_FEE_OUTPUT_ACTIVATION[network] + ') must not ' +
+                'begin before FIX_OUTPUT_FANOUT (' + fanoutTime + '): a second stored output below that ' +
+                'flag-day is a consensus-critical fan-out fault that halts the block');
+        }
+    });
+
+    it('needs no indexer FIX_OUTPUT_FANOUT block-height gate (the decoder gate is time-only)', function () {
+        if (!siblingOrSkip(this, INDEXER_CHANGES)) return;
+        // isEnabled ANDs the time and height gates, so a non-zero *_block holds the collapse
+        // off past its time gate, where this time-only capture would already halt blocks.
+        const row = fixOutputFanoutRow();
+        for (const network of ['mainnet', 'testnet', 'regtest']) {
+            assert.strictEqual(row[network + '_block'], 0,
+                'FIX_OUTPUT_FANOUT ' + network + '_block is ' + row[network + '_block'] + ': the ' +
+                'decoder oracle-fee gate cannot mirror a height gate, so arm it by time only');
+        }
     });
 });
+
+// The FIX_OUTPUT_FANOUT arming row, all six gate columns, read from indexer source.
+// A non-integer column (a named constant, a thunk) fails here rather than reading as 0.
+function fixOutputFanoutRow(){
+    const src = indexerChangesCorpus();
+    const head = /(?:addChange\(|\[)\s*'FIX_OUTPUT_FANOUT'\s*,\s*'[^']*'\s*,([^\])]*)[\])]/.exec(src);
+    assert.ok(head, 'FIX_OUTPUT_FANOUT must be registered in xchain-indexer/src/protocol_changes.js ' +
+        'or one of its registry parts under src/protocol_changes/');
+    const cols = head[1].split(',').map(s => s.trim());
+    const names = ['mainnet_time', 'testnet_time', 'regtest_time', 'mainnet_block', 'testnet_block', 'regtest_block'];
+    assert.strictEqual(cols.length, names.length,
+        'FIX_OUTPUT_FANOUT row must carry exactly six gate columns, read: ' + head[1]);
+    const row = {};
+    names.forEach((name, i) => {
+        assert.ok(/^\d+$/.test(cols[i]),
+            'FIX_OUTPUT_FANOUT ' + name + ' must be an integer literal for this guard to read it, got: ' + cols[i]);
+        row[name] = parseInt(cols[i], 10);
+    });
+    return row;
+}
 
 // ORACLE_FEE_SET_CAPTURE_ACTIVATION drift guard.
 //

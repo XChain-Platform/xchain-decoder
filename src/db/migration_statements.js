@@ -65,7 +65,9 @@ function isSimpleDestructiveStatement(stmt){
     // silently instead of failing; and SET STATEMENT v=x FOR <stmt> hides a statement
     // behind the SET keyword from every check below.
     if(/^SET\b/i.test(stmt) && !autoEligibleSet(stmt)) return true;
-    if(/^DROP\s+(TABLE|DATABASE|SCHEMA)\b/i.test(stmt)) return true;
+    // DROP is an allow-list like CREATE: only a standalone index drop and a session temporary-table
+    // drop stay auto-eligible, since a sequence, trigger, view, event or routine drop loses state or behaviour.
+    if(/^DROP\b/i.test(stmt) && !/^DROP\s+(?:INDEX|TEMPORARY\s+TABLE)\b/i.test(stmt)) return true;
     // CREATE OR REPLACE TABLE is an atomic DROP TABLE IF EXISTS + CREATE: it destroys
     // every existing row. Plain CREATE TABLE / CREATE TABLE IF NOT EXISTS are additive
     // and stay unflagged (see the CREATE note below); only the OR REPLACE form loses
@@ -186,7 +188,8 @@ module.exports = {
     // Byte-for-byte the same classifier as xchain-indexer/src/db/database/migration_scan.js
     // so the two migration runners stay legible as a pair.
     //
-    // Flagged as destructive: DROP TABLE/DATABASE/SCHEMA, TRUNCATE, RENAME TABLE,
+    // Flagged as destructive: any top-level DROP other than DROP INDEX and DROP TEMPORARY
+    // TABLE (sequences, triggers, views, events and routines too), TRUNCATE, RENAME TABLE,
     // DELETE (any form), REPLACE INTO (atomic DELETE+INSERT), INSERT ... ON DUPLICATE
     // KEY UPDATE (rewrites every colliding row), LOAD DATA (rows from a file the
     // scanner cannot read), UPDATE (except the
@@ -206,7 +209,8 @@ module.exports = {
     //
     // Deliberately NOT flagged (legitimate existing auto patterns): DROP INDEX/KEY,
     // DROP FOREIGN KEY/CONSTRAINT/CHECK/DEFAULT/PRIMARY KEY with the keyword bare and
-    // unquoted (structural, no row data lost), ADD ..., plain InnoDB or engine-less CREATE
+    // unquoted (structural, no row data lost), a standalone DROP INDEX ... ON and
+    // DROP TEMPORARY TABLE, ADD ..., plain InnoDB or engine-less CREATE
     // TABLE / CREATE TABLE IF NOT EXISTS (additive; but CREATE OR REPLACE TABLE IS flagged -
     // it is an atomic DROP+CREATE), CREATE [UNIQUE] INDEX, MODIFY that widens/nullables a
     // column, and ALTER ONLINE TABLE under the same clause rules as plain ALTER TABLE.
@@ -288,8 +292,8 @@ module.exports = {
         return /^\s*WHERE\s+id\s*=\s*0\s*;?\s*$/i.test(stmt.slice(i));
     },
 
-    // Create the migration ledger if absent. Infrastructure, not a domain table, so
-    // verifyTables() doesn't manage it.
+    // Create the migration ledger if absent. Infrastructure, not a domain table, so it has no
+    // src/sql file; verifyTables() creates it only to seed a database it builds from empty.
     async ensureMigrationsLedger(conn){
         await conn.query(
             'CREATE TABLE IF NOT EXISTS schema_migrations (' +

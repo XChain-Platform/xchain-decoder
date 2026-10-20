@@ -126,13 +126,17 @@ describe('Database#deleteAndCompareTxsNotInList()', () => {
 describe('Database#deleteAndCompareTxsNotInList()', () => {
     afterEach(() => sinon.restore());
 
-    it('returns transactionsDeleted=0 on query error', async () => {
+    // A swallowed failure left txidList holding the whole node mempool, so the caller
+    // re-fetched every txid; rejecting lets updateMempool skip the cycle instead.
+    it('rejects on query error, leaving txidList whole and releasing the connection', async () => {
         const db = makeDb();
         const q  = sinon.stub().rejects(new Error('db error'));
-        const { pool } = withConn(q);
+        const { pool, conn } = withConn(q);
         injectPool(db, pool);
-        const r = await db.deleteAndCompareTxsNotInList(['aaaa']);
-        assert.deepStrictEqual(r, { transactionsDeleted: 0 });
+        const list = ['aaaa', 'bbbb'];
+        await assert.rejects(db.deleteAndCompareTxsNotInList(list), /db error/);
+        assert.deepStrictEqual(list, ['aaaa', 'bbbb']);
+        assert.ok(conn.release.calledOnce, 'connection released on the failure path');
     });
 
     it('removes already-stored txids from the list in place (leaving only new arrivals)', async () => {

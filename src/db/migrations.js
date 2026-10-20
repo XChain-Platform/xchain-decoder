@@ -19,6 +19,20 @@ const Database = require('../db.js')
 const { logger } = require('./constants.js')
 const { migrationSession, retireMigrationConnection } = require('./migration_query_timeout.js')
 const { assertNoLiveColumnLoss } = require('./migration_live_schema_guard.js')
+const { assertUniqueKeyWitness } = require('./migration_key_witness.js')
+
+// The UNIQUE indexes a table's src/sql file declares, or none when the table has no source file
+function declaredUniqueIndexes(database, table){
+    // Only a plain identifier can name a src/sql file
+    if(!/^[\w$]+$/.test(table)) return [];
+    let data;
+    try { data = fs.readFileSync(database.sqlPath + '/' + table + '.sql', 'utf8'); }
+    catch(err){
+        if(err && err.code === 'ENOENT') return [];
+        throw err;
+    }
+    return database.parseExpectedIndexes(data, table).filter(index => index.unique);
+}
 
 function validateMigrationTargets(files, only, dir){
     // Targeted rollout: a name that matches no committed migration is almost
@@ -174,6 +188,9 @@ async function applyMigrationFile(database, context, file, raw, checksum, mode){
         }
         // The text scan cannot see what a MODIFY drops from the live column; this check can.
         await assertNoLiveColumnLoss(context.conn, file, statements);
+        // INSERT IGNORE dedupes nothing while a declared UNIQUE key is missing live, so require the key first.
+        await assertUniqueKeyWitness(context.conn, database.dbName, file, statements,
+            table => declaredUniqueIndexes(database, table));
     }
     // Lift the pool's 30s statement limit so a table rebuild is not killed half-applied.
     await context.activateQueryTimeout();

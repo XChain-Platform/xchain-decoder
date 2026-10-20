@@ -13,6 +13,7 @@
  **********************************************************************/
 
 const fs = require('fs');
+const crypto = require('crypto');
 const util = require('../util')
 const Database = require('../db.js')
 const { format: formatLogLine } = require('node:util');
@@ -78,6 +79,12 @@ async function verifyTableFiles(database, files, existing, db){
         }
     }
     return { checked, created };
+}
+
+// True when no table a src/sql file declares exists yet: a database this release builds from empty.
+function isFreshSchema(files, existing){
+    const declared = files.filter(f => f.endsWith('.sql')).map(f => f.slice(0, -4));
+    return declared.length > 0 && !declared.some(table => existing.has(table));
 }
 
 module.exports = {
@@ -154,6 +161,9 @@ module.exports = {
         logger.info('Verifying database and tables...');
         let result;
         try {
+            // A database built from empty takes every table at this release's src/sql shape, which is
+            // every committed migration's end state, so record them all before any CREATE runs.
+            if(isFreshSchema(files, existing)) await this.recordFreshSchemaMigrations(db);
             result = await verifyTableFiles(this, files, existing, db);
             if(result === null) return false;
         } finally {
@@ -174,6 +184,48 @@ module.exports = {
         }
         logger.info('Database and tables verified (' + result.checked + ' tables, ' + result.created + ' created).');
         return true;
+    },
+
+    // Record every committed migration as applied on a database verifyTables is about to build
+    // from empty, so startup never replays one against tables that already hold its end state.
+    // Same lock and checksum as runMigrations; one transaction, so the ledger is all or nothing.
+    async recordFreshSchemaMigrations(db){
+        const dir = this.sqlPath + '/migrations';
+        let files = [];
+        try { files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort(); }
+        catch(_){ return; }   // no migrations dir: nothing to record
+        if(!files.length) return;
+        // Ledger DDL commits implicitly, so it runs before the transaction opens.
+        await this.ensureMigrationsLedger(db);
+        // Refusing is safe: no declared table exists yet, so a restart seeds cleanly.
+        const lockName = 'xchain_migrate_' + this.dbName;
+        const got = await db.query('SELECT GET_LOCK(?, 30) AS l', [lockName]);
+        if(!got || !got[0] || String(got[0].l) !== '1')
+            throw new Error('recordFreshSchemaMigrations: could not acquire lock ' + lockName +
+                ' (another process is seeding or migrating this database). No table has been created ' +
+                'yet, so restarting this process seeds the ledger cleanly.');
+        try {
+            await db.query('START TRANSACTION');
+            try {
+                for(const file of files){
+                    const raw = fs.readFileSync(dir + '/' + file, 'utf8');
+                    const checksum = crypto.createHash('sha256').update(raw).digest('hex');
+                    // A row a racing peer already committed is kept as it stands.
+                    await db.query(
+                        'INSERT INTO schema_migrations (name, checksum, mode, applied_at) VALUES (?, ?, ?, NOW()) ' +
+                        'ON DUPLICATE KEY UPDATE name = name',
+                        [file, checksum, this.migrationMode(raw)]
+                    );
+                }
+                await db.query('COMMIT');
+            } catch(err){
+                try { await db.query('ROLLBACK'); } catch(_){}
+                throw err;
+            }
+        } finally {
+            try { await db.query('SELECT RELEASE_LOCK(?)', [lockName]); } catch(_){}
+        }
+        logger.info('Fresh install: recorded ' + files.length + ' migration(s) in schema_migrations before creating tables.');
     },
 
     // Apply tracked, ordered schema migrations from src/sql/migrations/: the changes the

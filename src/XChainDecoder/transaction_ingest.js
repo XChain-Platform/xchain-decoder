@@ -188,9 +188,17 @@ async function storeDispenseOutput(loop, nextOutput, nextBlockHeight){
         logger.error(`insertTransactionOutput (dispense) failed at block ${nextBlockHeight}; block rolled back, retrying`)
         return 'rollback'
     }
-    if (insertResult === this.db.DUPLICATED_TRANSACTION){
-        logger.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${loop.lastProcessedTxIndex}, vout=${nextOutput.vout}); possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
-    }
+    if (insertResult === this.db.DUPLICATED_TRANSACTION)
+        return rollbackDuplicateOutput.call(this, loop, nextOutput, nextBlockHeight, 'dispense')
+}
+
+// The parser never yields one (tx_index, vout) twice, so a duplicate output is a row this
+// tx_index did not write (an orphan the transactions counter cannot see). Keeping it would
+// attach another destination/amount to this transaction, so roll back as insertTransactionRow does.
+async function rollbackDuplicateOutput(loop, nextOutput, nextBlockHeight, kind){
+    logger.error(`insertTransactionOutput (${kind}) hit an existing transaction_outputs row in block ${nextBlockHeight} (tx_index ${loop.lastProcessedTxIndex}, vout ${nextOutput.vout}); possible orphaned row, rolling the block back`)
+    await this.db.endTransaction()
+    return 'rollback'
 }
 
 //Store payment outputs the indexer needs to read:
@@ -256,9 +264,8 @@ async function capturePaymentOutputs(loop, block, parseResult, nextTransactionHa
                 logger.error(`insertTransactionOutput (payment) failed at block ${nextBlockHeight}; block rolled back, retrying`)
                 return 'rollback'
             }
-            if (insertResult === this.db.DUPLICATED_TRANSACTION){
-                logger.warn(`Duplicate transaction_output on insert (block_index=${nextBlockHeight}, tx_index=${loop.lastProcessedTxIndex}, vout=${nextOutput.vout}); possible stale pre-reorg row not cleaned up by deleteBlockByIndex`)
-            }
+            if (insertResult === this.db.DUPLICATED_TRANSACTION)
+                return rollbackDuplicateOutput.call(this, loop, nextOutput, nextBlockHeight, 'payment')
         }
     }
     return commands

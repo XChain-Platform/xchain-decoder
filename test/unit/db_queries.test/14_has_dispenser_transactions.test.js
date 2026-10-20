@@ -59,6 +59,7 @@ describe('Database#hasDispenserTransactions()', () => {
         const sql = String(conn.query.firstCall.args[0]);
         assert.match(sql, /LIKE\s+'DISPENSER\|%'/i, 'must still match a top-level DISPENSER');
         assert.match(sql, /LIKE\s+'%\|DISPENSER\|%'/i, 'must also match a BATCH-carried DISPENSER');
+        assert.match(sql, /LIKE\s+'%;DISPENSER\|%'/i, 'must also match a DISPENSER after the first BATCH sub-command');
         assert.match(sql, /LIMIT 1/i);
     });
 
@@ -80,6 +81,14 @@ describe('Database#hasDispenserTransactions()', () => {
         assert.strictEqual(await db.hasDispenserTransactions(), true);
     });
 
+    // Sub-commands after the first are joined by ';', so only the leading one follows a '|'.
+    it('sees a dispenser opened after the first sub-command of a BATCH', async () => {
+        const db = makeDb();
+        const { pool } = withConn(likeConn(['SEND|0|a', 'BATCH|0|SEND|0|X|1;DISPENSER|0|xyz']));
+        injectPool(db, pool);
+        assert.strictEqual(await db.hasDispenserTransactions(), true);
+    });
+
     it('sees a top-level dispenser', async () => {
         const db = makeDb();
         const { pool } = withConn(likeConn(['DISPENSER|0|xyz']));
@@ -89,7 +98,7 @@ describe('Database#hasDispenserTransactions()', () => {
 
     it('stays false on a database that never decoded a DISPENSER', async () => {
         const db = makeDb();
-        const { pool } = withConn(likeConn(['SEND|0|a', 'BATCH|0|SEND|0|b', 'ISSUANCE|0|c']));
+        const { pool } = withConn(likeConn(['SEND|0|a', 'BATCH|0|SEND|0|b', 'BATCH|0|SEND|0|b;ISSUANCE|0|c', 'ISSUANCE|0|c']));
         injectPool(db, pool);
         assert.strictEqual(await db.hasDispenserTransactions(), false);
     });
