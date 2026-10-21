@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-10-21
+
+### Fixed
+- Installed wget in the decoder image so the compose healthcheck can probe /live.
+
 ## [0.26.0] - 2026-10-20
 
 ### Added
