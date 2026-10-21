@@ -6,6 +6,12 @@ RUN npm ci --omit=dev
 
 FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS decoder
 WORKDIR /XChainDecoder
+# wget is not in node:22-bookworm-slim. The compose healthcheck (owned by
+# xchain-node) probes GET /live with wget, so without it every decoder reads
+# unhealthy while /live answers 200 healthy.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget \
+    && rm -rf /var/lib/apt/lists/*
 COPY ./package.json /XChainDecoder/package.json
 COPY ./package-lock.json /XChainDecoder/package-lock.json
 COPY --from=dependencies /XChainDecoder/node_modules /XChainDecoder/node_modules

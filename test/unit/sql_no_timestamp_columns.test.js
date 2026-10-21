@@ -17,11 +17,22 @@ const Database = require('../../src/db.js');
 const ROOT_DIR = path.join(__dirname, '..', '..');
 const SQL_DIR = path.join(ROOT_DIR, 'src', 'sql');
 const MIGRATION_STATEMENTS = path.join(ROOT_DIR, 'src', 'db', 'migration_statements.js');
+const MIGRATION_LEDGER = path.join(ROOT_DIR, 'src', 'db', 'migration_ledger.js');
 const FIRST_SEEN_MIGRATION = path.join(
     SQL_DIR,
     'migrations',
     '2026-09-27-mempool-first-seen-datetime.sql'
 );
+
+function assertLedgerAlterDeclaresDatetime(source){
+    const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+    const alter = code.match(/ALTER\s+TABLE\s+schema_migrations\s+MODIFY\s+applied_at\s+([A-Za-z]+)/i);
+
+    assert.ok(alter, 'missing ALTER TABLE schema_migrations MODIFY applied_at');
+    assert.strictEqual(alter[1].toUpperCase(), 'DATETIME', `applied_at ALTER declares ${alter[1]}`);
+}
 
 describe('SQL DATETIME completeness', function () {
     it('declares no TIMESTAMP columns in top-level SQL definitions', function () {
@@ -73,5 +84,17 @@ describe('SQL DATETIME completeness', function () {
 
         assert.strictEqual(db.connectionPoolParams.timezone, 'Z');
         assert.strictEqual(db.connectionParams.timezone, 'Z');
+    });
+});
+
+describe('migration ledger applied_at ALTER', function () {
+    it('declares the migration_ledger.js applied_at ALTER as DATETIME', function () {
+        assertLedgerAlterDeclaresDatetime(fs.readFileSync(MIGRATION_LEDGER, 'utf8'));
+    });
+
+    it('rejects a migration_ledger.js applied_at ALTER declared as TIMESTAMP', function () {
+        const fixture = "await conn.query('ALTER TABLE schema_migrations MODIFY applied_at TIMESTAMP NOT NULL');";
+
+        assert.throws(() => assertLedgerAlterDeclaresDatetime(fixture), /TIMESTAMP/);
     });
 });
