@@ -68,16 +68,6 @@ describe('SQL DATETIME completeness', function () {
         assert.doesNotMatch(statements, /\bapplied_at\s+TIMESTAMP\b/i);
     });
 
-    it('declares the migration_ledger.js applied_at ALTER as DATETIME', function () {
-        assertLedgerAlterDeclaresDatetime(fs.readFileSync(MIGRATION_LEDGER, 'utf8'));
-    });
-
-    it('rejects a migration_ledger.js applied_at ALTER declared as TIMESTAMP', function () {
-        const fixture = "await conn.query('ALTER TABLE schema_migrations MODIFY applied_at TIMESTAMP NOT NULL');";
-
-        assert.throws(() => assertLedgerAlterDeclaresDatetime(fixture), /TIMESTAMP/);
-    });
-
     it('sets UTC before converting mempool first_seen to DATETIME', function () {
         const migration = fs.readFileSync(FIRST_SEEN_MIGRATION, 'utf8')
             .replace(/--.*$/gm, '');
@@ -94,5 +84,17 @@ describe('SQL DATETIME completeness', function () {
 
         assert.strictEqual(db.connectionPoolParams.timezone, 'Z');
         assert.strictEqual(db.connectionParams.timezone, 'Z');
+    });
+});
+
+describe('migration ledger applied_at ALTER', function () {
+    it('declares the migration_ledger.js applied_at ALTER as DATETIME', function () {
+        assertLedgerAlterDeclaresDatetime(fs.readFileSync(MIGRATION_LEDGER, 'utf8'));
+    });
+
+    it('rejects a migration_ledger.js applied_at ALTER declared as TIMESTAMP', function () {
+        const fixture = "await conn.query('ALTER TABLE schema_migrations MODIFY applied_at TIMESTAMP NOT NULL');";
+
+        assert.throws(() => assertLedgerAlterDeclaresDatetime(fixture), /TIMESTAMP/);
     });
 });
