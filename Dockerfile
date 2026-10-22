@@ -1,10 +1,10 @@
-FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS dependencies
+FROM node:22.23.4-alpine@sha256:ce8d97f7cfc7c5386421eb932df20a29df99b1a7f469f6157d5c9956702ffadc AS dependencies
 WORKDIR /XChainDecoder
 COPY ./package.json /XChainDecoder/package.json
 COPY ./package-lock.json /XChainDecoder/package-lock.json
 RUN npm ci --omit=dev
 
-FROM node:25.9.0@sha256:78839ac448c23517f8eab2e8f7943d9b4f73979eb7f8bed2c73dbf72ff869e7b AS decoder
+FROM node:22.23.4-bookworm@sha256:2bd396628eceb5c999a6e43731fab69d5fb98b94ba9d9d90b5f64575c5178765 AS decoder
 WORKDIR /XChainDecoder
 COPY ./package.json /XChainDecoder/package.json
 COPY ./package-lock.json /XChainDecoder/package-lock.json
