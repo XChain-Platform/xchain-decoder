@@ -1,5 +1,17 @@
 {
   "titleSets": {
+    "0007e7e17399f2ac": [
+      "nodeStillCatchingUp(): the IBD read off getblockchaininfo fails open on an absent, null or non-boolean field (older node, trimmed proxy)",
+      "nodeStillCatchingUp(): the IBD read off getblockchaininfo is true only for a literal initialblockdownload=true",
+      "the parse loop waits on a node in initial block download instead of reconciling a pre-delete refusal from verifyReorg is waited on, not thrown out of the loop",
+      "the parse loop waits on a node in initial block download instead of reconciling reads initialblockdownload off the reply it already holds, before the reconcile",
+      "the parse loop waits on a node in initial block download instead of reconciling the tip-regression branch exists in the order the guard relies on",
+      "the parse loop waits on a node in initial block download instead of reconciling waits (sleep + continue) rather than calling verifyReorg while IBD is true",
+      "verifyReorg: an above-tip gap the window cannot absorb is refused before the first delete a gap of exactly the ceiling still reconciles (the ceiling is a budget, not a fence)",
+      "verifyReorg: an above-tip gap the window cannot absorb is refused before the first delete deletes nothing and writes no halt when the node does not know the stored tip",
+      "verifyReorg: prior rollback depth still limits a confirmed reorg a prior depth at the ceiling still waits when the node is only behind",
+      "verifyReorg: prior rollback depth still limits a confirmed reorg an unknown stored tip waits before spending the remaining depth"
+    ],
     "007fbd675c8dbc77": [
       "E2E: ACTION Decoding ACTION payload edge cases A4.1:should handle ACTION with empty memo field",
       "E2E: ACTION Decoding ACTION payload edge cases A4.2:should handle ACTION with many trailing pipe-delimited empty fields",
@@ -75,6 +87,16 @@
       "DISPENSER lifecycle mirror: advisory open-view an integral EXPIRATION still passes both guards unchanged",
       "DISPENSER lifecycle mirror: advisory open-view documented residual: MAX_REFILLS is open-view-neutral (a rejected 6th refill does not diverge)",
       "DISPENSER lifecycle mirror: advisory open-view documented residual: the decoder cannot mirror the MAX_DISPENSES auto-close"
+    ],
+    "06b2c3d9f6aaa08c": [
+      "XChainDecoder.verifyReorg above-tip depth guard also guards the above-tip orphan branch, and there it refuses BEFORE the first delete",
+      "XChainDecoder.verifyReorg depth guard aborts fail-closed once the walk reaches the safe depth instead of deleting past purged dispenser rows",
+      "XChainDecoder.verifyReorg depth guard completes a reorg one block shallower than the safe depth",
+      "XChainDecoder.verifyReorg depth guard recovers a 134-block litecoin testnet reorg without changing standard networks",
+      "XChainDecoder.verifyReorg durable halt (restart-mid-reorg) a full resync (cleared halt marker) restores normal shallow-reorg operation",
+      "XChainDecoder.verifyReorg durable halt (restart-mid-reorg) halts durably on the over-deep abort and a restart refuses to resume the rollback",
+      "XChainDecoder.verifyReorg retry budget resets the budget per block so a multi-block reorg with per-block transient failures removes every orphan block",
+      "XChainDecoder.verifyReorg retry budget still aborts when a single block genuinely fails 10 times in a row"
     ],
     "075b788357e290ab": [
       "collapseDispenserRegistrations drops candidates with no operating address and tolerates a non-list",
@@ -304,6 +326,18 @@
       "Database#isThereADispenserForAddress() returns false when no rows returned",
       "Database#isThereADispenserForAddress() returns true when dispensers_count > 0"
     ],
+    "105d30d13fc473e0": [
+      "a reorg proof wait does not trigger autoheal returns not stalled while the wait is set",
+      "a reorg proof wait ends once the node holds the stored tip a node_behind wait clears when the node reaches the stored tip, and stall detection resumes",
+      "a reorg proof wait ends when the next block extends the stored tip clears the wait and the refusal latch before the insert",
+      "a reorg proof wait ends when the next block extends the stored tip keeps the wait while the next block still does not extend the stored tip",
+      "reorg_wait rides every health payload publishes null when no proof wait is active",
+      "reorg_wait rides every health payload publishes the same wait on status, live and ready",
+      "reorg_wait rides every health payload publishes the same wait on the JSON-RPC health result",
+      "successful reconciles clear reorg_wait with the refusal latch clears at all three reconcile completion sites",
+      "the shared reconcile catch publishes reorg_wait starts null and keeps one since timestamp across repeated polls",
+      "the tip-regression catch publishes reorg_wait surfaces a non-IBD node that is behind the stored chain"
+    ],
     "11d6c1155cadb8c0": [
       "CE-10: Fire-and-Forget DB Call (insertTransactionOutput) insertTransactionOutput failure should be observable",
       "CE-10: Fire-and-Forget DB Call (insertTransactionOutput) insertTransactionOutput should be called with correct parameters",
@@ -402,12 +436,6 @@
     ],
     "154009859620f098": [
       "Fuzz: parseTransaction edge: transaction with many outputs should handle transaction with 100 random outputs"
-    ],
-    "1554a102f8ef603f": [
-      "SQL DATETIME completeness declares no TIMESTAMP columns in top-level SQL definitions",
-      "SQL DATETIME completeness declares the migration ledger applied_at column as DATETIME",
-      "SQL DATETIME completeness pins direct and pooled database connections to UTC",
-      "SQL DATETIME completeness sets UTC before converting mempool first_seen to DATETIME"
     ],
     "15a40e4df3b0929a": [
       "coverage ratchet floors documents the Docker-shipped non-owned bufferutils exclusion",
@@ -1164,18 +1192,6 @@
       "Database.splitSqlStatements() @regression splits ordinary multi-statement SQL into the same statements as before",
       "Database.splitSqlStatements() @regression treats doubled quotes as escapes (a ; inside stays inside)"
     ],
-    "4763aa60db951190": [
-      "nodeStillCatchingUp(): the IBD read off getblockchaininfo fails open on an absent, null or non-boolean field (older node, trimmed proxy)",
-      "nodeStillCatchingUp(): the IBD read off getblockchaininfo is true only for a literal initialblockdownload=true",
-      "the parse loop waits on a node in initial block download instead of reconciling a pre-delete refusal from verifyReorg is waited on, not thrown out of the loop",
-      "the parse loop waits on a node in initial block download instead of reconciling reads initialblockdownload off the reply it already holds, before the reconcile",
-      "the parse loop waits on a node in initial block download instead of reconciling the tip-regression branch exists in the order the guard relies on",
-      "the parse loop waits on a node in initial block download instead of reconciling waits (sleep + continue) rather than calling verifyReorg while IBD is true",
-      "verifyReorg: an above-tip gap the window cannot absorb is refused before the first delete a gap of exactly the ceiling still reconciles (the ceiling is a budget, not a fence)",
-      "verifyReorg: an above-tip gap the window cannot absorb is refused before the first delete a prior depth already AT the ceiling still takes the durable halt, not the refusal",
-      "verifyReorg: an above-tip gap the window cannot absorb is refused before the first delete counts what a previous process already rolled back toward the refusal",
-      "verifyReorg: an above-tip gap the window cannot absorb is refused before the first delete deletes nothing and writes no halt when the known depth alone exceeds the ceiling"
-    ],
     "47c0720002969b72": [
       "assertTransactionIdsAreBigint metadata @regression @tier1 rejects a missing id column",
       "assertTransactionIdsAreBigint metadata @regression @tier1 skips unrelated fixture rows that did not come from its schema query",
@@ -1194,12 +1210,48 @@
     "4890a1159c369a21": [
       "Fuzz: parseTransaction P2WSH with missing/corrupt witness should handle 100 P2WSH txs with corrupt witness"
     ],
+    "48954a79b1d861d7": [
+      "a node that proves it reorged away still halts and rolls back to the fork point a fork under a gap past the window halts and the halted walk ends at the fork point",
+      "a node that proves it reorged away still halts and rolls back to the fork point a node back on the stored chain after the fork point is read stops the deletes",
+      "an endpoint that does not know the stored chain waits a fallback that never saw the stored chain waits, then the decoder converges on failback",
+      "an endpoint that does not know the stored chain waits a lagging node that knows higher stored headers waits without deleting them",
+      "an endpoint that does not know the stored chain waits a node that lost the stored blocks waits as well, and the wait names the reset",
+      "the hash-compare rollback also requires header proof waits when the node hash differs but the stored block is still active",
+      "the hash-compare rollback also requires header proof waits when the node hash differs but the stored hash is unknown",
+      "the node-tip boundary must prove a real fork a node behind past the safe window writes no halt and deletes nothing",
+      "the node-tip boundary must prove a real fork a node two blocks behind deletes nothing even though it knows both high headers",
+      "the node-tip boundary must prove a real fork a persistent wrong hash cannot override a stored block still on the active chain",
+      "the reorged-away proof follows the verbose header confirmation count proves nothing on a block on the active chain",
+      "the reorged-away proof follows the verbose header confirmation count proves nothing on a block the node does not know (-5)",
+      "the reorged-away proof follows the verbose header confirmation count proves nothing on a header with no confirmation count",
+      "the reorged-away proof follows the verbose header confirmation count proves nothing on a transport fault on the header",
+      "the reorged-away proof follows the verbose header confirmation count proves nothing on an empty header answer",
+      "the reorged-away proof follows the verbose header confirmation count proves on confirmations -1 without reading chain state or chain work",
+      "the reorged-away proof follows the verbose header confirmation count the fork halt asks again only once its unproven answer is a minute old"
+    ],
     "48dee2bb9f8949a5": [
       "DISPENSER_EXPIRE_SAFE_DEPTH conformance to canonical undo_blocks.js SAFE_DEPTH exceeds every canonical per-chain undo window by the margin",
       "DISPENSER_EXPIRE_SAFE_DEPTH conformance to canonical undo_blocks.js the hand-copied standard floor still matches the unchanged mainnet window",
       "DISPENSER_EXPIRE_SAFE_DEPTH conformance to canonical undo_blocks.js tracker LTC testnet ceiling equals the decoder LTC testnet depth",
       "DISPENSER_EXPIRE_SAFE_DEPTH conformance to canonical undo_blocks.js tracker MAX_SAFE_UNDO_BLOCKS equals the decoder SAFE_DEPTH",
       "DISPENSER_EXPIRE_SAFE_DEPTH raises only litecoin testnet to the 5000-block window plus margin"
+    ],
+    "4905b2fbd0beb328": [
+      "F1: a halt that rolled blocks back names the reset, not the clear the clear tool help says which halts it cannot clear and names the reset",
+      "F1: a halt that rolled blocks back names the reset, not the clear the park line for a halt with rolled-back blocks above the tip names the reset and promises no resume",
+      "F1: a halt that rolled blocks back names the reset, not the clear the safe-depth halt names the reset and says the clear refuses it",
+      "F2: an above-tip rollback is decided by fork depth, not the height gap a fork under a gap past the window halts durably before the first delete",
+      "F2: an above-tip rollback is decided by fork depth, not the height gap a gap of exactly the window with a fork under it halts instead of deleting 126 blocks first",
+      "F2: an above-tip rollback is decided by fork depth, not the height gap a gap of exactly the window with confirmed reorged blocks rolls back and completes",
+      "F2: an above-tip rollback is decided by fork depth, not the height gap a not-found stored tip waits even when the height gap fits the window",
+      "F2: an above-tip rollback is decided by fork depth, not the height gap confirmations -1 proves the reorg without a chain-work comparison",
+      "F3: a halted database serves nothing above the fork point with the marker confirmed, the halted walk rolls back to the fork point",
+      "F3: a halted database serves nothing above the fork point without a confirmed marker, the walk stops at the ceiling as before",
+      "F3: a restart does not parse forward on a halt that rolled blocks back parks before the first block when a live halt has rolled-back blocks above the tip",
+      "F3: a restart does not parse forward on a halt that rolled blocks back parses forward on a live halt with nothing rolled back above the tip",
+      "F4: the park height and the latent-marker line say what is true parks at the stored tip after the rollback, not the cursor from before it",
+      "F4: the park height and the latent-marker line say what is true the latent-marker line does not call a halted decoder healthy, and names the reset",
+      "F4: the park height and the latent-marker line say what is true the safe-depth park through start() lands at the fork point"
     ],
     "492934dde4710b5e": [
       "P2SH/P2WSH chunk-carrier reveal: one commit fetch per parse fetches the commit exactly once and still attributes its fee output",
@@ -2783,6 +2835,19 @@
       "Security: BlockchainConnector Credential handling [REGRESSION P0] R-SEC-001: should not include credentials in the URL",
       "Security: BlockchainConnector Protocol handling [REGRESSION P0] R-SEC-001: should preserve https:// when specified"
     ],
+    "bb98118b5b524171": [
+      "CE-06: Chain Reorganization Detection and Recovery [REGRESSION P0] reconciles when the node tip regresses below the decoder height",
+      "CE-06: Chain Reorganization Detection and Recovery [REGRESSION P0] tolerates a null previousBlock in the reorg trigger without crashing",
+      "CE-06: Chain Reorganization Detection and Recovery [REGRESSION P0] verifyReorg deletes blocks above the node tip without an RPC hash query",
+      "CE-06: Chain Reorganization Detection and Recovery [REGRESSION P0] verifyReorg preserves blocks above the node tip without fork proof",
+      "CE-06: Chain Reorganization Detection and Recovery should trigger reorg detection when previous block hash mismatches in main loop",
+      "CE-06: Chain Reorganization Detection and Recovery verifyReorg should detect and roll back mismatched blocks",
+      "CE-06: Chain Reorganization Detection and Recovery verifyReorg should handle getBlockHash failures during reorg",
+      "CE-06: Chain Reorganization Detection and Recovery verifyReorg should not insert event when no reorg found",
+      "CE-06: Chain Reorganization Detection and Recovery verifyReorg should preserve every processed block without orphan proof",
+      "CE-06: Chain Reorganization Detection and Recovery verifyReorg should stop cleanly when every processed block is invalidated",
+      "CE-06: Chain Reorganization Detection and Recovery verifyReorg should wait on mismatched blocks without orphan proof"
+    ],
     "bc71a27833d1bfb3": [
       "output address derivation conformance bitcoin-mainnet derives the coin prefixes and witness checksum variant",
       "output address derivation conformance bitcoin-regtest derives the coin prefixes and witness checksum variant",
@@ -2839,6 +2904,14 @@
       "Taproot envelope recognition detectEnvelopeWitness() recognition reads only the top two stack items: the signature slot is opaque to it",
       "Taproot envelope recognition detectEnvelopeWitness() recognizes a multi-push envelope and concatenates pushes in order",
       "Taproot envelope recognition detectEnvelopeWitness() recognizes the golden witness and reassembles the exact payload bytes"
+    ],
+    "c33b5d628af07096": [
+      "SQL DATETIME completeness declares no TIMESTAMP columns in top-level SQL definitions",
+      "SQL DATETIME completeness declares the migration ledger applied_at column as DATETIME",
+      "SQL DATETIME completeness pins direct and pooled database connections to UTC",
+      "SQL DATETIME completeness sets UTC before converting mempool first_seen to DATETIME",
+      "migration ledger applied_at ALTER declares the migration_ledger.js applied_at ALTER as DATETIME",
+      "migration ledger applied_at ALTER rejects a migration_ledger.js applied_at ALTER declared as TIMESTAMP"
     ],
     "c3dab6aacd71c13e": [
       "BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION conformance a DISARMED network is inactive at every block time, including absurd ones",
@@ -3189,6 +3262,23 @@
       "fixture ports keeps base ports when CI_PORT_OFFSET is absent or zero",
       "fixture ports rejects invalid offsets and out-of-range results"
     ],
+    "dc8674eed52e008e": [
+      "a boot that cannot read the halt marker parks instead of parsing a probe that answers with nothing parks too",
+      "a boot that cannot read the halt marker parks instead of parsing one read fault on the boot probe of a halted database parses nothing",
+      "a boot that cannot read the halt marker parks instead of parsing parks the loop when a later probe first sees a halt with rolled-back blocks above the tip",
+      "a boot that cannot read the halt marker parks instead of parsing resumes on its own once the marker reads with no halt",
+      "a boot that cannot read the halt marker parks instead of parsing stays parked while the probe keeps failing",
+      "a halted walk ends at the fork point the node shows, and no lower a false node-tip hash cannot halt while the stored block remains active",
+      "a halted walk ends at the fork point the node shows, and no lower a node that holds the stored block at its tip keeps every stored block above it",
+      "a halted walk ends at the fork point the node shows, and no lower one wrong hash at the fork point itself stops the walk instead of deleting it",
+      "a halted walk ends at the fork point the node shows, and no lower the honest deep fork still finishes at the fork point",
+      "a halted walk stops on a node that lies or drops out after the marker a failed read then a lower node tip after the marker deletes nothing below the fork",
+      "a halted walk stops on a node that lies or drops out after the marker a node answering a wrong hash for every height deletes nothing past the halt",
+      "a halted walk stops on a node that lies or drops out after the marker alternating wrong and right hashes stop the walk",
+      "a halted walk stops on a node that lies or drops out after the marker an honest fork deeper than two windows deletes nothing past the halt",
+      "a halted walk stops on a node that lies or drops out after the marker one wrong hash after the marker stops the walk, deleting no valid block",
+      "the park line names the height it knows on an emptied table it names the stored tip and the start height, not \"unknown\""
+    ],
     "dde536d960f1a1a5": [
       "mempool first_seen DATETIME migration @regression baselines only when first_seen is already DATETIME",
       "mempool first_seen DATETIME migration @regression declares no TIMESTAMP column and declares first_seen DATETIME NOT NULL",
@@ -3263,6 +3353,12 @@
       "Database#insertTransaction() still inserts the transaction when the pubkey write reports failure",
       "Database#insertTransaction() writes no pubkey when the transaction exposed none, or the source is the empty-address sentinel"
     ],
+    "e02a355062992f4c": [
+      "a restart on a halted database parks unless it reads no rolled-back block above the tip a count of zero parses forward, as a halt with nothing rolled back always has",
+      "a restart on a halted database parks unless it reads no rolled-back block above the tip a count that answers a non-count parks too",
+      "a restart on a halted database parks unless it reads no rolled-back block above the tip a count that cannot be read parks before the first block",
+      "a restart on a halted database parks unless it reads no rolled-back block above the tip a database with no count at all parks and names the reset"
+    ],
     "e05281661c88972c": [
       "CE-08: Signal Handling and Graceful Shutdown api.js flips decoderRunning false when the loop exits and on shutdown",
       "CE-08: Signal Handling and Graceful Shutdown api.js should register signal handlers and health endpoint",
@@ -3287,16 +3383,6 @@
       "Security: Deobfuscation Robustness Non-buffer input rejection should return null for number input",
       "Security: Deobfuscation Robustness Non-buffer input rejection should return null for object input",
       "Security: Deobfuscation Robustness Non-buffer input rejection should return null for string input"
-    ],
-    "e2ba08417e7004a8": [
-      "CE-06: Chain Reorganization Detection and Recovery [REGRESSION P0] reconciles when the node tip regresses below the decoder height",
-      "CE-06: Chain Reorganization Detection and Recovery [REGRESSION P0] tolerates a null previousBlock in the reorg trigger without crashing",
-      "CE-06: Chain Reorganization Detection and Recovery [REGRESSION P0] verifyReorg deletes blocks above the node tip without an RPC hash query",
-      "CE-06: Chain Reorganization Detection and Recovery should trigger reorg detection when previous block hash mismatches in main loop",
-      "CE-06: Chain Reorganization Detection and Recovery verifyReorg should detect and roll back mismatched blocks",
-      "CE-06: Chain Reorganization Detection and Recovery verifyReorg should handle getBlockHash failures during reorg",
-      "CE-06: Chain Reorganization Detection and Recovery verifyReorg should not insert event when no reorg found",
-      "CE-06: Chain Reorganization Detection and Recovery verifyReorg should stop cleanly when every processed block is invalidated"
     ],
     "e2dc1e87963a2b20": [
       "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-005: should not drop a 0x00 final ciphertext byte on a full multisig chunk",
@@ -3621,16 +3707,6 @@
       "Security: Deobfuscation Robustness Key/IV derivation from txid [REGRESSION P0] R-DEC-005: should produce different output for txids that differ only in key portion",
       "Security: Deobfuscation Robustness Magic word false positive resistance [REGRESSION P0] R-DEC-003: should not produce XCHN prefix from random data (100 iterations)"
     ],
-    "fd57b09815088f6a": [
-      "XChainDecoder.verifyReorg depth guard aborts fail-closed once the walk reaches the safe depth instead of deleting past purged dispenser rows",
-      "XChainDecoder.verifyReorg depth guard also guards the above-tip orphan branch, and there it refuses BEFORE the first delete",
-      "XChainDecoder.verifyReorg depth guard completes a reorg one block shallower than the safe depth",
-      "XChainDecoder.verifyReorg depth guard recovers a 134-block litecoin testnet reorg without changing standard networks",
-      "XChainDecoder.verifyReorg durable halt (restart-mid-reorg) a full resync (cleared halt marker) restores normal shallow-reorg operation",
-      "XChainDecoder.verifyReorg durable halt (restart-mid-reorg) halts durably on the over-deep abort and a restart refuses to resume the rollback",
-      "XChainDecoder.verifyReorg retry budget resets the budget per block so a multi-block reorg with per-block transient failures removes every orphan block",
-      "XChainDecoder.verifyReorg retry budget still aborts when a single block genuinely fails 10 times in a row"
-    ],
     "fe5b5679ddb3b515": [
       "BlockchainConnector #getBlockHeader() [REGRESSION P2] R-RPC-001: should retry on timeout (ECONNABORTED)",
       "BlockchainConnector #getBlockHeader() [REGRESSION P2] R-RPC-001: should throw after exhausting all 10 timeout retries",
@@ -3640,8 +3716,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 246,
-      "titleCount": 2165,
+      "fileCount": 251,
+      "titleCount": 2228,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3814,7 +3890,7 @@
         "test/unit/migration_runner.test/19_key_witness_guard.test.js": "9bd15abd96c0f43f",
         "test/unit/migration_runner.test/20_declared_key_drop_guard.test.js": "b2f89504900651c4",
         "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
-        "test/unit/node_catch_up_wait.test.js": "4763aa60db951190",
+        "test/unit/node_catch_up_wait.test.js": "0007e7e17399f2ac",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
         "test/unit/node_reachability_status.test.js": "09f6b21d4c9c4493",
         "test/unit/node_url_failover.test.js": "df1a7438428d2073",
@@ -3839,6 +3915,11 @@
         "test/unit/reorg_halt_park.test.js": "b6be0fd71f5537fb",
         "test/unit/reorg_halt_surface.test.js": "571065a79b6fdaba",
         "test/unit/reorg_halt_surface.test/01_empty_probe_answer_keeps_the_halt.test.js": "6108c204ee3d7617",
+        "test/unit/reorg_recovery.test/01_reorg_recovery_paths.test.js": "4905b2fbd0beb328",
+        "test/unit/reorg_recovery.test/02_halted_walk_hostile_node.test.js": "dc8674eed52e008e",
+        "test/unit/reorg_recovery.test/03_reorged_away_proof.test.js": "48954a79b1d861d7",
+        "test/unit/reorg_recovery.test/04_boot_park_fails_closed.test.js": "e02a355062992f4c",
+        "test/unit/reorg_recovery.test/05_reorg_wait_surface.test.js": "105d30d13fc473e0",
         "test/unit/reorg_table_coverage.test.js": "8d1ac41b3c8d3fc3",
         "test/unit/repo/fixture_ports.test.js": "dc378898866ff01a",
         "test/unit/roundtrip.test.js": "319d38eebd8ba22a",
@@ -3853,7 +3934,7 @@
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",
         "test/unit/shutdown.test.js": "b7c40222c7ba54aa",
         "test/unit/sibling_coverage.test.js": "d8d1e52267ea606f",
-        "test/unit/sql_no_timestamp_columns.test.js": "1554a102f8ef603f",
+        "test/unit/sql_no_timestamp_columns.test.js": "c33b5d628af07096",
         "test/unit/sql_quote_backslash_escapes.test.js": "b72d4e6d05233677",
         "test/unit/sql_schema_parse_coverage.test.js": "2442ae2aad9cf6c2",
         "test/unit/status_lag_field.test.js": "418aa8572442df90",
@@ -3872,7 +3953,7 @@
         "test/unit/util.test.js": "81be8bb6cf1dea2f",
         "test/unit/util_extra.test.js": "3a87e525ae152e17",
         "test/unit/valid_action_names_flag_day.test.js": "48102ba3278bff5c",
-        "test/unit/verify_reorg_retry.test.js": "fd57b09815088f6a",
+        "test/unit/verify_reorg_retry.test.js": "06b2c3d9f6aaa08c",
         "test/unit/verify_reorg_retry.test/01_xchain_decoder_verify_reorg_mid_walk_tip_regression.test.js": "9cf7a9676a09ed58",
         "test/unit/verify_reorg_retry.test/02_xchain_decoder_verify_reorg_does_not_mistake_a_failed_db_read_for_an_exhausted_table.test.js": "5aede94bd4bed74a",
         "test/unit/verify_reorg_retry.test/03_reorg_entry_paths_log_at_warn.test.js": "aa473d78908111d8",
@@ -3937,14 +4018,14 @@
     },
     "test:chaos": {
       "fileCount": 10,
-      "titleCount": 61,
+      "titleCount": 64,
       "files": {
         "test/chaos/ce01_node_unavailability.test.js": "1ab70d0f50adaefe",
         "test/chaos/ce02_rpc_timeouts.test.js": "f505ba8dce326503",
         "test/chaos/ce03_db_pool_exhaustion.test.js": "abdf4cc518953c22",
         "test/chaos/ce04_mid_transaction_failure.test.js": "2506026cddff6d99",
         "test/chaos/ce05_malformed_mempool.test.js": "6c28789f9345bb57",
-        "test/chaos/ce06_chain_reorg.test.js": "e2ba08417e7004a8",
+        "test/chaos/ce06_chain_reorg.test.js": "bb98118b5b524171",
         "test/chaos/ce07_concurrent_instances.test.js": "cb98f7659ab544d2",
         "test/chaos/ce08_signal_handling.test.js": "e05281661c88972c",
         "test/chaos/ce09_unhandled_rejection.test.js": "b97f08cbf07b98ec",
@@ -4190,8 +4271,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 246,
-      "titleCount": 2165,
+      "fileCount": 251,
+      "titleCount": 2228,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -4364,7 +4445,7 @@
         "test/unit/migration_runner.test/19_key_witness_guard.test.js": "9bd15abd96c0f43f",
         "test/unit/migration_runner.test/20_declared_key_drop_guard.test.js": "b2f89504900651c4",
         "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
-        "test/unit/node_catch_up_wait.test.js": "4763aa60db951190",
+        "test/unit/node_catch_up_wait.test.js": "0007e7e17399f2ac",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
         "test/unit/node_reachability_status.test.js": "09f6b21d4c9c4493",
         "test/unit/node_url_failover.test.js": "df1a7438428d2073",
@@ -4389,6 +4470,11 @@
         "test/unit/reorg_halt_park.test.js": "b6be0fd71f5537fb",
         "test/unit/reorg_halt_surface.test.js": "571065a79b6fdaba",
         "test/unit/reorg_halt_surface.test/01_empty_probe_answer_keeps_the_halt.test.js": "6108c204ee3d7617",
+        "test/unit/reorg_recovery.test/01_reorg_recovery_paths.test.js": "4905b2fbd0beb328",
+        "test/unit/reorg_recovery.test/02_halted_walk_hostile_node.test.js": "dc8674eed52e008e",
+        "test/unit/reorg_recovery.test/03_reorged_away_proof.test.js": "48954a79b1d861d7",
+        "test/unit/reorg_recovery.test/04_boot_park_fails_closed.test.js": "e02a355062992f4c",
+        "test/unit/reorg_recovery.test/05_reorg_wait_surface.test.js": "105d30d13fc473e0",
         "test/unit/reorg_table_coverage.test.js": "8d1ac41b3c8d3fc3",
         "test/unit/repo/fixture_ports.test.js": "dc378898866ff01a",
         "test/unit/roundtrip.test.js": "319d38eebd8ba22a",
@@ -4403,7 +4489,7 @@
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",
         "test/unit/shutdown.test.js": "b7c40222c7ba54aa",
         "test/unit/sibling_coverage.test.js": "d8d1e52267ea606f",
-        "test/unit/sql_no_timestamp_columns.test.js": "1554a102f8ef603f",
+        "test/unit/sql_no_timestamp_columns.test.js": "c33b5d628af07096",
         "test/unit/sql_quote_backslash_escapes.test.js": "b72d4e6d05233677",
         "test/unit/sql_schema_parse_coverage.test.js": "2442ae2aad9cf6c2",
         "test/unit/status_lag_field.test.js": "418aa8572442df90",
@@ -4422,7 +4508,7 @@
         "test/unit/util.test.js": "81be8bb6cf1dea2f",
         "test/unit/util_extra.test.js": "3a87e525ae152e17",
         "test/unit/valid_action_names_flag_day.test.js": "48102ba3278bff5c",
-        "test/unit/verify_reorg_retry.test.js": "fd57b09815088f6a",
+        "test/unit/verify_reorg_retry.test.js": "06b2c3d9f6aaa08c",
         "test/unit/verify_reorg_retry.test/01_xchain_decoder_verify_reorg_mid_walk_tip_regression.test.js": "9cf7a9676a09ed58",
         "test/unit/verify_reorg_retry.test/02_xchain_decoder_verify_reorg_does_not_mistake_a_failed_db_read_for_an_exhausted_table.test.js": "5aede94bd4bed74a",
         "test/unit/verify_reorg_retry.test/03_reorg_entry_paths_log_at_warn.test.js": "aa473d78908111d8",

@@ -48,20 +48,36 @@ function makeDecoder() {
 // Stored tip at `top`; the node agrees with every stored hash, so once the walk
 // reaches the node tip it ends. `priorDepth` is what a previous process already
 // rolled back above the tip (the restart-durable count).
-function decoderAbove(top, { priorDepth = 0 } = {}) {
+function decoderAbove(top, { nodeTip, forkPoint = nodeTip, priorDepth = 0, knownByNode = true } = {}) {
     const decoder = makeDecoder()
     const deleted = []
     let marked = 0
-    decoder.connector = { rpcErrors: 0, getBlockHash: async (h) => 'hash' + h }
+    let deletedAtHalt = null
+    decoder.connector = {
+        rpcErrors: 0,
+        getBlockHash: async (h) => {
+            if (h > nodeTip) throw new Error('Block height out of range')
+            return h > forkPoint ? 'node' + h : 'hash' + h
+        },
+        getBlockHeader: async (hash) => {
+            if (knownByNode){
+                const height = Number(hash.slice(4))
+                return { confirmations: height > forkPoint ? -1 : nodeTip - height + 1 }
+            }
+            const err = new Error('Block not found')
+            err.rpcCode = -5
+            throw err
+        }
+    }
     decoder.db = {
         getLastBlockIndex:         async () => top,
         getBlockByIndex:           async (h) => (h < 0 ? null : { block_index: h, block_hash: 'hash' + h }),
         deleteBlockByIndex:        async (h) => { deleted.push(h); top = h - 1; return true },
         isReorgHalted:             async () => false,
         countReorgDeletesAboveTip: async () => priorDepth,
-        markReorgHalted:           async () => { marked++; return true }
+        markReorgHalted:           async () => { marked++; deletedAtHalt = deleted.length; return true }
     }
-    return { decoder, deleted, marked: () => marked }
+    return { decoder, deleted, marked: () => marked, deletedAtHalt: () => deletedAtHalt }
 }
 
 describe('nodeStillCatchingUp(): the IBD read off getblockchaininfo', function () {
@@ -82,14 +98,14 @@ describe('nodeStillCatchingUp(): the IBD read off getblockchaininfo', function (
 
 describe('verifyReorg: an above-tip gap the window cannot absorb is refused before the first delete', function () {
 
-    it('deletes nothing and writes no halt when the known depth alone exceeds the ceiling', async function () {
-        const { decoder, deleted, marked } = decoderAbove(300)
+    it('deletes nothing and writes no halt when the node does not know the stored tip', async function () {
+        const nodeTip = 300 - SAFE_DEPTH - 1
+        const { decoder, deleted, marked } = decoderAbove(300, { nodeTip, forkPoint: nodeTip - 1, knownByNode: false })
 
-        await assert.rejects(() => decoder.verifyReorg(300 - SAFE_DEPTH - 1), (err) => {
+        await assert.rejects(() => decoder.verifyReorg(nodeTip), (err) => {
             assert.strictEqual(err.tipBelowStoredTip, true, 'tagged so the parse loop can wait on it')
-            assert.match(err.message, /127 blocks below the stored tip/)
-            assert.match(err.message, /no REORG_HALT marker was written/)
-            assert.match(err.message, /needs no resync/)
+            assert.match(err.message, new RegExp('does not know stored block ' + nodeTip))
+            assert.match(err.message, /waiting without deleting/)
             return true
         })
 
@@ -99,36 +115,43 @@ describe('verifyReorg: an above-tip gap the window cannot absorb is refused befo
     })
 
     it('a gap of exactly the ceiling still reconciles (the ceiling is a budget, not a fence)', async function () {
-        const { decoder, deleted } = decoderAbove(300)
+        const nodeTip = 300 - SAFE_DEPTH
+        const { decoder, deleted } = decoderAbove(299, { nodeTip, forkPoint: nodeTip - 1 })
 
-        assert.strictEqual(await decoder.verifyReorg(300 - SAFE_DEPTH), true)
+        assert.strictEqual(await decoder.verifyReorg(nodeTip), true)
         assert.strictEqual(deleted.length, SAFE_DEPTH)
         assert.strictEqual(decoder.getReorgHaltStatus().halted, false)
     })
 
-    it('counts what a previous process already rolled back toward the refusal', async function () {
+})
+
+describe('verifyReorg: prior rollback depth still limits a confirmed reorg', function () {
+
+    it('an unknown stored tip waits before spending the remaining depth', async function () {
         // 10 above the tip would fit a fresh window; it does not fit the 120 a
         // killed process already spent, and a restart must not delete the 6 that
         // remain just to abort on the 7th.
-        const { decoder, deleted } = decoderAbove(300, { priorDepth: SAFE_DEPTH - 6 })
+        const { decoder, deleted } = decoderAbove(300, { nodeTip: 290, forkPoint: 289,
+            priorDepth: SAFE_DEPTH - 6, knownByNode: false })
 
         await assert.rejects(() => decoder.verifyReorg(290), (err) => {
             assert.strictEqual(err.tipBelowStoredTip, true)
-            assert.match(err.message, /with 120 block\(s\) already rolled back/)
+            assert.match(err.message, /does not know stored block 290/)
             return true
         })
         assert.strictEqual(deleted.length, 0)
     })
 
-    it('a prior depth already AT the ceiling still takes the durable halt, not the refusal', async function () {
-        // Blocks past the window are already gone from this database: that is the
-        // halt's case, and the refusal must not soften it.
-        const { decoder, deleted, marked } = decoderAbove(300, { priorDepth: SAFE_DEPTH })
+    it('a prior depth at the ceiling still waits when the node is only behind', async function () {
+        const { decoder, deleted, marked } = decoderAbove(300, { nodeTip: 299, priorDepth: SAFE_DEPTH })
 
-        await assert.rejects(() => decoder.verifyReorg(299), /safe-depth/)
-        assert.strictEqual(deleted.length, 0)
-        assert.strictEqual(marked(), 1)
-        assert.strictEqual(decoder.getReorgHaltStatus().halted, true)
+        await assert.rejects(() => decoder.verifyReorg(299), (err) => {
+            assert.strictEqual(err.refusalClass, 'node_behind')
+            return true
+        })
+        assert.deepStrictEqual(deleted, [])
+        assert.strictEqual(marked(), 0)
+        assert.strictEqual(decoder.getReorgHaltStatus().halted, false)
     })
 })
 

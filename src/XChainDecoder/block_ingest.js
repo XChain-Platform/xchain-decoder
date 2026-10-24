@@ -93,9 +93,11 @@ async function rollBackDetectedReorg(loop, nextBlockHeight){
     } catch (err){
         // A REORG_HALT refusal parks the loop instead of exiting the
         // process; every other abort still propagates and halts loudly.
-        parkOrRethrow.call(this, err, loop.lastProcessedBlockIndex)
+        await parkOrRethrow.call(this, err, loop)
         return 'continue'
     }
+    this.reorgWait = null
+    loop.tipBelowStoredTipRefused = false
     // Re-clamp: same as the pre-loop guard and the node-tip regression path.
     loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
     // Count rolled-back blocks as the difference between the pre-reorg tip
@@ -181,6 +183,10 @@ async function ingestNextBlock(loop){
     if (nextBlockHeight > this.startBlockIndex){
         if ((await detectReorgAtBlock.call(this, loop, nextBlockHeight, previousBlockHash)) === 'continue') return 'continue'
     }
+    // The node's next block extends the stored tip, so any proof wait published
+    // earlier is over; clear it before the insert so stall detection resumes.
+    this.reorgWait = null
+    loop.tipBelowStoredTipRefused = false
 
     return await storeBlock.call(this, loop, block, nextBlockHeight, nextBlockHash, previousBlockHash)
 }

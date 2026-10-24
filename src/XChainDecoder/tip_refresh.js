@@ -22,7 +22,7 @@ const { format: formatLogLine } = require('node:util')
 const { chainTierMismatch, chainFieldMissing, chainGenesisUnpinned } = require('../protocol/chain_identity')
 const { logger, BLOCKCHAIN_INFO_REFRESH_MS, MIN_VERIFICATION_PROGRESS_TO_PARSE } = require('./constants.js')
 const { nodeStillCatchingUp, blockchainInfoWellFormed } = require('./payload_helpers.js')
-const { parkOrRethrow } = require('./sync_loop.js')
+const { parkOrRethrow, setReorgWait } = require('./sync_loop.js')
 
 // lastBlockchainInfo is the reply fetchChainTip just stored on the loop, passed in
 // read-only; a refusal discards it from the loop and the caller sleeps and re-polls.
@@ -244,23 +244,30 @@ async function reconcileOrphanBlocks(loop, lastProcessedBlockIndex){
     try {
         await this.verifyReorg(this.blockchainInfoLastBlock)
     } catch (err){
-        // A gap too deep to reconcile, refused BEFORE any delete (nothing
-        // rolled back, no durable halt). Exiting here would only restart
-        // into the same refusal; stay up, say it once, and re-check the
-        // tip every poll so a node that is merely catching up (without
-        // reporting IBD) resolves it on its own and a real rollback stays
-        // visible on the status surface as node_height below the tip.
+        // A gap the window cannot absorb with no fork found under it, refused
+        // BEFORE any delete (nothing rolled back, no durable halt). Exiting here
+        // would only restart into the same refusal; stay up, say it once, and
+        // re-check the tip every poll so a node that is merely behind (without
+        // reporting IBD) resolves it on its own, while a fork that appears under
+        // it halts durably on a later poll once the node proves the fork
+        // (reorg_verification/reorg_depth.js). The latch holds the refusal's class,
+        // so a refusal that changes what it says (an unreadable node hash that later
+        // compares as the same chain) logs again instead of leaving the first wording
+        // standing.
         if (err && err.tipBelowStoredTip){
-            if (!loop.tipBelowStoredTipRefused){
+            setReorgWait.call(this, err)
+            const refusalClass = err.refusalClass || 'refused'
+            if (loop.tipBelowStoredTipRefused !== refusalClass){
                 this.logError(err.message)
             }
-            loop.tipBelowStoredTipRefused = true
+            loop.tipBelowStoredTipRefused = refusalClass
             await this.sleep(5000)
             return 'continue'
         }
-        parkOrRethrow.call(this, err, lastProcessedBlockIndex)
+        await parkOrRethrow.call(this, err, loop)
         return 'continue'
     }
+    this.reorgWait = null
     loop.tipBelowStoredTipRefused = false
     // Re-clamp: a deep reorg can empty the blocks table, causing
     // getLastBlockIndex() to return -1 and nextBlockHeight to become 0

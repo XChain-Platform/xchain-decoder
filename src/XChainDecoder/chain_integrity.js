@@ -20,6 +20,7 @@
 
 const { chainGenesisMismatch, chainGenesisUnpinned } = require('../protocol/chain_identity')
 const { logger, REORG_HALT_PROBE_INTERVAL_MS, AUXPOW_REASSEMBLE_AFTER, TIP_SETTLE_DELAY_MS, TIP_SETTLE_MAX_READS } = require('./constants.js')
+const { RESET_RECOVERY, readRolledBackAboveTip } = require('./reorg_halt.js')
 
 // Read the durable REORG_HALT marker through whichever probe the db exposes, or
 // null when it exposes none (or there is no db) and the cached state must stand.
@@ -40,6 +41,41 @@ async function readReorgHaltMarker(db){
         return { halted: !!(halted && halted.halted !== undefined ? halted.halted : halted), at: null, reason: null }
     }
     return null
+}
+
+// How often a park taken on an unreadable marker re-reads it. Shorter than the
+// halt park's TTL, because a boot-time read fault is usually transient and this park
+// ends as soon as the marker reads.
+const UNREAD_PARK_REPROBE_MS = 5000
+
+// The park height as a log line names it: the stored tip, said plainly when no block
+// is stored yet (an emptied or never-filled table), or unknown when no tip was read.
+function describeParkHeight(height, startBlockIndex){
+    if (typeof height !== 'number' || !Number.isFinite(height)) return 'unknown'
+    if (Number.isInteger(startBlockIndex) && height < startBlockIndex){
+        return height + ' (no block is stored, so parsing would resume at the start height ' + startBlockIndex + ')'
+    }
+    return String(height)
+}
+
+// Say a halt-state transition the probe just read, once per transition. A first
+// sighting of a halt by any probe (a health route's included) also has the parse
+// loop re-run the boot park check before its next block.
+function noteReorgHaltTransition(decoder, wasHalted){
+    if (decoder.reorgHalted && !wasHalted){
+        decoder.reorgHaltParkCheckDue = true
+        logger.error('XChainDecoder: LATENT REORG_HALT MARKER PRESENT - this decoder carries a durable ' +
+            'REORG_HALT row from an aborted rollback, and health, /status and /live report reorg_halted=true ' +
+            'while it stands. A halt that left rolled-back blocks above the stored tip parks the parse loop ' +
+            'at boot; any other halt parses forward only while the node\'s chain extends the stored tip, and ' +
+            'the next reorg parks the parse loop (the process stays up and parses nothing). This database is ' +
+            'NOT a valid bootstrap source. REQUIRED OPERATOR ACTION: ' + RESET_RECOVERY + ', or, once no ' +
+            'rolled-back block remains above the tip and the database is verified intact, ' +
+            '`xchain-node clear-reorg-halt <chain> <network> --reason "..."`.' +
+            (decoder.reorgHaltReason ? ' Marker detail: ' + decoder.reorgHaltReason : ''))
+    } else if (!decoder.reorgHalted && wasHalted){
+        logger.warn('XChainDecoder: REORG_HALT marker is gone; halt cleared.')
+    }
 }
 
 module.exports = {
@@ -64,6 +100,9 @@ module.exports = {
             try {
                 const marker = await readReorgHaltMarker(this.db)
                 if (marker === null) return this.getReorgHaltStatus()
+                // A real read: the boot park and its release (parkOnRolledBackHalt,
+                // resumeFromReorgHaltPark) fail closed while this is true.
+                this.reorgHaltProbeFailed = false
                 // Keep a halt this process raised but could not record. A failed marker
                 // write leaves no row, so a no-halt read here is that absence, not a
                 // clear; adopting it would publish reorg_halted=false until restart.
@@ -85,19 +124,10 @@ module.exports = {
                 // finding no row is exactly the state an unconfirmed in-process halt
                 // leaves behind, so clearing on absence would erase the one signal.
                 if (this.reorgHalted) this.reorgHaltMarkerPersisted = true
-                if (this.reorgHalted && !wasHalted){
-                    logger.error('XChainDecoder: LATENT REORG_HALT MARKER PRESENT - this decoder carries a durable ' +
-                        'REORG_HALT row from an aborted rollback. It will keep parsing forward and look healthy, but ' +
-                        'the NEXT reorg will refuse to roll back and stop the decoder. This database is NOT a valid ' +
-                        'bootstrap source. REQUIRED OPERATOR ACTION: a full resync from a known-good snapshot, or ' +
-                        'once the rolled-back range is re-parsed and the database is verified intact, ' +
-                        '`xchain-node clear-reorg-halt <coin> <network> --reason "..."`.' +
-                        (this.reorgHaltReason ? ' Marker detail: ' + this.reorgHaltReason : ''))
-                } else if (!this.reorgHalted && wasHalted){
-                    logger.warn('XChainDecoder: REORG_HALT marker is gone; halt cleared.')
-                }
+                noteReorgHaltTransition(this, wasHalted)
                 return this.getReorgHaltStatus()
             } catch (e){
+                this.reorgHaltProbeFailed = true
                 logger.warn('XChainDecoder: REORG_HALT probe failed (non-fatal), keeping last known state (' +
                     this.reorgHalted + '): ' + (e && e.message))
                 return this.getReorgHaltStatus()
@@ -140,26 +170,79 @@ module.exports = {
     // every rollback until an operator clears it, so a restart lands back in the same
     // refusal a few seconds later, forever. Idempotent, because the loop can reach a
     // refusal from three call sites and only the first one is news.
-    parkOnReorgHalt(reason, blockHeight){
+    //
+    // resetOnly marks a halt that rolled back blocks above the stored tip: a parked
+    // decoder never re-parses them, so clear-reorg-halt's re-parse check can never pass
+    // and the line names the reset instead of promising a resume.
+    //
+    // unread marks a park taken because the marker itself could not be read: it says
+    // so, and resumeFromReorgHaltPark ends it only on a real read.
+    parkOnReorgHalt(reason, blockHeight, { resetOnly = false, unread = false } = {}){
         if (this.reorgHaltParked) return
         this.reorgHaltParked = true
         this.reorgHaltParkedAt = new Date().toISOString()
         this.reorgHaltParkedHeight = (typeof blockHeight === 'number' && blockHeight >= 0) ? blockHeight : null
+        this.reorgHaltParkUnread = unread
+        const height = describeParkHeight(blockHeight, this.startBlockIndex)
+        if (unread){
+            this.logError('PARKED at block height ' + height + ' before parsing: the REORG_HALT marker could not be '
+                + 'read, so this decoder cannot tell whether its database carries a halt that condemns it to a '
+                + 'reset. Nothing is fetched, deleted or inserted until the marker reads. It is re-read every '
+                + Math.round(UNREAD_PARK_REPROBE_MS / 1000) + 's, and parsing resumes on its own, with no restart, '
+                + 'once it reads with no halt or with a halt that left no rolled-back block above the stored tip.'
+                + (reason ? ' Reason: ' + reason : ''))
+            return
+        }
         // A halt whose marker write failed has nothing an operator can clear, so the
         // park cannot end on its own and the line has to say so rather than promise a
         // resume that will never come.
         const recorded = this.reorgHaltMarkerPersisted !== false
-        this.logError('PARKED on a REORG_HALT at block height '
-            + (this.reorgHaltParkedHeight === null ? 'unknown' : this.reorgHaltParkedHeight)
+        this.logError('PARKED on a REORG_HALT at block height ' + height
             + '. The parse loop has stopped and this process stays up: the durable marker refuses every '
-            + 'rollback and a restart cannot clear it. Clear it with `xchain-node clear-reorg-halt <chain> '
-            + '<network> --reason "..."`, which verifies the rolled-back range has been re-parsed and records '
-            + 'the clear as its own events row. This decoder re-reads the marker every '
-            + Math.round(REORG_HALT_PROBE_INTERVAL_MS / 1000) + 's and resumes parsing on its own once it is '
-            + 'gone, with no restart.'
+            + 'rollback and a restart cannot clear it. '
+            + (resetOnly
+                ? 'This halt rolled back blocks above the stored tip and a parked decoder never re-parses them, '
+                    + 'so clear-reorg-halt refuses it: recover with ' + RESET_RECOVERY + ', which re-decodes '
+                    + 'this decoder and its indexer from the start height.'
+                : 'Clear it with `xchain-node clear-reorg-halt <chain> '
+                    + '<network> --reason "..."`, which verifies the rolled-back range has been re-parsed and records '
+                    + 'the clear as its own events row. This decoder re-reads the marker every '
+                    + Math.round(REORG_HALT_PROBE_INTERVAL_MS / 1000) + 's and resumes parsing on its own once it is '
+                    + 'gone, with no restart.')
             + (recorded ? '' : ' The marker could NOT be persisted, so nothing exists for a clear to supersede '
                 + 'and this park will NOT end on its own: repair the database and restart.')
             + (reason ? ' Reason: ' + reason : ''))
+    },
+
+    // Park before the first block when a live halt left rolled-back blocks above the
+    // stored tip. Such a halt may already have finished its rollback down to the fork
+    // point (reorg_verification/halted_walk.js), so the stored tip sits on the node's
+    // chain and no reorg would reach verifyReorg's entry guard: parsing forward would
+    // extend a database whose dispenser state may not match a fresh sync.
+    //
+    // Fails closed three times over: a halt probe that failed (it threw, or answered
+    // with nothing) parks, since an unread marker may be exactly such a halt; a count
+    // that cannot be read parks; and a db with no count at all parks, since nothing
+    // then says the halt left no rolled-back block above the tip. A db with no probe
+    // at all keeps the cached state, as checkReorgHalt does. Runs at boot and again
+    // when a probe first sees a halt. Never throws. Returns true when it parked.
+    async parkOnRolledBackHalt(){
+        if (this.reorgHaltParked) return false
+        if (this.reorgHaltProbeFailed === true){
+            this.parkOnReorgHalt('the REORG_HALT probe failed; see the probe warning above.',
+                this.lastProcessedBlockIndex, { unread: true })
+            return true
+        }
+        if (!this.reorgHalted) return false
+        const rolledBack = await readRolledBackAboveTip(this.db)
+        if (rolledBack === 0) return false
+        const count = (rolledBack === undefined)
+            ? 'an uncounted number of (this database has no countReorgDeletesAboveTip)'
+            : (rolledBack === null ? 'an unreadable number of' : rolledBack)
+        this.parkOnReorgHalt('the live REORG_HALT left ' + count + ' rolled-back block(s) above the stored tip.'
+            + (this.reorgHaltReason ? ' Marker detail: ' + this.reorgHaltReason : ''),
+            this.lastProcessedBlockIndex, { resetOnly: true })
+        return true
     },
 
     // Ask whether a park may end, and end it when it may. True once the loop may parse
@@ -173,6 +256,7 @@ module.exports = {
     // straight back into the same refusal once per tick.
     async resumeFromReorgHaltPark(){
         if (!this.reorgHaltParked) return true
+        if (this.reorgHaltParkUnread) return this.resumeFromUnreadPark()
         if (this.reorgHaltMarkerPersisted === false) return false
         const status = await this.checkReorgHalt()
         if (status.halted) return false
@@ -182,6 +266,28 @@ module.exports = {
         this.reorgHaltParkedHeight = null
         this.log('REORG_HALT cleared; resuming the parse loop'
             + (height === null ? '' : ' from block height ' + height) + ' without a restart.')
+        return true
+    },
+
+    // End a park taken on an unreadable marker, but only on a real read: a probe that
+    // fails again answers the cached state, which is no evidence of anything. A read
+    // that finds a halt goes through the boot park check, so a halt with rolled-back
+    // blocks above the stored tip stays parked for a reset and one with none parses
+    // forward as it would have from boot.
+    async resumeFromUnreadPark(){
+        const now = Date.now()
+        if (this.unreadParkProbeAt > 0 && (now - this.unreadParkProbeAt) < UNREAD_PARK_REPROBE_MS) return false
+        this.unreadParkProbeAt = now
+        const status = await this.checkReorgHalt({ force: true, now })
+        if (this.reorgHaltProbeFailed !== false) return false
+        this.unreadParkProbeAt = 0
+        this.reorgHaltParked = false
+        this.reorgHaltParkedAt = null
+        this.reorgHaltParkedHeight = null
+        this.reorgHaltParkUnread = false
+        if (status.halted && await this.parkOnRolledBackHalt()) return false
+        this.log('REORG_HALT marker read ' + (status.halted ? 'as a halt with no rolled-back block above the stored tip' : 'with no halt')
+            + '; resuming the parse loop without a restart.')
         return true
     },
 

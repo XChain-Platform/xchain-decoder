@@ -33,7 +33,10 @@ function buildDecoder(readFailures) {
   const nodeHash = { 102: 'node102', 101: 'node101', 100: 'node100', 99: 'match99' }
   const deleted = []
 
-  decoder.connector = { getBlockHash: async (h) => nodeHash[h] }
+  decoder.connector = {
+    getBlockHash: async (h) => nodeHash[h],
+    getBlockHeader: async () => ({ confirmations: -1 })
+  }
   decoder.db = {
     getLastBlockIndex: async () => top,
     getBlockByIndex: async (h) => {

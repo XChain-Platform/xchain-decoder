@@ -86,6 +86,7 @@ function buildDecoder({ dbOverrides = {}, nodeTips = [NODE_TIP], maxSleeps = 4 }
             return { blocks, verificationprogress: 1, initialblockdownload: false }
         },
         getBlockHash: async () => 'aabbccdd',
+        getBlockHeader: async () => ({ confirmations: -1 }),
         getBlock: async () => ''
     }
     // The parse path is not this file's subject: stop the loop at the fetch, the
@@ -101,12 +102,11 @@ function buildDecoder({ dbOverrides = {}, nodeTips = [NODE_TIP], maxSleeps = 4 }
         getLastBlockIndex: async () => STORED_TIP,
         getLastTxIndex:    async () => 0,
         endTransaction:    async () => {},
-        ping:              async () => true
+        ping:              async () => true, countReorgDeletesAboveTip: async () => 0 // nothing rolled back: no boot park
     }, dbOverrides)
 
     return { decoder, sleepCount: () => sleeps, lastSleepMs: () => lastSleepMs }
 }
-
 // A hand-advanced clock, because the park's re-read cadence IS a duration: with
 // the wall clock every park pass lands inside checkReorgHalt's 60 s TTL and the
 // probe would answer from cache for the whole test, which is exactly the bug the

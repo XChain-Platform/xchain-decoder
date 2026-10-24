@@ -259,6 +259,14 @@ function initializeDecoderReorg(decoder) {
     // rollback and the bootstrap gate finds nothing to refuse on.
     decoder.reorgHaltMarkerPersisted = null
     decoder._reorgHaltProbeInFlight = null
+    // Whether the last halt probe failed (it threw, or answered with nothing): null
+    // until a probe runs against a db that has one, so the boot park can fail closed.
+    decoder.reorgHaltProbeFailed = null
+    // Set when a probe first sees a halt; the parse loop re-runs the boot park check.
+    decoder.reorgHaltParkCheckDue = false
+    // The last unproven answer of the fork halt's reorged-away check, so the parse
+    // loop does not ask the node again every poll while it waits (reorged_away_proof.js).
+    decoder.forkProofCache = null
 }
 
 function initializeDecoderHaltState(decoder) {
@@ -275,6 +283,9 @@ function initializeDecoderHaltState(decoder) {
     decoder.reorgHaltParked = false
     decoder.reorgHaltParkedAt = null
     decoder.reorgHaltParkedHeight = null
+    // A park taken because the marker could not be read; it ends only on a real read.
+    decoder.reorgHaltParkUnread = false
+    decoder.unreadParkProbeAt = 0
 
     // Non-null only while the parse loop is waiting out a node in initial block
     // download whose tip sits below our stored tip (see the wait branch in
@@ -284,6 +295,9 @@ function initializeDecoderHaltState(decoder) {
     // Shape: { node_height, stored_height, since } where since is the ISO
     // timestamp the CURRENT wait began, held fixed until it ends.
     decoder.nodeCatchingUp = null
+    // Non-null while reorg verification is waiting for positive fork evidence.
+    // Shape: { stored_height, stored_hash, class, since }.
+    decoder.reorgWait = null
 }
 
 class XChainDecoder {

@@ -20,139 +20,24 @@
 
 const { format: formatLogLine } = require('node:util')
 const { chainTierMismatch } = require('../protocol/chain_identity')
-const { logger, DISPENSER_EXPIRE_SAFE_DEPTH, MIN_VERIFICATION_PROGRESS_TO_PARSE } = require('./constants.js')
+const { logger, MIN_VERIFICATION_PROGRESS_TO_PARSE } = require('./constants.js')
 const { haltReorg } = require('./reorg_halt.js')
 const { nodeStillCatchingUp, blockchainInfoWellFormed } = require('./payload_helpers.js')
+const { refuseHaltedRollback, readPriorRollbackDepth, assertWithinSafeDepth, requireReorgProof, refuseOrHaltDeepGap } = require('./reorg_verification/reorg_depth.js')
+const { finishHaltedWalk } = require('./reorg_verification/halted_walk.js')
 
-function safeDepthFor(decoder){
-    return decoder.dispenserExpireSafeDepth || DISPENSER_EXPIRE_SAFE_DEPTH
-}
-
-function refuseHaltedRollback(){
-    // Mirror the durable marker into the in-memory health state so the health
-    // surface agrees with the abort even before the next TTL probe.
-    this.reorgHalted = true
-    this.reorgHaltCheckedAt = Date.now()
-    const msg = "verifyReorg: decoder is HALTED from a prior over-deep reorg abort. Refusing to "
-        + "roll back further: a restart must not silently resume a rollback past the dispenser "
-        + "safe-depth window (DISPENSER_EXPIRE_SAFE_DEPTH=" + safeDepthFor(this) + "), which "
-        + "would permanently lose money-bearing dispenser state. Recovery: a full resync from a "
-        + "known-good snapshot, or once the rolled-back range is re-parsed and the database is "
-        + "verified intact, `xchain-node clear-reorg-halt <coin> <network> --reason \"...\"`."
-    logger.error(msg)
-    // Tagged so the parse loop parks on this refusal instead of exiting into a
-    // restart loop: the marker outlives every restart and is released only by
-    // an audited operator clear, which lands while this process runs.
-    const err = new Error(msg)
-    err.reorgHalt = true
-    throw err
-}
-
-async function readPriorRollbackDepth(){
-    let priorDepth = 0
-    let seedErr = null
-    for (let attempt = 1; attempt <= 3; attempt++){
-        try {
-            // Default scan bound, never the height ceiling: the bound counts ROWS and the
-            // method returns distinct HEIGHTS, so re-deleted heights would crowd out older ones.
-            const depth = await this.db.countReorgDeletesAboveTip()
-            // A non-count is a read fault, never a depth: NaN fails both ceiling comparisons open.
-            if (!Number.isInteger(depth) || depth < 0){
-                throw new Error('countReorgDeletesAboveTip returned a non-count depth (' + typeof depth + ' ' + String(depth) + ')')
-            }
-            priorDepth = depth
-            seedErr = null
-            break
-        } catch (err){
-            seedErr = err
-            logger.error(formatLogLine(`reorg: could not read the prior rollback depth (attempt ${attempt}/3)`, err))
-            if (attempt < 3) await this.sleep(3000)
-        }
-    }
-    if (seedErr){
-        const msg = 'verifyReorg: the prior rollback depth could not be read, so the dispenser '
-            + 'safe-depth ceiling cannot be enforced across a restart. Refusing to delete any block: '
-            + (seedErr.message || String(seedErr))
-        logger.error(msg)
-        throw new Error(msg)
-    }
-    return priorDepth
-}
-
-// Fail-closed reorg-depth ceiling, parity with xchain-utxo-tracker's
-// UNDO_BLOCKS guard (XChainUtxoTracker.js verifyReorg). Soft-expired
-// dispensers become eligible for hard purge once DISPENSER_EXPIRE_SAFE_DEPTH
-// blocks deep (purgeExpiredDispensers), and deleteBlockByIndex can only
-// resurrect a dispenser whose expired_block_index row still exists, so
-// rolling back past that window would silently and permanently lose
-// money-bearing dispenser state vs a from-scratch sync. A loud abort is
-// strictly safer than a silently corrupt DB: stop and require an
-// operator-driven resync. Called BEFORE each delete attempt (outside
-// the per-block retry try/catch, so the throw is not retried away).
-//
-// The ceiling is measured over priorDepth + this run's deletes, because the
-// dispenser purge window is a property of the DATABASE, not of one process:
-// 100 blocks deleted before a restart and 100 after are 200 blocks past the
-// tip either way, and counting only the current invocation is what let a
-// restart finish an aborted over-deep rollback.
-async function assertWithinSafeDepth(lastBlockIndex, priorDepth, blocksDeleted){
-    const safeDepth = safeDepthFor(this)
-    if (priorDepth + blocksDeleted.length >= safeDepth){
-        const msg = "verifyReorg: reorg depth exceeds the dispenser safe-depth window "
-            + "(DISPENSER_EXPIRE_SAFE_DEPTH=" + safeDepth + "). Already rolled back "
-            + (priorDepth + blocksDeleted.length) + " blocks (" + blocksDeleted.length
-            + " in this run, resumed from " + priorDepth + " already deleted above the tip); "
-            + "soft-expired dispenser rows for block height "
-            + lastBlockIndex + " and below may already have been hard-purged, so continuing would "
-            + "silently lose money-bearing dispenser state. Aborting. Recovery: a full resync from "
-            + "a known-good snapshot, or once the rolled-back range is re-parsed and the database "
-            + "is verified intact, `xchain-node clear-reorg-halt <coin> <network> --reason \"...\"`."
-        logger.error(msg)
-        await haltReorg.call(this, msg, blocksDeleted)
-        // Same tag as the entry guard above, and for the same reason: the marker
-        // haltReorg just wrote is what every later rollback will refuse on, so
-        // the parse loop parks rather than exiting. The delete-failure halts
-        // below are deliberately NOT tagged: those are infrastructure faults,
-        // where a fresh process and a fresh pool are a real repair attempt, and
-        // their marker parks the next boot through the entry guard anyway.
-        const err = new Error(msg)
-        err.reorgHalt = true
-        throw err
-    }
-}
-
-async function deleteAboveTipBlock(lastBlockIndex, lastBlock, nodeTip, priorDepth, blocksDeleted, retryCount){
-    await assertWithinSafeDepth.call(this, lastBlockIndex, priorDepth, blocksDeleted)
-
-    // This branch knows its depth up front: every stored height above the
-    // node tip is a delete. When that alone (on top of what is already
-    // rolled back) would cross the ceiling, refuse NOW, before the first
-    // delete, and WITHOUT the durable halt: nothing has been rolled back
-    // past the window, so nothing is lost and no resync is owed. The
-    // ceiling check above stays the authority once deletes have happened;
-    // this only stops a run that is doomed from its first block from
-    // spending the whole window to find that out (an operator's mainnet
-    // node 2666 blocks behind lost 126 valid blocks and forty hours to
-    // exactly that, 2026-09-07). Tagged so the parse loop can wait on it
-    // instead of exiting into a restart loop.
-    const aboveTip = lastBlockIndex - nodeTip
-    const alreadyRolledBack = priorDepth + blocksDeleted.length
-    const safeDepth = safeDepthFor(this)
-    if (alreadyRolledBack + aboveTip > safeDepth){
-        const msg = "verifyReorg: the node's tip (" + nodeTip + ") is " + aboveTip
-            + " blocks below the stored tip (" + lastBlockIndex + "), which"
-            + (alreadyRolledBack > 0 ? " with " + alreadyRolledBack + " block(s) already rolled back" : "")
-            + " exceeds the dispenser safe-depth window (DISPENSER_EXPIRE_SAFE_DEPTH="
-            + safeDepth + "). Refusing before any further delete: nothing has been "
-            + "rolled back past the window, no REORG_HALT marker was written and this database needs "
-            + "no resync. Either the node is still catching up (wait for it to pass " + lastBlockIndex
-            + ") or it was rolled back below this database's tip (operator action)."
-        // Not logged here: the parse loop retries this every poll and logs
-        // the refusal once per transition; other callers let it escape.
-        const err = new Error(msg)
-        err.tipBelowStoredTip = true
-        throw err
-    }
+async function deleteAboveTipBlock(lastBlockIndex, lastBlock, nodeTip, priorDepth, blocksDeleted, retryCount, walk){
+    const block = { block_index: lastBlockIndex, block_hash: lastBlock.block_hash }
+    // A high header with confirmations -1 is ambiguous until the stored chain is
+    // proven off the active chain at the node's own tip. This check also owns the
+    // deep-gap halt, so no durable marker is written for a node that is merely behind.
+    await refuseOrHaltDeepGap.call(this, block, nodeTip, priorDepth, blocksDeleted, walk)
+    if (walk.haltError) return retryCount
+    await requireReorgProof.call(this, block, nodeTip)
+    await assertWithinSafeDepth.call(this, lastBlockIndex, priorDepth, blocksDeleted, walk)
+    // A halt raised on this block deletes nothing here: the walk hands over to
+    // finishHaltedWalk, which deletes only what the node proves it reorged away from.
+    if (walk.haltError) return retryCount
     try {
         // Pass the block hash so the delete and its REORG audit marker commit
         // atomically; see deleteBlockByIndex for the durability rationale.
@@ -230,8 +115,10 @@ async function refreshReorgTip(nodeTip){
     return settled === null ? nodeTip : settled
 }
 
-async function deleteForkedBlock(lastBlockIndex, lastBlock, priorDepth, blocksDeleted, retryCount){
-    await assertWithinSafeDepth.call(this, lastBlockIndex, priorDepth, blocksDeleted)
+async function deleteForkedBlock(lastBlockIndex, lastBlock, nodeTip, priorDepth, blocksDeleted, retryCount, walk){
+    await requireReorgProof.call(this, { block_index: lastBlockIndex, block_hash: lastBlock.block_hash }, nodeTip)
+    await assertWithinSafeDepth.call(this, lastBlockIndex, priorDepth, blocksDeleted, walk)
+    if (walk.haltError) return retryCount
     try {
         // Pass the block hash so the delete and its REORG audit marker commit
         // atomically; see deleteBlockByIndex for the durability rationale.
@@ -275,11 +162,13 @@ async function readLastStoredBlock(){
     return { lastBlockIndex, lastBlock }
 }
 
-async function walkReorg(nodeTip, priorDepth, blocksDeleted){
+async function walkReorg(nodeTip, priorDepth, blocksDeleted, walk){
     let thereAreDifferences = true
     let retryCount = 0
 
     while (thereAreDifferences){
+        // Halted with a durable marker: one reading per delete no longer suffices.
+        if (walk.haltError) return finishHaltedWalk.call(this, nodeTip, priorDepth, blocksDeleted, walk)
         const stored = await readLastStoredBlock.call(this)
         if (stored === null) continue
         const { lastBlockIndex, lastBlock } = stored
@@ -290,22 +179,13 @@ async function walkReorg(nodeTip, priorDepth, blocksDeleted){
         // deep reorg that invalidates every processed block would dereference a null
         // lastBlock below and crash before the REORG event is written, leaving the
         // decoder in an inconsistent restart state.
-        if (!lastBlock || lastBlockIndex < this.startBlockIndex){
-            thereAreDifferences = false
-            break
-        }
-
-        // Blocks stored ABOVE the node's current tip are orphans the node no
-        // longer has (deep reorg, node rollback, or restart onto a shorter chain).
-        // getBlockHash(lastBlockIndex) would throw "Block height out of range",
-        // and the transient-error catch below would retry it forever instead of
-        // deleting it. Detect this with a deterministic height compare against
-        // the tip passed in (no brittle RPC-error-string matching). nodeTip is
-        // undefined for legacy callers (e.g. existing verifyReorg-only tests);
-        // guard with != null so their behaviour is unchanged. The live parse loop
-        // always passes the freshly-refreshed tip.
+        if (!lastBlock || lastBlockIndex < this.startBlockIndex) break
+        // A stored block above the node tip cannot be checked by height because
+        // getBlockHash would report it out of range. The height comparison selects
+        // the hash-based header proof instead; only confirmations -1 permits deletion.
+        // A caller without a node tip reaches the ordinary height-hash comparison.
         if (nodeTip != null && lastBlockIndex > nodeTip){
-            retryCount = await deleteAboveTipBlock.call(this, lastBlockIndex, lastBlock, nodeTip, priorDepth, blocksDeleted, retryCount)
+            retryCount = await deleteAboveTipBlock.call(this, lastBlockIndex, lastBlock, nodeTip, priorDepth, blocksDeleted, retryCount, walk)
             continue
         }
 
@@ -329,16 +209,37 @@ async function walkReorg(nodeTip, priorDepth, blocksDeleted){
 
         // Strict compare: a loose one could coerce a non-string into a false fork that deletes this block.
         if (lastBlock["block_hash"] !== blockHashFromNode){
-            retryCount = await deleteForkedBlock.call(this, lastBlockIndex, lastBlock, priorDepth, blocksDeleted, retryCount)
+            retryCount = await deleteForkedBlock.call(this, lastBlockIndex, lastBlock, nodeTip, priorDepth, blocksDeleted, retryCount, walk)
         } else {
             thereAreDifferences = false
         }
     }
 }
 
+// Close a walk: throw a halt it recorded, saying whether the halted walk reached the
+// fork point or why it stopped above it, else summarise a completed reorg.
+function finishReorgRun(blocksDeleted, walk){
+    if (walk.haltError){
+        this.logWarn(walk.haltStop
+            ? `reorg: halted; rolled back ${blocksDeleted.length} block(s) in this run and stopped above the fork point, deleting nothing the node did not prove it reorged away from: ${walk.haltStop}`
+            : `reorg: halted; rolled back ${blocksDeleted.length} block(s) in this run, down to the fork point the node confirmed`)
+        throw walk.haltError
+    }
+    if (blocksDeleted.length > 0){
+        // Each rolled-back block already persisted its own REORG marker atomically with its
+        // delete (deleteBlockByIndex), so there is no separate end-of-run event to write.
+        // This is only an ops summary of the completed reorg.
+        this.logWarn(`reorg: rolled back ${blocksDeleted.length} block(s): ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
+        // Once per RUN, never per deleted block: a per-block increment would report a
+        // single depth-5 reorg as five reorgs and destroy the frequency signal.
+        this.reorgCount++
+        this.lastReorgDepth = blocksDeleted.length
+    }
+}
+
 module.exports = {
     async verifyReorg(nodeTip){
-        let blocksDeleted = []
+        const blocksDeleted = []
 
         // Restart-durable halt guard. The safe-depth ceiling below is a per-invocation
         // counter over durably-committed per-block deletes: once it fired the loud
@@ -347,9 +248,9 @@ module.exports = {
         // rollback past the dispenser purge window (permanent, money-bearing
         // dispenser-state divergence). Every abort path now persists a durable
         // REORG_HALT marker (markReorgHalted); on entry we refuse to proceed while it
-        // is set, so a restart cannot resume an over-deep rollback. Recovery is one of
-        // the two the abort message names: a full resync (rebuilding the schema clears
-        // the marker), or the audited `xchain-node clear-reorg-halt` once its checks pass.
+        // is set, so a restart cannot resume an over-deep rollback. The refusal names the
+        // recovery that fits: `reset ... --with-indexer` while rolled-back blocks sit
+        // above the tip, or the audited `clear-reorg-halt` when none do.
         // Feature-detected so the minimal-mock verifyReorg tests stay unaffected.
         if (typeof this.db.isReorgHalted === 'function' && await this.db.isReorgHalted()){
             refuseHaltedRollback.call(this)
@@ -377,19 +278,13 @@ module.exports = {
             priorDepth = await readPriorRollbackDepth.call(this)
         }
 
-        await walkReorg.call(this, nodeTip, priorDepth, blocksDeleted)
+        // haltError: set once a safe-depth halt is durable, after which finishHaltedWalk
+        // rolls back to the fork point only on the node's confirmed readings and the halt
+        // is thrown here. haltStop: why that walk stopped above the fork point, if it did.
+        const walk = { haltError: null, haltStop: null }
+        await walkReorg.call(this, nodeTip, priorDepth, blocksDeleted, walk)
 
-        if (blocksDeleted.length > 0){
-            // Each rolled-back block already persisted its own REORG marker atomically with its
-            // delete (deleteBlockByIndex), so there is no separate end-of-run event to write.
-            // This is only an ops summary of the completed reorg.
-            this.logWarn(`reorg: rolled back ${blocksDeleted.length} block(s): ` + JSON.stringify(blocksDeleted.map(b => b.block_index)))
-            // Once per RUN, never per deleted block: a per-block increment would report a
-            // single depth-5 reorg as five reorgs and destroy the frequency signal.
-            this.reorgCount++
-            this.lastReorgDepth = blocksDeleted.length
-        }
-
+        finishReorgRun.call(this, blocksDeleted, walk)
         return true
     },
 }

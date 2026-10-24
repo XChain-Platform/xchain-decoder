@@ -212,6 +212,7 @@ function liveBody(decoder, state) {
         // { node_height, stored_height, since } while the parse loop is waiting out
         // a node in initial block download below our tip, null otherwise.
         node_catching_up:  (decoder && decoder.nodeCatchingUp) || null,
+        reorg_wait:        (decoder && decoder.reorgWait) || null,
         // node_last_ok_at + node_unreachable. Same reporting-not-gating contract as
         // node_height_stale below, and the only surface that separates "the node has
         // never answered" from "the node is fine".

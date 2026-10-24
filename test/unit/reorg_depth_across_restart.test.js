@@ -19,7 +19,11 @@
 //
 // These pin the second, restart-durable leg: the depth is reconstructed from the
 // REORG markers deleteBlockByIndex commits inside each delete's own transaction,
-// which no abort-time write failure can lose.
+// which no abort-time write failure can lose. The ceiling decides when the halt is
+// written (`atHalt`); once its marker reads back, the walk goes on only down to a
+// fork point the node confirms. Here every stored block disagrees with the node, the
+// shape a node answering wrong hashes gives, so no fork point is confirmed and the
+// halted walk deletes nothing more.
 
 'use strict'
 
@@ -49,6 +53,8 @@ function restartedDecoder(db) {
     const decoder = makeDecoder()
     let height = 300
     const deleted = []
+    // How many blocks were gone when the halt marker was written: the ceiling's verdict.
+    const atHalt = []
     decoder.db = Object.assign({
         getLastBlockIndex:  async () => height,
         getBlockByIndex:    async (i) => (i < 0 ? null : { block_index: i, block_hash: 'aa'.repeat(32) }),
@@ -56,38 +62,45 @@ function restartedDecoder(db) {
         // A restart that LOST the halt marker: the entry guard sees a clean database,
         // which is the whole premise of the hazard.
         isReorgHalted:      async () => false,
-        markReorgHalted:    async () => true
+        markReorgHalted:    async () => { atHalt.push(deleted.length); return true }
     }, db)
-    decoder.connector = { rpcErrors: 0, getBlockHash: async () => 'bb'.repeat(32) }
+    decoder.connector = {
+        rpcErrors: 0,
+        getBlockHash: async () => 'bb'.repeat(32),
+        getBlockHeader: async () => ({ confirmations: -1 })
+    }
     // The seed read retries with a 3s sleep; no test may pay for that in wall time.
     decoder.sleep = async () => {}
-    return { decoder, deleted }
+    return { decoder, deleted, atHalt }
 }
 
 describe('verifyReorg: the safe-depth ceiling survives a lost halt marker', function () {
 
     it('refuses the FIRST delete when the committed REORG markers already reach the ceiling', async function () {
-        const { decoder, deleted } = restartedDecoder({
+        const { decoder, deleted, atHalt } = restartedDecoder({
             countReorgDeletesAboveTip: async () => SAFE_DEPTH
         })
 
         await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/)
 
+        assert.deepStrictEqual(atHalt, [0],
+            'a rollback already at the ceiling halts before deleting one more block after a restart')
         assert.strictEqual(deleted.length, 0,
-            'a rollback already at the ceiling must not delete one more block after a restart')
+            'no stored block matches the node, so the halted walk confirms no fork point and deletes nothing')
         assert.strictEqual(decoder.getReorgHaltStatus().halted, true,
             'the decoder must publish the halt on its health surface')
     })
 
     it('spends only the depth that is left, then aborts', async function () {
-        const { decoder, deleted } = restartedDecoder({
+        const { decoder, deleted, atHalt } = restartedDecoder({
             countReorgDeletesAboveTip: async () => SAFE_DEPTH - 3
         })
 
         await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/)
 
-        assert.strictEqual(deleted.length, 3,
+        assert.deepStrictEqual(atHalt, [3],
             'the remaining budget is the ceiling minus what was already deleted above the tip')
+        assert.strictEqual(deleted.length, 3, 'and nothing past the halt, with no fork point confirmed')
     })
 
     it('names both halves of the depth in the abort message, so the operator sees the resume', async function () {
@@ -107,11 +120,11 @@ describe('verifyReorg: the safe-depth ceiling survives a lost halt marker', func
     // depth evidence, the run would delete 126 more blocks on top of whatever the
     // aborted one had already taken.
     it('without the durable count, a restart spends a whole fresh budget', async function () {
-        const { decoder, deleted } = restartedDecoder({})   // no countReorgDeletesAboveTip
+        const { decoder, atHalt } = restartedDecoder({})   // no countReorgDeletesAboveTip
 
         await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/)
 
-        assert.strictEqual(deleted.length, SAFE_DEPTH,
+        assert.deepStrictEqual(atHalt, [SAFE_DEPTH],
             'this is the resume the durable count exists to stop')
     })
 })
@@ -146,7 +159,7 @@ describe('verifyReorg: the safe-depth ceiling survives a lost halt marker', func
 
     it('recovers when the read fault is transient', async function () {
         let attempts = 0
-        const { decoder, deleted } = restartedDecoder({
+        const { decoder, atHalt } = restartedDecoder({
             countReorgDeletesAboveTip: async () => {
                 if (++attempts < 3) throw new Error('connection lost')
                 return SAFE_DEPTH - 1
@@ -154,7 +167,11 @@ describe('verifyReorg: the safe-depth ceiling survives a lost halt marker', func
         })
 
         await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/)
-        assert.strictEqual(deleted.length, 1)
+        // The 125 read on the third attempt is what decides: with the one above-tip
+        // block that makes exactly the window, which the above-tip delete still fits,
+        // and the ceiling halts right after it (a zero depth would have spent the whole
+        // window instead).
+        assert.deepStrictEqual(atHalt, [1])
     })
 
     it('still refuses on the halt marker when one DID survive, before counting anything', async function () {
@@ -270,7 +287,7 @@ function reDeletedRangeDecoder() {
     for (let h = 400; h >= 301; h--) markers.push({ id: ++id, data: JSON.stringify([{ block_index: h, block_hash: 'bb' }]) })
     const newestFirst = markers.slice().reverse()
     const scans = []
-    const { decoder, deleted } = restartedDecoder({})
+    const { decoder, deleted, atHalt } = restartedDecoder({})
     const markerDb = Object.create(Database.prototype)
     markerDb.transactionConnection = null
     markerDb.getLastBlockIndex = () => decoder.db.getLastBlockIndex()
@@ -283,13 +300,13 @@ function reDeletedRangeDecoder() {
         release: async () => {}
     })
     decoder.db.countReorgDeletesAboveTip = (...args) => markerDb.countReorgDeletesAboveTip(...args)
-    return { decoder, deleted, scans }
+    return { decoder, deleted, atHalt, scans }
 }
 
 describe('verifyReorg: a re-deleted height does not shrink the carried-over depth', function () {
 
     it('counts every distinct height above the tip when repeat markers fill the newest rows', async function () {
-        const { decoder, deleted, scans } = reDeletedRangeDecoder()
+        const { decoder, atHalt, scans } = reDeletedRangeDecoder()
 
         await assert.rejects(() => decoder.verifyReorg(NODE_TIP), (err) => {
             assert.match(err.message, /safe-depth/)
@@ -297,7 +314,7 @@ describe('verifyReorg: a re-deleted height does not shrink the carried-over dept
             return true
         })
 
-        assert.strictEqual(deleted.length, SAFE_DEPTH - 110,
+        assert.deepStrictEqual(atHalt, [SAFE_DEPTH - 110],
             'a scan bounded at the height ceiling reads 100 here and spends ten blocks past the purge horizon')
         assert.ok(scans.every((limit) => limit >= 200), 'the scan must reach both runs\' markers: ' + scans)
     })

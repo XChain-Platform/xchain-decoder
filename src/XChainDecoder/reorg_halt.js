@@ -25,6 +25,23 @@
 const { getLogger } = require('../observability')
 const { logger } = require('./constants.js')
 
+// The one recovery for a halt that rolled back blocks above the stored tip: a parked
+// decoder never re-parses that range, so clear-reorg-halt's re-parse check can never pass.
+const RESET_RECOVERY = '`xchain-node reset xchain-decoder <chain> <network> --with-indexer --yes`'
+
+// Count the rolled-back heights above the stored tip to choose a halt's recovery:
+// undefined when the db has no such count (older and minimal db shapes), null when
+// it cannot be read. Never throws.
+async function readRolledBackAboveTip(db){
+    if (!db || typeof db.countReorgDeletesAboveTip !== 'function') return undefined
+    try {
+        const count = await db.countReorgDeletesAboveTip()
+        return (Number.isInteger(count) && count >= 0) ? count : null
+    } catch (_) {
+        return null
+    }
+}
+
 function announceReorgHalt(reason, blocksDeleted, canPersist){
     try {
         getLogger().error('REORG_HALT', {
@@ -130,4 +147,4 @@ async function haltReorg(reason, blocksDeleted){
     reportReorgHaltMarker.call(this, persisted, attempts, lastError)
 }
 
-module.exports = { haltReorg }
+module.exports = { haltReorg, RESET_RECOVERY, readRolledBackAboveTip }

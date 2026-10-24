@@ -95,6 +95,7 @@ function buildHealthResult(decoder, state, decoderRunning, decoderError){
         // { node_height, stored_height, since } while the parse loop is waiting
         // out a node in initial block download below our tip, null otherwise.
         node_catching_up:    (decoder && decoder.nodeCatchingUp) || null,
+        reorg_wait:          (decoder && decoder.reorgWait) || null,
         // node_last_ok_at + node_unreachable: whether the coin node is answering
         // this decoder at all, and since when it stopped. Reported, not gated on.
         ...nodeReachabilityFields(decoder),
@@ -166,6 +167,7 @@ function registerStatusRoute(app, decoder, isDecoderRunning){
             // { node_height, stored_height, since } while the parse loop is waiting out
             // a node in initial block download below our tip, null otherwise.
             node_catching_up:  (decoder && decoder.nodeCatchingUp) || null,
+            reorg_wait:        (decoder && decoder.reorgWait) || null,
             // node_last_ok_at + node_unreachable: whether the coin node is answering
             // this decoder at all, and since when it stopped. Reported, not gated on.
             ...nodeReachabilityFields(decoder),
@@ -391,4 +393,4 @@ if (require.main === module) startApi()
 // startApi is exported so the crash handlers it installs can be driven for real
 // rather than asserted against the source text; the require.main guard above
 // still keeps a plain require from opening a port or a DB connection.
-module.exports = { makeRpcBatchGuard, registerLiveRoute, registerReadyRoute, registerStatusRoute, startApi, createMempoolMethods, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
+module.exports = { buildHealthResult, makeRpcBatchGuard, registerLiveRoute, registerReadyRoute, registerStatusRoute, startApi, createMempoolMethods, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }

@@ -154,6 +154,9 @@ module.exports = {
         // release, which is the crash loop parking exists to end. The halt itself is
         // reported on its own field by every health surface.
         if (this.reorgHaltParked) return false
+        // Waiting for positive reorg proof is deliberate and survives a restart, so
+        // autoheal cannot repair it. The dedicated reorg_wait field explains the pause.
+        if (this.reorgWait) return false
         // Neither height is known, so there is no gap to measure.
         if (this.blockchainInfoLastBlock < 0 || this.lastProcessedBlockIndex < 0) return false
         // The chain is not waiting on us: a decoder at or one block behind the tip
