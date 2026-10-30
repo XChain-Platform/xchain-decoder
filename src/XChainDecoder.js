@@ -255,8 +255,8 @@ function initializeDecoderReorg(decoder) {
     // Whether a REORG_HALT row is known to be READABLE, as distinct from
     // whether this decoder is halted. null = no halt has been raised or read
     // yet; false = a halt exists in memory whose durable write could not be
-    // confirmed, which is the one state where a restart silently resumes the
-    // rollback and the bootstrap gate finds nothing to refuse on.
+    // confirmed, which is the one state a restart forgets (only the per-block
+    // REORG markers keep the depth ceiling) and the bootstrap gate cannot refuse on.
     decoder.reorgHaltMarkerPersisted = null
     decoder._reorgHaltProbeInFlight = null
     // Whether the last halt probe failed (it threw, or answered with nothing): null

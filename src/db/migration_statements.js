@@ -17,7 +17,7 @@ const { ensureLedgerAppliedAtDatetime } = require('./migration_ledger.js')
 const { stripBlockComments } = require('./migration_live_schema_guard.js')
 const {
     hasUnquotedHash, isSimpleDestructiveStatement, createOutsideAllowList, isDestructiveAlter,
-    statementOutsideAllowList,
+    statementOutsideAllowList, addsDeferredConstraint,
 } = require('./migration_guards/destructive_statement_rules.js')
 
 module.exports = {
@@ -63,7 +63,9 @@ module.exports = {
     // generated key), a MODIFY not opening its alter_spec (WAIT n / NOWAIT belongs to the head),
     // any ALTER TABLE PARTITION, TABLESPACE or ENGINE clause, ALTER IGNORE
     // TABLE (deletes duplicate-key rows), any other ALTER than ALTER [ONLINE] TABLE, a CREATE
-    // TABLE naming an engine other than InnoDB, and any CREATE other than [TEMPORARY] TABLE and
+    // TABLE naming an engine other than InnoDB, any FOREIGN KEY, REFERENCES or CHECK constraint
+    // definition (cascades, restricts or rejects later writes and deletes), and any CREATE other
+    // than [TEMPORARY] TABLE and
     // [UNIQUE|FULLTEXT|SPATIAL] INDEX (triggers, events, routines and views run SQL
     // the scanner cannot read), and any SET other than SET NAMES or a single UTC
     // time_zone (session variables relax strict mode; SET STATEMENT ... FOR hides a statement).
@@ -74,7 +76,8 @@ module.exports = {
     // Deliberately NOT flagged (legitimate existing auto patterns): DROP INDEX/KEY,
     // DROP FOREIGN KEY/CONSTRAINT/CHECK/DEFAULT/PRIMARY KEY with the keyword bare and
     // unquoted (structural, no row data lost), a standalone DROP INDEX ... ON and
-    // DROP TEMPORARY TABLE, ADD ..., plain InnoDB or engine-less CREATE
+    // DROP TEMPORARY TABLE, ADD ... (except a FOREIGN KEY or CHECK constraint), plain InnoDB
+    // or engine-less CREATE
     // TABLE / CREATE TABLE IF NOT EXISTS (additive; but CREATE OR REPLACE TABLE IS flagged -
     // it is an atomic DROP+CREATE), CREATE [UNIQUE] INDEX, MODIFY that widens/nullables a
     // column, and ALTER ONLINE TABLE under the same clause rules as plain ALTER TABLE.
@@ -110,6 +113,7 @@ module.exports = {
             // flag every other UPDATE.
             if(/^UPDATE\b/i.test(stmt) && !this.isIdRepairUpdate(stmt)) return raw;
             if(createOutsideAllowList(stmt)) return raw;
+            if(addsDeferredConstraint(stmt)) return raw;
             // MariaDB spells it ALTER [ONLINE] [IGNORE] TABLE. ONLINE only picks the lock mode, so
             // it gets the plain clause checks; IGNORE silently deletes duplicate-key rows, so never.
             const alterHead = /^ALTER\s+((?:(?:ONLINE|IGNORE)\s+)*)TABLE\b/i.exec(stmt);

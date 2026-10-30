@@ -139,8 +139,9 @@ async function assertWithinSafeDepth(lastBlockIndex, priorDepth, blocksDeleted, 
 //
 // So with the marker confirmed, record the halt on the walk; the walk stops deleting
 // on its own evidence and hands over to finishHaltedWalk, which deletes only what the
-// node confirms, and verifyReorg throws once that ends. Without the marker, throw now
-// exactly as before: an unrecorded halt is the one state a restart could resume from.
+// node confirms, and verifyReorg throws once that ends. Without the marker, throw now:
+// nothing durable condemns this database (no boot park, nothing for the bootstrap gate
+// to count), so it must not be rolled back past the window.
 async function raiseSafeDepthHalt(msg, blocksDeleted, walk){
     logger.error(msg)
     await haltReorg.call(this, msg, blocksDeleted)

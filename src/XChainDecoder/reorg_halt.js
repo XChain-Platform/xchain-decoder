@@ -80,25 +80,30 @@ function reportReorgHaltMarker(persisted, attempts, lastError){
     } catch (_) { /* a diagnostic must never mask the abort it describes */ }
 
     if (!persisted){
-        // The incident shape the bootstrap gate exists to stop: the process is
-        // about to exit, the restart policy recycles the container, the entry
-        // guard reads a marker that was never written, the decoder finishes the
-        // over-deep rollback, and the gate counts zero markers and publishes
-        // this database as known-good. Nothing durable records it, so this line
-        // is the only evidence and it has to name the required action.
+        // The incident shape the bootstrap gate exists to stop: the process exits,
+        // the container restarts, and the entry guard, health surfaces and gate all
+        // read a marker that was never written, so the gate would publish this
+        // database as known-good. The depth ceiling survives (it is re-derived from
+        // the per-block REORG markers), but nothing durable records the halt, so
+        // this line is the only evidence and it has to name the required action.
         logger.error('verifyReorg: the durable REORG_HALT marker could NOT be persisted after '
             + attempts + ' attempt(s)'
             + (lastError ? ' (' + (lastError.message || String(lastError)) + ')' : '')
-            + '. This database is NOT a valid bootstrap source: a restart will re-enter verifyReorg '
-            + 'with a zeroed depth counter and silently resume the over-deep rollback. '
-            + 'REQUIRED OPERATOR ACTION: full resync from a known-good snapshot.')
+            + '. This database is NOT a valid bootstrap source: the halt is recorded nowhere durable, '
+            + 'so after a restart the health surfaces and the bootstrap gate will not report it. '
+            + 'The safe-depth ceiling still holds across a restart, because it is re-derived from the '
+            + 'per-block REORG markers committed with each delete, and a restarted decoder that reaches '
+            + 'it halts again and retries this write. '
+            + 'REQUIRED OPERATOR ACTION: full resync from a known-good snapshot, and do not publish '
+            + 'or snapshot this database until then.')
     }
 }
 
 // Persist the durable halt marker before an abort throws. Feature-detected, and
 // non-throwing so a marker failure never masks the loud abort, but NOT silent:
 // the outcome is honoured, published on the health surface and logged, because
-// an unrecorded halt is the one state where a restart resumes the rollback.
+// an unrecorded halt is invisible after a restart to the health surfaces and the
+// bootstrap gate (the depth ceiling itself is re-derived from per-block REORG markers).
 async function haltReorg(reason, blocksDeleted){
     // Set the in-memory health state first: the durable write is best-effort,
     // but this decoder is halted either way and every health surface must say

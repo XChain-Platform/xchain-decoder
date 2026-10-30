@@ -11,8 +11,6 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert');
-const fs     = require('fs');
-const path   = require('path');
 const VENDORED_MODULE = require('../../../src/protocol/indexer_batch_limits.js');
 const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
         hasProvablyRejectedBatch,
@@ -26,94 +24,7 @@ const { BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION,
 const ACTION_ALIASES = require('../../../src/protocol/action_aliases.js');
 const sync = require('../../../bin/sync-batch-limits.js');
 const CORPUS = require('../../fixtures/regtestBatchCorpus.json');
-const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
-const T0 = 1700000000;
-function siblingOrSkip(ctx, file) {
-    if (fs.existsSync(file)) return true;
-    if (REQUIRE_SIBLINGS)
-        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but sibling not found: ' + file);
-    ctx.skip();
-    return false;
-}
-// A real xchain-indexer Batch handler, wired to the REAL Utility and the REAL ProtocolChanges
-// registry, with only the database and the dispatch stubbed out.
-//
-// What is stubbed and why it does not weaken the comparison:
-//   * isActionAllowed -> true. Address-sleep state is one of the causes deliberately NOT
-//     mirrored, so holding it off keeps the comparison about the causes that ARE.
-//   * detectFeePaymentMode -> 'native'. The aggregate gas pre-check is likewise not mirrored;
-//     the native path is its documented first exit.
-//   * getTickerId -> one id per DISTINCT tick STRING. That is the boundary case for the MINT
-//     mirror: it makes the real handler's per-distinct-token count equal the mirror's
-//     per-identical-string count, so the two must agree exactly. The OPPOSITE case (two
-//     spellings of one token) is driven separately below, where the mirror is expected to
-//     stay silent and the handler to reject.
-function realBatch(opts) {
-    opts = opts || {};
-    const Batch           = require(sync.INDEXER_BATCH);
-    // From the checkout root, not from the handler path: the handler is one directory deeper
-    // once the indexer splits it into src/actions/batch/, and walking up from it lands in
-    // src/actions/ instead of src/.
-    const Utility         = require(path.join(sync.INDEXER_ROOT, 'src', 'utility.js'));
-    const ProtocolChanges = require(sync.INDEXER_CHANGES);
-    const util = new Utility({ config: {}, indexerDb: {}, decoderDb: {}, util: {} });
-    util.addAddressTicker      = () => {};
-    util.detectFeePaymentMode  = () => 'native';
-    // Network and block time are overridable so the weight-budget cases can drive the SAME
-    // handler where BATCH_COST_WEIGHTING is armed and where it is not.
-    const blockTime = (opts.blockTime === undefined) ? T0 : opts.blockTime;
-    const changes = new ProtocolChanges({
-        config:    { NETWORK: opts.network || 'regtest' },
-        util:      util,
-        decoderDb: { getBlockTime: async () => blockTime },
-    });
-    const ids = opts.tickIds || new Map();
-    let nextId = 1000;
-    const indexerDb = {
-        suppressIndexIdCreation: false,
-        async createBatch() {},
-        async isActionAllowed() { return true; },
-        async getTokenInfo() { return null; },
-        async getTickerId(tick) {
-            if (!ids.has(tick)) ids.set(tick, nextId++);
-            return ids.get(tick);
-        },
-        async getAddressBalances() { return []; },
-        async createActionIndex() { return 1; },
-    };
-    return new Batch({
-        config:          { GAS: 'XCHAIN' },
-        decoderDb:       {},
-        indexerDb:       indexerDb,
-        util:            util,
-        mapper:          { async createMappings() {} },
-        protocolChanges: changes,
-        actionAliases:   Object.assign({}, ACTION_ALIASES),
-        async processAction() {},
-    });
-}
-// The real handler's verdict for one wire payload. Returns the STATUS string.
-async function indexerStatus(wire, opts) {
-    const batch = realBatch(opts);
-    const data = {
-        TX_DATA:     wire,
-        FORMAT:      0,
-        BLOCK_INDEX: 10,
-        ACTION_INDEX: 5,
-        SOURCE:      'bcrt1qbatchsource',
-        IS_GENESIS:  false,
-        IS_EMISSION: false,
-        TX_OUTPUTS:  [],
-    };
-    const log = console.log;
-    console.log = () => {};
-    try {
-        await batch.parse(String(wire).split('|').slice(1), data, false);
-    } finally {
-        console.log = log;
-    }
-    return data['STATUS'];
-}
+const { siblingOrSkip, realBatch, indexerStatus } = require('../../helpers/indexer_batch_handler.js');
 const subCommandsOf = (wire) => wire.slice('BATCH|0|'.length).split(';');
 const mirrorRejects = (wire) => hasProvablyRejectedBatch(subCommandsOf(wire), ACTION_ALIASES);
 // Vectors chosen to cover every mirrored cause, every cause deliberately NOT mirrored, and
@@ -394,6 +305,39 @@ describe(OUTER_TITLE, function () {
                                   ['JDOG.1'], [undefined], [null], ['0.5'], [' 0'], ['-1']])
                 assert.strictEqual(isLegacyActionFormat(params), util.isLegacyActionFormat(params),
                     'diverged on ' + JSON.stringify(params));
+        });
+    });
+});
+
+describe(OUTER_TITLE, function () {
+    this.timeout(0);
+
+    describe(TIER_TITLE, function () {
+
+        it('charges a multi-leg AIRDROP no more than the handler, flat below its per-leg gate', async function () {
+            if (!siblingOrSkip(this, sync.INDEXER_BATCH)) return;
+            // A FORMAT-2 AIRDROP of four legs. Regtest arms the handler's per-leg weight at
+            // genesis; mainnet leaves it unarmed, so block 0 there is below it.
+            const leg = 'BTC|1|a';
+            const command = 'AIRDROP|2|' + [leg, leg, leg, leg].join('|');
+            const wire = 'BATCH|0|' + [command, command, command].join(';');
+            const flat = VENDORED_MODULE.COMMAND_WEIGHTS.AIRDROP;
+            const ours = subCommandCostWeight(command, ACTION_ALIASES);
+            const regtest = { handlerConfig: { NETWORK: 'regtest' } };
+            const above = await realBatch(regtest)
+                .subCommandWeight('AIRDROP', command, { BLOCK_INDEX: 10 }, true);
+            const below = await realBatch({ handlerConfig: { NETWORK: 'mainnet' } })
+                .subCommandWeight('AIRDROP', command, { COIN: 'BTC', BLOCK_INDEX: 0 }, true);
+            assert.strictEqual(above, 4 * flat, 'premise wrong: the handler no longer charges per leg');
+            assert.strictEqual(below, flat, 'premise wrong: the handler charges per leg below its gate');
+            assert.ok(ours <= above,
+                'UNDER-CAPTURE risk: the mirror charges a multi-leg AIRDROP more than the handler');
+            assert.strictEqual(ours, below, 'below the per-leg gate the flat weight must be exact');
+            // The declared gap: the handler rejects this batch whole and the mirror still
+            // captures it. A mirror that starts suppressing here must follow the per-coin gate.
+            assert.strictEqual(await indexerStatus(wire, regtest), 'invalid: COMMAND (limit)');
+            assert.strictEqual(captureCommands(wire, 'regtest', 0).length, 3,
+                'the mirror now suppresses a multi-leg batch; re-derive subCommandCostWeight\'s comment');
         });
     });
 });

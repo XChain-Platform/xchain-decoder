@@ -220,18 +220,18 @@ module.exports = {
     },
 
     // Persist the durable reorg-halt marker (idempotent: no-op if already halted).
-    // Called on every verifyReorg abort path BEFORE the throw, so a restart cannot
-    // resume the over-deep rollback. Best-effort by design; the caller swallows any
-    // error so a marker-write failure never masks the original loud abort.
+    // Called on every verifyReorg abort path BEFORE the throw, so a restarted decoder
+    // refuses every later rollback until an audited clear. Best-effort by design; the
+    // caller swallows any error so a marker-write failure never masks the loud abort.
     //
     // Returns TRUE only when a REORG_HALT row is readable afterwards, never merely
     // "the INSERT reported no error". insertEvent swallows every write error and
     // returns false, so the boolean it hands back is the only failure signal that
     // exists here, and a caller that trusts it without a read-back is trusting a
     // driver's ack for a row nobody has seen. That distinction is the whole point:
-    // this marker is the only thing standing between a restarted decoder and a
-    // silently resumed over-deep rollback, and every consumer of it (the entry
-    // guard, the health surfaces, the bootstrap gate) reads the ROW, not the ack.
+    // this marker is the only durable record of the halt (the depth ceiling across a
+    // restart rests separately on countReorgDeletesAboveTip), and every consumer of it
+    // (the entry guard, the health surfaces, the bootstrap gate) reads the ROW, not the ack.
     async markReorgHalted(reason){
         // An unaudited clear row reads as halted but is no REORG_HALT row, and older
         // bootstrap gates count only those rows, so that halt still gets one written.

@@ -57,8 +57,8 @@ const { hasProvablyRejectedSubCommand,
 //
 // A FOURTH cause, the BATCH_COST_WEIGHTING weight budget, IS mirrored, and unlike the caps
 // above it is gated on its own vendored instant rather than assumed on (see
-// isBatchCostWeightingActive). Its one deliberate under-estimate, the DEPLOY discount, is
-// argued at subCommandCostWeight.
+// isBatchCostWeightingActive). Its two under-estimates, the DEPLOY discount and the flat
+// AIRDROP weight past the indexer's per-leg gate, are argued at subCommandCostWeight.
 //
 // Order of the checks is irrelevant to the verdict (any one of them means "rejected"), so
 // this does NOT reproduce the indexer's error precedence, which decides only WHICH string a
@@ -68,9 +68,11 @@ const { hasProvablyRejectedSubCommand,
 // provably active", so every caller written before the budget existed keeps today's verdicts.
 function hasProvablyRejectedBatch(subCommands, aliases, consensusNetwork, blockTime){
     if (!Array.isArray(subCommands)) return false
-    // The global command cap, counted over the raw ';'-split list with empty elements
-    // included - the same list, and the same counting rule, the indexer caps.
-    if (subCommands.length > COMMAND_LIMIT) return true
+    const weightsActive = isBatchCostWeightingActive(consensusNetwork, blockTime)
+    // The global count cap, counted over the raw ';'-split list with empty elements
+    // included - the same list, and the same counting rule, the indexer caps. The limit
+    // switches to WEIGHT_BUDGET under weighting, exactly as the indexer's commandCapError does.
+    if (subCommands.length > (weightsActive ? WEIGHT_BUDGET : COMMAND_LIMIT)) return true
     if (hasProvablyRejectedSubCommand(subCommands)) return true
 
     const tally     = new Map()
@@ -93,10 +95,9 @@ function hasProvablyRejectedBatch(subCommands, aliases, consensusNetwork, blockT
     }
 
     // The weighted budget, which the indexer applies INSTEAD of the flat count at/after
-    // BATCH_COST_WEIGHTING. The count cap above stays a sound pre-filter either way, because
-    // every weight is >= 1 and the budget is the same number.
-    if (isBatchCostWeightingActive(consensusNetwork, blockTime) &&
-        batchCostWeight(subCommands, aliases) > WEIGHT_BUDGET) return true
+    // BATCH_COST_WEIGHTING. The count pre-filter above is exact against it whatever the two
+    // constants are, because every weight is >= 1, so a count over the budget is a sum over it.
+    if (weightsActive && batchCostWeight(subCommands, aliases) > WEIGHT_BUDGET) return true
 
     return false
 }
@@ -129,9 +130,14 @@ function isBatchCostWeightingActive(consensusNetwork, blockTime){
 // So DEPLOY is deliberately UNDER-charged at the default 1 rather than its table weight of
 // 30: the indexer discounts a format-4 chunk carrier back to 1, and this module does not read
 // FORMAT versions. DEPLOY is capped at 1 per BATCH by GATED_ACTION_LIMITS, so the whole
-// under-estimate is bounded at 29 of the 250 budget. Every other weighted ACTION
-// (AIRDROP/DIVIDEND/EXECUTE/XEXEC) is charged unconditionally by the indexer, so the table
-// value is exact there.
+// under-estimate is bounded at 29 of the 250 budget. DIVIDEND/EXECUTE/XEXEC are charged
+// unconditionally by the indexer, so the table value is exact there.
+//
+// AIRDROP is exact only below the indexer's BATCH_AIRDROP_LEG_WEIGHT_ACTIVATION height gate.
+// At and above it the indexer charges the table weight once PER LEG (FORMATs 1 to 3 carry
+// several), so the flat weight here is a lower bound: an over-budget multi-leg batch is still
+// captured, the safe direction. Mirroring the multiplier needs that gate's per-coin heights
+// and the block height, neither of which this module takes.
 //
 // Alias expansion matches the indexer's, which normalizes the name before weighing; the
 // module header's ordering argument covers that BATCH_SUBACTION_NORMALIZATION is on wherever

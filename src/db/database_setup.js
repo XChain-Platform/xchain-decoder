@@ -272,10 +272,11 @@ module.exports = {
     // Assert the session runs the strict sql_mode the pool pins (DECODER_SQL_MODE). Under a
     // lax mode the DETERMINISTIC_WRITE_ERRNOS become warnings, so a row a strict peer
     // quarantines is stored truncated here and the replicated transactions table diverges.
-    async assertStrictSqlMode(){
-        let conn;
+    // A caller-owned conn is checked in place and never released here.
+    async assertStrictSqlMode(existingConn){
+        let conn = existingConn;
         try {
-            conn = await this.getConnection();
+            if(!conn) conn = await this.getConnection();
             const rows = await conn.query('SELECT @@SESSION.sql_mode AS mode');
             const mode = String((rows && rows[0] && rows[0].mode) || '');
             const flags = mode.split(',').map((f) => f.trim().toUpperCase());
@@ -291,7 +292,7 @@ module.exports = {
                 );
             }
         } finally {
-            if(conn && this.transactionConnection == null){
+            if(conn && !existingConn && this.transactionConnection == null){
                 try { await conn.release(); } catch(_){}
             }
         }
