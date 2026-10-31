@@ -218,6 +218,10 @@ module.exports = {
         let returnToPool = true;
         let sessionDirty = false;
         try {
+            // Check sql_mode on the connection that applies the files (a proxy or server-side
+            // override can differ per connection); a refused session is closed, not pooled.
+            try { await this.assertStrictSqlMode(conn); }
+            catch(e){ sessionDirty = true; throw e; }
             const got = await conn.query('SELECT GET_LOCK(?, 30) AS l', [lockName]);
             if(!got || !got[0] || String(got[0].l) !== '1'){
                 logger.warn('runMigrations: could not acquire lock ' + lockName + ' (another process is migrating). Skipping this run.');

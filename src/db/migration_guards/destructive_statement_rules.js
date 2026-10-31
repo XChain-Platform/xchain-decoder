@@ -108,6 +108,13 @@ function createOutsideAllowList(stmt){
     return !/^CREATE\s+(?:(?:UNIQUE|FULLTEXT|SPATIAL)\s+)?INDEX\b/i.test(stmt);
 }
 
+// True for a FOREIGN KEY, REFERENCES or CHECK definition, which changes how later writes and
+// deletes behave (reorg rollback ones too), like a trigger. Kept in step with the xchain-indexer classifier.
+function addsDeferredConstraint(stmt){
+    const text = blankLiterals(stmt);
+    return /\bREFERENCES\b/i.test(text) || /(?<!\bDROP\s+)\bFOREIGN\s+KEY\b/i.test(text) || /\bCHECK\s*\(/i.test(text);
+}
+
 // The closing allow-list: true unless the statement opens with a form an auto file may use.
 // Any other form (BINLOG, DO, SELECT, PURGE, RESET, INSTALL, ...) can make the server do
 // something this prefix classifier cannot see, the same blind spot as CALL above.
@@ -168,4 +175,5 @@ function isDestructiveAlter(stmt, safeAlterDrop){
 
 module.exports = {
     hasUnquotedHash, isSimpleDestructiveStatement, createOutsideAllowList, isDestructiveAlter, statementOutsideAllowList,
+    addsDeferredConstraint,
 }
