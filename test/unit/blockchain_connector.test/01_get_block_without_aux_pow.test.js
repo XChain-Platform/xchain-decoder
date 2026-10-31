@@ -91,7 +91,31 @@ describe('BlockchainConnector', () => {
                 }
             )
         })
+
     })
+})
+
+describe('getBlockWithoutAuxPow malformed RPC results', () => {
+    registerConnectorHooks()
+    for (const sample of [
+        { label: 'object header', header: {}, block: 'aa' },
+        { label: 'numeric block', header: 'aa', block: 12345 },
+        { label: 'non-hex block', header: 'aa', block: 'zz' },
+        { label: 'odd-length header', header: 'abc', block: 'aa' },
+    ]) {
+        it('rejects a malformed ' + sample.label + ' as an untagged RPC fault', async () => {
+            axiosStub.onCall(0).resolves({ data: { result: sample.header } })
+            axiosStub.onCall(1).resolves({ data: { result: sample.block } })
+            const before = connector.rpcErrors
+            await assert.rejects(() => connector.getBlockWithoutAuxPow('hash'), err => {
+                assert.strictEqual(err.auxPowParseFailure, undefined)
+                assert.match(err.message, /returned malformed block hex/)
+                return true
+            })
+            assert.strictEqual(axiosStub.callCount, 2)
+            assert.strictEqual(connector.rpcErrors, before + 1)
+        })
+    }
 })
 
 describe('BlockchainConnector', () => {

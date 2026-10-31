@@ -107,6 +107,30 @@ describe('mempool admission of an ACTION with no resolvable source', function ()
   })
 })
 
+describe('known mempool and block open-dispenser set divergence', function () {
+  this.timeout(0)
+
+  const classify = (openSet) => actionResult(null, {
+    dispenseOutputs: openSet.has('dispenserAddr')
+      ? [{ txIndex: 'txid1', vout: 1, destinationAddress: 'dispenserAddr', amount: 1 }]
+      : [],
+  })
+
+  it('blanks pending text when the dispenser is not committed until confirmation', async () => {
+    const { decoder, inserted } = await runOneMempoolCycle(classify, new Set())
+    assert.strictEqual(inserted[0].data, '')
+    assert.strictEqual(inserted[0].raw_data, null)
+    assert.strictEqual(decoder.hasStorableContent(classify(new Set(['dispenserAddr']))), true)
+  })
+
+  it('keeps pending text when a legacy-expiry block later closes the dispenser', async () => {
+    const { decoder, inserted } = await runOneMempoolCycle(
+      classify, new Set(['dispenserAddr']))
+    assert.strictEqual(inserted[0].data, 'COINPAY|0|abc|def')
+    assert.strictEqual(decoder.hasStorableContent(classify(new Set())), false)
+  })
+})
+
 // The block path sees a gate-skipped tx (oversized or unknown ACTION, no outputs) once.
 // The mempool path must too: a stateful seen-set fake runs two polls over the same txid.
 describe('mempool admission of a gate-skipped ACTION', function () {

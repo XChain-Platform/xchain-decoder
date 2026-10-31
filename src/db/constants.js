@@ -28,6 +28,9 @@ const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/
 // why the pool pins DECODER_SQL_MODE below.
 const DETERMINISTIC_WRITE_ERRNOS = new Set([1366, 1406, 1264, 1265, 1292])
 
+// Must match index_addresses.address VARCHAR(120) in sql/index_addresses.sql.
+const INDEX_ADDRESS_MAX_CHARS = 120
+
 // Pin every pooled session strict, so a lax my.cnf cannot store the truncated row a
 // strict peer quarantines. Never add NO_BACKSLASH_ESCAPES: opensBackslashEscape in
 // query_helpers.js assumes backslash escapes are on. assertStrictSqlMode checks both.
@@ -40,6 +43,7 @@ module.exports = {
     SATOSHIS_DECIMALS,
     DB_NAME_REGEX,
     DETERMINISTIC_WRITE_ERRNOS,
+    INDEX_ADDRESS_MAX_CHARS,
     DECODER_SQL_MODE,
     DEFAULT_QUERY_TIMEOUT_MS,
 }

@@ -167,11 +167,10 @@ describe('verifyReorg: the safe-depth ceiling survives a lost halt marker', func
         })
 
         await assert.rejects(() => decoder.verifyReorg(NODE_TIP), /safe-depth/)
-        // The 125 read on the third attempt is what decides: with the one above-tip
-        // block that makes exactly the window, which the above-tip delete still fits,
-        // and the ceiling halts right after it (a zero depth would have spent the whole
-        // window instead).
-        assert.deepStrictEqual(atHalt, [1])
+        // The 125 read on the third attempt is what decides: the one above-tip block
+        // plus the proven-forked node-tip block cannot both fit, so the halt precedes
+        // the first delete. A zero depth would have left room for the walk.
+        assert.deepStrictEqual(atHalt, [0])
     })
 
     it('still refuses on the halt marker when one DID survive, before counting anything', async function () {

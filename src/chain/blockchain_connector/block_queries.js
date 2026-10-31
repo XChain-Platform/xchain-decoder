@@ -18,6 +18,11 @@ const { attachRpcFields } = require('./rpc_helpers.js')
 // A block hash as every supported node prints it: 32 bytes of hex, either case.
 const BLOCK_HASH_HEX = /^[0-9a-fA-F]{64}$/
 
+function isWholeHex(value){
+    return typeof value === 'string' && value.length > 0 && value.length % 2 === 0
+        && /^[0-9a-fA-F]+$/.test(value)
+}
+
 module.exports = {
     async getNetworkInfo(){
         return await this.rpcCallWithTimeoutRetry({
@@ -80,6 +85,13 @@ module.exports = {
     async getBlockWithoutAuxPow(blockhash) {
         let blockHeaderHex = await this.getBlockHeader(blockhash, true)
         let blockHex = await this.getBlock(blockhash, true)
+        if (!isWholeHex(blockHeaderHex) || !isWholeHex(blockHex)) {
+            this.rpcErrors++
+            const badMethod = !isWholeHex(blockHeaderHex) ? 'getblockheader' : 'getblock'
+            const badValue = badMethod === 'getblockheader' ? blockHeaderHex : blockHex
+            const shape = typeof badValue === 'string' ? 'string length ' + badValue.length : typeof badValue
+            throw new Error(badMethod + ' returned malformed block hex for ' + blockhash + ' (' + shape + ')')
+        }
 
         try {
             // Strip logic lives in stripAuxPowFromBlockHex, which is byte-identical to

@@ -83,20 +83,20 @@ function* arbitrateEnvelope(envelopeActive, envelopeInputs, blockHeight, nextTxI
 function* capturePubkey(keyInput, db, source){
     //Extract and store the public key from the input that spent the source's UTXO
     //
-    // The opportunistic write below only fires for a source index_addresses
-    // already holds, and the MEMPOOL lane depends on exactly that: it must never
-    // allocate a replicated lookup id from non-deterministic mempool arrival
-    // order (see insertMempoolTransaction). So a first-ever source's key is
-    // carried out as sourcePubkey instead, and the confirmed-block path writes it
-    // in db.insertTransaction once createAddress has allocated the id.
+    // The mempool lane carries the key in sourcePubkey but never writes pubkeys:
+    // its arrival order must not allocate a replicated lookup id. On confirmation,
+    // the block path records the key here for an existing address or records it in
+    // insertTransactionRow after creating a first-ever address.
     let sourcePubkey = null
     if (source && keyInput){
-        let pubkey = this.extractPubkeyFromInput(keyInput)
+        const pubkey = this.extractPubkeyFromInput(keyInput)
         if (pubkey){
             sourcePubkey = pubkey
-            let addressId = yield db.getAddressId(source)
-            if (addressId && !(yield db.hasPubkey(addressId))){
-                yield db.insertPubkey(addressId, pubkey)
+            if (db !== this.mempoolDb){
+                const addressId = yield db.getAddressId(source)
+                if (addressId && !(yield db.hasPubkey(addressId))){
+                    yield db.insertPubkey(addressId, pubkey)
+                }
             }
         }
     }
@@ -248,9 +248,9 @@ function* parseTransactionSteps(transaction, openDispenserAddresses, db, blockHe
     // issuing a DB round-trip per output. Defensive fallback to an empty Set
     // keeps callers that don't pass it (e.g. some unit tests) working.
     if (!openDispenserAddresses) openDispenserAddresses = new Set()
-    // db is the handle used for the pubkey-capture writes below. The block path passes
-    // this.db (default); the mempool path passes this.mempoolDb so pubkey writes for a
-    // pending tx never touch the block's open transaction.
+    // db identifies the parsing lane. The block path passes this.db (default) and
+    // may record a pubkey; the mempool path passes this.mempoolDb, which suppresses
+    // that replicated lookup write while keeping all other mempool reads isolated.
     if (!db) db = this.db
     // A zero-input transaction has no ins[0] to dereference below (the coinbase/
     // standard_input guard also reads ins[0]). An LTC MWEB/HogEx integration tx can

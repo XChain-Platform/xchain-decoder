@@ -73,10 +73,11 @@ function decodeMempoolTransaction(nextTxHex, nextTxHexIndex){
 // mempoolDb with the same query and grace floor the block loop uses
 // (loadOpenDispenserAddresses in block_store.js). A pending tx confirms at the earliest
 // into the next block, whose header time is close to now, so wall-clock seconds stand
-// in for that block's timestamp. A failed read is logged and the cycle parses against
-// an empty set: the mempool view is non-consensus, so a pending row that blanks an
-// unattributed ACTION for one poll is corrected by the block path on confirm, and the
-// rest of the cycle (pruning, new arrivals) still runs.
+// in for that block's timestamp. The set is only an approximation: it cannot include a
+// dispenser not committed when this classify-once row is first seen, and on legacy
+// expiry networks it can retain a dispenser the confirming block expires first. A
+// failed read also parses against an empty set. These differences only affect the
+// non-consensus pending view; the block path is authoritative on confirmation.
 function* loadMempoolParentProtocolTime(blockTime){
     if (!isDispenserCancelGraceParentFloorActive(this.consensusNetwork, blockTime)) return null
     if (this.lastProcessedBlockIndex < 0 ||
@@ -123,17 +124,16 @@ function* loadMempoolOpenDispenserAddresses(){
 function* parseMempoolTransaction(nextTx, nextTransactionHash, openDispenserAddresses){
     let parseResult = null
     try {
-        // Pass mempoolDb so the pubkey-capture writes inside parseTransaction also
-        // stay off the block transaction. The envelope
+        // Pass mempoolDb so parseTransaction recognizes the mempool lane and never
+        // writes a replicated pubkey row. The envelope
         // recognition height is gated on this decoder's own
         // next block (lastProcessedBlockIndex + 1): a pending
         // tx confirms at the earliest into that block, and the
         // mempool view is per-instance and non-consensus, so a
         // briefly-lagging instance near the flag boundary is
         // acceptable where a forked BLOCK parse would not be.
-        // The open-dispenser set makes a payment to an open dispenser a dispense
-        // output here exactly as on the block path, so hasStorableContent agrees
-        // between the two for an ACTION whose source cannot be resolved.
+        // This committed-row set is the closest pending-time approximation of the
+        // block path's evolving set. The doc block above names the known differences.
         parseResult = yield this.parseTransaction(nextTx, openDispenserAddresses, this.mempoolDb, this.lastProcessedBlockIndex + 1)
     } catch (err) {
         // The surrounding try has no catch (only a finally for the busy
@@ -150,8 +150,8 @@ function* parseMempoolTransaction(nextTx, nextTransactionHash, openDispenserAddr
 // Apply the block path's two admission gates: an ACTION needs a resolved source
 // (hasStorableContent), then the shared payload gate (buildStoredActionRecord).
 // An unattributable ACTION is blanked, not skipped: the row is the seen-set entry.
-// An unattributed ACTION that pays an open dispenser carries dispense outputs, so it
-// passes hasStorableContent and keeps its text, matching the row stored on confirm.
+// An unattributed ACTION that pays an open dispenser carries dispense outputs and keeps
+// its text when that dispenser remains open in the confirming block's set.
 function admitMempoolAction(parseResult, nextTransactionHash){
     const hasAction = (parseResult["data"] != null) && (parseResult["data"].length > 0)
     if (hasAction && !this.hasStorableContent(parseResult)){
@@ -187,8 +187,9 @@ function* storeMempoolTransaction(nodeTxid, nextTxHex, nextTxHexIndex, openDispe
 
     // Same admission gates as the confirmed-block path (admitMempoolAction):
     // buildStoredActionRecord owns the ceiling, the alias expansion, the
-    // UTF-8 decode and the VALID_ACTION_NAMES check, so a pending tx can
-    // never show one thing and then silently vanish on confirm. It stores
+    // UTF-8 decode and the VALID_ACTION_NAMES check, so those payload gates cannot
+    // make a pending tx silently vanish on confirm. Attribution can still differ as
+    // documented above. It stores
     // the canonical payload as the SAME UTF-8 string the block path writes,
     // not hex: otherwise mempool_transactions.data ("434f..." hex) and
     // transactions.data ("COINPAY|..." text) hold the same on-wire ACTION in
