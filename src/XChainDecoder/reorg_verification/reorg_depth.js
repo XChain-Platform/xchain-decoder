@@ -232,7 +232,8 @@ async function refuseOrHaltDeepGap(block, nodeTip, priorDepth, blocksDeleted, wa
     const aboveTip = lastBlockIndex - nodeTip
     const alreadyRolledBack = priorDepth + blocksDeleted.length
     const safeDepth = safeDepthFor(this)
-    const floor = alreadyRolledBack + aboveTip
+    // requireAboveTipForkProof proved the stored block at nodeTip is forked too.
+    const floor = alreadyRolledBack + aboveTip + 1
     if (floor <= safeDepth) return
     const rolledBackNote = (alreadyRolledBack > 0 ? " with " + alreadyRolledBack + " block(s) already rolled back" : "")
     const msg = "verifyReorg: the node reports confirmations -1 for stored block " + nodeTip

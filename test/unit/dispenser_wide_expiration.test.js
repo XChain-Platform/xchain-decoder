@@ -16,7 +16,9 @@ const {
 const {
     collectDispenserCreates,
     dispenserEditExtension,
+    fitsIndexAddressColumn,
 } = require('../../src/XChainDecoder/dispenser_registration.js')
+const { INDEX_ADDRESS_MAX_CHARS } = require('../../src/db/constants.js')
 const constants = require('../../src/protocol/constants.js')
 
 const MAX_SAFE = String(Number.MAX_SAFE_INTEGER)
@@ -156,5 +158,26 @@ describe('DISPENSER wide expiration registration', function () {
             decoder, editCommand(U64_OVERFLOW), 'DISPENSER|',
             { source: 'source-address' }, { timestamp: 1 },
         ), null)
+    })
+})
+
+describe('DISPENSER address-column boundary', function () {
+    it('rejects operating addresses that cannot fit the address table', function () {
+        assert.strictEqual(fitsIndexAddressColumn('a'.repeat(120)), true)
+        assert.strictEqual(fitsIndexAddressColumn('a'.repeat(121)), false)
+        assert.strictEqual(fitsIndexAddressColumn('Málaga'), true)
+        assert.strictEqual(fitsIndexAddressColumn('addr😀'), false)
+        assert.strictEqual(INDEX_ADDRESS_MAX_CHARS, 120)
+    })
+
+    it('skips an oversized GET_ADDRESS without registering a dispenser', function () {
+        const fields = createCommand('100').split('|')
+        fields[10] = 'a'.repeat(121)
+        const decoder = context('regtest')
+        const registrations = collectDispenserCreates.call(
+            decoder, [fields.join('|')], 'DISPENSER|', { source: 'source-address' },
+            { timestamp: 1 }, 'tx-hash', 12)
+        assert.deepStrictEqual(registrations, [])
+        assert.strictEqual(decoder.parseErrors, 1)
     })
 })

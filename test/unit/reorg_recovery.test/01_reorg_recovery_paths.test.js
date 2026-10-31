@@ -111,7 +111,7 @@ describe('F2: an above-tip rollback is decided by fork depth, not the height gap
     it('a gap of exactly the window with a fork under it halts instead of deleting 126 blocks first', async function () {
         const { decoder, atHalt, tip } = forkedDecoder({ forkPoint: 170, nodeTip: 300 - SAFE_DEPTH })
         await assert.rejects(() => decoder.verifyReorg(300 - SAFE_DEPTH), /dispenser safe-depth window/)
-        assert.deepStrictEqual(atHalt, [SAFE_DEPTH])
+        assert.deepStrictEqual(atHalt, [0])
         assert.strictEqual(tip(), 170)
     })
 

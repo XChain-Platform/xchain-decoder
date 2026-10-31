@@ -123,6 +123,19 @@ describe('verifyReorg: an above-tip gap the window cannot absorb is refused befo
         assert.strictEqual(decoder.getReorgHaltStatus().halted, false)
     })
 
+    it('a gap one block beyond the budget halts before the first delete', async function () {
+        const nodeTip = 300 - SAFE_DEPTH
+        const { decoder, marked, deletedAtHalt } = decoderAbove(
+            300, { nodeTip, forkPoint: nodeTip - 1 })
+
+        await assert.rejects(() => decoder.verifyReorg(nodeTip), err => {
+            assert.strictEqual(err.reorgHalt, true)
+            return true
+        })
+        assert.strictEqual(marked(), 1)
+        assert.strictEqual(deletedAtHalt(), 0)
+    })
+
 })
 
 describe('verifyReorg: prior rollback depth still limits a confirmed reorg', function () {
