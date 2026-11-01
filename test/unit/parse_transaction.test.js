@@ -119,6 +119,106 @@ describe('XChainDecoder#parseTransaction()', () => {
         assert.strictEqual(result.sourcePubkey, '02aabb')
         assert.ok(decoder.db.insertPubkey.notCalled, 'the parser must not allocate a lookup id to write it here')
     })
+})
+
+describe('XChainDecoder#parseTransaction()', () => {
+    let decoder
+
+    beforeEach(() => {
+        decoder = createDecoder()
+    })
+
+    afterEach(() => {
+        sinon.restore()
+    })
+
+    it('carries a known source pubkey through the mempool lane without writing pubkeys', async () => {
+        const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
+        decoder.getSourceFromOutput = sinon.stub().resolves('bcrt1qknown')
+        decoder.extractPubkeyFromInput = sinon.stub().returns('02aabb')
+        decoder.mempoolDb = {
+            getAddressId: sinon.stub().resolves(7),
+            hasPubkey: sinon.stub().resolves(false),
+            insertPubkey: sinon.stub().resolves(true)
+        }
+
+        const result = await decoder.parseTransaction(tx, undefined, decoder.mempoolDb)
+
+        assert.strictEqual(result.sourcePubkey, '02aabb')
+        assert.ok(decoder.mempoolDb.getAddressId.notCalled)
+        assert.ok(decoder.mempoolDb.insertPubkey.notCalled)
+    })
+
+    it('records a known source pubkey when the same transaction is parsed on the block lane', async () => {
+        const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
+        decoder.getSourceFromOutput = sinon.stub().resolves('bcrt1qknown')
+        decoder.extractPubkeyFromInput = sinon.stub().returns('02aabb')
+        decoder.mempoolDb = {}
+        decoder.db.getAddressId = sinon.stub().resolves(7)
+        decoder.db.hasPubkey = sinon.stub().resolves(false)
+        decoder.db.insertPubkey = sinon.stub().resolves(true)
+
+        const result = await decoder.parseTransaction(tx, undefined, decoder.db)
+
+        assert.strictEqual(result.sourcePubkey, '02aabb')
+        assert.ok(decoder.db.insertPubkey.calledOnceWithExactly(7, '02aabb'))
+    })
+})
+
+describe('XChainDecoder#parseTransaction()', () => {
+    let decoder
+
+    beforeEach(() => {
+        decoder = createDecoder()
+    })
+
+    afterEach(() => {
+        sinon.restore()
+    })
+
+    it('carries a known source pubkey through the mempool lane without writing pubkeys', async () => {
+        const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
+        decoder.getSourceFromOutput = sinon.stub().resolves('bcrt1qknown')
+        decoder.extractPubkeyFromInput = sinon.stub().returns('02aabb')
+        decoder.mempoolDb = {
+            getAddressId: sinon.stub().resolves(7),
+            hasPubkey: sinon.stub().resolves(false),
+            insertPubkey: sinon.stub().resolves(true)
+        }
+
+        const result = await decoder.parseTransaction(tx, undefined, decoder.mempoolDb)
+
+        assert.strictEqual(result.sourcePubkey, '02aabb')
+        assert.ok(decoder.mempoolDb.getAddressId.notCalled)
+        assert.ok(decoder.mempoolDb.insertPubkey.notCalled)
+    })
+
+    it('records a known source pubkey when the same transaction is parsed on the block lane', async () => {
+        const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)
+        decoder.getSourceFromOutput = sinon.stub().resolves('bcrt1qknown')
+        decoder.extractPubkeyFromInput = sinon.stub().returns('02aabb')
+        decoder.mempoolDb = {}
+        decoder.db.getAddressId = sinon.stub().resolves(7)
+        decoder.db.hasPubkey = sinon.stub().resolves(false)
+        decoder.db.insertPubkey = sinon.stub().resolves(true)
+
+        const result = await decoder.parseTransaction(tx, undefined, decoder.db)
+
+        assert.strictEqual(result.sourcePubkey, '02aabb')
+        assert.ok(decoder.db.insertPubkey.calledOnceWithExactly(7, '02aabb'))
+    })
+})
+
+describe('XChainDecoder#parseTransaction()', () => {
+    let decoder
+
+    beforeEach(() => {
+        decoder = createDecoder()
+    })
+
+    afterEach(() => {
+        sinon.restore()
+    })
 
     it('leaves sourcePubkey null when the input exposes no key', async () => {
         const tx = bitcoin.Transaction.fromHex(TX_HEX.opReturn)

@@ -66,9 +66,11 @@ describe('updateMempool DB isolation', function () {
   })
 
   it('hands parseTransaction the mempoolDb handle so pubkey writes stay off the block tx', async () => {
+    // The title is pinned. Handle identity now suppresses the mempool pubkey write
+    // entirely while preserving the separate-handle contract asserted here.
     const { decoder, getParseTxDbArg } = buildDecoder(true)
     await decoder.updateMempool()
-    assert.strictEqual(getParseTxDbArg(), decoder.mempoolDb, 'mempool parse must use mempoolDb for pubkey capture')
+    assert.strictEqual(getParseTxDbArg(), decoder.mempoolDb, 'mempool parse must retain its dedicated handle')
   })
 
   it('hands deleteAndCompareTxsNotInList a DEDUPED txid list', async () => {

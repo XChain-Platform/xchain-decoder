@@ -38,11 +38,16 @@ function stopDecoder() {
     decoder.stop()
 }
 
+async function expectReorgWait(run) {
+    const error = await run().then(() => null, err => err)
+    assert.ok(error, 'Should refuse to reconcile without orphan proof')
+    assert.strictEqual(error.reorgWait, true, 'Should mark the refusal for a visible retry')
+}
+
+beforeEach(createDecoder)
+afterEach(stopDecoder)
+
 describe('CE-06: Chain Reorganization Detection and Recovery', function () {
-    beforeEach(createDecoder)
-
-    afterEach(stopDecoder)
-
     it('verifyReorg should detect and roll back mismatched blocks', async function () {
         // Simulate 3 blocks where the last 2 have wrong hashes
         let blockIndex = 5
@@ -62,6 +67,9 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
 
         mockDb.getBlockByIndex = sinon.stub().callsFake(async (idx) => dbBlocks[idx])
         mockConnector.getBlockHash = sinon.stub().callsFake(async (idx) => nodeHashes[idx])
+        mockConnector.getBlockHeader = sinon.stub().callsFake(async (hash) => {
+            return hash.startsWith('old_hash_') ? { confirmations: -1 } : { confirmations: 1 }
+        })
         mockDb.deleteBlockByIndex = sinon.stub().callsFake(async () => {
             blockIndex--
             return true
@@ -81,10 +89,26 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
 })
 
 describe('CE-06: Chain Reorganization Detection and Recovery', function () {
-    beforeEach(createDecoder)
+    it('verifyReorg should wait on mismatched blocks without orphan proof', async function () {
+        let blockIndex = 5
+        mockDb.getLastBlockIndex = sinon.stub().callsFake(async () => blockIndex)
+        mockDb.getBlockByIndex = sinon.stub().callsFake(async (idx) => {
+            return { block_hash: idx === 5 ? 'old_hash_5' : 'matching_hash_4' }
+        })
+        mockConnector.getBlockHash = sinon.stub().callsFake(async (idx) => {
+            return idx === 5 ? 'new_hash_5' : 'matching_hash_4'
+        })
+        mockConnector.getBlockHeader.resolves({ confirmations: 0 })
+        mockDb.deleteBlockByIndex = sinon.stub().callsFake(async () => { blockIndex--; return true })
 
-    afterEach(stopDecoder)
+        await expectReorgWait(() => decoder.verifyReorg())
 
+        assert.ok(mockConnector.getBlockHeader.calledWith('old_hash_5', false), 'Should request proof for the stored hash')
+        assert.ok(mockDb.deleteBlockByIndex.notCalled, 'Should preserve the mismatched block without orphan proof')
+    })
+})
+
+describe('CE-06: Chain Reorganization Detection and Recovery', function () {
     it('verifyReorg should handle getBlockHash failures during reorg', async function () {
         let hashCallCount = 0
         let blockIndex = 3
@@ -114,10 +138,6 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
 })
 
 describe('CE-06: Chain Reorganization Detection and Recovery', function () {
-    beforeEach(createDecoder)
-
-    afterEach(stopDecoder)
-
     it('verifyReorg should stop cleanly when every processed block is invalidated', async function () {
         // Deep reorg: the decoder has processed blocks 0,1,2 and the node has
         // invalidated all three, so the backward walk exhausts the entire blocks
@@ -139,6 +159,7 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
         // Every queried hash differs from the DB, so the walk never matches and
         // must rely on the exhaustion guard to terminate.
         mockConnector.getBlockHash = sinon.stub().callsFake(async (idx) => 'node_hash_' + idx)
+        mockConnector.getBlockHeader = sinon.stub().resolves({ confirmations: -1 })
         mockDb.deleteBlockByIndex = sinon.stub().callsFake(async () => {
             blockIndex--
             return true
@@ -163,10 +184,26 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
 })
 
 describe('CE-06: Chain Reorganization Detection and Recovery', function () {
-    beforeEach(createDecoder)
+    it('verifyReorg should preserve every processed block without orphan proof', async function () {
+        let blockIndex = 2
+        const dbBlocks = {
+            2: { block_hash: 'old_hash_2' },
+            1: { block_hash: 'old_hash_1' },
+            0: { block_hash: 'old_hash_0' }
+        }
+        mockDb.getLastBlockIndex = sinon.stub().callsFake(async () => blockIndex)
+        mockDb.getBlockByIndex = sinon.stub().callsFake(async (idx) => dbBlocks[idx])
+        mockConnector.getBlockHash = sinon.stub().callsFake(async (idx) => 'node_hash_' + idx)
+        mockConnector.getBlockHeader.resolves({ confirmations: 4 })
+        mockDb.deleteBlockByIndex = sinon.stub().callsFake(async () => { blockIndex--; return true })
 
-    afterEach(stopDecoder)
+        await expectReorgWait(() => decoder.verifyReorg())
 
+        assert.ok(mockDb.deleteBlockByIndex.notCalled, 'Should preserve every block without orphan proof')
+    })
+})
+
+describe('CE-06: Chain Reorganization Detection and Recovery', function () {
     it('verifyReorg should not insert event when no reorg found', async function () {
         mockDb.getLastBlockIndex.resolves(5)
         mockDb.getBlockByIndex.resolves({ block_hash: 'same_hash' })
@@ -217,34 +254,31 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
 })
 
 describe('CE-06: Chain Reorganization Detection and Recovery', function () {
-    beforeEach(createDecoder)
-
-    afterEach(stopDecoder)
-
     it('[REGRESSION P0] verifyReorg deletes blocks above the node tip without an RPC hash query', async function () {
-        // F-9(b): the node tip dropped to 5 but the decoder still has 8,7,6 stored.
-        // Those are orphans the node no longer has. getBlockHash(8) throws "Block
-        // height out of range", and the transient-error catch would retry it forever.
-        // verifyReorg(5) must delete 8,7,6 via a deterministic height compare (no RPC,
-        // no brittle error-string matching), then hash-compare from the in-range tip.
+        // The decoder has 8,7,6 above the node tip and a proven fork at height 5.
+        // Delete above-tip rows without requesting their unavailable hashes by height.
         let blockIndex = 8
         const dbBlocks = {
             8: { block_hash: 'orphan_8' },
             7: { block_hash: 'orphan_7' },
             6: { block_hash: 'orphan_6' },
-            5: { block_hash: 'good_5' }
+            5: { block_hash: 'orphan_5' },
+            4: { block_hash: 'good_4' }
         }
         mockDb.getLastBlockIndex = sinon.stub().callsFake(async () => blockIndex)
         mockDb.getBlockByIndex = sinon.stub().callsFake(async (idx) => dbBlocks[idx])
         mockConnector.getBlockHash = sinon.stub().callsFake(async (idx) => {
             if (idx > 5) throw new Error('Block height out of range')
-            return 'good_' + idx
+            return idx === 5 ? 'active_5' : 'good_' + idx
+        })
+        mockConnector.getBlockHeader = sinon.stub().callsFake(async (hash) => {
+            return hash.startsWith('orphan_') ? { confirmations: -1 } : { confirmations: 1 }
         })
         mockDb.deleteBlockByIndex = sinon.stub().callsFake(async () => { blockIndex--; return true })
 
         await decoder.verifyReorg(5)
 
-        assert.strictEqual(mockDb.deleteBlockByIndex.callCount, 3, 'Should delete the 3 above-tip orphan blocks')
+        assert.strictEqual(mockDb.deleteBlockByIndex.callCount, 4, 'Should delete the fork through the node tip')
         assert.ok(mockDb.deleteBlockByIndex.calledWith(8) && mockDb.deleteBlockByIndex.calledWith(7) && mockDb.deleteBlockByIndex.calledWith(6), 'Should delete 8,7,6')
         assert.ok(!mockConnector.getBlockHash.calledWith(8), 'must NOT query the node for an above-tip height')
         assert.ok(!mockConnector.getBlockHash.calledWith(7), 'must NOT query the node for an above-tip height')
@@ -260,10 +294,30 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
 })
 
 describe('CE-06: Chain Reorganization Detection and Recovery', function () {
-    beforeEach(createDecoder)
+    it('[REGRESSION P0] verifyReorg preserves blocks above the node tip without fork proof', async function () {
+        let blockIndex = 8
+        mockDb.getLastBlockIndex = sinon.stub().callsFake(async () => blockIndex)
+        mockDb.getBlockByIndex = sinon.stub().callsFake(async (idx) => {
+            return idx === 4 ? { block_hash: 'active_4' } : { block_hash: 'unproven_' + idx }
+        })
+        mockConnector.getBlockHash = sinon.stub().callsFake(async (idx) => {
+            if (idx > 5) throw new Error('Block height out of range')
+            return 'active_' + idx
+        })
+        mockConnector.getBlockHeader.resolves({ confirmations: 0 })
+        mockDb.deleteBlockByIndex = sinon.stub().callsFake(async () => { blockIndex--; return true })
 
-    afterEach(stopDecoder)
+        await expectReorgWait(() => decoder.verifyReorg(5))
 
+        assert.ok(mockDb.deleteBlockByIndex.notCalled, 'Should preserve above-tip blocks without fork proof')
+        assert.ok(!mockConnector.getBlockHash.calledWith(8), 'must NOT query the node for an above-tip height')
+        assert.ok(!mockConnector.getBlockHash.calledWith(7), 'must NOT query the node for an above-tip height')
+        assert.ok(!mockConnector.getBlockHash.calledWith(6), 'must NOT query the node for an above-tip height')
+        assert.ok(mockConnector.getBlockHash.calledWith(5), 'should hash-compare the in-range tip block')
+    })
+})
+
+describe('CE-06: Chain Reorganization Detection and Recovery', function () {
     it('[REGRESSION P0] reconciles when the node tip regresses below the decoder height', async function () {
         // F-9(a): node tip is 5 but the decoder has processed up to 10 (a node
         // rollback / deep reorg). The forward hash-compare path never fires: there
@@ -295,10 +349,6 @@ describe('CE-06: Chain Reorganization Detection and Recovery', function () {
 })
 
 describe('CE-06: Chain Reorganization Detection and Recovery', function () {
-    beforeEach(createDecoder)
-
-    afterEach(stopDecoder)
-
     it('[REGRESSION P0] tolerates a null previousBlock in the reorg trigger without crashing', async function () {
         // F-1: getBlockByIndex returns null on a caught DB error; the reorg trigger
         // used to deref straight into previousBlock.block_hash (TypeError), escape

@@ -20,7 +20,8 @@ const { migrationSession, retireMigrationConnection } = require('./migration_que
 const { assertNoLiveColumnLoss } = require('./migration_live_schema_guard.js')
 const { assertUniqueKeyWitness, declaredUniqueIndexes } = require('./migration_guards/key_witness.js')
 const { assertNoDeclaredKeyDrop } = require('./migration_guards/declared_key_drop.js')
-const { reconcileAppliedMigration, guardMigrationFrontier } = require('./migration_guards/applied_ledger.js')
+const { reconcileAppliedMigration, guardMigrationFrontier, guardUnregisteredRename } = require('./migration_guards/applied_ledger.js')
+const { planLedgerRenames, orphanedLedgerNames } = require('./migration_ledger.js')
 
 function validateMigrationTargets(files, only, dir){
     // Targeted rollout: a name that matches no committed migration is almost
@@ -34,6 +35,23 @@ function validateMigrationTargets(files, only, dir){
     if(unknown.length)
         throw new Error('runMigrations: --file target(s) not found in ' + dir + ': ' + unknown.join(', ') +
             '. Available: ' + files.join(', '));
+}
+
+async function loadAppliedLedger(conn, files){
+    const rows = await conn.query('SELECT name, checksum FROM schema_migrations');
+    const appliedByName = new Map(rows.map(r => [r.name, r.checksum]));
+    for(const { from, to } of planLedgerRenames(appliedByName.keys())){
+        await conn.query('UPDATE schema_migrations SET name = ? WHERE name = ?', [to, from]);
+        appliedByName.set(to, appliedByName.get(from));
+        appliedByName.delete(from);
+        logger.info('runMigrations: re-keyed ledger row ' + from + ' -> ' + to + '.');
+    }
+    const orphanByChecksum = new Map();
+    for(const name of orphanedLedgerNames(appliedByName.keys(), files)){
+        const checksum = appliedByName.get(name);
+        if(checksum && !orphanByChecksum.has(checksum)) orphanByChecksum.set(checksum, name);
+    }
+    return { appliedByName, orphanByChecksum };
 }
 
 function assertDatedMigration(file){
@@ -150,6 +168,7 @@ async function processMigration(database, context, file){
     const raw = fs.readFileSync(context.dir + '/' + file, 'utf8');
     const checksum = crypto.createHash('sha256').update(raw).digest('hex');
     if(context.appliedByName.has(file) && await reconcileAppliedMigration(context, file, checksum)) return;
+    if(guardUnregisteredRename(context, file, checksum)) return;
     const mode = await migrationModeOrSkip(database, context, file, raw, checksum);
     if(mode === null) return;
     guardMigrationFrontier(context, file, mode);
@@ -218,6 +237,10 @@ module.exports = {
         let returnToPool = true;
         let sessionDirty = false;
         try {
+            // Check sql_mode on the connection that applies the files (a proxy or server-side
+            // override can differ per connection); a refused session is closed, not pooled.
+            try { await this.assertStrictSqlMode(conn); }
+            catch(e){ sessionDirty = true; throw e; }
             const got = await conn.query('SELECT GET_LOCK(?, 30) AS l', [lockName]);
             if(!got || !got[0] || String(got[0].l) !== '1'){
                 logger.warn('runMigrations: could not acquire lock ' + lockName + ' (another process is migrating). Skipping this run.');
@@ -233,11 +256,11 @@ module.exports = {
                 // Raise the limit now for a full run; a --file run raises it only to apply a file.
                 if(!only) await session.activate();
                 await this.ensureMigrationsLedger(conn);
-                const appliedRows = await conn.query('SELECT name, checksum FROM schema_migrations');
+                const { appliedByName, orphanByChecksum } = await loadAppliedLedger(conn, files);
                 const context = {
                     includeManual, only, dir, result, conn, activateQueryTimeout: session.activate,
                     markSessionDirty: () => { sessionDirty = true; },
-                    appliedByName: new Map(appliedRows.map(r => [r.name, r.checksum])),
+                    appliedByName, orphanByChecksum,
                 };
                 for(const file of files) await processMigration(this, context, file);
             } finally {

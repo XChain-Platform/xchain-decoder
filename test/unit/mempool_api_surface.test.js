@@ -200,7 +200,7 @@ describe('api.js getmempool stale fallback', () => {
 // must exist, consult its TTL cache before the DB, clamp the row window, and map
 // the decoder's node-mempool snapshot fields into the response.
 describe('api.js getmempool method (source pin)', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../src/api.js'), 'utf8');
+    const src = fs.readFileSync(path.join(__dirname, '../../src/api/mempool_methods.js'), 'utf8');
 
     it('exposes getmempool on the JSON-RPC controller', () => {
         assert.ok(/async getmempool\(/.test(src), 'getmempool method missing from api.js');
@@ -210,12 +210,11 @@ describe('api.js getmempool method (source pin)', () => {
         const at = src.indexOf('async getmempool(');
         const body = src.slice(at, at + 3000);
         assert.ok(body.includes('GETMEMPOOL_CACHE_MS'), 'getmempool lost its TTL cache knob');
-        assert.ok(body.includes('getmempoolCache'), 'getmempool no longer consults the shared cache');
+        assert.ok(body.includes('state.cache'), 'getmempool no longer consults the shared cache');
     });
 
     it('reads rows via the bounded DB helpers and clamps the per-request limit to 500', () => {
-        const at = src.indexOf('async getmempool(');
-        const body = src.slice(at, at + 3000);
+        const body = src;
         assert.ok(body.includes('getMempoolTransactions(500)'), 'getmempool must read the full bounded window once');
         assert.ok(body.includes('getMempoolTransactionCount()'), 'getmempool must report the true total');
         assert.ok(/Math\.min\(parseInt\(params && params\.limit, 10\) \|\| 500, 500\)/.test(body), 'per-request limit clamp missing');

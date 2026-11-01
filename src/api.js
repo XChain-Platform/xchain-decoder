@@ -56,6 +56,7 @@ const {
 } = require('./api/probe_routes');
 const { reportStartFailure, installCrashHandlers } = require('./api/crash_reporting');
 const { getHealthProbeState } = require('./api/health_probe');
+const { createMempoolMethods: createMempoolRpcMethods } = require('./api/mempool_methods');
 const { installDecoderObservability } = require('./api/observability_wiring');
 
 const NETWORK = config.NETWORK
@@ -95,6 +96,7 @@ function buildHealthResult(decoder, state, decoderRunning, decoderError){
         // { node_height, stored_height, since } while the parse loop is waiting
         // out a node in initial block download below our tip, null otherwise.
         node_catching_up:    (decoder && decoder.nodeCatchingUp) || null,
+        reorg_wait:          (decoder && decoder.reorgWait) || null,
         // node_last_ok_at + node_unreachable: whether the coin node is answering
         // this decoder at all, and since when it stopped. Reported, not gated on.
         ...nodeReachabilityFields(decoder),
@@ -166,6 +168,7 @@ function registerStatusRoute(app, decoder, isDecoderRunning){
             // { node_height, stored_height, since } while the parse loop is waiting out
             // a node in initial block download below our tip, null otherwise.
             node_catching_up:  (decoder && decoder.nodeCatchingUp) || null,
+            reorg_wait:        (decoder && decoder.reorgWait) || null,
             // node_last_ok_at + node_unreachable: whether the coin node is answering
             // this decoder at all, and since when it stopped. Reported, not gated on.
             ...nodeReachabilityFields(decoder),
@@ -187,6 +190,12 @@ function registerStatusRoute(app, decoder, isDecoderRunning){
             reorg_halt_cleared_reason: reorgHalt.cleared_reason || null
         })
     })
+}
+
+function createMempoolMethods(decoder){
+    return createMempoolRpcMethods(decoder, (err) => {
+        console.error('getmempool: mempool read failed:', err);
+    });
 }
 
 // The JSON-RPC methods, keyed by name for express-json-rpc-router. The health
@@ -217,69 +226,6 @@ function createJsonRpcController(decoder, isDecoderRunning, getDecoderError){
             };
         },
         ...createMempoolMethods(decoder)
-    }
-}
-
-// getmempool's shared snapshot cache (see the method's comment). Held here so
-// every request, whatever its limit, slices one cached 500-row window.
-function createMempoolMethods(decoder){
-    let getmempoolCache = null;
-    return {
-        // Current mempool snapshot for remote explorers. mempool_transactions is
-        // deliberately excluded from xchain-sync replication (node-local,
-        // non-deterministic observation), so an explorer serving from synced
-        // replicas has no DB path to pending actions; this method is that path.
-        // Returns the node's TOTAL mempool tx count (XChain or not, from the
-        // last updateMempool poll; -1 until one has run), the count of
-        // XChain-carrying rows, and a bounded row window (same 500-row cap and
-        // tx_hash ordering as the explorer's colocated-DB read). Rows are
-        // PRE-VALIDATION: the indexer can still reject them at confirmation.
-        //
-        // TTL-cached (default 5s, GETMEMPOOL_CACHE_MS) because this method, unlike
-        // its trivial siblings above, reads the DB: without the cache an
-        // unauthenticated request burst would amplify into pooled-connection
-        // contention against the block loop (the same hazard the batch guard
-        // below exists for). The full 500-row window is cached once and sliced
-        // per-request, so differing limits share one read. A poll-cycle-stale
-        // snapshot is fine: updateMempool itself only rewrites every 60s.
-        async getmempool(params) {
-            const ttl = parseInt(config.GETMEMPOOL_CACHE_MS, 10) || 5000;
-            const now = Date.now();
-            const db  = decoder.mempoolDb || decoder.db;
-            let stale = false;
-            let snapshot = getmempoolCache;
-            if (!getmempoolCache || (now - getmempoolCache.t) >= ttl) {
-                if (db) {
-                    try {
-                        const rows  = await db.getMempoolTransactions(500);
-                        const total = await db.getMempoolTransactionCount();
-                        getmempoolCache = { t: now, rows, total, read_ok_at: Date.now() };
-                    } catch (err) {
-                        // Serve the stale snapshot if we have one; a mempool read
-                        // must never surface as an API error to remote explorers.
-                        console.error('getmempool: mempool read failed:', err);
-                        stale = true;
-                    }
-                } else {
-                    getmempoolCache = { t: now, rows: [], total: 0, read_ok_at: null };
-                }
-                snapshot = getmempoolCache || { rows: [], total: 0, read_ok_at: null };
-            }
-            const limit = Math.max(1, Math.min(parseInt(params && params.limit, 10) || 500, 500));
-            return {
-                node_tx_count: decoder.nodeMempoolTxCount,
-                node_updated_at: decoder.nodeMempoolUpdatedAt,
-                stale,
-                read_ok_at: snapshot.read_ok_at,
-                total: snapshot.total,
-                rows: snapshot.rows.slice(0, limit).map(r => ({
-                    tx_hash: r.tx_hash,
-                    source: r.source,
-                    data: Buffer.isBuffer(r.data) ? r.data.toString('utf8') : r.data,
-                    first_seen: Number.isFinite(r.first_seen) ? r.first_seen : null
-                }))
-            };
-        }
     }
 }
 
@@ -391,4 +337,4 @@ if (require.main === module) startApi()
 // startApi is exported so the crash handlers it installs can be driven for real
 // rather than asserted against the source text; the require.main guard above
 // still keeps a plain require from opening a port or a DB connection.
-module.exports = { makeRpcBatchGuard, registerLiveRoute, registerReadyRoute, registerStatusRoute, startApi, createMempoolMethods, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
+module.exports = { buildHealthResult, makeRpcBatchGuard, registerLiveRoute, registerReadyRoute, registerStatusRoute, startApi, createMempoolMethods, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }

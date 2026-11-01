@@ -93,6 +93,10 @@ function registerRefusedMarkerRecord(context) {
         assert.ok(/full resync/i.test(critical[0]),
             'the line must name the required operator action: ' + critical[0])
         assert.ok(/not a valid bootstrap source/i.test(critical[0]), critical[0])
+        // The per-block REORG markers keep the depth ceiling across a restart, so the
+        // line must not claim a restart starts from a zeroed counter.
+        assert.doesNotMatch(critical[0], /zeroed/i)
+        assert.match(critical[0], /ceiling still holds across a restart/i)
     })
 }
 

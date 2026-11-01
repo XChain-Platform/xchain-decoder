@@ -20,6 +20,22 @@
 
 const { format: formatLogLine } = require('node:util')
 const { logger, CHECK_BLOCK_DELAY_MS, MEMPOOL_INTERVAL, REORG_HALT_PARK_TICK_MS } = require('./constants.js')
+const { readRolledBackAboveTip } = require('./reorg_halt.js')
+
+// Publish the current proof wait without resetting its start time on every poll.
+function setReorgWait(err){
+    const detail = (err && err.reorgWaitState) || {}
+    const next = {
+        stored_height: detail.stored_height ?? null,
+        stored_hash: detail.stored_hash || null,
+        class: detail.class || (err && err.refusalClass) || 'unread'
+    }
+    const prior = this.reorgWait
+    const sameWait = prior && prior.stored_height === next.stored_height
+        && prior.stored_hash === next.stored_hash && prior.class === next.class
+    next.since = sameWait ? prior.since : new Date().toISOString()
+    this.reorgWait = next
+}
 
 // Re-derive the loop cursors from the DB after any mid-block rollback, then
 // pause before the retry. Every rollback path MUST run this before continuing:
@@ -34,13 +50,41 @@ async function resetAfterRollback(loop){
     await this.sleep(3000)
 }
 
-// Answer a failed reconcile: park on a REORG_HALT refusal, rethrow anything
-// else. Shared by the three verifyReorg call sites so all three classify a halt
-// the same way; before this, two of them let it escape start() into the
-// exit-and-restart loop parkOnReorgHalt exists to end.
-function parkOrRethrow(err, blockHeight){
+// Answer a failed reconcile: wait on an unproven stored block, park on a
+// REORG_HALT refusal, and rethrow anything else. Shared by the three verifyReorg
+// call sites so a not-found header never exits the parse loop or deletes a block.
+//
+// The park height is the stored tip after the rollback, not the loop cursor from
+// before it: a halt that rolled back to the fork point leaves the cursor at the old
+// branch's tip, so the cursors are re-derived from the database first, exactly as
+// the rollback paths do. An unreadable tip keeps the cursor and parks anyway.
+//
+// Reset-only when the error says so (a safe-depth halt), else when rolled-back
+// blocks sit above the tip or their count cannot be read: clear-reorg-halt refuses
+// both. A db with no such count keeps the clear-and-resume wording.
+async function parkOrRethrow(err, loop){
+    if (err && err.reorgWait){
+        setReorgWait.call(this, err)
+        const refusalClass = err.refusalClass || 'unread'
+        if (loop.tipBelowStoredTipRefused !== refusalClass) this.logWarn(err.message)
+        loop.tipBelowStoredTipRefused = refusalClass
+        await this.sleep(5000)
+        return
+    }
     if (!(err && err.reorgHalt)) throw err
-    this.parkOnReorgHalt(err.message, blockHeight)
+    try {
+        loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
+        loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
+        loop.blocksQuantity = 0
+    } catch (readErr){
+        logger.error(formatLogLine('Could not re-read the stored tip before parking; parking at the loop cursor:', readErr))
+    }
+    let resetOnly = err.resetOnly
+    if (typeof resetOnly !== 'boolean'){
+        const rolledBack = await readRolledBackAboveTip(this.db)
+        resetOnly = rolledBack !== undefined && rolledBack !== 0
+    }
+    this.parkOnReorgHalt(err.message, loop.lastProcessedBlockIndex, { resetOnly })
 }
 
 async function leaveReorgHaltPark(loop){
@@ -55,6 +99,19 @@ async function leaveReorgHaltPark(loop){
     loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
     loop.blocksQuantity = 0
     loop.lastBlockchainInfo = null
+}
+
+// One parse-loop step for the REORG_HALT park: when a probe has just seen a halt for
+// the first time, run the boot park check first, then, while parked, try to leave
+// the park. True while the loop must not parse this pass.
+async function reorgHaltHoldsLoop(loop){
+    if (this.reorgHaltParkCheckDue){
+        this.reorgHaltParkCheckDue = false
+        await this.parkOnRolledBackHalt()
+    }
+    if (!this.reorgHaltParked) return false
+    await leaveReorgHaltPark.call(this, loop)
+    return true
 }
 
 // A different hash at the stored height is a reorg only once two readings of it agree:
@@ -87,6 +144,13 @@ async function reconcileEqualHeightTip(loop){
     } catch (e){
         logger.error(formatLogLine('Error during equal-height tip-hash detection reads, skipping:', e))
     }
+    // The node holds the stored tip on its active chain, so any proof wait published
+    // earlier is over (a node that was behind has caught up). Without this a resolved
+    // wait stays on the health payloads and keeps isStalled() false for good.
+    if (storedBlock && nodeHash && storedBlock.block_hash === nodeHash){
+        this.reorgWait = null
+        loop.tipBelowStoredTipRefused = false
+    }
     if (needsReconcile){
         needsReconcile = await equalHeightSwapHolds.call(this, loop.lastProcessedBlockIndex, nodeHash, storedBlock.block_hash)
     }
@@ -102,9 +166,11 @@ async function reconcileEqualHeightTip(loop){
         try {
             await this.verifyReorg(this.blockchainInfoLastBlock)
         } catch (err){
-            parkOrRethrow.call(this, err, loop.lastProcessedBlockIndex)
+            await parkOrRethrow.call(this, err, loop)
             return 'continue'
         }
+        this.reorgWait = null
+        loop.tipBelowStoredTipRefused = false
         loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
         loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
         loop.blocksQuantity = 0
@@ -135,4 +201,4 @@ async function waitAtTip(loop){
     await this.sleep(CHECK_BLOCK_DELAY_MS)
 }
 
-module.exports = { resetAfterRollback, parkOrRethrow, leaveReorgHaltPark, waitAtTip }
+module.exports = { resetAfterRollback, setReorgWait, parkOrRethrow, leaveReorgHaltPark, reorgHaltHoldsLoop, waitAtTip }

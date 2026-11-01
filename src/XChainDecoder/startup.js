@@ -24,7 +24,7 @@ const Database = require('../db.js')
 const { chainGenesisUnpinned } = require('../protocol/chain_identity')
 const { logger, BLOCKCHAIN_INFO_REFRESH_MS } = require('./constants.js')
 const { bigIntBufferutilsActive } = require('./payload_helpers.js')
-const { resetAfterRollback, leaveReorgHaltPark, waitAtTip } = require('./sync_loop.js')
+const { resetAfterRollback, reorgHaltHoldsLoop, waitAtTip } = require('./sync_loop.js')
 const { refreshChainTip } = require('./tip_refresh.js')
 const { ingestNextBlock } = require('./block_ingest.js')
 
@@ -133,12 +133,13 @@ async function prepareDatabase(){
     }
 
     // Report a LATENT reorg halt at boot. A decoder restored from (or running on)
-    // a database that already carries a REORG_HALT marker parses forward normally
-    // and looks healthy; without this nothing says so until the next reorg hits
-    // the guard in verifyReorg, weeks later. Probe once here so the fault is in
+    // a database that already carries a REORG_HALT marker can parse forward with
+    // nothing else saying so until the next reorg hits the guard in verifyReorg,
+    // weeks later. Probe once here so the fault is in
     // the startup log and in every health response from the first request on.
-    // Non-fatal by design: the marker only blocks rollbacks, so a halted-but-
-    // advancing decoder must not be turned into a crash loop by this check.
+    // Non-fatal by design: a probe fault never crashes the boot. It does park the
+    // parse loop before the first block (parkOnRolledBackHalt, in bootDecoder), since
+    // an unread marker may be a halt that condemns this database.
     await this.checkReorgHalt({ force: true });
 }
 
@@ -242,7 +243,13 @@ async function bootDecoder(){
 
     // The loop-carried cursors, counters and latches live on one object the loop's
     // steps share, built in the order they are declared.
-    return Object.assign(await readLoopCursors.call(this), initialLoopLatches())
+    const loop = Object.assign(await readLoopCursors.call(this), initialLoopLatches())
+    // A live halt that left rolled-back blocks above the stored tip parks here,
+    // before the first block, rather than parsing forward on a condemned database,
+    // and so does a boot probe that could not read the marker at all.
+    this.reorgHaltParkCheckDue = false
+    await this.parkOnRolledBackHalt()
+    return loop
 }
 
 module.exports = {
@@ -267,14 +274,12 @@ module.exports = {
                 break
             }
 
-            // Parked on a REORG_HALT (parkOnReorgHalt): nothing is fetched, deleted or
+            // Parked on a REORG_HALT (parkOnReorgHalt), or newly parked because a probe
+            // just saw a halt for the first time: nothing is fetched, deleted or
             // inserted until the marker clears, so this sits above the tip refresh and
             // everything under it. Below the stopFlag check on purpose, so a SIGTERM
             // arriving during a park drains at the next tick like any other iteration.
-            if (this.reorgHaltParked){
-                await leaveReorgHaltPark.call(this, loop)
-                continue main_parsing
-            }
+            if (await reorgHaltHoldsLoop.call(this, loop)) continue main_parsing
 
             // Edge-triggered stale-tip warn. Evaluated every iteration
             // because the outage path below is `catch -> sleep(3000) -> continue`,

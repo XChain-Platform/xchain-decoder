@@ -55,7 +55,8 @@ function decoderOver({ top, nodeTip, tips, forkAt = null }) {
         getBlockHash: async (h) => {
             if (h > nodeTip) throw new Error('Block height out of range')
             return 'hash' + h
-        }
+        },
+        getBlockHeader: async () => ({ confirmations: -1 })
     }
     decoder.db = {
         endTransaction:            async () => {},
@@ -121,15 +122,15 @@ describe('a settled lower tip rolls back exactly as before [REGRESSION P1]', fun
 
     it('a settled real rollback deletes and marks exactly what it did before the settle', async function () {
         // Today's behaviour, measured by calling verifyReorg with the same tip directly.
-        const direct = decoderOver({ top: 200, nodeTip: 194, tips: [194] })
+        const direct = decoderOver({ top: 200, nodeTip: 194, tips: [194], forkAt: 193 })
         await direct.decoder.verifyReorg(194)
 
-        const { decoder, state } = decoderOver({ top: 200, nodeTip: 194, tips: [194] })
+        const { decoder, state } = decoderOver({ top: 200, nodeTip: 194, tips: [194], forkAt: 193 })
         const { loop } = await onePass(decoder, 200)
-        assert.deepStrictEqual(state.deleted, [200, 199, 198, 197, 196, 195])
+        assert.deepStrictEqual(state.deleted, [200, 199, 198, 197, 196, 195, 194])
         assert.deepStrictEqual(state.deleted, direct.state.deleted)
         assert.deepStrictEqual(state.markers, direct.state.markers)
-        assert.strictEqual(loop.lastProcessedBlockIndex, 194, 'the cursor is re-derived after the rollback')
+        assert.strictEqual(loop.lastProcessedBlockIndex, 193, 'the cursor is re-derived after the rollback')
         assert.strictEqual(decoder.reorgCount, 1)
     })
 
@@ -163,9 +164,9 @@ describe('the mid-walk tip refresh is settled before it moves the tip down [REGR
     })
 
     it('a settled lower tip mid-walk still drains the blocks above it', async function () {
-        const { decoder, state } = decoderOver({ top: 105, nodeTip: 102, tips: [102] })
+        const { decoder, state } = decoderOver({ top: 105, nodeTip: 102, tips: [102], forkAt: 101 })
         assert.strictEqual(await decoder.verifyReorg(105), true)
-        assert.deepStrictEqual(state.deleted, [105, 104, 103])
+        assert.deepStrictEqual(state.deleted, [105, 104, 103, 102])
     })
 })
 

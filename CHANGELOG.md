@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-01
+
+### Fixed
+- The decoder now recovers from proven chain reorganizations and waits visibly otherwise instead of stalling silently.
+- Mempool refresh and transaction parsing now handle failed reads and malformed transactions without stalling.
+- Reorg halts and reorg depth checks are more reliable, and a halt cleared by an operator no longer counts as live.
+- Migration guards now keep a ledger of applied migrations and judge destructive statements against the live schema more accurately.
+
+### Changed
+- Updated the Node base image to the pinned Node 22 patch and refreshed the follow-redirects dependency.
+
 ## [0.26.2] - 2026-10-21
 
 ### Changed
@@ -50,6 +61,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - Bumped ip-address, axios and proxy-addr past their advisories.
+
+## [0.23.3] - 2026-10-21
+
+### Security
+- Moved the runtime image from Node 25.9.0 to Node 22.23.4 for the CVE-2026-111497 Brotli decoder fix.
 
 ## [0.23.0] - 2026-10-11
 

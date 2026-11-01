@@ -262,7 +262,8 @@ describe('clear-reorg-halt CLI', function () {
         // Names the parked discriminator and the resync a parked decoder needs, not only a wait.
         const refusal = errors.join('\n')
         assert.match(refusal, /reorg_halt_parked: true/)
-        assert.match(refusal, /full resync from a known-good snapshot/)
+        assert.match(refusal, /xchain-node reset xchain-decoder <chain> <network> --with-indexer --yes/,
+            'a parked decoder never re-parses the range, so the refusal names the reset that recovers it')
         assert.match(refusal, /cannot be forced/)
     })
 })

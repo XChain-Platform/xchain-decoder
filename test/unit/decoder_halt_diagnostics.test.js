@@ -81,7 +81,11 @@ function haltingDecoder(db) {
         getBlockByIndex: async (i) => (i < 0 ? null : { block_index: i, block_hash: 'aa'.repeat(32) }),
         deleteBlockByIndex: async () => { height -= 1; return true }
     }, db)
-    decoder.connector = { rpcErrors: 0, getBlockHash: async () => 'bb'.repeat(32) }
+    decoder.connector = {
+        rpcErrors: 0,
+        getBlockHash: async () => 'bb'.repeat(32),
+        getBlockHeader: async () => ({ confirmations: -1 })
+    }
     return decoder
 }
 

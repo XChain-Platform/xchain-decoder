@@ -25,6 +25,28 @@ async function ensureLedgerAppliedAtDatetime(conn){
     );
 }
 
+// Applied migrations are keyed by filename. Any deliberate rename must be
+// registered here so an aged database re-keys its ledger row instead of
+// treating the same SQL as pending under a new name.
+const MIGRATION_LEDGER_RENAMES = {};
+
+function planLedgerRenames(appliedNames){
+    const have = new Set(appliedNames || []);
+    const operations = [];
+    for(const [from, to] of Object.entries(MIGRATION_LEDGER_RENAMES)){
+        if(have.has(from) && !have.has(to)) operations.push({ from, to });
+    }
+    return operations;
+}
+
+function orphanedLedgerNames(appliedNames, files){
+    const onDisk = new Set(files || []);
+    return [...(appliedNames || [])].map(String).filter(name => !onDisk.has(name)).sort();
+}
+
 module.exports = {
     ensureLedgerAppliedAtDatetime,
+    MIGRATION_LEDGER_RENAMES,
+    planLedgerRenames,
+    orphanedLedgerNames,
 }

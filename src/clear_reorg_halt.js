@@ -30,9 +30,14 @@
  * supersedes, and db.readReorgHaltState lets the newest row decide. Preconditions:
  *
  *   1. no block is still missing above the tip (countReorgDeletesAboveTip == 0):
- *      the rolled-back range has been re-parsed. Cannot be forced. A decoder still
- *      parsing forward on a dormant marker catches up on its own; a PARKED one
- *      (reorg_halt_parked) never re-parses the range, so its recovery is a full resync.
+ *      the rolled-back range has been re-parsed. Cannot be forced. A safe-depth halt
+ *      parks with the blocks it rolled back missing above the tip, a halt with
+ *      rolled-back blocks above the tip parks at boot, and a parked decoder never
+ *      re-parses, so this check never passes for those halts: their one recovery is
+ *      `xchain-node reset xchain-decoder <chain> <network> --with-indexer --yes`.
+ *      It passes for a halt that rolled nothing back (a delete that failed on its
+ *      first block) and once a decoder parsing forward on a dormant marker has
+ *      re-parsed the range.
  *   2. the database holds no dispenser state and never decoded a DISPENSER
  *      action, so the purge cannot have lost anything. --force overrides this one
  *      for an operator who has compared the dispensers table against a known-good
@@ -65,7 +70,12 @@ const EXIT = {
     HALT_SUPERSEDED: 5
 }
 
-const USAGE = 'usage: node src/clear_reorg_halt.js [--reason "<why this database is known good>"] [--force] [--dry-run]  (--reason is required unless --dry-run)'
+const RESET_COMMAND = 'xchain-node reset xchain-decoder <chain> <network> --with-indexer --yes'
+
+const USAGE = 'usage: node src/clear_reorg_halt.js [--reason "<why this database is known good>"] [--force] [--dry-run]  (--reason is required unless --dry-run)\n'
+    + 'Clears a REORG_HALT only when no rolled-back block remains above the stored tip. A halt that rolled blocks back '
+    + '(the dispenser safe-depth abort) leaves them above the tip, a parked decoder never re-parses them, and --force '
+    + 'cannot override that check: recover such a halt with `' + RESET_COMMAND + '`.'
 
 function parseArgs(argv){
     const out = { reason: null, force: false, dryRun: false, help: false, bad: null }
@@ -113,9 +123,9 @@ async function checkClearPreconditions(db, args, error){
     if (deletesAboveTip !== 0){
         error('clear-reorg-halt: REFUSED. ' + deletesAboveTip + ' block(s) rolled back above the current tip have not been re-parsed yet. '
             + 'This check cannot be forced. If the decoder is parked on this halt (reorg_halt_parked: true on health, '
-            + '/status or /live), it parses nothing and will never re-parse this range: recover with a full resync from '
-            + 'a known-good snapshot. If it is still parsing forward on a dormant marker (reorg_halt_parked: false), wait '
-            + 'for it to pass the halt height, then run this again.')
+            + '/status or /live), it parses nothing and will never re-parse this range: recover with `' + RESET_COMMAND + '`, '
+            + 'which re-decodes this decoder and its indexer. If it is still parsing forward on a dormant marker '
+            + '(reorg_halt_parked: false), wait for it to pass the halt height, then run this again.')
         return { exitCode: EXIT.NOT_RESYNCED }
     }
 
@@ -246,4 +256,4 @@ async function main(){
 
 if (require.main === module) main()
 
-module.exports = { run, parseArgs, EXIT, USAGE }
+module.exports = { run, parseArgs, EXIT, USAGE, RESET_COMMAND }

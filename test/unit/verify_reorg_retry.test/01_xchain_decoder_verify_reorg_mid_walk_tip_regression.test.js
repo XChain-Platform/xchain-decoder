@@ -43,18 +43,19 @@ describe('XChainDecoder.verifyReorg mid-walk tip regression', function () {
     decoder.sleep = async () => {}
 
     // DB stores 100..105; the node reports tip 105 at call time (call-time nodeTip), but
-    // the tip regresses to 102 mid-walk. Blocks 103,104,105 sit above the live tip and
-    // must be deleted via the above-tip branch; 102 and below still hash-match.
+    // the tip regresses to 102 mid-walk onto a fork from height 101. Blocks 102..105
+    // are abandoned and must be deleted via the above-tip and hash-compare branches.
     const REGRESSED_TIP = 102
     let top = 105
     const deleted = []
-    const dbHash = { 105: 'db105', 104: 'db104', 103: 'db103', 102: 'match102', 101: 'match101', 100: 'match100' }
+    const dbHash = { 105: 'db105', 104: 'db104', 103: 'db103', 102: 'db102', 101: 'match101', 100: 'match100' }
     decoder.connector = {
       // Live node: any height above the regressed tip is out of range.
       getBlockHash: async (h) => {
         if (h > REGRESSED_TIP) throw new Error('Block height out of range')
         return 'match' + h
       },
+      getBlockHeader: async () => ({ confirmations: -1 }),
       getBlockchainInfo: async () => ({ blocks: REGRESSED_TIP, verificationprogress: 1 })
     }
     decoder.db = {
@@ -68,10 +69,10 @@ describe('XChainDecoder.verifyReorg mid-walk tip regression', function () {
 
     // Called with the STALE higher tip (105). Without the refresh, height 105 is not
     // above nodeTip=105, getBlockHash(105) throws out-of-range, and the walk spins
-    // forever. With the refresh it re-reads tip=102 and drains 103,104,105.
+    // forever. With the refresh it re-reads tip=102, proves the fork there and drains 102..105.
     const result = await decoder.verifyReorg(105)
     assert.strictEqual(result, true)
-    assert.deepStrictEqual(deleted, [105, 104, 103],
+    assert.deepStrictEqual(deleted, [105, 104, 103, 102],
       'blocks above the regressed tip are deleted via the above-tip branch after the tip refresh')
   })
 })
@@ -140,18 +141,19 @@ describe('XChainDecoder.verifyReorg mid-walk tip regression', function () {
 
     // Identical shape to the refusal case, but the refreshing endpoint is OURS: its
     // block 0 matches the pin, so the regressed tip (102) is accepted and the orphan
-    // blocks above it (103,104,105) drain via the above-tip branch, exactly as before
+    // abandoned blocks 102..105 drain after the boundary proof, exactly as before
     // the genesis gate was added.
     const REGRESSED_TIP = 102
     let top = 105
     const deleted = []
-    const dbHash = { 105: 'db105', 104: 'db104', 103: 'db103', 102: 'match102', 101: 'match101', 100: 'match100' }
+    const dbHash = { 105: 'db105', 104: 'db104', 103: 'db103', 102: 'db102', 101: 'match101', 100: 'match100' }
     decoder.connector = {
       getBlockHash: async (h) => {
         if (h === 0) return OUR_GENESIS
         if (h > REGRESSED_TIP) throw new Error('Block height out of range')
         return 'match' + h
       },
+      getBlockHeader: async () => ({ confirmations: -1 }),
       getBlockchainInfo: async () => ({ blocks: REGRESSED_TIP, chain: 'main', verificationprogress: 1 })
     }
     decoder.db = {
@@ -165,7 +167,7 @@ describe('XChainDecoder.verifyReorg mid-walk tip regression', function () {
 
     const result = await decoder.verifyReorg(105)
     assert.strictEqual(result, true)
-    assert.deepStrictEqual(deleted, [105, 104, 103],
+    assert.deepStrictEqual(deleted, [105, 104, 103, 102],
       'an agreeing endpoint still self-heals a regressed tip via the above-tip branch')
   })
 })
@@ -218,13 +220,14 @@ function catchingUpWalk(infos, exitAfterSleeps) {
   decoder.sleep = async () => {
     if (exitAfterSleeps && ++state.sleeps >= exitAfterSleeps) state.top = -1
   }
-  const dbHash = { 105: 'db105', 104: 'db104', 103: 'db103', 102: 'match102', 101: 'match101', 100: 'match100' }
+  const dbHash = { 105: 'db105', 104: 'db104', 103: 'db103', 102: 'db102', 101: 'match101', 100: 'match100' }
   decoder.connector = {
     getBlockHash: async (h) => {
       if (h === 0) return OUR_GENESIS
       if (h > 102) throw new Error('Block height out of range')
       return 'match' + h
     },
+    getBlockHeader: async () => ({ confirmations: -1 }),
     getBlockchainInfo: async () => infos[Math.min(state.infoReads++, infos.length - 1)]
   }
   decoder.db = {
@@ -260,7 +263,7 @@ describe('XChainDecoder.verifyReorg mid-walk tip refresh from a catching-up node
     const synced = { blocks: 102, chain: 'main', initialblockdownload: false, verificationprogress: 1 }
     const { decoder, state } = catchingUpWalk([ibd, ibd, synced])
     assert.strictEqual(await decoder.verifyReorg(105), true)
-    assert.deepStrictEqual(state.deleted, [105, 104, 103], 'the wait resolves once the node is synced')
+    assert.deepStrictEqual(state.deleted, [105, 104, 103, 102], 'the wait resolves once the node is synced')
   })
 })
 
@@ -286,6 +289,6 @@ describe('XChainDecoder.verifyReorg mid-walk tip refresh from a malformed reply'
     const synced = { blocks: 102, chain: 'main', initialblockdownload: false, verificationprogress: 1 }
     const { decoder, state } = catchingUpWalk([trimmed, trimmed, synced])
     assert.strictEqual(await decoder.verifyReorg(105), true)
-    assert.deepStrictEqual(state.deleted, [105, 104, 103], 'the walk resumes on the first well-formed reading')
+    assert.deepStrictEqual(state.deleted, [105, 104, 103, 102], 'the walk resumes on the first well-formed reading')
   })
 })

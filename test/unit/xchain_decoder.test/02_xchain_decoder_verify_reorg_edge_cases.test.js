@@ -130,7 +130,8 @@ describe('XChainDecoder#verifyReorg() edge cases', () => {
                 if (h === 10) return 'node_hash10'  // differs → reorg
                 if (h === 9)  return 'good9'         // matches → stop
                 return 'match'
-            })
+            }),
+            getBlockHeader: sinon.stub().resolves({ confirmations: -1 })
         }
 
         const result = await decoder.verifyReorg()

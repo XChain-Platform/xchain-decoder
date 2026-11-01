@@ -46,7 +46,8 @@ function buildDecoder(failuresPerBlock) {
   const deleteArgs = []
 
   decoder.connector = {
-    getBlockHash: async (h) => nodeHash[h]
+    getBlockHash: async (h) => nodeHash[h],
+    getBlockHeader: async () => ({ confirmations: -1 })
   }
   decoder.db = {
     getLastBlockIndex: async () => top,
@@ -115,7 +116,8 @@ function buildDeepReorgDecoder(divergentBlocks, network = 'bitcoin-regtest') {
   let top = TIP
   const deleted = []
   decoder.connector = {
-    getBlockHash: async (h) => (h > TIP - divergentBlocks ? 'node' + h : 'match' + h)
+    getBlockHash: async (h) => (h > TIP - divergentBlocks ? 'node' + h : 'match' + h),
+    getBlockHeader: async () => ({ confirmations: -1 })
   }
   decoder.db = {
     getLastBlockIndex: async () => top,
@@ -151,13 +153,18 @@ describe('XChainDecoder.verifyReorg depth guard', function () {
     assert.strictEqual(deleted.length, SAFE_DEPTH,
       'must stop deleting exactly at DISPENSER_EXPIRE_SAFE_DEPTH blocks')
   })
+})
 
+describe('XChainDecoder.verifyReorg above-tip depth guard', function () {
   it('also guards the above-tip orphan branch, and there it refuses BEFORE the first delete', async function () {
     // Blocks stored above the node tip are deleted via a separate branch. That
-    // branch knows its depth up front, so a node tip deeper below us than the
-    // window must not spend the window finding out: it refuses with nothing
-    // deleted and no durable halt (nothing was lost). The full contract is in
-    // nodeCatchUpWait.test.js.
+    // branch knows a floor on its depth up front, so a node tip deeper below us
+    // than the window must not spend the window finding out. Here the node holds a
+    // different block at its own tip but answers no block header, so nothing proves
+    // it reorged away from the stored one (a lagging endpoint on another branch looks
+    // exactly like this): it refuses with nothing deleted and no durable halt. The
+    // halt on a proven fork is in reorg_recovery.test/; the wait contract is in
+    // node_catch_up_wait.test.js.
     const decoder = new XChainDecoder(
       'bitcoin-regtest', 'h', '0', 'db', 'u', 'p', 'h', '0', 'u', 'p', false, null
     )
@@ -165,7 +172,14 @@ describe('XChainDecoder.verifyReorg depth guard', function () {
     decoder.sleep = async () => {}
     let top = 10000
     const deleted = []
-    decoder.connector = { getBlockHash: async (h) => 'match' + h }
+    decoder.connector = {
+      getBlockHash: async (h) => 'match' + h,
+      getBlockHeader: async () => {
+        const err = new Error('Block not found')
+        err.rpcCode = -5
+        throw err
+      }
+    }
     decoder.db = {
       getLastBlockIndex: async () => top,
       getBlockByIndex: async (h) => ({ block_hash: 'db' + h }),
@@ -173,7 +187,11 @@ describe('XChainDecoder.verifyReorg depth guard', function () {
       insertEvent: async () => { throw new Error('no end-of-run REORG event') }
     }
     // Node tip far below the stored tip: every stored block above it is an orphan.
-    await assert.rejects(() => decoder.verifyReorg(10000 - SAFE_DEPTH - 50), /dispenser safe-depth window/)
+    await assert.rejects(() => decoder.verifyReorg(10000 - SAFE_DEPTH - 50), (err) => {
+      assert.match(err.message, /does not know stored block 9824/)
+      assert.strictEqual(err.tipBelowStoredTip, true, 'an unproven fork past the window is a wait, not a halt')
+      return true
+    })
     assert.strictEqual(deleted.length, 0)
     assert.strictEqual(decoder.getReorgHaltStatus().halted, false)
   })
@@ -206,8 +224,14 @@ function buildDurableHaltDecoder(shared) {
   decoder.startBlockIndex = 0
   decoder.sleep = async () => {}
   const deleted = []
+  // Blocks gone when the halt marker was written: the ceiling's verdict.
+  const atHalt = []
+  // The node held every stored block and left the abandoned ones for its longer
+  // chain, so it proves each delete past the halt (getblockheader -1, more work).
   decoder.connector = {
-    getBlockHash: async (h) => (h > forkPoint ? 'node' + h : 'match' + h)
+    getBlockHash: async (h) => (h > forkPoint ? 'node' + h : 'match' + h),
+    getBlockHeader: async (hash) => ({ confirmations: hash.startsWith('db') ? -1 : 1, chainwork: '01' }),
+    getBlockchainInfo: async () => ({ blocks: TIP, headers: TIP, chainwork: '02' })
   }
   decoder.db = {
     getLastBlockIndex: async () => dbState.top,
@@ -218,9 +242,9 @@ function buildDurableHaltDecoder(shared) {
     // Answers the db contract (true = a REORG_HALT row is now readable) rather
     // than shrugging with undefined: haltReorg honours this value, and a stub
     // that shrugs models a decoder whose marker write silently failed.
-    markReorgHalted: async () => { store.halted = true; return true }
+    markReorgHalted: async () => { atHalt.push(deleted.length); store.halted = true; return true }
   }
-  return { decoder, deleted }
+  return { decoder, deleted, atHalt }
 }
 
 describe('XChainDecoder.verifyReorg durable halt (restart-mid-reorg)', function () {
@@ -229,19 +253,20 @@ describe('XChainDecoder.verifyReorg durable halt (restart-mid-reorg)', function 
   it('halts durably on the over-deep abort and a restart refuses to resume the rollback', async function () {
     const shared = makeShared(SAFE_DEPTH + 74) // 200-block-class reorg
 
-    // Run 1: aborts fail-closed exactly at the safe depth and persists the halt marker.
+    // Run 1: halts exactly at the safe depth, persists the halt marker, and only
+    // then finishes the rollback down to the fork point, so nothing of the
+    // abandoned branch stays served while the database waits for its reset.
     const first = buildDurableHaltDecoder(shared)
     await assert.rejects(() => first.decoder.verifyReorg(), /dispenser safe-depth window/)
-    assert.strictEqual(first.deleted.length, SAFE_DEPTH, 'run 1 stops deleting at the ceiling')
+    assert.deepStrictEqual(first.atHalt, [SAFE_DEPTH], 'run 1 halts at the ceiling')
     assert.strictEqual(shared.store.halted, true, 'run 1 must persist a durable halt marker')
+    assert.strictEqual(shared.dbState.top, shared.forkPoint, 'the halted rollback ends at the fork point')
 
     // Run 2 = process restart: fresh decoder (counter reset), same persisted state.
-    // Pre-fix it would delete the remaining 74 blocks; now it must delete NONE.
+    // The marker refuses any further rollback.
     const second = buildDurableHaltDecoder(shared)
     await assert.rejects(() => second.decoder.verifyReorg(), /HALTED from a prior over-deep reorg abort/)
-    assert.strictEqual(second.deleted.length, 0, 'restart must not resume the over-deep rollback')
-    assert.ok(shared.dbState.top > shared.forkPoint,
-      'blocks past the purge window must remain (rollback did not silently complete)')
+    assert.strictEqual(second.deleted.length, 0, 'restart must not roll back again')
   })
 
   it('a full resync (cleared halt marker) restores normal shallow-reorg operation', async function () {

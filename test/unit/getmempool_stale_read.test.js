@@ -56,11 +56,17 @@ async function servesStaleSnapshotAndRetries(){
     assert.strictEqual(failed.total, 7);
     assert.strictEqual(failed.rows[0].tx_hash, 'aa');
 
+    const backedOff = await getmempool({ limit: 500 });
+    assert.strictEqual(getRows.callCount, 2);
+    assert.strictEqual(getTotal.callCount, 2);
+    assert.strictEqual(backedOff.stale, true);
+
+    clock.tick(1000);
     const recovered = await getmempool({ limit: 500 });
     assert.strictEqual(getRows.callCount, 3);
     assert.strictEqual(getTotal.callCount, 3);
     assert.strictEqual(recovered.stale, false);
-    assert.strictEqual(recovered.read_ok_at, 6000);
+    assert.strictEqual(recovered.read_ok_at, 7000);
     assert.strictEqual(recovered.total, 8);
     assert.strictEqual(recovered.rows[0].tx_hash, 'bb');
 }
@@ -84,7 +90,30 @@ async function reportsStaleEmptyFallback(){
     assert.deepStrictEqual(result.rows, []);
 
     await getmempool({ limit: 500 });
+    assert.strictEqual(getRows.callCount, 1);
+    clock.tick(1000);
+    await getmempool({ limit: 500 });
     assert.strictEqual(getRows.callCount, 2);
+}
+
+async function sharesConcurrentRefresh(){
+    let releaseRows;
+    const rowsReady = new Promise(resolve => { releaseRows = resolve; });
+    const getRows = sinon.stub().returns(rowsReady);
+    const getTotal = sinon.stub().resolves(1);
+    const getmempool = createMempoolMethods({
+        nodeMempoolTxCount: 1,
+        nodeMempoolUpdatedAt: 1000,
+        mempoolDb: { getMempoolTransactions: getRows, getMempoolTransactionCount: getTotal }
+    }).getmempool;
+
+    const first = getmempool({ limit: 500 });
+    const second = getmempool({ limit: 500 });
+    assert.strictEqual(getRows.callCount, 1, 'concurrent callers share the in-flight row read');
+    releaseRows([{ tx_hash: 'aa', source: 'alice', data: 'first', first_seen: 11 }]);
+    const replies = await Promise.all([first, second]);
+    assert.strictEqual(getTotal.callCount, 1, 'concurrent callers share the in-flight count read');
+    assert.deepStrictEqual(replies.map(reply => reply.rows[0].tx_hash), ['aa', 'aa']);
 }
 
 describe('getmempool stale reads', function () {
@@ -104,4 +133,5 @@ describe('getmempool stale reads', function () {
 
     it('serves the last good snapshot as stale and retries immediately after a failed refresh', servesStaleSnapshotAndRetries);
     it('reports a stale empty fallback when the first read fails without a prior good timestamp', reportsStaleEmptyFallback);
+    it('shares one database refresh across concurrent callers', sharesConcurrentRefresh);
 });

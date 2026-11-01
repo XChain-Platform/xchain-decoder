@@ -26,6 +26,7 @@ const fs     = require('fs');
 const path   = require('path');
 
 const Database = require('../../../src/db');
+const migrationLedger = require('../../../src/db/migration_ledger.js');
 
 // Functional coverage of the per-file scoping (--file / opts.only): drive the real
 // runMigrations() against a fake connection over a tmp migrations dir holding several
@@ -40,6 +41,7 @@ const Database = require('../../../src/db');
     // pre-existing schema_migrations content (already-applied files).
     function makeDb(sqlPath, ledgerRows) {
         const applied  = [];  // filenames INSERTed into schema_migrations this run
+        const renamed  = [];
         const executed = [];  // raw non-bookkeeping statements executed
         const conn = {
             async query(sql, params) {
@@ -55,6 +57,7 @@ const Database = require('../../../src/db');
                 if (/information_schema\.columns/.test(sql))                   return [{ dataType: 'bigint' }];
                 if (/^INSERT INTO schema_migrations/.test(sql)) { applied.push(params[0]); return []; }
                 if (/^UPDATE schema_migrations SET checksum/.test(sql))        return [];
+                if (/^UPDATE schema_migrations SET name/.test(sql)) { renamed.push(params); return []; }
                 // Anything else is a migration body statement.
                 executed.push(sql);
                 return [];
@@ -66,7 +69,7 @@ const Database = require('../../../src/db');
         db.dbName  = 'fake_db';
         db.getConnection = async () => conn;
         db.ensureMigrationsLedger = async () => {};
-        return { db, applied, executed };
+        return { db, applied, executed, renamed };
     }
 
     // Each committed file gets its own DDL body so `executed` can distinguish them.
@@ -108,6 +111,34 @@ describe('runMigrations() --file / opts.only scoping @regression', function () {
         assert.deepStrictEqual(res.pending, []);
     });
 
+});
+
+describe('runMigrations() migration filename guards @regression', function () {
+    const OLD = '2026-06-01-old-name.sql';
+    const NEW = '2026-10-31-new-name.sql';
+    const BODY = '-- xchain:migration mode=auto\nALTER TABLE t ADD COLUMN c INT;\n';
+    const SUM = crypto.createHash('sha256').update(BODY).digest('hex');
+
+    afterEach(function () { delete migrationLedger.MIGRATION_LEDGER_RENAMES[OLD]; });
+
+    it('refuses a pending file whose bytes match an orphaned ledger row', async function () {
+        const root = tmpMigrationsDir({ [NEW]: BODY });
+        const { db, applied, executed } = makeDb(root, [{ name: OLD, checksum: SUM }]);
+        await assert.rejects(() => db.runMigrations({ includeManual: true }), /MIGRATION_LEDGER_RENAMES/);
+        assert.deepStrictEqual(applied, []);
+        assert.deepStrictEqual(executed, []);
+    });
+
+    it('re-keys a registered rename and does not execute the migration again', async function () {
+        migrationLedger.MIGRATION_LEDGER_RENAMES[OLD] = NEW;
+        const root = tmpMigrationsDir({ [NEW]: BODY });
+        const { db, applied, executed, renamed } = makeDb(root, [{ name: OLD, checksum: SUM }]);
+        const result = await db.runMigrations({ includeManual: true });
+        assert.deepStrictEqual(renamed, [[NEW, OLD]]);
+        assert.deepStrictEqual(applied, []);
+        assert.deepStrictEqual(executed, []);
+        assert.deepStrictEqual(result.applied, []);
+    });
 });
 
 describe('runMigrations() --file / opts.only scoping @regression', function () {

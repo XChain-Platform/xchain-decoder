@@ -108,6 +108,13 @@ function createOutsideAllowList(stmt){
     return !/^CREATE\s+(?:(?:UNIQUE|FULLTEXT|SPATIAL)\s+)?INDEX\b/i.test(stmt);
 }
 
+// True for a FOREIGN KEY, REFERENCES or CHECK definition, which changes how later writes and
+// deletes behave (reorg rollback ones too), like a trigger. Kept in step with the xchain-indexer classifier.
+function addsDeferredConstraint(stmt){
+    const text = blankLiterals(stmt);
+    return /\bREFERENCES\b/i.test(text) || /(?<!\bDROP\s+)\bFOREIGN\s+KEY\b/i.test(text) || /\bCHECK\s*\(/i.test(text);
+}
+
 // The closing allow-list: true unless the statement opens with a form an auto file may use.
 // Any other form (BINLOG, DO, SELECT, PURGE, RESET, INSTALL, ...) can make the server do
 // something this prefix classifier cannot see, the same blind spot as CALL above.
@@ -138,34 +145,24 @@ function isDestructiveAlter(stmt, safeAlterDrop){
     // CONVERT TO CHARACTER SET rewrites every text column of the table and can truncate or
     // re-encode row data.
     if(/\bCONVERT\s+TO\b/i.test(stmt)) return true;
-    // MODIFY that adds NOT NULL narrows the column domain, except an AUTO_INCREMENT repair
-    // (definitionally NOT NULL; 2026-06-10-mirror-id-autoincrement-repair.sql). Checked per
-    // top-level clause, so one AUTO_INCREMENT clause cannot exempt a sibling NOT NULL clause.
-    let mDepth = 0, mStart = 0;
-    const mClauses = [];
-    for(let i=0;i<stmt.length;i++){
-        const ch = stmt[i];
-        if(ch === '(') mDepth++;
-        else if(ch === ')') mDepth--;
-        else if(ch === ',' && mDepth === 0){ mClauses.push(stmt.slice(mStart, i)); mStart = i + 1; }
-    }
-    mClauses.push(stmt.slice(mStart));
-    for(const clause of mClauses){
-        if(/\bMODIFY\b[\s\S]*\bNOT\s+NULL\b/i.test(clause) &&
-           !/\bAUTO_INCREMENT\b/i.test(clause)) return true;
-    }
     // Read each alter_spec past the head and any WAIT n / NOWAIT (an unparsed head is one spec).
     const parsed = alterSpecs(stmt);
     for(const spec of (parsed ? parsed.specs : [stmt])){
+        const bare = blankLiterals(spec);
+        // MODIFY that adds NOT NULL narrows the column domain, except an AUTO_INCREMENT
+        // repair. Quote-aware specs keep literals from joining or exempting clauses.
+        if(/\bMODIFY\b[\s\S]*\bNOT\s+NULL\b/i.test(bare) &&
+           !/\bAUTO_INCREMENT\b/i.test(bare)) return true;
         // Restating id without AUTO_INCREMENT strips the attribute, so later inserts lose their key.
         if(/^\s*MODIFY\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?`?id`?(?=\s|$)/i.test(spec) &&
-           !/\bAUTO_INCREMENT\b/i.test(spec)) return true;
+           !/\bAUTO_INCREMENT\b/i.test(bare)) return true;
         // A MODIFY keyword that does not open its spec is one no check here can place.
-        if(/\bMODIFY\b/i.test(blankLiterals(spec)) && !/^\s*MODIFY\b/i.test(spec)) return true;
+        if(/\bMODIFY\b/i.test(bare) && !/^\s*MODIFY\b/i.test(spec)) return true;
     }
     return false;
 }
 
 module.exports = {
     hasUnquotedHash, isSimpleDestructiveStatement, createOutsideAllowList, isDestructiveAlter, statementOutsideAllowList,
+    addsDeferredConstraint,
 }

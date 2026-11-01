@@ -21,6 +21,7 @@
 const { logger } = require('./constants.js')
 const { oracleAddressFromCreate, V0_GIVE_COIN_INDEX, V0_GET_COIN_INDEX, V0_GET_ADDRESS_INDEX, V0_EXPIRATION_INDEX, V2_EXPIRATION_INDEX } = require('../protocol/oracle_fee_output')
 const { isBatchSubCommandCaptureActive } = require('../protocol/batch_sub_command_capture')
+const { INDEX_ADDRESS_MAX_CHARS } = require('../db/constants.js')
 const {
     hasValidExpirationToken,
     isExactIntegerExpirationActive,
@@ -142,6 +143,11 @@ function dispenserCommandPrefixFor(block){
     return dispenserCommandPrefix
 }
 
+function fitsIndexAddressColumn(value){
+    return typeof value === 'string' && value.length <= INDEX_ADDRESS_MAX_CHARS
+        && !/[\uD800-\uDFFF]/.test(value)
+}
+
 function pushOperatingAddressCreate(getAddress, decodedDataSplit, expiration, dispenserCreateCandidates, parseResult, nextTransactionHash, lastProcessedTxIndex){
     if (getAddress && getAddress.length > 0 && getAddress.charAt(0) === "^"){
         // Fail loud on a compacted `^<id>` GET_ADDRESS. This is a
@@ -160,6 +166,9 @@ function pushOperatingAddressCreate(getAddress, decodedDataSplit, expiration, di
         // registered.
         this.parseErrors++
         logger.error(`Skipping dispenser in tx ${nextTransactionHash} (txIndex ${lastProcessedTxIndex}): unresolved compacted GET_ADDRESS reference '${getAddress}' - the decoder cannot resolve ^<id> address references, so this delegated dispenser was NOT registered`)
+    } else if (getAddress && !fitsIndexAddressColumn(getAddress)) {
+        this.parseErrors++
+        logger.error(`Skipping dispenser in tx ${nextTransactionHash} (txIndex ${lastProcessedTxIndex}): GET_ADDRESS does not fit index_addresses.address (${getAddress.length} UTF-16 units)`)
     } else {
         // The dispenser operates on GET_ADDRESS when a delegated
         // address is given, otherwise on the tx SOURCE (indexer
@@ -375,4 +384,4 @@ async function extendEditedDispenser(extension, nextBlockHeight){
     }
 }
 
-module.exports = { dispenserCommandPrefixFor, collectDispenserCreates, registerDispenser, dispenserEditExtension, extendEditedDispenser, isExactIntegerExpirationActive, isExactIntegerToken }
+module.exports = { dispenserCommandPrefixFor, collectDispenserCreates, registerDispenser, dispenserEditExtension, extendEditedDispenser, fitsIndexAddressColumn, isExactIntegerExpirationActive, isExactIntegerToken }

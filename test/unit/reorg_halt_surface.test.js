@@ -177,7 +177,7 @@ describe('XChainDecoder latent REORG_HALT reporting', function () {
         decoder.sleep = async () => {}
         // Deep enough that the safe-depth ceiling fires before the walk runs out of blocks.
         let top = 500
-        decoder.connector = { getBlockHash: async () => 'node-hash' }
+        decoder.connector = { getBlockHash: async () => 'node-hash', getBlockHeader: async () => ({ confirmations: -1 }) }
         decoder.db = {
             isReorgHalted: async () => false,
             markReorgHalted: async () => { throw new Error('marker write failed') },
