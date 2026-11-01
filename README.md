@@ -4,8 +4,8 @@
 # XChain Platform Decoder
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.21.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-2%2C118%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.27.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-2%2C778%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -113,16 +113,16 @@ neither source sets one, so these defaults hold on an unconfigured box:
 | `npm run migrate` | Apply pending database migrations (auto + manual; `--file <name>` scopes to specific migration(s)) |
 | `npm run ci` | The full no-external-services gate: unit, security, smoke, regression, chaos, and a 100-iteration fuzz pass (about a minute) |
 | `npm run test:smoke` | Smoke tests (58 tests, no external services) |
-| `npm run test:unit` | Unit tests (1,637 tests, no external services) |
+| `npm run test:unit` | Unit tests (2,258 tests, no external services) |
 | `npm run test:security` | Security tests (83 tests, no external services) |
-| `npm run test:integration` | Integration tests (30 tests; brings up its own throwaway regtest node and MariaDB, requires Docker) |
+| `npm run test:integration` | Integration tests (45 tests; brings up its own throwaway regtest node and MariaDB, requires Docker) |
 | `npm run test:e2e` | End-to-end tests (72 tests; brings up its own throwaway regtest node and MariaDB on separate ports, requires Docker) |
 | `npm run test:fuzz` | Fuzz tests (5 harnesses, 1000-5000 iterations each depending on harness, 177 tests) |
 | `npm run test:fuzz:quick` | Quick fuzz (100 iterations, 177 tests) |
-| `npm run test:chaos` | Chaos engineering tests (61 tests) |
-| `npm run test:regression` | Regression tests P0+P1 (87 tests) |
+| `npm run test:chaos` | Chaos engineering tests (64 tests) |
+| `npm run test:regression` | Regression tests P0+P1 (139 tests) |
 | `npm run test:regression:critical` | Regression tests P0 only (54 tests, <1s) |
-| `npm run test:regression:full` | Full regression suite (106 tests) |
+| `npm run test:regression:full` | Full regression suite (179 tests) |
 | `npm run test:bench` | Performance benchmarks (7 scenarios) |
 | `npm run test:bench:quick` | Quick benchmarks |
 | `npm run test:mutation` | Mutation testing (Stryker Mutator) |
