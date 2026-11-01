@@ -54,6 +54,7 @@ const {
     ageProbeLogState,
     PROBE_LOG_WINDOW_MS
 } = require('./api/probe_routes');
+const { rpcErrorHandler } = require('./api/rpc_error_handler');
 const { reportStartFailure, installCrashHandlers } = require('./api/crash_reporting');
 const { getHealthProbeState } = require('./api/health_probe');
 const { createMempoolMethods: createMempoolRpcMethods } = require('./api/mempool_methods');
@@ -269,6 +270,10 @@ function registerRoutes(app, decoder, isDecoderRunning, getDecoderError){
     // response instead of crashing the request.
     app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
     app.use(jsonRouter({methods: createJsonRpcController(decoder, isDecoderRunning, getDecoderError)}))
+
+    // Terminal error handler: body-parser failures (malformed, non-object or oversized
+    // JSON) become JSON-RPC errors instead of Express's HTML stack-trace page.
+    app.use(rpcErrorHandler)
 }
 
 async function startApi(){
