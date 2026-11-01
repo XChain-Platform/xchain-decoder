@@ -93,12 +93,28 @@ function nodeReachabilityFields(decoder){
 // health() draws a pooled MariaDB connection - amplifying one unauthenticated request
 // into pool contention against the liveness-critical block loop. Only trivial status
 // methods are exposed, so a small cap is ample.
+//
+// The guard also rejects any batch holding a non-plain-object element (null, number, string,
+// nested array). The router calls handleSingleReq(null) un-awaited and then reads body.id on
+// null, so one such element produced an HTTP 500 stack trace plus a CRASH unhandledRejection
+// record from unauthenticated input. Answering -32600 here keeps it from ever reaching the router.
+function isPlainRpcObject(v){
+    return v !== null && typeof v === 'object' && !Array.isArray(v)
+}
+
 function makeRpcBatchGuard(maxBatch){
     return (req, res, next) => {
         if (Array.isArray(req.body) && req.body.length > maxBatch){
             return res.status(400).json({
                 jsonrpc: '2.0',
                 error: { code: -32600, message: 'Batch too large (max ' + maxBatch + ' requests per call)' },
+                id: null
+            })
+        }
+        if (Array.isArray(req.body) && !req.body.every(isPlainRpcObject)){
+            return res.status(400).json({
+                jsonrpc: '2.0',
+                error: { code: -32600, message: 'Invalid Request: every batch element must be an object' },
                 id: null
             })
         }

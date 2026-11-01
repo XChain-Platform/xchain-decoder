@@ -180,6 +180,40 @@ describe('decoder stability fixes @regression', function () {
     })
 })
 
+// A non-object batch element made express-json-rpc-router throw (HTTP 500 stack trace plus a
+// CRASH unhandledRejection record) from unauthenticated input; the guard must answer -32600 first.
+describe('JSON-RPC batch element-shape guard @regression', function () {
+    function fakeRes(){
+        return { _code: null, _json: null, status(c){ this._code = c; return this }, json(o){ this._json = o; return this } }
+    }
+
+    for (const [label, body] of [
+        ['non-object elements', [1, null, 'a']],
+        ['a lone null', [null]],
+        ['a nested array', [[]]],
+        ['a valid call mixed with null', [{ jsonrpc: '2.0', method: 'health', id: 1 }, null]]
+    ]) {
+        it('rejects a batch with ' + label + ' with -32600 and does not call next', function () {
+            const guard = makeRpcBatchGuard(20)
+            const res = fakeRes()
+            let nextCalled = false
+            guard({ body }, res, () => { nextCalled = true })
+            assert.strictEqual(res._code, 400)
+            assert.strictEqual(nextCalled, false)
+            assert.strictEqual(res._json.error.code, -32600)
+            assert.strictEqual(res._json.id, null)
+        })
+    }
+
+    it('passes a valid all-object batch and an empty array unchanged', function () {
+        const guard = makeRpcBatchGuard(20)
+        let n = 0
+        guard({ body: [{ jsonrpc: '2.0', method: 'health', id: 1 }, { method: 'health' }] }, fakeRes(), () => { n++ })
+        guard({ body: [] }, fakeRes(), () => { n++ })
+        assert.strictEqual(n, 2)
+    })
+})
+
 describe('decoder stability fixes @regression', function () {
     this.timeout(0)
 
