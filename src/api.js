@@ -202,7 +202,9 @@ function createMempoolMethods(decoder){
 // The JSON-RPC methods, keyed by name for express-json-rpc-router. The health
 // method's flag and error come through getters for the same reason as /status.
 function createJsonRpcController(decoder, isDecoderRunning, getDecoderError){
-    return {
+    // Prototype-free table: the router looks methods up by name, so a plain object
+    // would let inherited members ("constructor", "toString") pass as methods.
+    return Object.assign(Object.create(null), {
         // Function to check if xchain-decoder is up
         async ping() {
             return {status:"success"};
@@ -227,7 +229,7 @@ function createJsonRpcController(decoder, isDecoderRunning, getDecoderError){
             };
         },
         ...createMempoolMethods(decoder)
-    }
+    })
 }
 
 // The app's middleware in registration order: security headers, the per-IP rate
@@ -342,4 +344,4 @@ if (require.main === module) startApi()
 // startApi is exported so the crash handlers it installs can be driven for real
 // rather than asserted against the source text; the require.main guard above
 // still keeps a plain require from opening a port or a DB connection.
-module.exports = { buildHealthResult, makeRpcBatchGuard, registerLiveRoute, registerReadyRoute, registerStatusRoute, startApi, createMempoolMethods, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
+module.exports = { buildHealthResult, makeRpcBatchGuard, registerLiveRoute, registerReadyRoute, registerStatusRoute, startApi, createMempoolMethods, createJsonRpcController, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
