@@ -19,6 +19,8 @@
 // with an HTML page carrying the server stack trace. This maps those failures to
 // a JSON-RPC error envelope and never echoes the error message or stack.
 
+const { logger } = require('../XChainDecoder/constants.js');
+
 const PARSE_ERROR = -32700;
 const INVALID_REQUEST = -32600;
 const INTERNAL_ERROR = -32603;
@@ -40,7 +42,7 @@ function classify(err) {
 function rpcErrorHandler(err, req, res, next) {
     if (res.headersSent) return next(err);
     const { status, code, message } = classify(err);
-    if (status >= 500) console.error('rpc request failed:', err && err.message);
+    if (status >= 500) logger.error(`rpc request failed: ${err && err.message}`);
     res.status(status).json({ jsonrpc: '2.0', error: { code, message }, id: null });
 }
 
