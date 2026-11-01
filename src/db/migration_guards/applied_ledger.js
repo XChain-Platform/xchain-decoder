@@ -83,7 +83,7 @@ function guardMigrationFrontier(context, file, mode){
     if(!frontier) return;
     const msg = 'runMigrations: ' + file + ' is dated BEFORE already-applied migration ' + frontier +
         ', so it would run in a different position here than on a fresh database and diverge the schema. ' +
-        'Rename it with a date after ' + frontier + '.';
+        'Do not rename it after any database may have applied it; add a new migration dated after ' + frontier + '.';
     // Same dual-mode contract as the checksum guard above: the operator
     // path and opt-in strict mode fail closed, passive startup logs and
     // proceeds so a backdated commit cannot black-start the fleet.
@@ -91,4 +91,19 @@ function guardMigrationFrontier(context, file, mode){
     logger.error(msg + ' Applying it anyway at this position - review manually.');
 }
 
-module.exports = { reconcileAppliedMigration, guardMigrationFrontier }
+// A pending file with the checksum of a ledger row whose file disappeared has
+// already run under another name. Registered renames are healed before this
+// guard; anything left is refused so it cannot execute twice.
+function guardUnregisteredRename(context, file, checksum){
+    const oldName = context.orphanByChecksum && context.orphanByChecksum.get(checksum);
+    if(!oldName) return false;
+    const msg = 'runMigrations: ' + file + ' has the same content as ledger row ' + oldName +
+        ', which has no file on disk. Register the rename in MIGRATION_LEDGER_RENAMES so the ledger ' +
+        're-keys instead of running the migration again.';
+    if(context.includeManual || config.MIGRATION_STRICT_CHECKSUM === '1') throw new Error(msg);
+    logger.error(msg + ' Leaving it unapplied.');
+    context.result.pending.push(file);
+    return true;
+}
+
+module.exports = { reconcileAppliedMigration, guardMigrationFrontier, guardUnregisteredRename }

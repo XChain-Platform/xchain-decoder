@@ -64,6 +64,18 @@ describe('Database.destructiveAutoStatement() CONVERT TO and MODIFY id @regressi
         }
     });
 
+    it('flags NOT NULL and id repairs hidden by quoted text', function () {
+        for (const stmt of [
+            "ALTER TABLE t MODIFY parent_id BIGINT NOT NULL COMMENT 'copied from AUTO_INCREMENT id'",
+            "ALTER TABLE t MODIFY memo VARCHAR(255) DEFAULT ',' NOT NULL",
+            "ALTER TABLE t MODIFY a VARCHAR(5) DEFAULT '(', MODIFY b INT NOT NULL, MODIFY id BIGINT NOT NULL AUTO_INCREMENT",
+            "ALTER TABLE t MODIFY id BIGINT COMMENT 'AUTO_INCREMENT'",
+        ]) {
+            assert.strictEqual(scanOf([stmt]), stmt, stmt + ' must not be auto-eligible');
+        }
+        assert.strictEqual(scanOf(["ALTER TABLE t MODIFY memo VARCHAR(255) DEFAULT ',' NULL"]), null);
+    });
+
     it('refuses a mode=auto file that converts the charset, from raw file text', function () {
         const raw = '-- xchain:migration mode=auto\nALTER TABLE transactions CONVERT TO CHARACTER SET utf8mb3;\n';
         assert.match(String(scanOf(splitOf(raw))), /CONVERT TO CHARACTER SET utf8mb3/);
