@@ -945,6 +945,13 @@
       "post-commit dispenser purge failure count exports the count as a Prometheus counter",
       "post-commit dispenser purge failure count leaves the count at zero when the purge succeeds"
     ],
+    "324d3a917673b9f9": [
+      "XChainDecoder parse-loop quarantine quarantines a poison transaction after exhausting block retries",
+      "XChainDecoder parse-loop quarantine retries the whole block when parseTransaction throws transiently (no quarantine)",
+      "XChainDecoder parse-loop quarantine skips just the failing tx during a mempool update instead of aborting the cycle",
+      "XChainDecoder parse-loop quarantine survives a blockFromHex throw and retries the block instead of dying",
+      "XChainDecoder parse-loop quarantine with several poison txs counts and parses each quarantined position once, not again on later rollbacks"
+    ],
     "34bac8b72829a9ac": [
       "DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION conformance is re-exported by the public constants module",
       "DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION conformance keeps mainnet inert and regtest genesis-active while testnet is armable"
@@ -1550,6 +1557,13 @@
       "XChainBlockDecoder #transactionFromHex() [REGRESSION P2] R-NET-002: should strip MWEB flag (0x08) from litecoin transactions",
       "XChainBlockDecoder #transactionFromHex() [REGRESSION P2] R-NET-002: should strip MWEB+segwit flag (0x09) from litecoin transactions"
     ],
+    "5a8722b31c61ebf3": [
+      "quarantine retry state is per tx position and per block a one-off INSERT rejection on a second tx after a quarantine in the same block is still retried",
+      "quarantine retry state is per tx position and per block a sibling block at the same height does not inherit an INSERT quarantine",
+      "quarantine retry state is per tx position and per block a sibling block at the same height does not inherit the parse retry count",
+      "quarantine retry state is per tx position and per block a transient parse throw on a second tx after a quarantine in the same block is still retried",
+      "quarantine retry state is per tx position and per block two poison txs in one block each get their own parse retries and the block commits"
+    ],
     "5aaa005bd6c99496": [
       "BET action-name gate BET has no alias and is not the target of one",
       "BET action-name gate a base64 DETAILS payload passes through byte-for-byte",
@@ -1916,17 +1930,6 @@
       "alias expansion at the MAX_ACTION_DATA_LENGTH boundary a payload at exactly the cap canonicalizes to a record ABOVE the cap",
       "alias expansion at the MAX_ACTION_DATA_LENGTH boundary an already-canonical name at the cap is returned unchanged",
       "alias expansion at the MAX_ACTION_DATA_LENGTH boundary every alias expansion delta is what the constant comment claims"
-    ],
-    "7ab2b61a3082956b": [
-      "XChainDecoder parse-loop quarantine quarantines a poison transaction after exhausting block retries",
-      "XChainDecoder parse-loop quarantine retries the whole block when parseTransaction throws transiently (no quarantine)",
-      "XChainDecoder parse-loop quarantine skips just the failing tx during a mempool update instead of aborting the cycle",
-      "XChainDecoder parse-loop quarantine survives a blockFromHex throw and retries the block instead of dying",
-      "quarantine retry state is per tx position and per block a one-off INSERT rejection on a second tx after a quarantine in the same block is still retried",
-      "quarantine retry state is per tx position and per block a sibling block at the same height does not inherit an INSERT quarantine",
-      "quarantine retry state is per tx position and per block a sibling block at the same height does not inherit the parse retry count",
-      "quarantine retry state is per tx position and per block a transient parse throw on a second tx after a quarantine in the same block is still retried",
-      "quarantine retry state is per tx position and per block two poison txs in one block each get their own parse retries and the block commits"
     ],
     "7b91e388506f917f": [
       "Boundary: ACTION String Parsing (A-1 through A-12) [REGRESSION P1] R-DSP-001 A-5: DISPENSER v0 with all 15 fields \u2192 complete parse",
@@ -2427,6 +2430,12 @@
       "roundtrip conformance fixture: every case reaches the stored record reassembles the envelope payload as the encoder compiled it, chunk boundaries included",
       "roundtrip conformance fixture: every case reaches the stored record recognizes each envelope as the carrier, with the envelope ceiling"
     ],
+    "9bc574d40b343422": [
+      "quarantine ladder longer than the stall window never reads as stalled while ladder rollbacks are advancing, and quarantines every position",
+      "quarantine ladder longer than the stall window quarantine decisions match a decoder whose clock never crossed the stall window",
+      "quarantine ladder longer than the stall window still reads as stalled when a transient fault retries forever behind a quarantined position",
+      "quarantine ladder longer than the stall window the ladder lasts past STALL_ALERT_MS (precondition of the scenario)"
+    ],
     "9bd15abd96c0f43f": [
       "decoder migration runner applies the unique-key witness to auto files @regression refuses an auto INSERT IGNORE while the declared UNIQUE address key is only a plain index",
       "decoder migration runner applies the unique-key witness to auto files @regression runs the same file once the UNIQUE address key is live",
@@ -2790,6 +2799,12 @@
       "graceful shutdown resolveTimeoutMs prefers an explicit budget, then the env var, then the default",
       "graceful shutdown resolveTimeoutMs stays under the 120 s budget xchain-node gives a decoder",
       "graceful shutdown resolveTimeoutMs stays under the stop budget in xchain-node's own table when that checkout is beside this one"
+    ],
+    "b7f112d0b33a9b23": [
+      "rollback zeroes the loop log counters a block parsed after a rollback starts its counts from zero",
+      "rollback zeroes the loop log counters leaveReorgHaltPark zeroes all counters on resume",
+      "rollback zeroes the loop log counters parkOrRethrow zeroes all counters when parking on a halt",
+      "rollback zeroes the loop log counters resetAfterRollback zeroes all counters and re-derives the cursors"
     ],
     "b890eff5e5d00764": [
       "roundtrip conformance fixture: byte-identity to encoder original vendored test/fixtures/roundtrip-conformance.json is byte-identical to the encoder original"
@@ -3722,8 +3737,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 252,
-      "titleCount": 2232,
+      "fileCount": 255,
+      "titleCount": 2241,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3901,7 +3916,9 @@
         "test/unit/node_reachability_status.test.js": "09f6b21d4c9c4493",
         "test/unit/node_url_failover.test.js": "df1a7438428d2073",
         "test/unit/oracle_fee_output_activation_conformance.test.js": "eb049ebf43c69706",
-        "test/unit/parse_loop_quarantine.test.js": "7ab2b61a3082956b",
+        "test/unit/parse_loop_quarantine.test.js": "324d3a917673b9f9",
+        "test/unit/parse_loop_quarantine.test/01_retry_state_per_tx_position.test.js": "5a8722b31c61ebf3",
+        "test/unit/parse_loop_quarantine_restart.test.js": "9bc574d40b343422",
         "test/unit/parse_transaction.test.js": "7775a7711b003332",
         "test/unit/parse_transaction.test/01_parse_transaction_multisig_and_extraction.test.js": "e2dc1e87963a2b20",
         "test/unit/parse_transaction.test/02_parse_transaction_outputs_and_defaults.test.js": "d9b3257c562c64ff",
@@ -3929,6 +3946,7 @@
         "test/unit/reorg_recovery.test/05_reorg_wait_surface.test.js": "105d30d13fc473e0",
         "test/unit/reorg_table_coverage.test.js": "8d1ac41b3c8d3fc3",
         "test/unit/repo/fixture_ports.test.js": "dc378898866ff01a",
+        "test/unit/rollback_resets_log_counters.test.js": "b7f112d0b33a9b23",
         "test/unit/roundtrip.test.js": "319d38eebd8ba22a",
         "test/unit/roundtrip_conformance.test.js": "99f5849afe3a05b0",
         "test/unit/roundtrip_conformance.test/01_stored_record_invariants.test.js": "6493fa1a8a127b37",
@@ -4278,8 +4296,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 252,
-      "titleCount": 2232,
+      "fileCount": 255,
+      "titleCount": 2241,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -4457,7 +4475,9 @@
         "test/unit/node_reachability_status.test.js": "09f6b21d4c9c4493",
         "test/unit/node_url_failover.test.js": "df1a7438428d2073",
         "test/unit/oracle_fee_output_activation_conformance.test.js": "eb049ebf43c69706",
-        "test/unit/parse_loop_quarantine.test.js": "7ab2b61a3082956b",
+        "test/unit/parse_loop_quarantine.test.js": "324d3a917673b9f9",
+        "test/unit/parse_loop_quarantine.test/01_retry_state_per_tx_position.test.js": "5a8722b31c61ebf3",
+        "test/unit/parse_loop_quarantine_restart.test.js": "9bc574d40b343422",
         "test/unit/parse_transaction.test.js": "7775a7711b003332",
         "test/unit/parse_transaction.test/01_parse_transaction_multisig_and_extraction.test.js": "e2dc1e87963a2b20",
         "test/unit/parse_transaction.test/02_parse_transaction_outputs_and_defaults.test.js": "d9b3257c562c64ff",
@@ -4485,6 +4505,7 @@
         "test/unit/reorg_recovery.test/05_reorg_wait_surface.test.js": "105d30d13fc473e0",
         "test/unit/reorg_table_coverage.test.js": "8d1ac41b3c8d3fc3",
         "test/unit/repo/fixture_ports.test.js": "dc378898866ff01a",
+        "test/unit/rollback_resets_log_counters.test.js": "b7f112d0b33a9b23",
         "test/unit/roundtrip.test.js": "319d38eebd8ba22a",
         "test/unit/roundtrip_conformance.test.js": "99f5849afe3a05b0",
         "test/unit/roundtrip_conformance.test/01_stored_record_invariants.test.js": "6493fa1a8a127b37",
