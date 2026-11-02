@@ -37,6 +37,17 @@ function setReorgWait(err){
     this.reorgWait = next
 }
 
+// Zero the per-batch progress and log counters. A rolled-back pass leaves its
+// counts in memory; without this the next pass adds to them and the commit log
+// over-counts blocks and transactions (log only, stored rows are unaffected).
+function resetBatchCounters(loop){
+    loop.blocksQuantity = 0
+    loop.blocksCount = 0
+    loop.transactionsCount = 0
+    loop.validTransactionsCount = 0
+    loop.outputCount = 0
+}
+
 // Re-derive the loop cursors from the DB after any mid-block rollback, then
 // pause before the retry. Every rollback path MUST run this before continuing:
 // in particular lastProcessedTxIndex advances in memory while a block is being
@@ -46,7 +57,7 @@ function setReorgWait(err){
 async function resetAfterRollback(loop){
     loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
     loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-    loop.blocksQuantity = 0
+    resetBatchCounters(loop)
     await this.sleep(3000)
 }
 
@@ -75,7 +86,7 @@ async function parkOrRethrow(err, loop){
     try {
         loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
         loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-        loop.blocksQuantity = 0
+        resetBatchCounters(loop)
     } catch (readErr){
         logger.error(formatLogLine('Could not re-read the stored tip before parking; parking at the loop cursor:', readErr))
     }
@@ -97,7 +108,7 @@ async function leaveReorgHaltPark(loop){
     // the node and re-runs the reorg check the clear has now unblocked.
     loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
     loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-    loop.blocksQuantity = 0
+    resetBatchCounters(loop)
     loop.lastBlockchainInfo = null
 }
 
@@ -173,7 +184,7 @@ async function reconcileEqualHeightTip(loop){
         loop.tipBelowStoredTipRefused = false
         loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
         loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-        loop.blocksQuantity = 0
+        resetBatchCounters(loop)
         return 'continue'
     }
 }

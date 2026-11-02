@@ -151,6 +151,8 @@ async function readLoopCursors(){
     // Start the stall clock here, not in the constructor: a long pre-loop phase
     // (DB connect, txindex probe) must not count as time spent not advancing.
     this.lastAdvanceAt = Date.now()
+    // The ladder clock belongs to this process's retry counts, which start empty here.
+    this.lastLadderStepAt = 0
 
     if (lastProcessedBlockIndex < this.startBlockIndex - 1){
         lastProcessedBlockIndex = this.lastProcessedBlockIndex = this.startBlockIndex - 1
@@ -211,7 +213,12 @@ function initialLoopLatches(){
     // no instance ever skips a tx a healthy instance accepts (cross-instance parity).
     const insertQuarantineCounts = new Map()
     const insertQuarantine = new Set()
-    return { nodeSyncedProblem, nodeCatchingUpProblem, tipBelowStoredTipRefused, wrongChainProblem, wrongGenesisProblem, chainFieldMissingLogged, txParseRetryCounts, insertQuarantineCounts, insertQuarantine }
+
+    // Positions quarantined by a parse throw, keyed like the maps above. Later passes of the block
+    // still re-parse them but write only their PARSE_ERROR row, without re-counting; cleared on
+    // block commit.
+    const parseQuarantine = new Set()
+    return { nodeSyncedProblem, nodeCatchingUpProblem, tipBelowStoredTipRefused, wrongChainProblem, wrongGenesisProblem, chainFieldMissingLogged, txParseRetryCounts, insertQuarantineCounts, insertQuarantine, parseQuarantine }
 }
 
 async function bootDecoder(){

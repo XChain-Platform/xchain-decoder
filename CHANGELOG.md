@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-11-02
+
+### Fixed
+- The decoder now backs off when its node's work queue is full and no longer restarts itself in the middle of retrying a quarantined transaction.
+
 ## [0.27.1] - 2026-11-02
 
 ### Fixed

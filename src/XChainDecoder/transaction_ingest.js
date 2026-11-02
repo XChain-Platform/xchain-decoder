@@ -37,16 +37,30 @@ function countAttempt(attempts, key){
     return attempt
 }
 
+// Tell the stall verdict that the quarantine ladder took a real step. A block with
+// many poison positions pays TX_PARSE_MAX_RETRIES rollbacks per position, which can
+// outlast STALL_ALERT_MS while every rollback brings the height closer to commit.
+// Without this the decoder reads as wedged, the liveness consumer restarts it, and the
+// restart throws away the in-memory retry counts, so the same height loops forever.
+// Only attempts up to the quarantining one (MAX + 1) count: a position already
+// quarantined keeps counting on every later pass of the block, and stamping those
+// would hide a real wedge (a transient fault retrying forever) behind it.
+function noteLadderStep(decoder, attempt){
+    if (attempt <= TX_PARSE_MAX_RETRIES + 1) decoder.lastLadderStepAt = Date.now()
+}
+
 // Drop every retry count and quarantined position once the block that owned
 // them has committed (its PARSE_ERROR rows are durable), keeping the state bounded.
 function clearQuarantineState(loop){
     loop.txParseRetryCounts.clear()
     loop.insertQuarantineCounts.clear()
     loop.insertQuarantine.clear()
+    if (loop.parseQuarantine) loop.parseQuarantine.clear()
 }
 
 // Count a transaction this decoder skipped for good, apart from the routine rejections
-// parseErrors also counts. A later whole-block rollback can count one position twice.
+// parseErrors also counts. A position is counted once: the pass that quarantines it records it
+// in loop.parseQuarantine, and later passes of the block re-parse it without re-counting.
 function noteQuarantine(decoder, height, hash){
     decoder.quarantinedTxs = (decoder.quarantinedTxs || 0) + 1
     decoder.lastQuarantinedBlock = height
@@ -72,6 +86,12 @@ async function skipQuarantinedTransaction(block, nextBlockHeight, nextTransactio
     return 'continue'
 }
 
+// Write a parse-quarantine PARSE_ERROR row; 'rollback' when insertEvent already rolled the block back.
+async function insertParseErrorEvent(db, block, height, txIndex, hash, error){
+    const row = { block_index: height, tx_position: txIndex, tx_hash: hash, error }
+    return (await db.insertEvent("PARSE_ERROR", row, block.timestamp)) === false ? 'rollback' : 'continue'
+}
+
 async function handleParseFailure(loop, e, block, nextBlockHeight, nextTransactionHash, txIndex, retryKey){
     if (e && e.dbLookupFailure){
         // A DB lookup failed inside the block transaction (a timeout, a lock wait, a
@@ -94,7 +114,14 @@ async function handleParseFailure(loop, e, block, nextBlockHeight, nextTransacti
         return 'rollback'
     }
 
+    // A position this block already quarantined is still re-parsed on every pass, so whatever the
+    // parse writes before it throws (a pubkey row) commits exactly as it always has. Only its
+    // PARSE_ERROR row is written again; the attempt, ladder and quarantine counters are not touched.
+    if (loop.parseQuarantine && loop.parseQuarantine.has(retryKey))
+        return await insertParseErrorEvent(this.db, block, nextBlockHeight, txIndex, nextTransactionHash, String((e && e.message) || e))
+
     const attempt = countAttempt(loop.txParseRetryCounts, retryKey)
+    noteLadderStep(this, attempt)
     if (attempt <= TX_PARSE_MAX_RETRIES){
         // Could be transient (DB hiccup inside parseTransaction):
         // roll the block back and re-parse it from scratch.
@@ -107,18 +134,12 @@ async function handleParseFailure(loop, e, block, nextBlockHeight, nextTransacti
     // as a poison transaction and quarantine it (skip + audit event) so
     // one undecodable tx cannot wedge the pipeline at this height forever.
     this.parseErrors++
+    const errorText = String((e && e.message) || e)
     logger.error(formatLogLine(`Quarantining undecodable tx in block ${nextBlockHeight} (tx position ${txIndex}, hash ${nextTransactionHash}) after ${TX_PARSE_MAX_RETRIES} block retries:`, e))
-    let eventResult = await this.db.insertEvent("PARSE_ERROR", {
-        block_index: nextBlockHeight,
-        tx_position: txIndex,
-        tx_hash: nextTransactionHash,
-        error: String((e && e.message) || e)
-    }, block.timestamp)
-    if (eventResult === false){
-        // insertEvent already rolled the block transaction back
-        return 'rollback'
-    }
+    if (await insertParseErrorEvent(this.db, block, nextBlockHeight, txIndex, nextTransactionHash, errorText) === 'rollback') return 'rollback'
     noteQuarantine(this, nextBlockHeight, nextTransactionHash)
+    if (!loop.parseQuarantine) loop.parseQuarantine = new Set()
+    loop.parseQuarantine.add(retryKey)
     return 'continue'
 }
 
@@ -157,6 +178,7 @@ async function insertTransactionRow(loop, parseResult, nextTransactionHash, next
         // the errno set is conservative, so this normally quarantines
         // on the first exceedance.)
         const attempt = countAttempt(loop.insertQuarantineCounts, retryKey)
+        noteLadderStep(this, attempt)
         if (attempt > TX_PARSE_MAX_RETRIES){
             loop.insertQuarantine.add(retryKey)
             logger.error(`Quarantining tx with deterministic INSERT failure in block ${nextBlockHeight} (tx position ${txIndex}, hash ${nextTransactionHash}) after ${TX_PARSE_MAX_RETRIES} block retries`)
