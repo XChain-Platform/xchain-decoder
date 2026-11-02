@@ -147,8 +147,8 @@ describe('quarantine ladder longer than the stall window', function () {
     this.timeout(0)
 
     it('still reads as stalled when a transient fault retries forever behind a quarantined position', async function () {
-        // 'aa' is poison and quarantines, then keeps being re-counted on every later
-        // pass; 'bb' fails an RPC lookup every pass, which retries without limit and is
+        // 'aa' is poison and quarantines, then is skipped on every later pass;
+        // 'bb' fails an RPC lookup every pass, which retries without limit and is
         // exactly the wedge the stall verdict exists to surface.
         const { decoder, calls } = buildDecoder(['aa', 'bb'])
         const stalledSamples = []
@@ -159,6 +159,7 @@ describe('quarantine ladder longer than the stall window', function () {
                     throw new Error('poison aa')
                 }
                 stalledSamples.push(decoder.isStalled())
+                advance(STEP_MS)
                 const err = new Error('rpc lookup failed')
                 err.rpcLookupFailure = true
                 throw err
@@ -169,6 +170,6 @@ describe('quarantine ladder longer than the stall window', function () {
         assert.strictEqual(calls.commit, 0)
         assert.strictEqual(stalledSamples[0], false, 'not stalled right after the quarantine step')
         assert.strictEqual(stalledSamples[stalledSamples.length - 1], true,
-            'a re-counted, already quarantined position must not keep the stall verdict quiet')
+            'a quarantined position must not keep the stall verdict quiet')
     })
 })

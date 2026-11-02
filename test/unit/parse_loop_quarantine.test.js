@@ -372,3 +372,49 @@ describe('quarantine retry state is per tx position and per block', function () 
         assert.strictEqual(decoder.lastQuarantinedTxHash, 'cafe01')
     })
 })
+
+describe('XChainDecoder parse-loop quarantine with several poison txs', function () {
+    this.timeout(0)
+
+    it('counts and parses each quarantined position once, not again on later rollbacks', async function () {
+        const { decoder, calls } = buildDecoder({
+            transactions: [fakeTx('poison1'), fakeTx('poison2'), fakeTx('poison3')]
+        })
+
+        const parseCallsById = {}
+        decoder.parseTransaction = async (tx) => {
+            const id = tx.getId()
+            parseCallsById[id] = (parseCallsById[id] || 0) + 1
+            throw new Error('poison ' + id)
+        }
+        const quarantineLogs = []
+        const origError = console.error
+        const { logger } = require('../../src/XChainDecoder/constants.js')
+        const origLoggerError = logger.error
+        logger.error = (line) => {
+            if (String(line).startsWith('Quarantining undecodable tx')) quarantineLogs.push(String(line))
+        }
+        try {
+            await decoder.start()
+        } finally {
+            logger.error = origLoggerError
+            console.error = origError
+        }
+
+        assert.strictEqual(decoder.quarantinedTxs, 3, 'each poison tx is counted once')
+        assert.strictEqual(decoder.parseErrors, 3, 'each poison tx bumps parse_errors once')
+        assert.strictEqual(quarantineLogs.length, 3, 'each poison tx is logged as quarantined once')
+        for (const id of ['poison1', 'poison2', 'poison3']) {
+            assert.strictEqual(parseCallsById[id], 4, id + ' is parsed 3 retries plus the quarantining pass only')
+        }
+        assert.strictEqual(calls.endTransaction, 9, 'the ladder is three rollbacks per poison tx')
+        assert.strictEqual(calls.commitTransaction, 1)
+
+        // The committed pass writes one PARSE_ERROR per poison tx, with the original error text.
+        const lastPass = calls.insertEvent.slice(-3)
+        assert.deepStrictEqual(lastPass.map(e => e.data.tx_hash), ['poison1', 'poison2', 'poison3'])
+        assert.deepStrictEqual(lastPass.map(e => e.data.tx_position), [0, 1, 2])
+        assert.deepStrictEqual(lastPass.map(e => e.data.error), ['poison poison1', 'poison poison2', 'poison poison3'])
+        assert.ok(lastPass.every(e => e.code === 'PARSE_ERROR'))
+    })
+})
