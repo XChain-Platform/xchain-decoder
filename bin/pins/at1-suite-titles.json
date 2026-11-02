@@ -1,22 +1,21 @@
 {
   "titleSets": {
-    "0007e7e17399f2ac": [
-      "nodeStillCatchingUp(): the IBD read off getblockchaininfo fails open on an absent, null or non-boolean field (older node, trimmed proxy)",
-      "nodeStillCatchingUp(): the IBD read off getblockchaininfo is true only for a literal initialblockdownload=true",
-      "the parse loop waits on a node in initial block download instead of reconciling a pre-delete refusal from verifyReorg is waited on, not thrown out of the loop",
-      "the parse loop waits on a node in initial block download instead of reconciling reads initialblockdownload off the reply it already holds, before the reconcile",
-      "the parse loop waits on a node in initial block download instead of reconciling the tip-regression branch exists in the order the guard relies on",
-      "the parse loop waits on a node in initial block download instead of reconciling waits (sleep + continue) rather than calling verifyReorg while IBD is true",
-      "verifyReorg: an above-tip gap the window cannot absorb is refused before the first delete a gap of exactly the ceiling still reconciles (the ceiling is a budget, not a fence)",
-      "verifyReorg: an above-tip gap the window cannot absorb is refused before the first delete deletes nothing and writes no halt when the node does not know the stored tip",
-      "verifyReorg: prior rollback depth still limits a confirmed reorg a prior depth at the ceiling still waits when the node is only behind",
-      "verifyReorg: prior rollback depth still limits a confirmed reorg an unknown stored tip waits before spending the remaining depth"
-    ],
     "007fbd675c8dbc77": [
       "E2E: ACTION Decoding ACTION payload edge cases A4.1:should handle ACTION with empty memo field",
       "E2E: ACTION Decoding ACTION payload edge cases A4.2:should handle ACTION with many trailing pipe-delimited empty fields",
       "E2E: ACTION Decoding ACTION payload edge cases A4.3:should handle ACTION with special characters in memo",
       "E2E: ACTION Decoding ACTION payload edge cases A4.4:should handle minimum-length ACTION"
+    ],
+    "0322acbf5111011a": [
+      "BlockchainConnector #getBlockWithoutAuxPow() [REGRESSION P2] R-NET-003: should strip AuxPoW data from block hex",
+      "BlockchainConnector #getBlockWithoutAuxPow() [REGRESSION] R-NET-004: strips a structurally valid DOGE mainnet AuxPoW block and result parses via bitcoinjs-lib Block.fromBuffer",
+      "BlockchainConnector #getBlockWithoutAuxPow() [REGRESSION] R-NET-005: Dogecoin Core 1.14 structural-parse path - getblockheader returns exactly 160 hex chars (no AuxPoW bytes) but block has AuxPoW version bit set",
+      "BlockchainConnector #getBlockWithoutAuxPow() should not strip anything when header is exactly 160 hex chars (80 bytes)",
+      "BlockchainConnector #getBlockWithoutAuxPow() should propagate an RPC error unwrapped",
+      "getBlockWithoutAuxPow malformed RPC results rejects a malformed non-hex block as an untagged RPC fault",
+      "getBlockWithoutAuxPow malformed RPC results rejects a malformed numeric block as an untagged RPC fault",
+      "getBlockWithoutAuxPow malformed RPC results rejects a malformed object header as an untagged RPC fault",
+      "getBlockWithoutAuxPow malformed RPC results rejects a malformed odd-length header as an untagged RPC fault"
     ],
     "0406fb865bdaa059": [
       "Database.destructiveAutoStatement() storage engine @regression flags a CREATE TABLE that names any engine other than InnoDB",
@@ -636,6 +635,12 @@
       "Database.migrationMode() @regression reads mode=manual from the header tag",
       "Database.migrationMode() @regression reads the tag past a multi-line comment banner (banner does not push it out of view)"
     ],
+    "1fe5ca74d7732601": [
+      "XChainDecoder source walk-back that reaches a coinbase a P2SH carrier output paid by a coinbase throws untagged without fetching the zero txid",
+      "XChainDecoder source walk-back that reaches a coinbase a P2WSH carrier output paid by a coinbase throws untagged without fetching the zero txid",
+      "XChainDecoder source walk-back that reaches a coinbase a real funding lookup failure is still tagged for the block retry",
+      "XChainDecoder source walk-back that reaches a coinbase an envelope whose commit is a coinbase throws untagged without fetching the zero txid"
+    ],
     "20a02f889b2e9582": [
       "XChainDecoder RPC-lookup + rollback-signal hardening block loop RPC-failure classification retries the block past TX_PARSE_MAX_RETRIES on tagged RPC failures, never quarantining",
       "XChainDecoder RPC-lookup + rollback-signal hardening findFundingFeeOutputs still returns [] for the deterministic no-fee-destination case",
@@ -727,6 +732,19 @@
       "dispenser protocol time persists raw time while every time-keyed block consumer receives protocol time",
       "dispenser protocol time retries without writes when the protocol-time history read fails"
     ],
+    "2669f2256a2da19e": [
+      "known mempool and block open-dispenser set divergence blanks pending text when the dispenser is not committed until confirmation",
+      "known mempool and block open-dispenser set divergence keeps pending text when a legacy-expiry block later closes the dispenser",
+      "mempool admission of a gate-skipped ACTION stores an oversized ACTION as a blanked seen-set row, fetched and counted once",
+      "mempool admission of a gate-skipped ACTION stores an unknown ACTION as a blanked seen-set row, fetched and counted once",
+      "mempool admission of an ACTION with no resolvable source blanks an unattributable ACTION to an empty string and keeps the row",
+      "mempool admission of an ACTION with no resolvable source keeps the ACTION text for a null source when a dispense output makes the tx storable",
+      "mempool admission of an ACTION with no resolvable source keeps the ACTION text when the source resolves",
+      "mempool admission of an ACTION with no resolvable source loads the open-dispenser set with the cancelGraceFloor for the network",
+      "mempool admission of an ACTION with no resolvable source parses against the getAllOpenDispenserAddresses set, so an unattributed ACTION paying an open dispenser keeps its text",
+      "mempool admission of an ACTION with no resolvable source still runs the cycle against an empty set when getAllOpenDispenserAddresses fails",
+      "mempool admission of an ACTION with no resolvable source still writes a blanked row for an actionless tx with no source"
+    ],
     "290a48193a5b96df": [
       "collapseDispenserRegistrations below the address-id gate matches the frozen raw-address reference across seeded random batches",
       "collapseDispenserRegistrations below the address-id gate matches the frozen raw-address reference on non-list and sparse inputs",
@@ -815,6 +833,12 @@
     ],
     "2cc5bf1987da3a39": [
       "XChainDecoder block previous_block_hash byte order [REGRESSION P1] R-BUG-001: stores the big-endian display hash, not the reversed wire bytes"
+    ],
+    "2cf943c1ba6763ad": [
+      "BATCH count pre-filter follows the weight budget when weighting is active does not suppress a batch over the command cap but within the budget",
+      "BATCH count pre-filter follows the weight budget when weighting is active keeps the command cap when network and block time are omitted",
+      "BATCH count pre-filter follows the weight budget when weighting is active loads the substituted budget and uses a filler with no cap or weight of its own",
+      "BATCH count pre-filter follows the weight budget when weighting is active suppresses a batch one command over the budget when weighting is active"
     ],
     "2d2b66657ed4d171": [
       "BATCH payment-output capture batched COINPAY captures NOTHING below the gate (the live defect, preserved for replay)",
@@ -942,6 +966,22 @@
     "34bac8b72829a9ac": [
       "DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION conformance is re-exported by the public constants module",
       "DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION conformance keeps mainnet inert and regtest genesis-active while testnet is armable"
+    ],
+    "34eae4de07524b3b": [
+      "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-001: should decode an OP_RETURN transaction with XCHN payload",
+      "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-001: should return null for a coinbase transaction",
+      "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-004: should decode a 1-of-3 multisig transaction",
+      "XChainDecoder#parseTransaction() carries a first-ever source pubkey out of the parser even though no address id exists yet",
+      "XChainDecoder#parseTransaction() carries a known source pubkey through the mempool lane without writing pubkeys",
+      "XChainDecoder#parseTransaction() carries a known source pubkey through the mempool lane without writing pubkeys",
+      "XChainDecoder#parseTransaction() leaves sourcePubkey null when the input exposes no key",
+      "XChainDecoder#parseTransaction() records a known source pubkey when the same transaction is parsed on the block lane",
+      "XChainDecoder#parseTransaction() records a known source pubkey when the same transaction is parsed on the block lane",
+      "XChainDecoder#parseTransaction() should decode OP_RETURN with data and rawData",
+      "XChainDecoder#parseTransaction() should return empty data for a transaction with no XChain-relevant outputs",
+      "XChainDecoder#parseTransaction() should return null rawData when there is only one script push",
+      "XChainDecoder#parseTransaction() should return null when standard_input is false",
+      "XChainDecoder#parseTransaction() should strip trailing zeros from multisig payload"
     ],
     "358a7cbf07feb7ad": [
       "Database#getBlockByIndex() [REGRESSION P0] throws (never returns the missing-row sentinel) after retries on persistent query error"
@@ -1191,6 +1231,19 @@
       "Database.splitSqlStatements() @regression leaves a # or an apostrophe inside a block comment alone",
       "Database.splitSqlStatements() @regression splits ordinary multi-statement SQL into the same statements as before",
       "Database.splitSqlStatements() @regression treats doubled quotes as escapes (a ; inside stays inside)"
+    ],
+    "46c1ff5e983901ad": [
+      "nodeStillCatchingUp(): the IBD read off getblockchaininfo fails open on an absent, null or non-boolean field (older node, trimmed proxy)",
+      "nodeStillCatchingUp(): the IBD read off getblockchaininfo is true only for a literal initialblockdownload=true",
+      "the parse loop waits on a node in initial block download instead of reconciling a pre-delete refusal from verifyReorg is waited on, not thrown out of the loop",
+      "the parse loop waits on a node in initial block download instead of reconciling reads initialblockdownload off the reply it already holds, before the reconcile",
+      "the parse loop waits on a node in initial block download instead of reconciling the tip-regression branch exists in the order the guard relies on",
+      "the parse loop waits on a node in initial block download instead of reconciling waits (sleep + continue) rather than calling verifyReorg while IBD is true",
+      "verifyReorg: an above-tip gap the window cannot absorb is refused before the first delete a gap of exactly the ceiling still reconciles (the ceiling is a budget, not a fence)",
+      "verifyReorg: an above-tip gap the window cannot absorb is refused before the first delete a gap one block beyond the budget halts before the first delete",
+      "verifyReorg: an above-tip gap the window cannot absorb is refused before the first delete deletes nothing and writes no halt when the node does not know the stored tip",
+      "verifyReorg: prior rollback depth still limits a confirmed reorg a prior depth at the ceiling still waits when the node is only behind",
+      "verifyReorg: prior rollback depth still limits a confirmed reorg an unknown stored tip waits before spending the remaining depth"
     ],
     "47c0720002969b72": [
       "assertTransactionIdsAreBigint metadata @regression @tier1 rejects a missing id column",
@@ -1753,6 +1806,15 @@
       "Database#alterTableForDrift() NOT NULL relax keeps live attributes skips the relax when the live column carries a DEFAULT, COMMENT, ON UPDATE or generation expression",
       "Database#alterTableForDrift() NOT NULL relax keeps live attributes still never relaxes a primary-key or AUTO_INCREMENT column"
     ],
+    "671b8d81a2531533": [
+      "decoder migration live-schema MODIFY guard @regression finds each MODIFY clause, ignoring FIRST/AFTER and other clauses",
+      "decoder migration live-schema MODIFY guard @regression passes a MODIFY that restates every attribute or only widens, and an absent column",
+      "decoder migration live-schema MODIFY guard @regression refuses a MODIFY that strips AUTO_INCREMENT, a DEFAULT, ON UPDATE, COMMENT or a generation expression",
+      "decoder migration live-schema MODIFY guard @regression refuses narrowing a nullable live column to NOT NULL or PRIMARY KEY",
+      "decoder migration live-schema MODIFY guard @regression refuses narrowing of type, length and charset",
+      "decoder migration live-schema MODIFY guard @regression sees a MODIFY behind a block comment and ignores a keyword inside one",
+      "decoder migration runner applies the live-schema guard to auto files @regression refuses an auto MODIFY that would strip a live DEFAULT before running any statement"
+    ],
     "67e3c12ff1c288e7": [
       "malformed-AuxPoW block reassembly fallback BlockchainConnector.getBlockReassembled fails loudly when an in-block tx cannot be fetched",
       "malformed-AuxPoW block reassembly fallback BlockchainConnector.getBlockReassembled fetches txs through the bounded batch helper, not serially",
@@ -1803,6 +1865,19 @@
       "XChainDecoder#parseTransaction() P2WSH per-chain segwit gate a non-segwit chain extracts nothing from the same bytes and does not throw",
       "XChainDecoder#parseTransaction() P2WSH per-chain segwit gate a segwit chain still extracts the witness payload (control)",
       "XChainDecoder#parseTransaction() P2WSH per-chain segwit gate the gate is chain capability, not a parse error: the non-segwit chain records none"
+    ],
+    "6bd66f9fde20eca8": [
+      "DISPENSER address-column boundary rejects operating addresses that cannot fit the address table",
+      "DISPENSER address-column boundary skips an oversized GET_ADDRESS without registering a dispenser",
+      "DISPENSER wide expiration clamps every decimal token in the u64 gap without Number rounding",
+      "DISPENSER wide expiration keeps every safe unsigned integer exact on both sides of the gate",
+      "DISPENSER wide expiration pins the activation map and public constants export",
+      "DISPENSER wide expiration registration does not extend for a wide edit below the gate or an overflowing edit",
+      "DISPENSER wide expiration registration extends for a wide edit using the same clamp",
+      "DISPENSER wide expiration registration registers a wide create at the clamped advisory expiration",
+      "DISPENSER wide expiration registration rejects values the indexer u64 column cannot represent",
+      "DISPENSER wide expiration registration retains the historical rejection below the gate",
+      "DISPENSER wide expiration uses inclusive activation semantics and fails closed"
     ],
     "6c28789f9345bb57": [
       "CE-05: Malformed Mempool Transaction should continue processing after malformed tx",
@@ -1872,18 +1947,6 @@
       "OP_RETURN Integration data verified via indexer contract query should return correct fields from getDecoderBlockData",
       "OP_RETURN Integration rawData (second script push) should store rawData when present in the payload"
     ],
-    "7775a7711b003332": [
-      "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-001: should decode an OP_RETURN transaction with XCHN payload",
-      "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-001: should return null for a coinbase transaction",
-      "XChainDecoder#parseTransaction() [REGRESSION P0] R-SCR-004: should decode a 1-of-3 multisig transaction",
-      "XChainDecoder#parseTransaction() carries a first-ever source pubkey out of the parser even though no address id exists yet",
-      "XChainDecoder#parseTransaction() leaves sourcePubkey null when the input exposes no key",
-      "XChainDecoder#parseTransaction() should decode OP_RETURN with data and rawData",
-      "XChainDecoder#parseTransaction() should return empty data for a transaction with no XChain-relevant outputs",
-      "XChainDecoder#parseTransaction() should return null rawData when there is only one script push",
-      "XChainDecoder#parseTransaction() should return null when standard_input is false",
-      "XChainDecoder#parseTransaction() should strip trailing zeros from multisig payload"
-    ],
     "77e244a9a8af192c": [
       "Database#bigIntSatoshiToDecimalsString() should convert 0 satoshis to \"0.00000000\"",
       "Database#bigIntSatoshiToDecimalsString() should convert 1 satoshi to \"0.00000001\"",
@@ -1938,6 +2001,16 @@
       "BATCH dispenser registration several DISPENSER sub-commands in one BATCH skips only the sub-command whose coins name another chain",
       "BATCH dispenser registration several DISPENSER sub-commands in one BATCH skips only the sub-command with a compacted ^ GET_ADDRESS",
       "BATCH dispenser registration several DISPENSER sub-commands in one BATCH skips only the sub-command with an out-of-range EXPIRATION"
+    ],
+    "7d9c9de23dc8610e": [
+      "runMigrations() --file / opts.only scoping @regression a scoped run is NOT blocked by an unrelated undated file in the tree",
+      "runMigrations() --file / opts.only scoping @regression accepts an array of targets",
+      "runMigrations() --file / opts.only scoping @regression applies ONLY the targeted file and leaves the other pending",
+      "runMigrations() --file / opts.only scoping @regression fails loudly on an unknown target (typo protection), applying nothing",
+      "runMigrations() --file / opts.only scoping @regression is idempotent: re-targeting an already-applied file applies nothing",
+      "runMigrations() --file / opts.only scoping @regression throws when opts.only is an empty array (guards a mis-wired caller)",
+      "runMigrations() migration filename guards @regression re-keys a registered rename and does not execute the migration again",
+      "runMigrations() migration filename guards @regression refuses a pending file whose bytes match an orphaned ledger row"
     ],
     "7e4ce247fce039c5": [
       "CryptoNetworks #getBitcoinJsNetwork() [REGRESSION P2] R-NET-001: should return Dogecoin mainnet config with correct pubKeyHash",
@@ -2266,14 +2339,6 @@
       "Smoke: CryptoNetworks Configuration should return a valid startBlockIndex for litecoin-regtest",
       "Smoke: CryptoNetworks Configuration should return a valid startBlockIndex for litecoin-testnet"
     ],
-    "9427161b3e973b0e": [
-      "runMigrations() --file / opts.only scoping @regression a scoped run is NOT blocked by an unrelated undated file in the tree",
-      "runMigrations() --file / opts.only scoping @regression accepts an array of targets",
-      "runMigrations() --file / opts.only scoping @regression applies ONLY the targeted file and leaves the other pending",
-      "runMigrations() --file / opts.only scoping @regression fails loudly on an unknown target (typo protection), applying nothing",
-      "runMigrations() --file / opts.only scoping @regression is idempotent: re-targeting an already-applied file applies nothing",
-      "runMigrations() --file / opts.only scoping @regression throws when opts.only is an empty array (guards a mis-wired caller)"
-    ],
     "948bca876971dfd9": [
       "Smoke: Multisig Transaction Parsing should decode the multisig data to a recognizable string",
       "Smoke: Multisig Transaction Parsing should not have trailing zero bytes in the decoded data",
@@ -2297,10 +2362,6 @@
       "an equal-height tip swap is settled before the reconcile [REGRESSION P1] one stray hash at the stored height does not start a reconcile",
       "the mid-walk tip refresh is settled before it moves the tip down [REGRESSION P1] a settled lower tip mid-walk still drains the blocks above it",
       "the mid-walk tip refresh is settled before it moves the tip down [REGRESSION P1] one stale reading during a walk does not turn valid blocks into above-tip deletes"
-    ],
-    "951b85192ced37b0": [
-      "getmempool stale reads reports a stale empty fallback when the first read fails without a prior good timestamp",
-      "getmempool stale reads serves the last good snapshot as stale and retries immediately after a failed refresh"
     ],
     "95b9a69144b6d40d": [
       "migration operator hints [REGRESSION P1] points every source hint at the existing migration entrypoint"
@@ -2432,12 +2493,6 @@
       "decoder migration unique-key witness @regression refuses a missing declared unique index and names its remedy",
       "decoder migration unique-key witness @regression refuses a non-unique live index holding the same name and columns"
     ],
-    "9c3f37e4f6fe7093": [
-      "Database.destructiveAutoStatement() CONVERT TO and MODIFY id @regression flags ALTER TABLE ... CONVERT TO in every spelling",
-      "Database.destructiveAutoStatement() CONVERT TO and MODIFY id @regression flags a MODIFY of id that drops AUTO_INCREMENT",
-      "Database.destructiveAutoStatement() CONVERT TO and MODIFY id @regression keeps the AUTO_INCREMENT id repair and unrelated MODIFYs auto-eligible",
-      "Database.destructiveAutoStatement() CONVERT TO and MODIFY id @regression refuses a mode=auto file that converts the charset, from raw file text"
-    ],
     "9c60729c4afc15d8": [
       "BATCH sub-command ACTION-name gate and alias expansion the indexer side of the argument, driven not asserted enables names this decoder does not know, which is why the gate stops at the empty one",
       "BATCH sub-command ACTION-name gate and alias expansion the indexer side of the argument, driven not asserted really does reject the EMPTY ACTION name, which is what suppression rests on",
@@ -2475,14 +2530,6 @@
       "XChainDecoder#removeObfuscation() [REGRESSION P0] R-DEC-004: should return null for non-Buffer input (string)",
       "XChainDecoder#removeObfuscation() [REGRESSION P0] R-DEC-005: should decrypt correctly with different txids (different key/iv)",
       "XChainDecoder#removeObfuscation() [REGRESSION P0] R-DEC-005: should produce wrong plaintext when decrypted with wrong txid"
-    ],
-    "a194c2b2855f5460": [
-      "decoder migration live-schema MODIFY guard @regression finds each MODIFY clause, ignoring FIRST/AFTER and other clauses",
-      "decoder migration live-schema MODIFY guard @regression passes a MODIFY that restates every attribute or only widens, and an absent column",
-      "decoder migration live-schema MODIFY guard @regression refuses a MODIFY that strips AUTO_INCREMENT, a DEFAULT, ON UPDATE, COMMENT or a generation expression",
-      "decoder migration live-schema MODIFY guard @regression refuses narrowing of type, length and charset",
-      "decoder migration live-schema MODIFY guard @regression sees a MODIFY behind a block comment and ignores a keyword inside one",
-      "decoder migration runner applies the live-schema guard to auto files @regression refuses an auto MODIFY that would strip a live DEFAULT before running any statement"
     ],
     "a1cc9a9cc14fe706": [
       "block-time gate map assertion accepts an armed testnet block-time instant",
@@ -2712,6 +2759,20 @@
       "dispenser-open gate: coin parity with the indexer [REGRESSION P1] R-DSP-002 rejects a foreign network in either coin field",
       "dispenser-open gate: coin parity with the indexer [REGRESSION P1] R-DSP-002 rejects both-empty (the pre-fix OR gate also rejected this)"
     ],
+    "b1564f3c9a316880": [
+      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler agrees with it on every vector, and never suppresses a batch it accepts",
+      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler and agrees with the handler ABOVE the shared instant, where both weigh",
+      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler charges a multi-leg AIRDROP no more than the handler, flat below its per-leg gate",
+      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler classifies every ISSUE exactly as the handler does, over a cross-product",
+      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler leaves a batch AT the budget alone on both networks",
+      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler mirrors util.isLegacyActionFormat, which decides where the TICK sits",
+      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler never suppresses a real on-chain batch the handler accepts",
+      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler reads every MINT TICK exactly as the handler does, over the same cross-product",
+      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler stays silent where it cannot prove distinctness, and the handler does not",
+      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler still captures an over-budget batch inside the inverted MAINNET window",
+      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler suppresses an over-budget batch on regtest, where the handler rejects it whole",
+      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler under-charges DEPLOY rather than guessing its format, which is the safe direction"
+    ],
     "b254adfe1875935b": [
       "BATCH dispenser registration the DISPENSER prefix carries its delimiter above the gate at the TOP LEVEL, where VALID_ACTION_NAMES already closed it leaves DISPENSE alone (a SHORTER name, matched by neither prefix)",
       "BATCH dispenser registration the DISPENSER prefix carries its delimiter above the gate at the TOP LEVEL, where VALID_ACTION_NAMES already closed it registers a genuine top-level DISPENSER on both sides",
@@ -2905,6 +2966,11 @@
       "Taproot envelope recognition detectEnvelopeWitness() recognizes a multi-push envelope and concatenates pushes in order",
       "Taproot envelope recognition detectEnvelopeWitness() recognizes the golden witness and reassembles the exact payload bytes"
     ],
+    "c325d4f8e6e88d28": [
+      "getmempool stale reads reports a stale empty fallback when the first read fails without a prior good timestamp",
+      "getmempool stale reads serves the last good snapshot as stale and retries immediately after a failed refresh",
+      "getmempool stale reads shares one database refresh across concurrent callers"
+    ],
     "c33b5d628af07096": [
       "SQL DATETIME completeness declares no TIMESTAMP columns in top-level SQL definitions",
       "SQL DATETIME completeness declares the migration ledger applied_at column as DATETIME",
@@ -2959,17 +3025,6 @@
       "Smoke: XChainBlockDecoder should parse a standard bitcoin transaction hex",
       "Smoke: XChainBlockDecoder should throw on empty hex",
       "Smoke: XChainBlockDecoder should throw on truncated hex (< 80 bytes)"
-    ],
-    "ca3928e5b27e5791": [
-      "DISPENSER wide expiration clamps every decimal token in the u64 gap without Number rounding",
-      "DISPENSER wide expiration keeps every safe unsigned integer exact on both sides of the gate",
-      "DISPENSER wide expiration pins the activation map and public constants export",
-      "DISPENSER wide expiration registration does not extend for a wide edit below the gate or an overflowing edit",
-      "DISPENSER wide expiration registration extends for a wide edit using the same clamp",
-      "DISPENSER wide expiration registration registers a wide create at the clamped advisory expiration",
-      "DISPENSER wide expiration registration rejects values the indexer u64 column cannot represent",
-      "DISPENSER wide expiration registration retains the historical rejection below the gate",
-      "DISPENSER wide expiration uses inclusive activation semantics and fails closed"
     ],
     "cb25ed0b62ac6428": [
       "Database#countReorgDeletesAboveTip() THROWS on a marker payload that is not the expected array",
@@ -3099,6 +3154,13 @@
       "the IBD wait is published as node_catching_up clears when the node overtakes the stored tip without a below-tip poll in between",
       "the IBD wait is published as node_catching_up is null on a fresh decoder, so no surface has to invent the not-waiting state"
     ],
+    "d2b5d30fc386f341": [
+      "runMigrations() checks sql_mode on the migration connection @regression assertStrictSqlMode(conn) checks a caller-owned connection without releasing it",
+      "runMigrations() checks sql_mode on the migration connection @regression checks the migration connection before GET_LOCK and applies the file on a strict session",
+      "runMigrations() checks sql_mode on the migration connection @regression refuses NO_BACKSLASH_ESCAPES on the migration connection",
+      "runMigrations() checks sql_mode on the migration connection @regression refuses a lax migration connection before GET_LOCK and closes it",
+      "runMigrations() checks sql_mode on the migration connection @regression refuses when the wrapper check passed on a strict connection but the migration connection is lax"
+    ],
     "d2c2a99f53b6986c": [
       "DISPENSER PRICE v1 oracle-fee output capture captures BOTH the protocol fee output and the oracle-fee output on one create",
       "DISPENSER PRICE v1 oracle-fee output capture captures a v2 refill oracle-fee output using the stored dispenser oracle address",
@@ -3186,6 +3248,13 @@
       "BlockchainConnector RPC error accounting and reporting the shared result extractor reads PRESENCE, not truthiness returns a falsy-but-present result instead of throwing",
       "BlockchainConnector RPC error accounting and reporting the shared result extractor reads PRESENCE, not truthiness still prefers the node error object over the result member",
       "BlockchainConnector RPC error accounting and reporting the shared result extractor reads PRESENCE, not truthiness still throws the per-method label when the result is absent"
+    ],
+    "d8c36b006db8b4cc": [
+      "Database.destructiveAutoStatement() CONVERT TO and MODIFY id @regression flags ALTER TABLE ... CONVERT TO in every spelling",
+      "Database.destructiveAutoStatement() CONVERT TO and MODIFY id @regression flags NOT NULL and id repairs hidden by quoted text",
+      "Database.destructiveAutoStatement() CONVERT TO and MODIFY id @regression flags a MODIFY of id that drops AUTO_INCREMENT",
+      "Database.destructiveAutoStatement() CONVERT TO and MODIFY id @regression keeps the AUTO_INCREMENT id repair and unrelated MODIFYs auto-eligible",
+      "Database.destructiveAutoStatement() CONVERT TO and MODIFY id @regression refuses a mode=auto file that converts the charset, from raw file text"
     ],
     "d8d1e52267ea606f": [
       "cross-repo sibling coverage (what this run could NOT verify) declares every sibling it lists in .ci-siblings, so the venue ships them",
@@ -3395,6 +3464,10 @@
       "BATCH dispenser registration batched v2 refill / v1 cancel captures the oracle fee of a create+refill batch from the CREATE payload",
       "BATCH dispenser registration batched v2 refill / v1 cancel runs one extend per v2 sub-command and none for other actions"
     ],
+    "e50e30ab1510265c": [
+      "Database.destructiveAutoStatement() foreign key and CHECK constraints @regression allows dropping a constraint and keywords inside literals or quoted identifiers",
+      "Database.destructiveAutoStatement() foreign key and CHECK constraints @regression flags every FOREIGN KEY, REFERENCES and CHECK constraint definition"
+    ],
     "e593e0d867a3ce4f": [
       "XChainDecoder#getSourceFromOutput() P2WSH walk-back gate does not chase P2WSH-shaped outputs on non-segwit chains after activation",
       "XChainDecoder#getSourceFromOutput() P2WSH walk-back gate preserves the P2WSH walk-back below an unarmed non-segwit gate",
@@ -3535,17 +3608,6 @@
     "eb458618fc930251": [
       "XChainDecoder.verifyReorg does not mistake a failed DB read for an exhausted table [REGRESSION P0] retries the walk through failed reads and still rolls every orphan block back"
     ],
-    "ebc8dfbf50f8b096": [
-      "mempool admission of a gate-skipped ACTION stores an oversized ACTION as a blanked seen-set row, fetched and counted once",
-      "mempool admission of a gate-skipped ACTION stores an unknown ACTION as a blanked seen-set row, fetched and counted once",
-      "mempool admission of an ACTION with no resolvable source blanks an unattributable ACTION to an empty string and keeps the row",
-      "mempool admission of an ACTION with no resolvable source keeps the ACTION text for a null source when a dispense output makes the tx storable",
-      "mempool admission of an ACTION with no resolvable source keeps the ACTION text when the source resolves",
-      "mempool admission of an ACTION with no resolvable source loads the open-dispenser set with the cancelGraceFloor for the network",
-      "mempool admission of an ACTION with no resolvable source parses against the getAllOpenDispenserAddresses set, so an unattributed ACTION paying an open dispenser keeps its text",
-      "mempool admission of an ACTION with no resolvable source still runs the cycle against an empty set when getAllOpenDispenserAddresses fails",
-      "mempool admission of an ACTION with no resolvable source still writes a blanked row for an actionless tx with no source"
-    ],
     "ed34426952081e37": [
       "Fuzz: parseTransaction edge: transaction with no outputs should handle transaction with empty outs array"
     ],
@@ -3554,13 +3616,6 @@
       "BATCH whole-batch rejection: the rest of the class the real on-chain corpus is byte-identical below the gate, every payload",
       "BATCH whole-batch rejection: the rest of the class the real on-chain corpus never suppresses a batch whose ISSUEs are all dotted children",
       "BATCH whole-batch rejection: the rest of the class the real on-chain corpus suppresses only batches the indexer really rejects whole, and says how many"
-    ],
-    "f036a06a88e895c5": [
-      "BlockchainConnector #getBlockWithoutAuxPow() [REGRESSION P2] R-NET-003: should strip AuxPoW data from block hex",
-      "BlockchainConnector #getBlockWithoutAuxPow() [REGRESSION] R-NET-004: strips a structurally valid DOGE mainnet AuxPoW block and result parses via bitcoinjs-lib Block.fromBuffer",
-      "BlockchainConnector #getBlockWithoutAuxPow() [REGRESSION] R-NET-005: Dogecoin Core 1.14 structural-parse path - getblockheader returns exactly 160 hex chars (no AuxPoW bytes) but block has AuxPoW version bit set",
-      "BlockchainConnector #getBlockWithoutAuxPow() should not strip anything when header is exactly 160 hex chars (80 bytes)",
-      "BlockchainConnector #getBlockWithoutAuxPow() should propagate an RPC error unwrapped"
     ],
     "f068ea30d6afb5a5": [
       "DISPENSER PRICE v1 oracle-fee output capture activation gate captures at and above the flag-day on mainnet",
@@ -3579,19 +3634,6 @@
       "duplicate transaction output insert rolls the block back never commits past a persistent payment output collision",
       "duplicate transaction output insert rolls the block back rolls back a dispense output collision and commits on the clean retry",
       "duplicate transaction output insert rolls the block back rolls back a payment output collision and commits on the clean retry"
-    ],
-    "f2206c18335eb69f": [
-      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler agrees with it on every vector, and never suppresses a batch it accepts",
-      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler and agrees with the handler ABOVE the shared instant, where both weigh",
-      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler classifies every ISSUE exactly as the handler does, over a cross-product",
-      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler leaves a batch AT the budget alone on both networks",
-      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler mirrors util.isLegacyActionFormat, which decides where the TICK sits",
-      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler never suppresses a real on-chain batch the handler accepts",
-      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler reads every MINT TICK exactly as the handler does, over the same cross-product",
-      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler stays silent where it cannot prove distinctness, and the handler does not",
-      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler still captures an over-budget batch inside the inverted MAINNET window",
-      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler suppresses an over-budget batch on regtest, where the handler rejects it whole",
-      "BATCH limit vendoring and cross-repo conformance tier 3: driven against the REAL indexer Batch handler under-charges DEPLOY rather than guessing its format, which is the safe direction"
     ],
     "f2b4a0f1e0a013b6": [
       "Database#createAddress() inserts and returns id when address does not exist",
@@ -3716,8 +3758,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 251,
-      "titleCount": 2228,
+      "fileCount": 255,
+      "titleCount": 2262,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3725,6 +3767,7 @@
         "test/unit/apply_bufferutils_patch_twin_parity.test.js": "d104a881d7ea316d",
         "test/unit/auxpow_reassembly.test.js": "67e3c12ff1c288e7",
         "test/unit/auxpow_strip_parity.test.js": "3e0b1b842f3c3c3c",
+        "test/unit/batch_cost_prefilter_limit.test.js": "2cf943c1ba6763ad",
         "test/unit/batch_dispenser_address_id_collapse.test.js": "d41d5e457c323cd7",
         "test/unit/batch_dispenser_registration.test.js": "a87567a9516739f2",
         "test/unit/batch_dispenser_registration.test/01_a_dispenser_created_inside_a_batch.test.js": "05ef33730e0f85a6",
@@ -3743,7 +3786,7 @@
         "test/unit/batch_dispenser_registration.test/14_below_gate_collapse_frozen_reference.test.js": "290a48193a5b96df",
         "test/unit/batch_limits_vendoring.test.js": "537ab7708498cb2c",
         "test/unit/batch_limits_vendoring.test/tier_2_the_post_flag_rule_set_is_the_only_one_this_decoder_can_ever_see.test.js": "2267962a8018027e",
-        "test/unit/batch_limits_vendoring.test/tier_3_driven_against_the_real_indexer_batch_handler.test.js": "f2206c18335eb69f",
+        "test/unit/batch_limits_vendoring.test/tier_3_driven_against_the_real_indexer_batch_handler.test.js": "b1564f3c9a316880",
         "test/unit/batch_payment_output_capture.test.js": "2d2b66657ed4d171",
         "test/unit/batch_sub_command_name_gate.test.js": "9e46baeb57dabf64",
         "test/unit/batch_sub_command_name_gate.test/a_provably_rejected_sub_command_suppresses_the_whole_capture_view.test.js": "e594278f2f7a35c1",
@@ -3757,7 +3800,7 @@
         "test/unit/bet_action_gate.test.js": "5aaa005bd6c99496",
         "test/unit/block_prev_hash_byte_order.test.js": "2cc5bf1987da3a39",
         "test/unit/blockchain_connector.test.js": "a6b2950c08ad3319",
-        "test/unit/blockchain_connector.test/01_get_block_without_aux_pow.test.js": "f036a06a88e895c5",
+        "test/unit/blockchain_connector.test/01_get_block_without_aux_pow.test.js": "0322acbf5111011a",
         "test/unit/blockchain_connector.test/02_blockchain_connector_get_raw_transactions_bounded_concurrency.test.js": "55b018a2603be435",
         "test/unit/blockchain_connector_extra.test.js": "83cb7e9cd2340bd1",
         "test/unit/blockchain_connector_minus5_log_level.test.js": "6a7f97b3844dc74d",
@@ -3852,17 +3895,17 @@
         "test/unit/dispenser_purge_grace.test.js": "98dd8c6fd3e3decd",
         "test/unit/dispenser_purge_grace_activation.test.js": "14b08a9944b65284",
         "test/unit/dispenser_safe_depth.test.js": "48dee2bb9f8949a5",
-        "test/unit/dispenser_wide_expiration.test.js": "ca3928e5b27e5791",
+        "test/unit/dispenser_wide_expiration.test.js": "6bd66f9fde20eca8",
         "test/unit/duplicate_transaction_insert_rollback.test.js": "403aa81f64e27705",
         "test/unit/fee_destination.test.js": "0c8454135e113a90",
-        "test/unit/getmempool_stale_read.test.js": "951b85192ced37b0",
+        "test/unit/getmempool_stale_read.test.js": "c325d4f8e6e88d28",
         "test/unit/jsonrpc_body_guard.test.js": "58706b2a54fa0008",
         "test/unit/litecoin_block.test.js": "5ecf90a69618e860",
         "test/unit/mempool_api_surface.test.js": "3e9a24b03ca94279",
         "test/unit/mempool_first_seen_datetime.test.js": "dde536d960f1a1a5",
         "test/unit/mempool_isolation.test.js": "4223f81e9f105e21",
         "test/unit/mempool_payload_representation.test.js": "7f339cce97ef3d87",
-        "test/unit/mempool_unattributable_action.test.js": "ebc8dfbf50f8b096",
+        "test/unit/mempool_unattributable_action.test.js": "2669f2256a2da19e",
         "test/unit/migrate.test.js": "826dacd11ea07f42",
         "test/unit/migrate_status.test.js": "4fd0a29c075465f3",
         "test/unit/migration_preconditions.test.js": "e9d4bf9e39d8e63a",
@@ -3872,7 +3915,7 @@
         "test/unit/migration_runner.test/01_committed_migrations_declare_intent.test.js": "19e73caaa9b7c73f",
         "test/unit/migration_runner.test/02_database_migration_checksum_rebaselines.test.js": "35cbf8a92b2e7c36",
         "test/unit/migration_runner.test/03_run_migrations_checksum_re_bless_path.test.js": "f45010ff7d50d33a",
-        "test/unit/migration_runner.test/04_run_migrations_file_opts_only_scoping.test.js": "9427161b3e973b0e",
+        "test/unit/migration_runner.test/04_run_migrations_file_opts_only_scoping.test.js": "7d9c9de23dc8610e",
         "test/unit/migration_runner.test/05_run_migrations_migration_preconditions.test.js": "b9d84db0edbc4eae",
         "test/unit/migration_runner.test/06_database_split_sql_statements.test.js": "45857eb89566bdb3",
         "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "de71dddc3a70f32b",
@@ -3880,8 +3923,8 @@
         "test/unit/migration_runner.test/09_migration_query_timeout.test.js": "97b9a29072a0f010",
         "test/unit/migration_runner.test/10_migration_executable_residue_pin.test.js": "4eb10f6c301434ed",
         "test/unit/migration_runner.test/11_destructive_guard_session_set.test.js": "8b1bac8a4cab2cbd",
-        "test/unit/migration_runner.test/12_destructive_guard_modify_convert.test.js": "9c3f37e4f6fe7093",
-        "test/unit/migration_runner.test/13_live_schema_guard.test.js": "a194c2b2855f5460",
+        "test/unit/migration_runner.test/12_destructive_guard_modify_convert.test.js": "d8c36b006db8b4cc",
+        "test/unit/migration_runner.test/13_live_schema_guard.test.js": "671b8d81a2531533",
         "test/unit/migration_runner.test/14_destructive_guard_engine.test.js": "0406fb865bdaa059",
         "test/unit/migration_runner.test/15_destructive_guard_drop_target.test.js": "94d278f823552144",
         "test/unit/migration_runner.test/16_destructive_guard_quoted_comments.test.js": "4edb863dbbb574cc",
@@ -3889,19 +3932,22 @@
         "test/unit/migration_runner.test/18_destructive_guard_lock_wait.test.js": "cdee7ff351a1e063",
         "test/unit/migration_runner.test/19_key_witness_guard.test.js": "9bd15abd96c0f43f",
         "test/unit/migration_runner.test/20_declared_key_drop_guard.test.js": "b2f89504900651c4",
+        "test/unit/migration_runner.test/safety/21_migration_connection_sql_mode.test.js": "d2b5d30fc386f341",
+        "test/unit/migration_runner.test/safety/22_destructive_guard_foreign_key.test.js": "e50e30ab1510265c",
         "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
-        "test/unit/node_catch_up_wait.test.js": "0007e7e17399f2ac",
+        "test/unit/node_catch_up_wait.test.js": "46c1ff5e983901ad",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
         "test/unit/node_reachability_status.test.js": "09f6b21d4c9c4493",
         "test/unit/node_url_failover.test.js": "df1a7438428d2073",
         "test/unit/oracle_fee_output_activation_conformance.test.js": "eb049ebf43c69706",
         "test/unit/parse_loop_quarantine.test.js": "7ab2b61a3082956b",
-        "test/unit/parse_transaction.test.js": "7775a7711b003332",
+        "test/unit/parse_transaction.test.js": "34eae4de07524b3b",
         "test/unit/parse_transaction.test/01_parse_transaction_multisig_and_extraction.test.js": "e2dc1e87963a2b20",
         "test/unit/parse_transaction.test/02_parse_transaction_outputs_and_defaults.test.js": "d9b3257c562c64ff",
         "test/unit/parse_transaction.test/03_is_future_segwit_script.test.js": "aaf7aa8a7e0a3dd3",
         "test/unit/parse_transaction.test/04_get_source_from_output.test.js": "e593e0d867a3ce4f",
         "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js": "6a95ee16117e8e38",
+        "test/unit/parse_transaction.test/06_coinbase_funded_walkback.test.js": "1fe5ca74d7732601",
         "test/unit/protocol_constants.test.js": "13584cc3d862a5a2",
         "test/unit/protocol_time.test.js": "8383b3fc6d715636",
         "test/unit/protocol_time_caller_order.test.js": "d18469488f659a45",
@@ -4271,8 +4317,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 251,
-      "titleCount": 2228,
+      "fileCount": 255,
+      "titleCount": 2262,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -4280,6 +4326,7 @@
         "test/unit/apply_bufferutils_patch_twin_parity.test.js": "d104a881d7ea316d",
         "test/unit/auxpow_reassembly.test.js": "67e3c12ff1c288e7",
         "test/unit/auxpow_strip_parity.test.js": "3e0b1b842f3c3c3c",
+        "test/unit/batch_cost_prefilter_limit.test.js": "2cf943c1ba6763ad",
         "test/unit/batch_dispenser_address_id_collapse.test.js": "d41d5e457c323cd7",
         "test/unit/batch_dispenser_registration.test.js": "a87567a9516739f2",
         "test/unit/batch_dispenser_registration.test/01_a_dispenser_created_inside_a_batch.test.js": "05ef33730e0f85a6",
@@ -4298,7 +4345,7 @@
         "test/unit/batch_dispenser_registration.test/14_below_gate_collapse_frozen_reference.test.js": "290a48193a5b96df",
         "test/unit/batch_limits_vendoring.test.js": "537ab7708498cb2c",
         "test/unit/batch_limits_vendoring.test/tier_2_the_post_flag_rule_set_is_the_only_one_this_decoder_can_ever_see.test.js": "2267962a8018027e",
-        "test/unit/batch_limits_vendoring.test/tier_3_driven_against_the_real_indexer_batch_handler.test.js": "f2206c18335eb69f",
+        "test/unit/batch_limits_vendoring.test/tier_3_driven_against_the_real_indexer_batch_handler.test.js": "b1564f3c9a316880",
         "test/unit/batch_payment_output_capture.test.js": "2d2b66657ed4d171",
         "test/unit/batch_sub_command_name_gate.test.js": "9e46baeb57dabf64",
         "test/unit/batch_sub_command_name_gate.test/a_provably_rejected_sub_command_suppresses_the_whole_capture_view.test.js": "e594278f2f7a35c1",
@@ -4312,7 +4359,7 @@
         "test/unit/bet_action_gate.test.js": "5aaa005bd6c99496",
         "test/unit/block_prev_hash_byte_order.test.js": "2cc5bf1987da3a39",
         "test/unit/blockchain_connector.test.js": "a6b2950c08ad3319",
-        "test/unit/blockchain_connector.test/01_get_block_without_aux_pow.test.js": "f036a06a88e895c5",
+        "test/unit/blockchain_connector.test/01_get_block_without_aux_pow.test.js": "0322acbf5111011a",
         "test/unit/blockchain_connector.test/02_blockchain_connector_get_raw_transactions_bounded_concurrency.test.js": "55b018a2603be435",
         "test/unit/blockchain_connector_extra.test.js": "83cb7e9cd2340bd1",
         "test/unit/blockchain_connector_minus5_log_level.test.js": "6a7f97b3844dc74d",
@@ -4407,17 +4454,17 @@
         "test/unit/dispenser_purge_grace.test.js": "98dd8c6fd3e3decd",
         "test/unit/dispenser_purge_grace_activation.test.js": "14b08a9944b65284",
         "test/unit/dispenser_safe_depth.test.js": "48dee2bb9f8949a5",
-        "test/unit/dispenser_wide_expiration.test.js": "ca3928e5b27e5791",
+        "test/unit/dispenser_wide_expiration.test.js": "6bd66f9fde20eca8",
         "test/unit/duplicate_transaction_insert_rollback.test.js": "403aa81f64e27705",
         "test/unit/fee_destination.test.js": "0c8454135e113a90",
-        "test/unit/getmempool_stale_read.test.js": "951b85192ced37b0",
+        "test/unit/getmempool_stale_read.test.js": "c325d4f8e6e88d28",
         "test/unit/jsonrpc_body_guard.test.js": "58706b2a54fa0008",
         "test/unit/litecoin_block.test.js": "5ecf90a69618e860",
         "test/unit/mempool_api_surface.test.js": "3e9a24b03ca94279",
         "test/unit/mempool_first_seen_datetime.test.js": "dde536d960f1a1a5",
         "test/unit/mempool_isolation.test.js": "4223f81e9f105e21",
         "test/unit/mempool_payload_representation.test.js": "7f339cce97ef3d87",
-        "test/unit/mempool_unattributable_action.test.js": "ebc8dfbf50f8b096",
+        "test/unit/mempool_unattributable_action.test.js": "2669f2256a2da19e",
         "test/unit/migrate.test.js": "826dacd11ea07f42",
         "test/unit/migrate_status.test.js": "4fd0a29c075465f3",
         "test/unit/migration_preconditions.test.js": "e9d4bf9e39d8e63a",
@@ -4427,7 +4474,7 @@
         "test/unit/migration_runner.test/01_committed_migrations_declare_intent.test.js": "19e73caaa9b7c73f",
         "test/unit/migration_runner.test/02_database_migration_checksum_rebaselines.test.js": "35cbf8a92b2e7c36",
         "test/unit/migration_runner.test/03_run_migrations_checksum_re_bless_path.test.js": "f45010ff7d50d33a",
-        "test/unit/migration_runner.test/04_run_migrations_file_opts_only_scoping.test.js": "9427161b3e973b0e",
+        "test/unit/migration_runner.test/04_run_migrations_file_opts_only_scoping.test.js": "7d9c9de23dc8610e",
         "test/unit/migration_runner.test/05_run_migrations_migration_preconditions.test.js": "b9d84db0edbc4eae",
         "test/unit/migration_runner.test/06_database_split_sql_statements.test.js": "45857eb89566bdb3",
         "test/unit/migration_runner.test/07_database_schema_contract_guards.test.js": "de71dddc3a70f32b",
@@ -4435,8 +4482,8 @@
         "test/unit/migration_runner.test/09_migration_query_timeout.test.js": "97b9a29072a0f010",
         "test/unit/migration_runner.test/10_migration_executable_residue_pin.test.js": "4eb10f6c301434ed",
         "test/unit/migration_runner.test/11_destructive_guard_session_set.test.js": "8b1bac8a4cab2cbd",
-        "test/unit/migration_runner.test/12_destructive_guard_modify_convert.test.js": "9c3f37e4f6fe7093",
-        "test/unit/migration_runner.test/13_live_schema_guard.test.js": "a194c2b2855f5460",
+        "test/unit/migration_runner.test/12_destructive_guard_modify_convert.test.js": "d8c36b006db8b4cc",
+        "test/unit/migration_runner.test/13_live_schema_guard.test.js": "671b8d81a2531533",
         "test/unit/migration_runner.test/14_destructive_guard_engine.test.js": "0406fb865bdaa059",
         "test/unit/migration_runner.test/15_destructive_guard_drop_target.test.js": "94d278f823552144",
         "test/unit/migration_runner.test/16_destructive_guard_quoted_comments.test.js": "4edb863dbbb574cc",
@@ -4444,19 +4491,22 @@
         "test/unit/migration_runner.test/18_destructive_guard_lock_wait.test.js": "cdee7ff351a1e063",
         "test/unit/migration_runner.test/19_key_witness_guard.test.js": "9bd15abd96c0f43f",
         "test/unit/migration_runner.test/20_declared_key_drop_guard.test.js": "b2f89504900651c4",
+        "test/unit/migration_runner.test/safety/21_migration_connection_sql_mode.test.js": "d2b5d30fc386f341",
+        "test/unit/migration_runner.test/safety/22_destructive_guard_foreign_key.test.js": "e50e30ab1510265c",
         "test/unit/migrations_ledger_datetime.test.js": "2a6097257b0a2986",
-        "test/unit/node_catch_up_wait.test.js": "0007e7e17399f2ac",
+        "test/unit/node_catch_up_wait.test.js": "46c1ff5e983901ad",
         "test/unit/node_catching_up_status.test.js": "d19fabd24013167c",
         "test/unit/node_reachability_status.test.js": "09f6b21d4c9c4493",
         "test/unit/node_url_failover.test.js": "df1a7438428d2073",
         "test/unit/oracle_fee_output_activation_conformance.test.js": "eb049ebf43c69706",
         "test/unit/parse_loop_quarantine.test.js": "7ab2b61a3082956b",
-        "test/unit/parse_transaction.test.js": "7775a7711b003332",
+        "test/unit/parse_transaction.test.js": "34eae4de07524b3b",
         "test/unit/parse_transaction.test/01_parse_transaction_multisig_and_extraction.test.js": "e2dc1e87963a2b20",
         "test/unit/parse_transaction.test/02_parse_transaction_outputs_and_defaults.test.js": "d9b3257c562c64ff",
         "test/unit/parse_transaction.test/03_is_future_segwit_script.test.js": "aaf7aa8a7e0a3dd3",
         "test/unit/parse_transaction.test/04_get_source_from_output.test.js": "e593e0d867a3ce4f",
         "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js": "6a95ee16117e8e38",
+        "test/unit/parse_transaction.test/06_coinbase_funded_walkback.test.js": "1fe5ca74d7732601",
         "test/unit/protocol_constants.test.js": "13584cc3d862a5a2",
         "test/unit/protocol_time.test.js": "8383b3fc6d715636",
         "test/unit/protocol_time_caller_order.test.js": "d18469488f659a45",
