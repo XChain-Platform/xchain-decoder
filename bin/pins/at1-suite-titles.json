@@ -945,13 +945,6 @@
       "post-commit dispenser purge failure count exports the count as a Prometheus counter",
       "post-commit dispenser purge failure count leaves the count at zero when the purge succeeds"
     ],
-    "324d3a917673b9f9": [
-      "XChainDecoder parse-loop quarantine quarantines a poison transaction after exhausting block retries",
-      "XChainDecoder parse-loop quarantine retries the whole block when parseTransaction throws transiently (no quarantine)",
-      "XChainDecoder parse-loop quarantine skips just the failing tx during a mempool update instead of aborting the cycle",
-      "XChainDecoder parse-loop quarantine survives a blockFromHex throw and retries the block instead of dying",
-      "XChainDecoder parse-loop quarantine with several poison txs counts and parses each quarantined position once, not again on later rollbacks"
-    ],
     "34bac8b72829a9ac": [
       "DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION conformance is re-exported by the public constants module",
       "DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION conformance keeps mainnet inert and regtest genesis-active while testnet is armable"
@@ -1862,6 +1855,14 @@
       "db/query_helpers resolveQueryTimeout falls back to the default for a negative value",
       "db/query_helpers resolveQueryTimeout keeps an explicit 0 (no timeout)",
       "db/query_helpers resolveQueryTimeout parses a positive value"
+    ],
+    "6feb29bc635481aa": [
+      "XChainDecoder parse-loop quarantine quarantines a poison transaction after exhausting block retries",
+      "XChainDecoder parse-loop quarantine replays side effects commits the pubkey a quarantined tx writes before it throws, even after a later rollback",
+      "XChainDecoder parse-loop quarantine retries the whole block when parseTransaction throws transiently (no quarantine)",
+      "XChainDecoder parse-loop quarantine skips just the failing tx during a mempool update instead of aborting the cycle",
+      "XChainDecoder parse-loop quarantine survives a blockFromHex throw and retries the block instead of dying",
+      "XChainDecoder parse-loop quarantine with several poison txs counts each quarantined position once and re-parses it on later rollbacks"
     ],
     "7021d0775728fec9": [
       "Boundary: AES-128-CTR Deobfuscation (D-1 through D-7) [REGRESSION P0] R-DEC-001 D-3: should decrypt data that produces exactly XCHN with no payload",
@@ -3738,7 +3739,7 @@
   "scripts": {
     "test": {
       "fileCount": 255,
-      "titleCount": 2241,
+      "titleCount": 2242,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3916,7 +3917,7 @@
         "test/unit/node_reachability_status.test.js": "09f6b21d4c9c4493",
         "test/unit/node_url_failover.test.js": "df1a7438428d2073",
         "test/unit/oracle_fee_output_activation_conformance.test.js": "eb049ebf43c69706",
-        "test/unit/parse_loop_quarantine.test.js": "324d3a917673b9f9",
+        "test/unit/parse_loop_quarantine.test.js": "6feb29bc635481aa",
         "test/unit/parse_loop_quarantine.test/01_retry_state_per_tx_position.test.js": "5a8722b31c61ebf3",
         "test/unit/parse_loop_quarantine_restart.test.js": "9bc574d40b343422",
         "test/unit/parse_transaction.test.js": "7775a7711b003332",
@@ -4297,7 +4298,7 @@
     },
     "test:unit": {
       "fileCount": 255,
-      "titleCount": 2241,
+      "titleCount": 2242,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -4475,7 +4476,7 @@
         "test/unit/node_reachability_status.test.js": "09f6b21d4c9c4493",
         "test/unit/node_url_failover.test.js": "df1a7438428d2073",
         "test/unit/oracle_fee_output_activation_conformance.test.js": "eb049ebf43c69706",
-        "test/unit/parse_loop_quarantine.test.js": "324d3a917673b9f9",
+        "test/unit/parse_loop_quarantine.test.js": "6feb29bc635481aa",
         "test/unit/parse_loop_quarantine.test/01_retry_state_per_tx_position.test.js": "5a8722b31c61ebf3",
         "test/unit/parse_loop_quarantine_restart.test.js": "9bc574d40b343422",
         "test/unit/parse_transaction.test.js": "7775a7711b003332",
