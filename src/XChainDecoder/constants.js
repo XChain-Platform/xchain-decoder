@@ -159,6 +159,10 @@ const LOG_BLOCK_INTERVAL = 1000 //During catch-up sync, only log progress every 
 // rather than quarantining content other instances accept.
 const TX_PARSE_MAX_RETRIES = 3
 
+// The prevout txid a coinbase input carries. No node returns a transaction for it,
+// so a walk-back that reaches a coinbase must stop before asking for one.
+const COINBASE_PREV_TXID = '0'.repeat(64)
+
 // After this many consecutive fetch failures at one height on an AuxPoW chain,
 // treat the failure as deterministic (e.g. an AuxPoW section skipAuxPow cannot
 // traverse) and switch to getBlockReassembled, which rebuilds the pure block
@@ -196,5 +200,6 @@ module.exports = {
     DB_TRANSACTION_BLOCKS_QUANTITY,
     LOG_BLOCK_INTERVAL,
     TX_PARSE_MAX_RETRIES,
+    COINBASE_PREV_TXID,
     AUXPOW_REASSEMBLE_AFTER,
 }

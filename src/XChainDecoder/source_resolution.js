@@ -22,7 +22,7 @@ const util = require('../util')
 const crypto = require('crypto')
 const bitcoin = require('bitcoinjs-lib')
 const { format: formatLogLine } = require('node:util')
-const { logger } = require('./constants.js')
+const { logger, COINBASE_PREV_TXID } = require('./constants.js')
 const { P2WSH_WALKBACK_SEGWIT_GATE_ACTIVATION } = require('../protocol/constants/activation.js')
 
 function* fetchPrevoutTransaction(txId, outputIndex){
@@ -92,6 +92,13 @@ function p2wshWalkbackEnabled(decoder, blockHeight){
 function* fetchCommitFundingOutput(outputTransaction){
     let prevOutputIndex = outputTransaction.ins[0].index
     let prevTxHash = util.uint8ArrayToHex(Buffer.from(outputTransaction.ins[0].hash).reverse())
+    // A carrier output paid by a coinbase has no funding output to walk back to. The
+    // shape is identical on every instance, so it throws UNTAGGED to the
+    // retry-then-quarantine ladder; tagged rpcLookupFailure, the all-zero txid lookup
+    // below would fail on every node and retry the block height forever.
+    if (prevTxHash === COINBASE_PREV_TXID){
+        throw new Error(`getSourceFromOutput: carrier output is paid by a coinbase; no funding output to walk back to`)
+    }
     // Same fail-loud contract as the first fetch: tag the FETCH failure so the
     // block loop retries the block instead of quarantining the tx.
     let prevRawTransaction
