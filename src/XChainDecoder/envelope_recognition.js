@@ -21,7 +21,7 @@
 const util = require('../util')
 const bitcoin = require('bitcoinjs-lib')
 const { format: formatLogLine } = require('node:util')
-const { MAGIC_WORD_BUFFER, TAPROOT_LEAF_VERSION, TAPROOT_ANNEX_MARKER, logger } = require('./constants.js')
+const { MAGIC_WORD_BUFFER, TAPROOT_LEAF_VERSION, TAPROOT_ANNEX_MARKER, COINBASE_PREV_TXID, logger } = require('./constants.js')
 const { ENVELOPE_RECOGNITION_ACTIVATION } = require('../protocol/constants.js')
 // §3.8's second height: when a RECOGNIZED but payload-free carrier starts counting as a
 // mixed carrier. Separate from the gate above, which is already armed on mainnet.
@@ -186,6 +186,11 @@ module.exports = {
         if (!commitTransaction.ins || commitTransaction.ins.length === 0) return null
         const prevTxHash = util.uint8ArrayToHex(Buffer.from(commitTransaction.ins[0].hash).reverse())
         const prevOutputIndex = commitTransaction.ins[0].index
+        // A coinbase commit has no funder; same untagged quarantine route as
+        // getSourceFromOutput, never an all-zero txid lookup.
+        if (prevTxHash === COINBASE_PREV_TXID){
+            throw new Error(`getEnvelopeSourceFromCommit: envelope commit is a coinbase; no funding output to walk back to`)
+        }
         let prevRawTransaction
         try {
             prevRawTransaction = await this.connector.getRawTransaction(prevTxHash)
