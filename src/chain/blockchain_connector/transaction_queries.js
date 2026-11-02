@@ -67,14 +67,17 @@ function rawTransactionResponse(response, txid) {
 
 function rawTransactionFailureDetails(error) {
     // Work queue depth exceeded: back off longer before retrying.
-    // Bitcoin/Litecoin Core signal this with HTTP 500 + a JSON body
-    // carrying error.code === -429 (they never return HTTP 429).
+    // Older Bitcoin/Litecoin Core signal this with HTTP 500 + a JSON body
+    // carrying error.code === -429; Core 31 answers HTTP 503 with a
+    // text/plain "Work queue depth exceeded" body and no JSON error.
     // Dogecoin v1.14 instead drops the TCP connection outright when its
     // RPC queue fills, surfacing as an ECONNRESET/ECONNREFUSED socket error
     // with no HTTP response at all.
     const httpStatus = error.response?.status
     const rpcCode = error.response?.data?.error?.code
     const isQueueFull = rpcCode === -429
+        || httpStatus === 503
+        || httpStatus === 429
         || error.code === 'ECONNRESET'
         || error.code === 'ECONNREFUSED'
     const isTimeout = error.code === 'ECONNABORTED'
