@@ -151,6 +151,8 @@ async function readLoopCursors(){
     // Start the stall clock here, not in the constructor: a long pre-loop phase
     // (DB connect, txindex probe) must not count as time spent not advancing.
     this.lastAdvanceAt = Date.now()
+    // The ladder clock belongs to this process's retry counts, which start empty here.
+    this.lastLadderStepAt = 0
 
     if (lastProcessedBlockIndex < this.startBlockIndex - 1){
         lastProcessedBlockIndex = this.lastProcessedBlockIndex = this.startBlockIndex - 1
