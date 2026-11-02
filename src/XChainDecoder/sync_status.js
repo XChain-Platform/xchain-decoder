@@ -168,7 +168,14 @@ module.exports = {
         // Repeated failures fetching the SAME block is the fast verdict: the
         // counter resets on any success, so reaching the threshold means stuck.
         if (this._fetchErrorCount >= STALL_FETCH_ATTEMPTS) return true
-        return (Date.now() - this.lastAdvanceAt) > STALL_ALERT_MS
+        // A quarantine ladder step is progress too: it is bounded (each poison position
+        // pays at most TX_PARSE_MAX_RETRIES + 1 attempts) and ends in a commit, while
+        // its retry counts live only in this process. Reading a long ladder as a wedge
+        // would get the container restarted mid-ladder, which resets those counts, so a
+        // block with enough poison positions would never commit. lastAdvanceAt itself
+        // stays the committed-block clock, since the metrics export it as such.
+        const progressAt = Math.max(this.lastAdvanceAt, this.lastLadderStepAt || 0)
+        return (Date.now() - progressAt) > STALL_ALERT_MS
     },
 
     // True when the parse loop has stopped ITERATING. isStalled() cannot see this and

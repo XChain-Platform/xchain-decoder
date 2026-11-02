@@ -37,6 +37,18 @@ function countAttempt(attempts, key){
     return attempt
 }
 
+// Tell the stall verdict that the quarantine ladder took a real step. A block with
+// many poison positions pays TX_PARSE_MAX_RETRIES rollbacks per position, which can
+// outlast STALL_ALERT_MS while every rollback brings the height closer to commit.
+// Without this the decoder reads as wedged, the liveness consumer restarts it, and the
+// restart throws away the in-memory retry counts, so the same height loops forever.
+// Only attempts up to the quarantining one (MAX + 1) count: a position already
+// quarantined keeps counting on every later pass of the block, and stamping those
+// would hide a real wedge (a transient fault retrying forever) behind it.
+function noteLadderStep(decoder, attempt){
+    if (attempt <= TX_PARSE_MAX_RETRIES + 1) decoder.lastLadderStepAt = Date.now()
+}
+
 // Drop every retry count and quarantined position once the block that owned
 // them has committed (its PARSE_ERROR rows are durable), keeping the state bounded.
 function clearQuarantineState(loop){
@@ -95,6 +107,7 @@ async function handleParseFailure(loop, e, block, nextBlockHeight, nextTransacti
     }
 
     const attempt = countAttempt(loop.txParseRetryCounts, retryKey)
+    noteLadderStep(this, attempt)
     if (attempt <= TX_PARSE_MAX_RETRIES){
         // Could be transient (DB hiccup inside parseTransaction):
         // roll the block back and re-parse it from scratch.
@@ -157,6 +170,7 @@ async function insertTransactionRow(loop, parseResult, nextTransactionHash, next
         // the errno set is conservative, so this normally quarantines
         // on the first exceedance.)
         const attempt = countAttempt(loop.insertQuarantineCounts, retryKey)
+        noteLadderStep(this, attempt)
         if (attempt > TX_PARSE_MAX_RETRIES){
             loop.insertQuarantine.add(retryKey)
             logger.error(`Quarantining tx with deterministic INSERT failure in block ${nextBlockHeight} (tx position ${txIndex}, hash ${nextTransactionHash}) after ${TX_PARSE_MAX_RETRIES} block retries`)
