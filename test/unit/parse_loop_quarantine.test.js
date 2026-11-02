@@ -217,7 +217,7 @@ describe('XChainDecoder parse-loop quarantine', function () {
 describe('XChainDecoder parse-loop quarantine with several poison txs', function () {
     this.timeout(0)
 
-    it('counts and parses each quarantined position once, not again on later rollbacks', async function () {
+    it('counts each quarantined position once and re-parses it on later rollbacks', async function () {
         const { decoder, calls } = buildDecoder({
             transactions: [fakeTx('poison1'), fakeTx('poison2'), fakeTx('poison3')]
         })
@@ -229,7 +229,6 @@ describe('XChainDecoder parse-loop quarantine with several poison txs', function
             throw new Error('poison ' + id)
         }
         const quarantineLogs = []
-        const origError = console.error
         const { logger } = require('../../src/XChainDecoder/constants.js')
         const origLoggerError = logger.error
         logger.error = (line) => {
@@ -239,15 +238,14 @@ describe('XChainDecoder parse-loop quarantine with several poison txs', function
             await decoder.start()
         } finally {
             logger.error = origLoggerError
-            console.error = origError
         }
 
         assert.strictEqual(decoder.quarantinedTxs, 3, 'each poison tx is counted once')
         assert.strictEqual(decoder.parseErrors, 3, 'each poison tx bumps parse_errors once')
         assert.strictEqual(quarantineLogs.length, 3, 'each poison tx is logged as quarantined once')
-        for (const id of ['poison1', 'poison2', 'poison3']) {
-            assert.strictEqual(parseCallsById[id], 4, id + ' is parsed 3 retries plus the quarantining pass only')
-        }
+        // A quarantined position is still re-parsed on every later pass of the block (so its
+        // side effects replay exactly), but it is counted and logged once.
+        assert.deepStrictEqual(parseCallsById, { poison1: 10, poison2: 7, poison3: 4 })
         assert.strictEqual(calls.endTransaction, 9, 'the ladder is three rollbacks per poison tx')
         assert.strictEqual(calls.commitTransaction, 1)
 
@@ -257,5 +255,44 @@ describe('XChainDecoder parse-loop quarantine with several poison txs', function
         assert.deepStrictEqual(lastPass.map(e => e.data.tx_position), [0, 1, 2])
         assert.deepStrictEqual(lastPass.map(e => e.data.error), ['poison poison1', 'poison poison2', 'poison poison3'])
         assert.ok(lastPass.every(e => e.code === 'PARSE_ERROR'))
+    })
+})
+
+describe('XChainDecoder parse-loop quarantine replays side effects', function () {
+    this.timeout(0)
+
+    it('commits the pubkey a quarantined tx writes before it throws, even after a later rollback', async function () {
+        const { decoder } = buildDecoder({ transactions: [fakeTx('poisonA'), fakeTx('laterB')] })
+        // The block transaction holds pubkey writes until commit; a rollback discards them.
+        let pending = []
+        let committed = []
+        const endTransaction = decoder.db.endTransaction
+        const commitTransaction = decoder.db.commitTransaction
+        decoder.db.insertPubkey = async (pubkey) => { pending.push(pubkey) }
+        decoder.db.endTransaction = async () => { pending = []; return endTransaction() }
+        decoder.db.commitTransaction = async () => { committed = committed.concat(pending); pending = []; return commitTransaction() }
+
+        let laterBThrown = false
+        decoder.parseTransaction = async (tx) => {
+            if (tx.getId() === 'poisonA'){
+                await decoder.db.insertPubkey('pkA')
+                throw new Error('poison after the pubkey write')
+            }
+            // Once poisonA is quarantined, one tagged RPC failure on the next tx rolls the
+            // block back after the quarantining pass.
+            if (!laterBThrown && decoder.quarantinedTxs === 1){
+                laterBThrown = true
+                const err = new Error('node busy')
+                err.rpcLookupFailure = true
+                throw err
+            }
+            return null
+        }
+
+        await decoder.start()
+
+        assert.strictEqual(laterBThrown, true, 'the later rollback happened')
+        assert.strictEqual(decoder.quarantinedTxs, 1)
+        assert.deepStrictEqual(committed, ['pkA'], 'the committing pass replays the quarantined tx and its pubkey write')
     })
 })

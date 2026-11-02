@@ -214,10 +214,10 @@ function initialLoopLatches(){
     const insertQuarantineCounts = new Map()
     const insertQuarantine = new Set()
 
-    // Positions quarantined by a parse throw, keyed like the maps above, holding the tx hash and
-    // error text for the PARSE_ERROR row. A later whole-block rollback skips them instead of
-    // re-parsing and re-counting; cleared on block commit.
-    const parseQuarantine = new Map()
+    // Positions quarantined by a parse throw, keyed like the maps above. Later passes of the block
+    // still re-parse them but write only their PARSE_ERROR row, without re-counting; cleared on
+    // block commit.
+    const parseQuarantine = new Set()
     return { nodeSyncedProblem, nodeCatchingUpProblem, tipBelowStoredTipRefused, wrongChainProblem, wrongGenesisProblem, chainFieldMissingLogged, txParseRetryCounts, insertQuarantineCounts, insertQuarantine, parseQuarantine }
 }
 

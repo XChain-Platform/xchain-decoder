@@ -60,7 +60,7 @@ function clearQuarantineState(loop){
 
 // Count a transaction this decoder skipped for good, apart from the routine rejections
 // parseErrors also counts. A position is counted once: the pass that quarantines it records it
-// in loop.parseQuarantine, and every later whole-block rollback skips it without re-counting.
+// in loop.parseQuarantine, and later passes of the block re-parse it without re-counting.
 function noteQuarantine(decoder, height, hash){
     decoder.quarantinedTxs = (decoder.quarantinedTxs || 0) + 1
     decoder.lastQuarantinedBlock = height
@@ -114,6 +114,12 @@ async function handleParseFailure(loop, e, block, nextBlockHeight, nextTransacti
         return 'rollback'
     }
 
+    // A position this block already quarantined is still re-parsed on every pass, so whatever the
+    // parse writes before it throws (a pubkey row) commits exactly as it always has. Only its
+    // PARSE_ERROR row is written again; the attempt, ladder and quarantine counters are not touched.
+    if (loop.parseQuarantine && loop.parseQuarantine.has(retryKey))
+        return await insertParseErrorEvent(this.db, block, nextBlockHeight, txIndex, nextTransactionHash, String((e && e.message) || e))
+
     const attempt = countAttempt(loop.txParseRetryCounts, retryKey)
     noteLadderStep(this, attempt)
     if (attempt <= TX_PARSE_MAX_RETRIES){
@@ -132,8 +138,8 @@ async function handleParseFailure(loop, e, block, nextBlockHeight, nextTransacti
     logger.error(formatLogLine(`Quarantining undecodable tx in block ${nextBlockHeight} (tx position ${txIndex}, hash ${nextTransactionHash}) after ${TX_PARSE_MAX_RETRIES} block retries:`, e))
     if (await insertParseErrorEvent(this.db, block, nextBlockHeight, txIndex, nextTransactionHash, errorText) === 'rollback') return 'rollback'
     noteQuarantine(this, nextBlockHeight, nextTransactionHash)
-    if (!loop.parseQuarantine) loop.parseQuarantine = new Map()
-    loop.parseQuarantine.set(retryKey, { hash: nextTransactionHash, error: errorText })
+    if (!loop.parseQuarantine) loop.parseQuarantine = new Set()
+    loop.parseQuarantine.add(retryKey)
     return 'continue'
 }
 
@@ -349,12 +355,6 @@ async function ingestTransaction(loop, block, nextBlockHeight, openDispenserAddr
     if (loop.insertQuarantine.has(retryKey)){
         return await skipQuarantinedTransaction.call(this, block, nextBlockHeight, nextTransaction, txIndex)
     }
-
-    // Parse-quarantine skip: this position exhausted its parse retries on an earlier pass of the
-    // block, so a rollback from a later poison tx must not re-parse or re-count it. The rollback
-    // discarded its PARSE_ERROR row, so the committing pass writes it again with the original text.
-    const parsedBefore = loop.parseQuarantine && loop.parseQuarantine.get(retryKey)
-    if (parsedBefore) return await insertParseErrorEvent(this.db, block, nextBlockHeight, txIndex, parsedBefore.hash, parsedBefore.error)
 
     const parsed = await parseBlockTransaction.call(this, loop, block, nextBlockHeight, openDispenserAddresses, nextTransaction, txIndex, retryKey)
     if (typeof parsed === 'string') return parsed
