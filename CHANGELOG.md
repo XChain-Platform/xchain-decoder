@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-11-02
+
+### Fixed
+- A block whose transaction walk-back reaches a coinbase no longer stalls the decoder.
+
 ## [0.27.0] - 2026-11-01
 
 ### Fixed
