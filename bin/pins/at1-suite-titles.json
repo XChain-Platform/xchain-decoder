@@ -636,6 +636,12 @@
       "Database.migrationMode() @regression reads mode=manual from the header tag",
       "Database.migrationMode() @regression reads the tag past a multi-line comment banner (banner does not push it out of view)"
     ],
+    "1fe5ca74d7732601": [
+      "XChainDecoder source walk-back that reaches a coinbase a P2SH carrier output paid by a coinbase throws untagged without fetching the zero txid",
+      "XChainDecoder source walk-back that reaches a coinbase a P2WSH carrier output paid by a coinbase throws untagged without fetching the zero txid",
+      "XChainDecoder source walk-back that reaches a coinbase a real funding lookup failure is still tagged for the block retry",
+      "XChainDecoder source walk-back that reaches a coinbase an envelope whose commit is a coinbase throws untagged without fetching the zero txid"
+    ],
     "20a02f889b2e9582": [
       "XChainDecoder RPC-lookup + rollback-signal hardening block loop RPC-failure classification retries the block past TX_PARSE_MAX_RETRIES on tagged RPC failures, never quarantining",
       "XChainDecoder RPC-lookup + rollback-signal hardening findFundingFeeOutputs still returns [] for the deterministic no-fee-destination case",
@@ -3716,8 +3722,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 251,
-      "titleCount": 2228,
+      "fileCount": 252,
+      "titleCount": 2232,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3902,6 +3908,7 @@
         "test/unit/parse_transaction.test/03_is_future_segwit_script.test.js": "aaf7aa8a7e0a3dd3",
         "test/unit/parse_transaction.test/04_get_source_from_output.test.js": "e593e0d867a3ce4f",
         "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js": "6a95ee16117e8e38",
+        "test/unit/parse_transaction.test/06_coinbase_funded_walkback.test.js": "1fe5ca74d7732601",
         "test/unit/protocol_constants.test.js": "13584cc3d862a5a2",
         "test/unit/protocol_time.test.js": "8383b3fc6d715636",
         "test/unit/protocol_time_caller_order.test.js": "d18469488f659a45",
@@ -4271,8 +4278,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 251,
-      "titleCount": 2228,
+      "fileCount": 252,
+      "titleCount": 2232,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -4457,6 +4464,7 @@
         "test/unit/parse_transaction.test/03_is_future_segwit_script.test.js": "aaf7aa8a7e0a3dd3",
         "test/unit/parse_transaction.test/04_get_source_from_output.test.js": "e593e0d867a3ce4f",
         "test/unit/parse_transaction.test/05_parse_transaction_p2wsh_per_chain_segwit_gate.test.js": "6a95ee16117e8e38",
+        "test/unit/parse_transaction.test/06_coinbase_funded_walkback.test.js": "1fe5ca74d7732601",
         "test/unit/protocol_constants.test.js": "13584cc3d862a5a2",
         "test/unit/protocol_time.test.js": "8383b3fc6d715636",
         "test/unit/protocol_time_caller_order.test.js": "d18469488f659a45",
