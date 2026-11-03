@@ -62,7 +62,7 @@ function assertRestoreOrdering(calls) {
 describe('Database#deleteBlockByIndex()', () => {
     afterEach(() => sinon.restore());
 
-    it('executes 5 DELETE queries and returns true on success', async () => {
+    it('executes 6 DELETE queries and returns true on success', async () => {
         const db = makeDb();
         const q  = sinon.stub().resolves([]);
         const { pool, conn } = withConn(q);
@@ -72,8 +72,8 @@ describe('Database#deleteBlockByIndex()', () => {
         const calls = conn.query.getCalls().map(c => c.args[0]);
         // Explicit per-table checks instead of a magic DELETE count: the rollback
         // must touch exactly transaction_outputs, dispensers, dispenser_extension_undo,
-        // transactions, blocks.
-        for (const table of ['transaction_outputs', 'dispensers', 'dispenser_extension_undo', 'transactions', 'blocks']) {
+        // transactions, blocks, block_tx_index_end.
+        for (const table of ['transaction_outputs', 'dispensers', 'dispenser_extension_undo', 'transactions', 'blocks', 'block_tx_index_end']) {
             assert.ok(
                 calls.some(s => new RegExp(`DELETE\\s+FROM\\s+${table}\\b`, 'i').test(s)),
                 `must DELETE FROM ${table} on reorg rollback`
@@ -88,7 +88,7 @@ describe('Database#deleteBlockByIndex()', () => {
             'events/index_addresses must never be deleted on reorg'
         );
         const deletes = calls.filter(s => /DELETE/i.test(s));
-        assert.strictEqual(deletes.length, 5, 'no additional undeclared DELETE targets');
+        assert.strictEqual(deletes.length, 6, 'no additional undeclared DELETE targets');
         assertRestoreOrdering(calls);
     });
 

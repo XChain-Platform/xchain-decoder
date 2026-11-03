@@ -122,6 +122,14 @@ async function finishBlock(loop, block, nextBlockHeight, nextBlockHash, openDisp
         return 'rollback'
     }
 
+    // Record the block-end tx_index cursor in the block's own transaction, counting skipped carriers
+    // that wrote no row. Optional on the db: test stand-ins model only the methods they drive.
+    if (typeof this.db.recordBlockTxIndexEnd === 'function' &&
+        (await this.db.recordBlockTxIndexEnd(nextBlockHeight, loop.lastProcessedTxIndex)) === false){
+        logger.error(`Could not record tx_index_end for block ${nextBlockHeight}; block rolled back, retrying`)
+        return 'rollback'
+    }
+
     // Commit a full batch, or commit immediately when this block reaches tip.
     if ((loop.blocksQuantity == DB_TRANSACTION_BLOCKS_QUANTITY-1) || (nextBlockHeight == this.blockchainInfoLastBlock)){
         if ((await commitBlockBatch.call(

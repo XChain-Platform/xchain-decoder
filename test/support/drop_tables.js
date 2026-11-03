@@ -23,6 +23,7 @@ const DROP_ORDER = [
     'pubkeys',
     'transactions',
     'blocks',
+    'block_tx_index_end',
     'index_addresses',
     'index_transactions',
     'events',
