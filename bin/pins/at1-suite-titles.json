@@ -108,6 +108,12 @@
     "07a542a6a7c8c758": [
       "BATCH dispenser registration registration rides the SAME flag-day as payment-output capture both are off one second below the instant and on AT it"
     ],
+    "07b573c826a281bb": [
+      "getRawTransaction queue-full classification backs off 5 s on HTTP 503 \"Work queue depth exceeded\" and does not log a fixed fault",
+      "getRawTransaction queue-full classification keeps a 401 on the 500 ms fixed-fault path with a per-attempt log",
+      "getRawTransaction queue-full classification still backs off 5 s on ECONNRESET",
+      "getRawTransaction queue-full classification still backs off 5 s on a JSON -429 error"
+    ],
     "09e84783d9b0b7ef": [
       "Fuzz: DISPENSER parsing BATCH-like strings with embedded DISPENSER should handle batch: \"DISPENSER|0|A||||||B|||||3600;DISPENSER|0|C||||||D|||||7200...\"",
       "Fuzz: DISPENSER parsing BATCH-like strings with embedded DISPENSER should handle batch: \"DISPENSER|0|A||||||B|||||3600;SEND|0|XCHAIN|1000...\"",
@@ -1187,6 +1193,15 @@
       "Database#insertPubkey() passes addressId and pubkey as params",
       "Database#insertPubkey() returns false on error",
       "Database#insertPubkey() returns true on success"
+    ],
+    "450e5a710c803903": [
+      "JSON-RPC body-parser error handling a valid ping still returns a result",
+      "JSON-RPC body-parser error handling body \"x\" -> 400 with -32700",
+      "JSON-RPC body-parser error handling body null -> 400 with -32700",
+      "JSON-RPC body-parser error handling body over 100kb -> 413 with -32600",
+      "JSON-RPC body-parser error handling control: without the handler a malformed body leaks an HTML stack",
+      "JSON-RPC body-parser error handling src/api.js mounts the handler after the router",
+      "JSON-RPC body-parser error handling truncated JSON -> 400 with -32700"
     ],
     "45857eb89566bdb3": [
       "Database.splitSqlStatements() @regression does not split on a ; inside a # line comment, and drops the comment",
@@ -3738,8 +3753,8 @@
   },
   "scripts": {
     "test": {
-      "fileCount": 255,
-      "titleCount": 2242,
+      "fileCount": 257,
+      "titleCount": 2253,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -3931,6 +3946,7 @@
         "test/unit/protocol_time.test.js": "8383b3fc6d715636",
         "test/unit/protocol_time_caller_order.test.js": "d18469488f659a45",
         "test/unit/protocol_time_parity.test.js": "bea80fd3971653d5",
+        "test/unit/raw_transaction_queue_full_503.test.js": "07b573c826a281bb",
         "test/unit/raw_transaction_shape_guard.test.js": "a30a253f8b183809",
         "test/unit/remove_obfuscation.test.js": "0eb0aadd100cef95",
         "test/unit/reorg_depth_across_restart.test.js": "cb25ed0b62ac6428",
@@ -3952,6 +3968,7 @@
         "test/unit/roundtrip_conformance.test.js": "99f5849afe3a05b0",
         "test/unit/roundtrip_conformance.test/01_stored_record_invariants.test.js": "6493fa1a8a127b37",
         "test/unit/roundtrip_conformance.test/02_byte_identity_to_encoder_original.test.js": "b890eff5e5d00764",
+        "test/unit/rpc_body_parser_errors.test.js": "450e5a710c803903",
         "test/unit/rpc_lookup_failure.test.js": "20a02f889b2e9582",
         "test/unit/rpc_lookup_failure.test/01_block_loop_rollback_signal_handling.test.js": "8f6c7971e72c3673",
         "test/unit/rpc_lookup_failure.test/02_wire_decode_faults_escape_untagged.test.js": "85b2c4212474b7ca",
@@ -4297,8 +4314,8 @@
       }
     },
     "test:unit": {
-      "fileCount": 255,
-      "titleCount": 2242,
+      "fileCount": 257,
+      "titleCount": 2253,
       "files": {
         "test/unit/action_manifest_conformance.test.js": "3e1e7599837cbf70",
         "test/unit/alias_expansion_boundary.test.js": "7a5cec648390c3a0",
@@ -4490,6 +4507,7 @@
         "test/unit/protocol_time.test.js": "8383b3fc6d715636",
         "test/unit/protocol_time_caller_order.test.js": "d18469488f659a45",
         "test/unit/protocol_time_parity.test.js": "bea80fd3971653d5",
+        "test/unit/raw_transaction_queue_full_503.test.js": "07b573c826a281bb",
         "test/unit/raw_transaction_shape_guard.test.js": "a30a253f8b183809",
         "test/unit/remove_obfuscation.test.js": "0eb0aadd100cef95",
         "test/unit/reorg_depth_across_restart.test.js": "cb25ed0b62ac6428",
@@ -4511,6 +4529,7 @@
         "test/unit/roundtrip_conformance.test.js": "99f5849afe3a05b0",
         "test/unit/roundtrip_conformance.test/01_stored_record_invariants.test.js": "6493fa1a8a127b37",
         "test/unit/roundtrip_conformance.test/02_byte_identity_to_encoder_original.test.js": "b890eff5e5d00764",
+        "test/unit/rpc_body_parser_errors.test.js": "450e5a710c803903",
         "test/unit/rpc_lookup_failure.test.js": "20a02f889b2e9582",
         "test/unit/rpc_lookup_failure.test/01_block_loop_rollback_signal_handling.test.js": "8f6c7971e72c3673",
         "test/unit/rpc_lookup_failure.test/02_wire_decode_faults_escape_untagged.test.js": "85b2c4212474b7ca",
