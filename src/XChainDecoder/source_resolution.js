@@ -250,6 +250,17 @@ module.exports = {
                 if (Buffer.isBuffer(lastElement) && (lastElement.length === 33 || lastElement.length === 65)){
                     return lastElement.toString('hex')
                 }
+                // P2SH carrier spend: <sig> <pubkey> <redeemScript>. The key is the
+                // push before the redeemScript. Require a plain signature-then-key
+                // shape (exactly 3 pushes, key-length middle, non-key-length last)
+                // so multisig <0> <sig> <sig> <redeem> never yields a false capture.
+                if (decompiledScript.length === 3){
+                    let middle = decompiledScript[1]
+                    if (Buffer.isBuffer(lastElement) && lastElement.length > 0
+                        && Buffer.isBuffer(middle) && (middle.length === 33 || middle.length === 65)){
+                        return middle.toString('hex')
+                    }
+                }
             }
         }
         return null
