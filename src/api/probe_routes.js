@@ -111,6 +111,14 @@ function makeRpcBatchGuard(maxBatch){
                 id: null
             })
         }
+        // JSON-RPC 2.0: an empty batch array is an Invalid Request, not an empty success.
+        if (Array.isArray(req.body) && req.body.length === 0){
+            return res.status(400).json({
+                jsonrpc: '2.0',
+                error: { code: -32600, message: 'Invalid Request: empty batch' },
+                id: null
+            })
+        }
         if (Array.isArray(req.body) && !req.body.every(isPlainRpcObject)){
             return res.status(400).json({
                 jsonrpc: '2.0',

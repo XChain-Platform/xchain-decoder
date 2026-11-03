@@ -205,13 +205,27 @@ describe('JSON-RPC batch element-shape guard @regression', function () {
         })
     }
 
-    it('passes a valid all-object batch and an empty array unchanged', function () {
+    it('passes a valid all-object batch and a one-element batch unchanged', function () {
         const guard = makeRpcBatchGuard(20)
         let n = 0
         guard({ body: [{ jsonrpc: '2.0', method: 'health', id: 1 }, { method: 'health' }] }, fakeRes(), () => { n++ })
-        guard({ body: [] }, fakeRes(), () => { n++ })
+        guard({ body: [{}] }, fakeRes(), () => { n++ })
         assert.strictEqual(n, 2)
     })
+
+    it('rejects an empty batch with 400 / -32600 and does not call next', function () {
+        const guard = makeRpcBatchGuard(20)
+        const res = fakeRes()
+        let nextCalled = false
+        guard({ body: [] }, res, () => { nextCalled = true })
+        assert.strictEqual(res._code, 400)
+        assert.strictEqual(nextCalled, false)
+        assert.strictEqual(res._json.jsonrpc, '2.0')
+        assert.strictEqual(res._json.error.code, -32600)
+        assert.match(res._json.error.message, /empty batch/i)
+        assert.strictEqual(res._json.id, null)
+    })
+
 })
 
 describe('decoder stability fixes @regression', function () {
