@@ -22,7 +22,7 @@ const util = require('../util')
 const coins = require('../coins')
 const Database = require('../db.js')
 const { chainGenesisUnpinned } = require('../protocol/chain_identity')
-const { logger, BLOCKCHAIN_INFO_REFRESH_MS } = require('./constants.js')
+const { logger, BLOCKCHAIN_INFO_REFRESH_MS, BLOCKCHAIN_INFO_BEHIND_REFRESH_MS } = require('./constants.js')
 const { bigIntBufferutilsActive } = require('./payload_helpers.js')
 const { resetAfterRollback, reorgHaltHoldsLoop, waitAtTip } = require('./sync_loop.js')
 const { refreshChainTip } = require('./tip_refresh.js')
@@ -260,6 +260,16 @@ async function bootDecoder(){
 }
 
 module.exports = {
+    // Whether the cached node tip must be re-read this iteration. Behind the cached tip
+    // the refresh runs on the short BEHIND interval so lag_blocks tracks a burst of new
+    // blocks instead of reporting the gap as of the last 30 s refresh.
+    chainTipRefreshDue(loop, now){
+        if (!loop.lastBlockchainInfo) return true
+        if (loop.lastProcessedBlockIndex >= this.blockchainInfoLastBlock) return true
+        const age = now - loop.lastBlockchainInfoRefreshAt
+        return age >= BLOCKCHAIN_INFO_BEHIND_REFRESH_MS || age >= BLOCKCHAIN_INFO_REFRESH_MS
+    },
+
     async start(){
         verifyBundledConsensusPin.call(this)
         const loop = await bootDecoder.call(this)
@@ -300,9 +310,7 @@ module.exports = {
             //last condition keeps blockchainInfoLastBlock tracking the live chain
             //during a long catch-up, so the reported lag reflects the true remaining
             //gap instead of converging to zero against a frozen tip.
-            if (!loop.lastBlockchainInfo
-                || (loop.lastProcessedBlockIndex >= this.blockchainInfoLastBlock)
-                || (Date.now() - loop.lastBlockchainInfoRefreshAt >= BLOCKCHAIN_INFO_REFRESH_MS)){
+            if (this.chainTipRefreshDue(loop, Date.now())){
                 if ((await refreshChainTip.call(this, loop, loop.lastProcessedBlockIndex)) === 'continue') continue
             }
 

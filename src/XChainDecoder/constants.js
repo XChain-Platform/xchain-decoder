@@ -27,6 +27,10 @@ const lenientTextDecoder = new TextDecoder('utf-8')
 
 const CHECK_BLOCK_DELAY_MS = 1000 //1 second to continously ask for new block when all has been parsed
 const BLOCKCHAIN_INFO_REFRESH_MS = 30000 //Re-poll the node tip at least this often during catch-up so reported lag stays accurate
+// While the decoder is behind the cached tip, re-poll the node this often. The reported lag_blocks
+// (the only lag input the bootstrap gate reads) is cached-tip minus processed, so a tip cached for
+// the full 30 s window hides a block burst and under-reports the true gap.
+const BLOCKCHAIN_INFO_BEHIND_REFRESH_MS = 1000
 const MEMPOOL_INTERVAL = 60000 //60 seconds between mempool checks
 // A node tip below the stored tip, or a different block at the stored height, is acted
 // on only once two readings TIP_SETTLE_DELAY_MS apart agree; a reading that keeps
@@ -176,6 +180,7 @@ module.exports = {
     lenientTextDecoder,
     CHECK_BLOCK_DELAY_MS,
     BLOCKCHAIN_INFO_REFRESH_MS,
+    BLOCKCHAIN_INFO_BEHIND_REFRESH_MS,
     MEMPOOL_INTERVAL,
     TIP_SETTLE_DELAY_MS,
     TIP_SETTLE_MAX_READS,
