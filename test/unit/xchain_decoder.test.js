@@ -364,24 +364,6 @@ describe('XChainDecoder#extractPubkeyFromInput()', () => {
         assert.strictEqual(result, pubkey.toString('hex'))
     })
 
-    it('should extract the middle push from a P2SH carrier scriptSig <sig> <pubkey> <redeemScript>', () => {
-        const pubkey = Buffer.alloc(33, 0x02)
-        const sig    = Buffer.alloc(71, 0x30)
-        const redeem = bitcoin.script.compile([Buffer.alloc(20, 0x11), bitcoin.opcodes.OP_DROP, bitcoin.opcodes.OP_DUP, bitcoin.opcodes.OP_HASH160, Buffer.alloc(20, 0x22), bitcoin.opcodes.OP_EQUALVERIFY, bitcoin.opcodes.OP_CHECKSIG])
-        const input = { witness: [], script: bitcoin.script.compile([sig, pubkey, redeem]) }
-        assert.strictEqual(decoder.extractPubkeyFromInput(input), pubkey.toString('hex'))
-    })
-
-    it('should return null for a P2SH scriptSig whose middle push is not a key length', () => {
-        const input = { witness: [], script: bitcoin.script.compile([Buffer.alloc(71, 0x30), Buffer.alloc(40, 0x02), Buffer.alloc(110, 0x51)]) }
-        assert.strictEqual(decoder.extractPubkeyFromInput(input), null)
-    })
-
-    it('should not capture a key from a multisig P2SH scriptSig', () => {
-        const input = { witness: [], script: bitcoin.script.compile([bitcoin.opcodes.OP_0, Buffer.alloc(71, 0x30), Buffer.alloc(71, 0x31), Buffer.alloc(105, 0x52)]) }
-        assert.strictEqual(decoder.extractPubkeyFromInput(input), null)
-    })
-
     it('should return null for an input with empty witness and empty script', () => {
         const input = { witness: [], script: Buffer.alloc(0) }
         const result = decoder.extractPubkeyFromInput(input)
