@@ -119,6 +119,63 @@ function* fetchCommitFundingOutput(outputTransaction){
     return prevTransaction.outs[prevOutputIndex]
 }
 
+// Whether the key hashes to the 20-byte hash of a P2PKH or P2WPKH source address.
+// The address is decoded with the same network object that built it, so this holds
+// on every coin; any other address kind (P2SH, P2WSH, P2TR) never binds to a key.
+function pubkeyHashesToSource(pubkey, source, network){
+    let sourceScript
+    try {
+        sourceScript = bitcoin.address.toOutputScript(source, network)
+    } catch(err){
+        return false
+    }
+    let sourceHash = null
+    // P2PKH: OP_DUP OP_HASH160 <20> OP_EQUALVERIFY OP_CHECKSIG
+    if (sourceScript.length === 25 && sourceScript[0] === 0x76 && sourceScript[1] === 0xa9
+        && sourceScript[2] === 0x14 && sourceScript[23] === 0x88 && sourceScript[24] === 0xac){
+        sourceHash = sourceScript.subarray(3, 23)
+    }
+    // P2WPKH: OP_0 <20>
+    if (sourceScript.length === 22 && sourceScript[0] === 0x00 && sourceScript[1] === 0x14){
+        sourceHash = sourceScript.subarray(2, 22)
+    }
+    return sourceHash !== null && Buffer.from(bitcoin.crypto.hash160(pubkey)).equals(sourceHash)
+}
+
+// The key-length push an input exposes where a spender key sits, as a Buffer, or
+// null. Shape only: whether that key belongs to anyone is extractPubkeyFromInput's check.
+function candidatePubkeyFromInput(input){
+    // P2WPKH or P2SH-P2WPKH: pubkey is second witness element
+    if (input.witness && input.witness.length >= 2){
+        let pubkey = input.witness[1]
+        if (pubkey && (pubkey.length === 33 || pubkey.length === 65)){
+            return pubkey
+        }
+    }
+    // P2PKH: scriptSig is <sig> <pubkey>, decompile and take last element
+    if (input.script && input.script.length > 0){
+        let decompiledScript = bitcoin.script.decompile(input.script)
+        if (decompiledScript && decompiledScript.length >= 2){
+            let lastElement = decompiledScript[decompiledScript.length - 1]
+            if (Buffer.isBuffer(lastElement) && (lastElement.length === 33 || lastElement.length === 65)){
+                return lastElement
+            }
+            // P2SH carrier spend: <sig> <pubkey> <redeemScript>. The key is the
+            // push before the redeemScript. Require a plain signature-then-key
+            // shape (exactly 3 pushes, key-length middle, non-key-length last)
+            // so multisig <0> <sig> <sig> <redeem> never yields a false capture.
+            if (decompiledScript.length === 3){
+                let middle = decompiledScript[1]
+                if (Buffer.isBuffer(lastElement) && lastElement.length > 0
+                    && Buffer.isBuffer(middle) && (middle.length === 33 || middle.length === 65)){
+                    return middle
+                }
+            }
+        }
+    }
+    return null
+}
+
 function* resolveSourceFromOutput(txId, outputIndex, capture, blockHeight){
     let source = null
     let output = null
@@ -234,36 +291,16 @@ module.exports = {
         return next.value
     },
 
-    extractPubkeyFromInput(input){
-        // P2WPKH or P2SH-P2WPKH: pubkey is second witness element
-        if (input.witness && input.witness.length >= 2){
-            let pubkey = input.witness[1]
-            if (pubkey && (pubkey.length === 33 || pubkey.length === 65)){
-                return pubkey.toString('hex')
-            }
-        }
-        // P2PKH: scriptSig is <sig> <pubkey>, decompile and take last element
-        if (input.script && input.script.length > 0){
-            let decompiledScript = bitcoin.script.decompile(input.script)
-            if (decompiledScript && decompiledScript.length >= 2){
-                let lastElement = decompiledScript[decompiledScript.length - 1]
-                if (Buffer.isBuffer(lastElement) && (lastElement.length === 33 || lastElement.length === 65)){
-                    return lastElement.toString('hex')
-                }
-                // P2SH carrier spend: <sig> <pubkey> <redeemScript>. The key is the
-                // push before the redeemScript. Require a plain signature-then-key
-                // shape (exactly 3 pushes, key-length middle, non-key-length last)
-                // so multisig <0> <sig> <sig> <redeem> never yields a false capture.
-                if (decompiledScript.length === 3){
-                    let middle = decompiledScript[1]
-                    if (Buffer.isBuffer(lastElement) && lastElement.length > 0
-                        && Buffer.isBuffer(middle) && (middle.length === 33 || middle.length === 65)){
-                        return middle.toString('hex')
-                    }
-                }
-            }
-        }
-        return null
+    // Returns the key only when it hashes to `source`, the resolved source address.
+    // Verify it on every read: a P2SH or P2WSH carrier's source is the commit funder
+    // found by walking back a hop, so nothing on chain ties the spender's key to it.
+    extractPubkeyFromInput(input, source){
+        const candidate = candidatePubkeyFromInput(input)
+        if (!candidate || typeof source !== 'string') return null
+        // Anyone spending a carrier output a victim funded could otherwise register
+        // any key under the victim's address. A direct P2PKH or P2WPKH spend passes
+        // unchanged: consensus has already proved its key hashes to the source.
+        return pubkeyHashesToSource(candidate, source, this.network) ? candidate.toString('hex') : null
     },
 
     isFutureSegwitScript(script) {
