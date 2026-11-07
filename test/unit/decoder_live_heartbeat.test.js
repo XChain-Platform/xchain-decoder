@@ -240,6 +240,7 @@ describe('a failed DB ping keeps the halt the decoder already knows', function (
         decoder.reorgHaltReason = 'delete failed at 149';
         decoder.reorgHaltCheckedAt = 1759300000000;
         decoder.reorgHaltParked = true;
+        decoder.reorgHaltParkedAt = '2026-10-01T05:06:07.000Z';
         decoder.db = { ping };
         let markerReads = 0;
         const realCheck = decoder.checkReorgHalt;
@@ -254,6 +255,7 @@ describe('a failed DB ping keeps the halt the decoder already knows', function (
         assert.strictEqual(res.body.db, false);
         assert.strictEqual(res.body.reorg_halted, true, 'a DB fault must never publish a known halt as clear');
         assert.strictEqual(res.body.reorg_halt_parked, true);
+        assert.strictEqual(res.body.reorg_halt_parked_at, '2026-10-01T05:06:07.000Z');
         assert.strictEqual(res.body.reorg_halt_reason, 'delete failed at 149');
         assert.strictEqual(res.body.reorg_halt_checked_at, 1759300000000, 'the cached read time, not null');
         assert.strictEqual(markerReads(), 0, 'a pool that just failed its ping is not queried for the marker');

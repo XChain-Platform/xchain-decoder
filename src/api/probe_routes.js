@@ -246,6 +246,7 @@ function liveBody(decoder, state) {
         // decoder answering 503 here would restart-loop it for a marker no restart
         // clears. isStalled() carries the matching gate.
         reorg_halt_parked: reorgHalt.parked === true,
+        reorg_halt_parked_at: reorgHalt.parked_at || null,
         // Ships beside the halt flag, as on /status and the health method: null means no
         // marker probe has completed, so a false halt flag is not yet an answer.
         reorg_halt_checked_at: reorgHalt.checked_at || null,

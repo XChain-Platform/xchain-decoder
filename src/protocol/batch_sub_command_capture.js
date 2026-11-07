@@ -88,7 +88,8 @@ const { hasProvablyRejectedBatch,
 //
 //   1. A batch the indexer PROVABLY rejects as a whole yields the EMPTY list, because it
 //      runs none of its commands (see hasProvablyRejectedBatch, which covers the empty
-//      ACTION name, the 250-command cap and the per-ACTION caps).
+//      ACTION name, per-ACTION caps, the global count limit (WEIGHT_BUDGET replaces 250
+//      under weighting), and the separately gated BATCH_COST_WEIGHTING weight budget).
 //   2. Sub-command ACTION names are alias-expanded, because that is the name the indexer
 //      DISPATCHES on. Un-expanded, a batched alias reaches capture in its wire spelling
 //      while the indexer runs its canonical one, and the day an alias resolves to COINPAY

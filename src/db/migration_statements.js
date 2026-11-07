@@ -31,6 +31,9 @@ module.exports = {
         // tight, because the multi-line license banner pushes the tag past it and the
         // migration then silently reads as the `manual` default. Anchoring to the
         // prologue keeps both properties at any banner length.
+        // Keep this parser aligned with xchain-indexer/src/db/database/migration_scan.js,
+        // xchain-node/src/services/migration_precondition_service/migration_scan.js,
+        // and xchain-hub/src/db/schema/sql_migration_files.js.
         const lines    = String(raw).split('\n');
         const prologue = [];
         for(const line of lines){
@@ -38,8 +41,14 @@ module.exports = {
             if(trimmed === '' || trimmed.startsWith('--')){ prologue.push(line); continue; }
             break;   // first non-blank, non-comment line ends the prologue
         }
-        const m = prologue.join('\n').match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im);
-        return m ? m[1].toLowerCase() : 'manual';
+        const modes = [];
+        for(const line of prologue){
+            const header = /^\s*--\s*xchain:migration\b(.*)$/i.exec(line);
+            if(!header) continue;
+            for(const token of header[1].matchAll(/\bmode\s*=\s*([A-Za-z]+)\b/gi))
+                modes.push(token[1].toLowerCase());
+        }
+        return modes.length > 0 && modes.every(mode => mode === 'auto') ? 'auto' : 'manual';
     },
 
     // Destructive-DDL scan for the auto-apply path. Given a migration file's

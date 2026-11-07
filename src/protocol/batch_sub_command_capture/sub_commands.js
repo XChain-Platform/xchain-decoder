@@ -216,7 +216,9 @@ function expandAliasName(actionName, aliases){
 // against a dispenser that never settles.
 //
 // WHAT IS MIRRORED, and it is deliberately a SUBSET (see hasProvablyRejectedBatch):
-//   * the global 250-command cap                      -> 'invalid: COMMAND (limit)'
+//   * the global command cap (250, or WEIGHT_BUDGET under weighting)
+//                                                      -> 'invalid: COMMAND (limit)'
+//   * summed command weight above WEIGHT_BUDGET       -> 'invalid: COMMAND (limit)'
 //   * a nested BATCH sub-command (actionLimits.BATCH=0)-> 'invalid: BATCH (limit)'
 //   * more than one TOP-LEVEL (undotted) ISSUE         -> 'invalid: ISSUE (limit)'
 //   * more than one DEPLOY                             -> 'invalid: DEPLOY (limit)'
