@@ -23,8 +23,82 @@ function firstSeenAsSeconds(row){
     return Object.assign({}, row, { first_seen: Number.isFinite(n) ? n : null })
 }
 
+// A mempool poll that snapshotted the node mempool just before a block landed can
+// insert a tx after the block path pruned it, which would bring the confirmed tx back
+// as pending until the next poll. Hashes the block path pruned are remembered here
+// for about two poll intervals so that late insert is refused. The memory expires
+// (and is size-capped) because a reorg legitimately returns txs to the node mempool.
+const CONFIRMED_GUARD_TTL_MS = 120000
+const CONFIRMED_GUARD_MAX = 50000
+const PRUNE_CHUNK = 1000
+
+function confirmedGuard(db){
+    if (!db._recentlyConfirmedTxHashes) db._recentlyConfirmedTxHashes = new Map()
+    return db._recentlyConfirmedTxHashes
+}
+
+function isRecentlyConfirmed(db, hash, now){
+    const guard = db._recentlyConfirmedTxHashes
+    if (!guard || hash == null) return false
+    const expiresAt = guard.get(hash)
+    if (expiresAt == null) return false
+    if (expiresAt > now) return true
+    guard.delete(hash)
+    return false
+}
+
+function rememberConfirmed(db, hashes, now){
+    const guard = confirmedGuard(db)
+    for (const hash of hashes) {
+        // Re-insert so Map order stays oldest-first for the eviction below.
+        guard.delete(hash)
+        guard.set(hash, now + CONFIRMED_GUARD_TTL_MS)
+    }
+    for (const [hash, expiresAt] of guard) {
+        if (guard.size <= CONFIRMED_GUARD_MAX && expiresAt > now) break
+        guard.delete(hash)
+    }
+}
+
 module.exports = {
+    // Drop the rows of txs a just-committed block confirmed, so a tx never reads as
+    // pending and confirmed at once while the 60 s mempool poll catches up. Best
+    // effort and never throws: block ingest calls this after its commit, and a
+    // failure only leaves the rows for the next poll's reconcile to remove.
+    async deleteConfirmedMempoolTransactions(txHashes) {
+        const hashes = Array.from(new Set((txHashes || []).filter((h) => typeof h === 'string' && h.length > 0)))
+        if (hashes.length === 0) return 0
+        rememberConfirmed(this, hashes, Date.now())
+
+        let connection = null
+        let ownLease = false
+        let deleted = 0
+        try {
+            connection = await this.getConnection()
+            ownLease = (this.transactionConnection == null)
+            for (let i = 0; i < hashes.length; i += PRUNE_CHUNK) {
+                const chunk = hashes.slice(i, i + PRUNE_CHUNK)
+                const placeholders = chunk.map(() => '?').join(',')
+                const result = await connection.query(
+                    'DELETE FROM mempool_transactions WHERE tx_hash IN (' + placeholders + ')', chunk)
+                deleted += Number((result && result.affectedRows) || 0)
+            }
+            return deleted
+        } catch (err) {
+            logger.warn(formatLogLine('Could not prune confirmed txs from mempool_transactions; the next mempool poll removes them:', err))
+            return false
+        } finally {
+            if (connection && ownLease) {
+                try { await connection.release() } catch (_) { /* lease already gone */ }
+            }
+        }
+    },
+
     async insertMempoolTransaction(tx) {
+        // A block already confirmed this tx; a stale poll must not re-list it as pending.
+        if (isRecentlyConfirmed(this, tx && tx.hash, Date.now())) {
+            return this.DUPLICATED_TRANSACTION
+        }
         const query = `
             INSERT INTO mempool_transactions (
             tx_hash,

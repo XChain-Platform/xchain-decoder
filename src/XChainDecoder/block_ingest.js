@@ -188,7 +188,47 @@ async function ingestNextBlock(loop){
     this.reorgWait = null
     loop.tipBelowStoredTipRefused = false
 
-    return await storeBlock.call(this, loop, block, nextBlockHeight, nextBlockHash, previousBlockHash)
+    const stored = await storeBlock.call(this, loop, block, nextBlockHeight, nextBlockHash, previousBlockHash)
+    await pruneConfirmedFromMempool.call(this, loop, stored, block, nextBlockHeight)
+    return stored
+}
+
+function blockTxHashes(block){
+    const hashes = []
+    for (const tx of (block.transactions || [])) {
+        try { hashes.push(tx.getId()) } catch (_) { /* unparseable id; the mempool poll reconciles it */ }
+    }
+    return hashes
+}
+
+// mempool_transactions is otherwise reconciled only on the 60 s mempool poll, so a tx
+// a block just confirmed kept reading as pending (beside its confirmed row) for up to
+// a full poll interval. Prune the block's txs once the block is durable: a rolled-back
+// or retried block must not hide a tx that is still genuinely pending. The hashes of a
+// multi-block batch accumulate until the batch commits (blocksQuantity resets to 0).
+async function pruneConfirmedFromMempool(loop, stored, block, nextBlockHeight){
+    if (stored === 'rollback' || stored === 'continue') {
+        loop.mempoolPruneHashes = null
+        return
+    }
+    const mempoolDb = this.mempoolDb
+    if (!mempoolDb || typeof mempoolDb.deleteConfirmedMempoolTransactions !== 'function') return
+    // Deep catch-up runs with the mempool poll stopped and the table is reconciled on
+    // resync, so a per-block round trip there is pure cost.
+    if ((this.blockchainInfoLastBlock - nextBlockHeight) > SYNCED_THRESHOLD) {
+        loop.mempoolPruneHashes = null
+        return
+    }
+    loop.mempoolPruneHashes = (loop.mempoolPruneHashes || []).concat(blockTxHashes(block))
+    if (loop.blocksQuantity !== 0) return
+    const hashes = loop.mempoolPruneHashes
+    loop.mempoolPruneHashes = null
+    try {
+        await mempoolDb.deleteConfirmedMempoolTransactions(hashes)
+    } catch (err) {
+        // The DB method never throws; a stand-in that does must not stop the block loop.
+        logger.warn(formatLogLine('Mempool prune after block ' + nextBlockHeight + ' failed:', err))
+    }
 }
 
 module.exports = { ingestNextBlock }
