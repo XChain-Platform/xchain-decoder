@@ -31,8 +31,15 @@ function isBatchSubCommandCaptureActive(consensusNetwork, blockTime){
     return t >= activation
 }
 
-// Split a registered BATCH into sub-commands, preserving empty elements.
-// Return null for non-BATCH input and [] for an unregistered format.
+// SPLIT EQUIVALENCE WITH THE INDEXER
+// readCommands splits String(TX_DATA) on ';', then removes the first
+// BATCH|<format>| occurrence from element zero. This decoder removes that same
+// prefix at index zero before splitting. The prefix contains no semicolon, so
+// both operations produce the same list, including empty elements that count
+// toward the command cap. The registered-format conformance test pins
+// BATCH_SUB_COMMAND_FORMATS to the indexer's formats. An unregistered format is
+// rejected as an unknown version there and returns [] here; non-BATCH input
+// returns null because it has no sub-command list.
 function batchSubCommands(decodedData){
     if (typeof decodedData !== 'string' || !decodedData.startsWith('BATCH|'))
         return null
@@ -77,8 +84,19 @@ function expandAliasName(actionName, aliases){
     return canonical
 }
 
-// The remaining limit helpers mirror only rejection cases the decoder can prove.
-// Capture activation must not precede the indexer's issuance-limit rules.
+// WHICH FLAG STATE
+// The CHILD_ISSUE_KEY and per-literal MINT groupings below, plus COMMAND_LIMIT
+// and the merged action caps in batch_cost.js, mirror rules the indexer applies
+// only while BATCH_ISSUANCE_LIMITS is active. The decoder does not evaluate that
+// flag. Its capture gate is safe because the activation conformance test requires
+// equality with the indexer's issuance-limit instant on every armed network.
+// The tier-2 vendoring tests also require a zero block threshold and a flag
+// version no newer than the indexer's compiled consensus version. Therefore the
+// flag is active whenever capture can reach these helpers. Before activation, or
+// on a disarmed network, capture returns without applying them. This argument is
+// specific to BATCH_ISSUANCE_LIMITS. BATCH_COST_WEIGHTING has its own vendored
+// instant and runtime check in batch_cost.js; bin/sync-batch-limits.js documents
+// the longer distinction.
 
 // The indexer's `util.isNumeric`, mirrored verbatim, because isLegacyActionFormat below
 // branches on it and a divergence here moves a TICK by one position.
