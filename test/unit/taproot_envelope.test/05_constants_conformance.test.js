@@ -129,6 +129,26 @@ async function runAdversarialEntry(adv, control){
     assert.strictEqual(rpc.callCount, 0, adv.name + ' never fetches the commit')
 }
 
+function assertHeaderFramingVectors(vectors, control){
+    const expectedPayload = vectors.envelope_grammar.compiled_payload_hex
+    const seen = new Set()
+    for (const entry of vectors.header_framing.vectors){
+        const witness = [Buffer.alloc(64), Buffer.from(entry.envelope_script_hex, 'hex'), control]
+        const result = createDecoder().detectEnvelopeWitness(witness)
+        if (entry.expect === 'recognized'){
+            assert.ok(result, `${entry.name} must be recognized`)
+            assert.strictEqual(result.payload.toString('hex'), expectedPayload, entry.name)
+        } else if (entry.expect === 'not_recognized'){
+            assert.strictEqual(result, null, entry.name)
+        } else {
+            assert.fail(`unknown header-framing expect ${entry.expect} for ${entry.name}`)
+        }
+        seen.add(entry.expect)
+    }
+    assert.ok(vectors.header_framing.vectors.length >= 5, 'header-framing corpus shrank')
+    assert.deepStrictEqual([...seen].sort(), ['not_recognized', 'recognized'])
+}
+
 describe('Taproot envelope recognition', function () {
 
     afterEach(() => sinon.restore())
@@ -238,6 +258,7 @@ describe('Taproot envelope recognition', function () {
                     executed++
                 }
                 assert.ok(executed >= 6, `only ${executed} byte-carrying adversarial entries executed`)
+                assertHeaderFramingVectors(vectors, control)
             })
 
             it('the envelope_not_input_0 witness IS an action at input 0, so its refusal comes from the index alone', async function () {
