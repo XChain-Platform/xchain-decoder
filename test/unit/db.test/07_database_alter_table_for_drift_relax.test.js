@@ -76,4 +76,25 @@ describe('Database#alterTableForDrift() NOT NULL relax keeps live attributes', (
         const alters = await altersFor([liveCol('id', { COLUMN_KEY: 'PRI' }), liveCol('b', { EXTRA: 'auto_increment' })])
         assert.deepStrictEqual(alters, [])
     })
+
+    it('warns when a missing NOT NULL column cannot be added safely', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'decoder-drift-missing-'))
+        fs.writeFileSync(path.join(dir, 'missing.sql'),
+            'CREATE TABLE missing (\n  id INT NOT NULL\n) ENGINE=InnoDB;\n')
+        const db = new Database('127.0.0.1', 3306, 'test_db', 'user', 'pass')
+        db.sqlPath = dir
+        const statements = []
+        const warnings = []
+        const originalWarn = console.warn
+        console.warn = (message) => warnings.push(String(message))
+        try {
+            await db.alterTableForDrift('missing.sql', { query: async (sql) => {
+                if (/information_schema\.columns/i.test(sql)) return []
+                statements.push(sql)
+                return []
+            } })
+        } finally { console.warn = originalWarn }
+        assert.deepStrictEqual(statements, [])
+        assert.ok(warnings.some(line => /missing\.id/.test(line) && /NOT NULL with no DEFAULT/.test(line)))
+    })
 })

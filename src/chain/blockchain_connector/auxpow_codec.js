@@ -53,6 +53,9 @@ function encodeVarintHex(value) {
     throw new Error('encodeVarintHex: value out of supported range: ' + value)
 }
 
+// Skip the coinbase transaction at the head of the AuxPoW section and return the
+// offset just past its locktime.
+// Keep in sync with xchain-utxo-tracker/src/chain/blockchain_connector/auxpow_codec.js skipCoinbaseTransaction.
 function skipCoinbaseTransaction(buf, start) {
     let offset = start
 

@@ -358,4 +358,33 @@ describe('XChainDecoder keeps an unrecorded halt across the TTL re-probe', funct
         assert.strictEqual(status.halted, false, 'an operator clear of a recorded halt must still land')
         assert.strictEqual(status.cleared_reason, 'verified')
     })
+
+    it('still clears a recorded halt once an operator clear is read: the clear log names the supersession', async function () {
+        const { logger } = require('../../src/XChainDecoder/constants.js')
+        const warns = []
+        const realWarn = logger.warn
+        logger.warn = (msg) => { warns.push(String(msg)) }
+        try {
+            let row = { halted: true, at: '2026-10-01T00:00:00.000Z', reason: 'over-deep' }
+            const decoder = await haltedUnrecorded({ markReorgHalted: async () => true, getReorgHaltMarker: async () => row })
+            row = { ...NO_ROW, cleared_at: '2026-10-02T00:00:00.000Z', cleared_reason: 'verified by operator' }
+            await decoder.checkReorgHalt({ force: true })
+            assert.strictEqual(warns.length, 1)
+            assert.match(warns[0], /no longer live/)
+            assert.match(warns[0], /superseded by an audited REORG_HALT_CLEARED row/)
+            assert.match(warns[0], /2026-10-02T00:00:00\.000Z: verified by operator/)
+            assert.doesNotMatch(warns[0], /is gone/)
+            // A halt that stops being live with no halt row present says so instead.
+            row = { halted: true, at: '2026-10-03T00:00:00.000Z', reason: 'again' }
+            await decoder.checkReorgHalt({ force: true })
+            warns.length = 0
+            row = { ...NO_ROW }
+            await decoder.checkReorgHalt({ force: true })
+            assert.strictEqual(warns.length, 1)
+            assert.match(warns[0], /no longer live; no REORG_HALT row is present/)
+            assert.doesNotMatch(warns[0], /is gone/)
+        } finally {
+            logger.warn = realWarn
+        }
+    })
 })

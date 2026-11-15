@@ -108,9 +108,14 @@ describe('Database#deleteBlockByIndex()', () => {
         const { pool, conn } = withConn(q);
         injectPool(db, pool);
         await db.deleteBlockByIndex(77);
-        // Every parameterized DELETE call should include [77] as params
-        const paramCalls = conn.query.getCalls().filter(c => Array.isArray(c.args[1]) && c.args[1][0] === 77);
-        assert.ok(paramCalls.length >= 4);
+        // Two restore statements and six row-deletion statements are block-scoped.
+        const writeCalls = conn.query.getCalls().filter(c => /\b(DELETE|UPDATE)\b/i.test(c.args[0]));
+        assert.strictEqual(writeCalls.length, 8,
+            'expected 2 restoreDispenserExtensions statements and 6 deleteBlockRows statements');
+        for (const call of writeCalls) {
+            const sql = call.args[0].trim().replace(/\s+/g, ' ');
+            assert.deepStrictEqual(call.args[1], [77], 'wrong blockIndex binding for: ' + sql);
+        }
     });
 
 });

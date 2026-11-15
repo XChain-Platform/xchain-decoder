@@ -245,4 +245,4 @@ async function refuseOrHaltDeepGap(block, nodeTip, priorDepth, blocksDeleted, wa
 }
 
 
-module.exports = { safeDepthFor, refuseHaltedRollback, readPriorRollbackDepth, assertWithinSafeDepth, requireReorgProof, requireAboveTipForkProof, refuseOrHaltDeepGap }
+module.exports = { safeDepthFor, refuseHaltedRollback, readPriorRollbackDepth, assertWithinSafeDepth, requireReorgProof, refuseOrHaltDeepGap }

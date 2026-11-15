@@ -22,7 +22,7 @@ const { format: formatLogLine } = require('node:util')
 const { chainTierMismatch, chainFieldMissing, chainGenesisUnpinned } = require('../protocol/chain_identity')
 const { logger, BLOCKCHAIN_INFO_REFRESH_MS, MIN_VERIFICATION_PROGRESS_TO_PARSE } = require('./constants.js')
 const { nodeStillCatchingUp, blockchainInfoWellFormed } = require('./payload_helpers.js')
-const { parkOrRethrow, setReorgWait } = require('./sync_loop.js')
+const { parkOrRethrow, rederiveAfterRollback, setReorgWait } = require('./sync_loop.js')
 
 // lastBlockchainInfo is the reply fetchChainTip just stored on the loop, passed in
 // read-only; a refusal discards it from the loop and the caller sleeps and re-polls.
@@ -272,12 +272,7 @@ async function reconcileOrphanBlocks(loop, lastProcessedBlockIndex){
     // Re-clamp: a deep reorg can empty the blocks table, causing
     // getLastBlockIndex() to return -1 and nextBlockHeight to become 0
     // on a nonzero-start network. Clamp here, the same as the pre-loop guard.
-    loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
-    loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-    loop.blocksQuantity = 0
-    loop.transactionsCount = 0
-    loop.validTransactionsCount = 0
-    loop.outputCount = 0
+    await rederiveAfterRollback.call(this, loop)
     loop.startTimeStamp = Date.now()
     this.log("Blocks were updated after node-tip regression")
     return 'continue'

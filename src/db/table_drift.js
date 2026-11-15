@@ -126,7 +126,7 @@ module.exports = {
             const cur = liveByName.get(exp.name.toLowerCase());
             if(!cur){
                 if(exp.notNull && !exp.hasDefault){
-                    logger.info('Schema drift on ' + table + '.' + exp.name + ': column missing live, source is NOT NULL with no DEFAULT; cannot backfill existing rows safely. Skipping; add manually.');
+                    logger.warn('Schema drift on ' + table + '.' + exp.name + ': column missing live, source is NOT NULL with no DEFAULT; cannot backfill existing rows safely. SKIPPING add; add it in a dated migration.');
                     continue;
                 }
                 logger.info('Schema drift on ' + table + '.' + exp.name + ': column missing live. Adding column from SQL source.');

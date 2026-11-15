@@ -82,7 +82,7 @@ function buildDecoder(blockTxIds, mempoolDb) {
     decoder.sleep = async () => {}
     decoder.connector = {
         getBlockHash: async () => 'block-' + HEIGHT,
-        getBlock: async () => '',
+        getBlock: async () => '00',
     }
     decoder.fetchBlockHex = async () => ''
     decoder.xchainBlockDecoder = {

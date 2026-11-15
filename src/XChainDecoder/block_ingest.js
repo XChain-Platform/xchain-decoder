@@ -21,7 +21,7 @@
 const util = require('../util')
 const { format: formatLogLine } = require('node:util')
 const { logger, SYNCED_THRESHOLD } = require('./constants.js')
-const { parkOrRethrow } = require('./sync_loop.js')
+const { parkOrRethrow, rederiveAfterRollback, resetAfterRollback } = require('./sync_loop.js')
 const { storeBlock } = require('./block_store.js')
 
 async function fetchNextBlock(nextBlockHeight){
@@ -77,10 +77,7 @@ async function retryUndecodableBlock(loop, e, nextBlockHeight, nextBlockHash){
     this.parseErrors++
     logger.error(formatLogLine(`Failed to decode block ${nextBlockHeight} (${nextBlockHash}), retrying:`, e))
     await this.db.endTransaction()
-    loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
-    loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-    loop.blocksQuantity = 0
-    await this.sleep(3000)
+    await resetAfterRollback.call(this, loop)
     return 'continue'
 }
 
@@ -99,15 +96,10 @@ async function rollBackDetectedReorg(loop, nextBlockHeight){
     this.reorgWait = null
     loop.tipBelowStoredTipRefused = false
     // Re-clamp: same as the pre-loop guard and the node-tip regression path.
-    loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
+    await rederiveAfterRollback.call(this, loop)
     // Count rolled-back blocks as the difference between the pre-reorg tip
     // and the newly confirmed last good block so the log entry is actionable.
     const rolledBackCount = Math.max(0, preReorgBlock - loop.lastProcessedBlockIndex)
-    loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-    loop.blocksQuantity = 0
-    loop.transactionsCount = 0
-    loop.validTransactionsCount = 0
-    loop.outputCount = 0
     loop.startTimeStamp = Date.now()
     this.log("Blocks were updated (" + rolledBackCount + " blocks rolled back)")
     return 'continue'

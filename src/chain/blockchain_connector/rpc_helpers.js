@@ -36,6 +36,19 @@ function envInt(raw, fallback, name, min = 1) {
     return n
 }
 
+// Accept only a non-empty, byte-aligned hex string from block RPCs.
+function isWholeHex(value){
+    return typeof value === 'string' && value.length > 0 && value.length % 2 === 0
+        && /^[0-9a-fA-F]+$/.test(value)
+}
+
+// The error a block RPC answer that is not whole hex raises, naming the method, the block
+// and the answer's shape (never its content) so a wire fault reads as one.
+function malformedHexError(method, blockhash, value){
+    const shape = typeof value === 'string' ? 'string length ' + value.length : typeof value
+    return new Error(method + ' returned malformed block hex for ' + blockhash + ' (' + shape + ')')
+}
+
 // Attach the node's JSON-RPC error code and message to an error, non-enumerable so
 // JSON serialization of the error is unchanged. The one definition both transports
 // use: sanitizeRpcError for an HTTP-500 body, rpcResult for an HTTP-200 one.
@@ -172,6 +185,8 @@ function carryErrorIdentity(target, cause){
 
 module.exports = {
     envInt,
+    isWholeHex,
+    malformedHexError,
     attachRpcFields,
     carryErrorIdentity,
     sanitizeRpcError,

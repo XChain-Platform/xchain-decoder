@@ -22,6 +22,7 @@ const {
 const protocolTime = require('../protocol/protocol_time')
 const { logger, SYNCED_THRESHOLD, DB_TRANSACTION_BLOCKS_QUANTITY, LOG_BLOCK_INTERVAL, DISPENSER_EXPIRE_SAFE_DEPTH } = require('./constants.js')
 const { ingestTransaction, clearQuarantineState } = require('./transaction_ingest.js')
+const { rederiveAfterRollback } = require('./sync_loop.js')
 
 async function loadOpenDispenserAddresses(block, nextBlockHeight, parentProtocolTime){
     // Load the set once per block after any legacy expiry and before the
@@ -41,13 +42,7 @@ async function retryFailedCommit(loop, nextBlockHeight){
     // Reset to the last durable block after commitTransaction rolls back the
     // batch. The in-memory counters reset too so the retry is not double-counted.
     logger.error(`Commit failed at block ${nextBlockHeight}; resetting to last committed block and retrying`)
-    loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
-    loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-    loop.blocksQuantity = 0
-    loop.transactionsCount = 0
-    loop.validTransactionsCount = 0
-    loop.outputCount = 0
-    loop.blocksCount = 0
+    await rederiveAfterRollback.call(this, loop)
     loop.startTimeStamp = Date.now()
     await this.sleep(3000)
     return 'continue'

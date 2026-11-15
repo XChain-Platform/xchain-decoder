@@ -60,8 +60,9 @@ module.exports = {
     //
     // Flagged as destructive: any top-level DROP other than DROP INDEX and DROP TEMPORARY
     // TABLE (sequences, triggers, views, events and routines too), TRUNCATE, RENAME TABLE,
-    // DELETE (any form), REPLACE INTO (atomic DELETE+INSERT), INSERT ... ON DUPLICATE
-    // KEY UPDATE (rewrites every colliding row), LOAD DATA (rows from a file the
+    // DELETE (any form), REPLACE INTO (atomic DELETE+INSERT), INSERT IGNORE,
+    // INSERT ... ON DUPLICATE KEY UPDATE, CREATE TABLE ... IGNORE/REPLACE SELECT,
+    // LOAD DATA (rows from a file the
     // scanner cannot read), UPDATE (except the
     // committed AUTO_INCREMENT id=0 repair),
     // ALTER TABLE ... DROP <column|partition|bare identifier>,

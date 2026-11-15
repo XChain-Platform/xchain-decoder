@@ -140,11 +140,15 @@ function makeDecoder(consensusNetwork){
 
 function configureBlockDecoder(decoder, blockTimes){
     decoder.xchainBlockDecoder = {
-        blockFromHex: (hex) => ({
-            prevHash: Buffer.from(PREV_WIRE),
-            timestamp: blockTimes[Number(String(hex).split(':')[1])],
-            transactions: [fakeTx('tx-at-' + String(hex))],
-        })
+        // getBlock below hands back the block's label hex-encoded, so it is whole hex.
+        blockFromHex: (hex) => {
+            const label = Buffer.from(String(hex), 'hex').toString()
+            return {
+                prevHash: Buffer.from(PREV_WIRE),
+                timestamp: blockTimes[Number(label.split(':')[1])],
+                transactions: [fakeTx('tx-at-' + label)],
+            }
+        }
     }
 }
 
@@ -163,7 +167,7 @@ function runBlocks(consensusNetwork, blockTimes, model){
     decoder.connector = {
         getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: blockTimes.length - 1 }),
         getBlockHash:      async (height) => 'height:' + height,
-        getBlock:          async (hash) => hash,
+        getBlock:          async (hash) => Buffer.from(hash).toString('hex'),
     }
 
     let commits = 0

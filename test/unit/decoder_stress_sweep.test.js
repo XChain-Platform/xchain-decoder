@@ -49,7 +49,7 @@ function buildInsertFailureDecoder(insertTransaction){
     decoder.connector = {
         getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: 0 }),
         getBlockHash: async () => 'aabbccdd',
-        getBlock: async () => ''
+        getBlock: async () => '00'
     }
     decoder.db = {
         createDatabase: async () => true, verifyDatabase: async () => true,
@@ -79,7 +79,7 @@ function buildOutputDecoder(parseResult){
     const calls = { insertTx: [], outputs: 0, commit: 0 }
     decoder.connector = {
         getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: 0 }),
-        getBlockHash: async () => 'aabbccdd', getBlock: async () => ''
+        getBlockHash: async () => 'aabbccdd', getBlock: async () => '00'
     }
     decoder.db = {
         createDatabase: async () => true, verifyDatabase: async () => true,

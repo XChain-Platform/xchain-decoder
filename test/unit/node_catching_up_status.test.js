@@ -69,7 +69,7 @@ function buildDecoder(infoQueue, onPoll = () => {}){
             return Object.assign({ verificationprogress: 1 }, info)
         },
         getBlockHash: async () => 'aabbccdd',
-        getBlock: async () => ''
+        getBlock: async () => '00'
     }
 
     decoder.db = {

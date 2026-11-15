@@ -30,7 +30,7 @@ function configureDecoderSource(decoder, calls){
     decoder.connector = {
         getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: 11 }),
         getBlockHash: async () => 'block-11',
-        getBlock: async () => '',
+        getBlock: async () => '00',
     }
     decoder.xchainBlockDecoder = {
         blockFromHex: () => ({

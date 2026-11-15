@@ -131,7 +131,9 @@ describe('decoder migration runner applies the unique-key witness to auto files 
             'CREATE UNIQUE INDEX address ON index_addresses (address);\n');
         fs.writeFileSync(path.join(root, 'migrations', '2099-01-01-t.sql'),
             '-- xchain:migration mode=auto\nINSERT IGNORE INTO index_addresses (address) SELECT source FROM mempool_transactions;\n');
-        Object.assign(db, { sqlPath: root, dbName: 'fake_db', getConnection: async () => conn, ensureMigrationsLedger: async () => {} });
+        // Isolate the downstream witness; classifier behavior has its own real-rule tests.
+        Object.assign(db, { sqlPath: root, dbName: 'fake_db', getConnection: async () => conn,
+            ensureMigrationsLedger: async () => {}, destructiveAutoStatement: () => null });
         return { db, executed };
     }
 
