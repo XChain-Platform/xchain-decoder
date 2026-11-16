@@ -161,6 +161,12 @@ function isDispenserAddressIdCollapseActive(consensusNetwork, blockTime){
 // Above the address-id collapse gate, use the resolved index_addresses id so every
 // equality of the table's collation shares one key. Raw spellings remain distinct below
 // the gate for historical replay compatibility.
+//
+// RESIDUAL: mainnet batch registration is live from 1786838400, but the address-id
+// collapse gate remains unarmed. Until it is armed, operating addresses that differ
+// only under the table collation stay separate here, share one (tx_index, address_id)
+// key, and leave the first create's expiration after the second insert is reported as
+// DUPLICATED_TRANSACTION. Rows written in that window remain first-wins on replay.
 async function collapseRegistrationsByAddressId(candidates, addressIdOf){
     if (!Array.isArray(candidates)) return []
     const rawAddresses = new Set()

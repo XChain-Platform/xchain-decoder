@@ -42,7 +42,9 @@
  *      action, so the purge cannot have lost anything. --force overrides this one
  *      for an operator who has compared the dispensers table against a known-good
  *      replica; the clear row records that it was forced.
- *   3. the session passes the decoder's strict sql_mode check. Cannot be forced.
+ *   3. the connection that writes and reads back the clear row passes the
+ *      decoder's strict sql_mode check. Cannot be forced. The CLI also checks one
+ *      pooled session before --dry-run so a dry run predicts the same refusal.
  *
  * Reads DECODER_DB_* from the service environment (.env) through src/config.js,
  * like migrate.js.
@@ -154,9 +156,8 @@ function refuseUnpinnableHalt(marker, error){
     return true
 }
 
-// Refuse a session whose sql_mode the decoder itself would refuse at startup. This
-// CLI builds its own pool and never runs runMigrations, so without this check the row
-// that decides halt state could be written on a lax session with no warning.
+// Pre-check a session so --dry-run predicts the binding refusal. clearReorgHalt repeats
+// the check on the connection that writes and reads back REORG_HALT_CLEARED.
 async function refuseLaxSqlMode(db, error){
     try {
         await db.assertStrictSqlMode()
@@ -212,6 +213,11 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
     // REORG_HALT inside that window; clearing without the pin would supersede a halt
     // nobody audited and record checks taken before it existed.
     const result = await db.clearReorgHalt({ reason, checks: checks, forced: !dispenserClean, expectedHaltId: marker.id })
+    if (result.laxSession){
+        error('clear-reorg-halt: REFUSED. The connection that would have written the REORG_HALT_CLEARED row '
+            + 'failed the strict-mode check: ' + result.error + '. Nothing was cleared.')
+        return EXIT.FAILED
+    }
     if (result.alreadyClear){
         log('clear-reorg-halt: the marker was cleared by someone else while this ran. Nothing to do.')
         return EXIT.OK

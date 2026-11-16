@@ -47,11 +47,11 @@ module.exports = {
     // live, because "we could not tell" must never reach a caller as "not halted".
     // The same holds for a clear row: one without the audited shape clearReorgHalt
     // writes reads as a live halt flagged unaudited_clear, not as a clear.
-    async readReorgHaltState(){
+    async readReorgHaltState(existingConnection){
         const query = `SELECT id, time, code, data FROM events WHERE code IN ('REORG_HALT', 'REORG_HALT_CLEARED') ORDER BY id DESC LIMIT 1;`
         const none = { halted: false, id: null, at: null, reason: null, cleared_at: null, cleared_reason: null }
-        let connection = await this.getConnection()
-        const ownLease = (this.transactionConnection == null)
+        let connection = existingConnection || await this.getConnection()
+        const ownLease = (existingConnection == null && this.transactionConnection == null)
         try {
             const rows = await connection.query(query)
             if (!Array.isArray(rows) || rows.length === 0) return none
@@ -102,22 +102,45 @@ module.exports = {
     async clearReorgHalt({ reason, checks = {}, forced = false, expectedHaltId = null } = {}){
         if (typeof reason !== 'string' || reason.trim().length < 8)
             throw new Error('clearReorgHalt: a reason of at least 8 characters is required; it is recorded with the clear')
-        const state = await this.readReorgHaltState()
-        if (!state.halted) return { cleared: false, alreadyClear: true }
-        if (state.id == null || (expectedHaltId != null && String(state.id) !== String(expectedHaltId)))
-            return { cleared: false, alreadyClear: false, superseded: true, liveHaltId: (state.id != null ? state.id : null) }
-        const written = await this.insertEvent('REORG_HALT_CLEARED', {
-            reason: reason.trim(),
-            at: new Date().toISOString(),
-            forced: !!forced,
-            checks: checks,
-            cleared_halt_id: state.id,
-            cleared_halt_at: state.at,
-            cleared_halt_reason: state.reason
-        })
-        if (written !== true) return { cleared: false, alreadyClear: false }
-        const after = await this.readReorgHaltState()
-        return { cleared: after.halted === false, alreadyClear: false }
+        let connection = this.transactionConnection
+        let ownLease = false
+        let sessionDirty = false
+        try {
+            if (connection == null){
+                connection = await this.getConnection()
+                ownLease = true
+            }
+            try {
+                await this.assertStrictSqlMode(connection)
+            } catch (err){
+                sessionDirty = true
+                return { cleared: false, alreadyClear: false, laxSession: true, error: (err && err.message) || String(err) }
+            }
+            const state = await this.readReorgHaltState(connection)
+            if (!state.halted) return { cleared: false, alreadyClear: true }
+            if (state.id == null || (expectedHaltId != null && String(state.id) !== String(expectedHaltId)))
+                return { cleared: false, alreadyClear: false, superseded: true, liveHaltId: (state.id != null ? state.id : null) }
+            const written = await this.insertEvent('REORG_HALT_CLEARED', {
+                reason: reason.trim(),
+                at: new Date().toISOString(),
+                forced: !!forced,
+                checks: checks,
+                cleared_halt_id: state.id,
+                cleared_halt_at: state.at,
+                cleared_halt_reason: state.reason
+            }, undefined, connection)
+            if (written !== true) return { cleared: false, alreadyClear: false }
+            const after = await this.readReorgHaltState(connection)
+            return { cleared: after.halted === false, alreadyClear: false }
+        } finally {
+            if (ownLease && connection){
+                if (sessionDirty && typeof connection.destroy === 'function'){
+                    try { await connection.destroy() } catch (_) {}
+                } else {
+                    try { await connection.release() } catch (_) {}
+                }
+            }
+        }
     },
 
     // How many distinct block heights above the current tip have already been
