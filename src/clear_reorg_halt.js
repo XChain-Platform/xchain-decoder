@@ -170,6 +170,32 @@ async function refuseLaxSqlMode(db, error){
     }
 }
 
+function reportClearResult(result, { log, error, verdict, reason }){
+    if (result.laxSession){
+        error('clear-reorg-halt: REFUSED. The connection that would have written the REORG_HALT_CLEARED row '
+            + 'failed the strict-mode check: ' + result.error + '. Nothing was cleared.')
+        return EXIT.FAILED
+    }
+    if (result.alreadyClear){
+        log('clear-reorg-halt: the marker was cleared by someone else while this ran. Nothing to do.')
+        return EXIT.OK
+    }
+    if (result.superseded){
+        error('clear-reorg-halt: REFUSED. The decoder halted again while these checks ran, so the live halt'
+            + (result.liveHaltId != null ? ' (events id ' + result.liveHaltId + ')' : '')
+            + ' is not the one they were measured against. Nothing was cleared. Wait for the decoder to settle, then run this again '
+            + 'so the checks are taken against the halt being cleared.')
+        return EXIT.HALT_SUPERSEDED
+    }
+    if (!result.cleared){
+        error('clear-reorg-halt: FAILED. The REORG_HALT_CLEARED row could not be written or read back; the halt is still live.')
+        return EXIT.FAILED
+    }
+    log('clear-reorg-halt: cleared. ' + verdict + '. Recorded as events.code=REORG_HALT_CLEARED with reason: ' + reason
+        + '. The decoder reports reorg_halted=false on its next probe (within a minute); the halt row itself is kept for the audit trail.')
+    return EXIT.OK
+}
+
 // The whole decision, with the database and the output injected so it can be
 // exercised without MariaDB. Returns the process exit code.
 async function run({ db, argv = [], log = console.log, error = console.error }){
@@ -213,29 +239,7 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
     // REORG_HALT inside that window; clearing without the pin would supersede a halt
     // nobody audited and record checks taken before it existed.
     const result = await db.clearReorgHalt({ reason, checks: checks, forced: !dispenserClean, expectedHaltId: marker.id })
-    if (result.laxSession){
-        error('clear-reorg-halt: REFUSED. The connection that would have written the REORG_HALT_CLEARED row '
-            + 'failed the strict-mode check: ' + result.error + '. Nothing was cleared.')
-        return EXIT.FAILED
-    }
-    if (result.alreadyClear){
-        log('clear-reorg-halt: the marker was cleared by someone else while this ran. Nothing to do.')
-        return EXIT.OK
-    }
-    if (result.superseded){
-        error('clear-reorg-halt: REFUSED. The decoder halted again while these checks ran, so the live halt'
-            + (result.liveHaltId != null ? ' (events id ' + result.liveHaltId + ')' : '')
-            + ' is not the one they were measured against. Nothing was cleared. Wait for the decoder to settle, then run this again '
-            + 'so the checks are taken against the halt being cleared.')
-        return EXIT.HALT_SUPERSEDED
-    }
-    if (!result.cleared){
-        error('clear-reorg-halt: FAILED. The REORG_HALT_CLEARED row could not be written or read back; the halt is still live.')
-        return EXIT.FAILED
-    }
-    log('clear-reorg-halt: cleared. ' + verdict + '. Recorded as events.code=REORG_HALT_CLEARED with reason: ' + reason
-        + '. The decoder reports reorg_halted=false on its next probe (within a minute); the halt row itself is kept for the audit trail.')
-    return EXIT.OK
+    return reportClearResult(result, { log, error, verdict, reason })
 }
 
 async function main(){
