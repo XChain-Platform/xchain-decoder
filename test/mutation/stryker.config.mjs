@@ -54,6 +54,7 @@ export default {
       'test/unit/decoder_tip_stale_surface.test.js',
       'test/unit/node_catch_up_wait.test.js',
       'test/unit/node_catching_up_status.test.js',
+      'test/unit/reorg_recovery.test/05_reorg_wait_surface.test.js',
     ],
     config: 'test/mutation/.mocharc.mutation.yml',
     'no-package': true,

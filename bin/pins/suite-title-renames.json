@@ -25,6 +25,10 @@
     },
     "test/unit/migration_runner.test.js": {
       "Database.destructiveAutoStatement() @regression does NOT flag benign system-variable SETs (SET NAMES / SET sql_mode / SET @@)": "Database.destructiveAutoStatement() @regression does NOT flag the allow-listed session SETs (SET NAMES / a single UTC time_zone)"
+    },
+    "test/unit/security/configuration/dependency_advisories.test.js": {
+      "Security: remediated dependency advisories @regression @tier4 ADV-1: package.json pins minimatch at or above 10.2.5": "Security: remediated dependency advisories @regression @tier4 ADV-1: package.json pins minimatch at or above 11.0.9",
+      "Security: remediated dependency advisories @regression @tier4 ADV-2: every minimatch entry in package-lock.json is at or above 10.2.5": "Security: remediated dependency advisories @regression @tier4 ADV-2: every minimatch entry in package-lock.json is at or above 11.0.9"
     }
   }
 }
