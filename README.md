@@ -46,6 +46,23 @@ Full decoder documentation is available in the [xchain-documentation](https://gi
 | [Database](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/database.md) | Full schema reference: 8 tables covering blocks, transactions, dispensers, indexes, events |
 | [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/operations.md) | Running, Docker, API endpoints, reorg handling, mempool, troubleshooting |
 
+### Dependency pins
+
+The decoder and UTXO tracker intentionally pin bitcoinjs-lib 6.1.8, while the
+encoder and SDK use 7.0.4. The v6 decoder patch reads Dogecoin output values
+above JavaScript's safe integer limit. It is applied by the Dockerfile copy,
+`src/chain/apply_bufferutils_patch.js`, and the startup check in
+`src/XChainDecoder/startup.js`.
+
+The decoder and tracker patch files must remain byte-identical, so those two
+services must migrate majors together. The service boundary carries raw
+transaction hex rather than bitcoinjs-lib objects, so the split does not alter
+their wire contract. Revisit the split when v6 reaches end of support or has a
+security advisory, when a coordinated decoder and tracker migration is planned,
+or before any service boundary starts carrying library objects or byte-array
+values. A migration must keep the large Dogecoin output regressions and the
+decoder startup check green.
+
 ## Quick Start
 
 ```bash

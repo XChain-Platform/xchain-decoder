@@ -16,7 +16,7 @@ const axios = require('axios');
 const config = require('../../config');
 const { format: formatLogLine } = require('node:util');
 const { CONNECTION_ERROR_CODES, logger } = require('./constants.js')
-const { carryErrorIdentity, envInt, nodeReachabilityFrom, rpcResult, sanitizeRpcError } = require('./rpc_helpers.js')
+const { carryErrorIdentity, envInt, isJsonRpcErrorAnswer, nodeReachabilityFrom, rpcResult, sanitizeRpcError } = require('./rpc_helpers.js')
 
 module.exports = {
     // Node reachability as the health surfaces publish it. Cheap and never throws,
@@ -44,9 +44,12 @@ module.exports = {
             this.lastNodeOkAt = Date.now()
             return response
         } catch (error) {
-            // Timeouts (ECONNABORTED), socket/DNS faults and RPC errors delivered as
-            // HTTP 500 all land here, and all mean this attempt got no usable answer.
-            this.lastNodeFailAt = Date.now()
+            // A JSON-RPC error object in the body proves the node answered, whichever
+            // HTTP status carried it, exactly as it does in the 200 branch above.
+            // Timeouts (ECONNABORTED), socket/DNS faults and HTTP errors without such a
+            // body (auth, text-only queue-full pages) still count as a failed attempt.
+            if (isJsonRpcErrorAnswer(error)) this.lastNodeOkAt = Date.now()
+            else this.lastNodeFailAt = Date.now()
             if (error && error.response) {
                 // An HTTP-level error (auth, queue-full 500, etc.) still proves
                 // the endpoint is reachable; only unreachability drives failover.

@@ -68,15 +68,34 @@ describe('BATCH sub-command ACTION-name gate and alias expansion', function () {
                     unknownButEnabled.push(name)
             }
             // A gate keyed on VALID_ACTION_NAMES would suppress capture for every batch
-            // carrying one of these, and the indexer dispatches those batches normally:
-            // under-capture, the money-bearing direction. The measurement is the reason
-            // hasProvablyRejectedSubCommand fires on the empty name ALONE.
+            // carrying one of these. Where the dispatched-only admission gate is unarmed
+            // (mainnet, and below its height elsewhere) the indexer dispatches those
+            // batches normally; where it is armed (regtest, which protocolChanges() builds,
+            // from block 0) only the names that are also in DISPATCHED_ACTIONS (DISPENSE,
+            // XCALL) are dispatched and a flag name such as UNIFIED_FEES rejects the batch.
+            // The under-capture argument therefore holds through names that are both
+            // enabled and dispatched: under-capture, the money-bearing direction. The
+            // measurement is the reason hasProvablyRejectedSubCommand fires on the empty
+            // name ALONE.
             assert.ok(unknownButEnabled.length > 0,
                 'if this ever reaches zero, a decoder-side name gate becomes buildable and ' +
-                'the rest of this defect class can be closed; re-derive rather than delete')
+                'the rest of this defect class can be closed; re-derive rather than delete ' +
+                '(where the dispatched-only gate is armed the set that matters is enabled ' +
+                'AND in DISPATCHED_ACTIONS)')
             for (const name of ['DISPENSE', 'XCALL', 'UNIFIED_FEES'])
                 assert.ok(unknownButEnabled.includes(name),
                     name + ' is enabled in the indexer and unknown here')
+        })
+
+        it('admits DISPENSE and XCALL through the dispatched-only set while UNIFIED_FEES stays outside it', function () {
+            const dispatch = path.join(INDEXER_ROOT, 'src', 'actions', 'actions_class', 'dispatch.js')
+            if (!siblingOrSkip(this, dispatch)) return
+            const { DISPATCHED_ACTIONS } = require(dispatch)
+            for (const name of ['DISPENSE', 'XCALL'])
+                assert.ok(DISPATCHED_ACTIONS.has(name), name + ' is dispatched by the indexer')
+            assert.strictEqual(DISPATCHED_ACTIONS.has('UNIFIED_FEES'), false,
+                'UNIFIED_FEES is a registered flag name with no handler, so a dispatched-only ' +
+                'network rejects a batch carrying it')
         })
 
         it('rejects an ALIAS name, so expansion must never run below BATCH_SUBACTION_NORMALIZATION', async function () {

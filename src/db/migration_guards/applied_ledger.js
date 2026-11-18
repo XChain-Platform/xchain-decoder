@@ -31,6 +31,7 @@ async function reconcileAppliedMigration(context, file, checksum){
     // whichever revision it applied first.
     const fromList = rebase ? [].concat(rebase.from) : [];
     if(rebase && fromList.includes(recorded) && checksum === rebase.to){
+        // Keep mode as apply-time history; the indexer's migrate.js --status shows the current tag.
         await context.conn.query('UPDATE schema_migrations SET checksum = ? WHERE name = ?', [checksum, file]);
         logger.info('runMigrations: rebaselined checksum for ' + file + ' (reviewed retag, executable SQL unchanged).');
         return true;

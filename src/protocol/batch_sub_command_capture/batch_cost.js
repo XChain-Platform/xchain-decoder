@@ -30,7 +30,7 @@ const { hasProvablyRejectedSubCommand,
 // Does the indexer PROVABLY reject this whole BATCH, so that none of its sub-commands runs?
 //
 // Returns true only on evidence this module can establish from the command list ALONE. It is
-// deliberately incomplete, and the three causes left out are left out for stated reasons
+// deliberately incomplete, and the causes left out are left out for stated reasons
 // rather than for want of effort:
 //
 //   * AN UNREGISTERED ACTION NAME (beyond the empty one). The indexer's activation scan
@@ -48,6 +48,19 @@ const { hasProvablyRejectedSubCommand,
 //     Object.prototype names are UNREGISTERED there and the batch is rejected as
 //     'invalid: ACTION (unknown)'; a name gate written from a list must treat them as unknown
 //     too. Left open; the over-capture it costs is the safe direction.
+//   * THE DISPATCHED-ONLY ADMISSION CHECK. Where ACTION_ADMISSION_DISPATCHED_ONLY is armed
+//     (BTC, LTC and DOGE testnet from their gate heights, and regtest; unarmed on mainnet),
+//     the indexer's activation scan runs a second name test BEFORE the registry one: a
+//     non-empty sub-command ACTION outside its
+//     in-code DISPATCHED_ACTIONS set rejects the whole batch as 'invalid: ACTION (unknown)',
+//     even for a registered, enabled feature-flag name such as UNIFIED_FEES. The empty name
+//     still dies on the registry test. Not mirrored, for the same reason as the name gate
+//     above: DISPATCHED_ACTIONS is a code constant that gains a member whenever the indexer
+//     gains a handler, so a decoder copy one release stale would read a newly handled ACTION
+//     as unknown and under-capture. Admission above the gate is DISPATCHED_ACTIONS AND the
+//     registry, so a list copied from either side can go stale. A deny-list of registered but
+//     never dispatched names, applied only at or above each network's gate height, fails
+//     safe when stale except for a flag name that later gains a handler; it is not built.
 //   * A SLEEPING SOURCE. `indexerDb.isActionAllowed` reads the indexer's own address-sleep
 //     state (db.isAddressSleeping) as of the block. That table does not exist in the decoder
 //     and is not derivable from the transaction, so there is nothing here to mirror. Stated
@@ -55,7 +68,7 @@ const { hasProvablyRejectedSubCommand,
 //   * THE AGGREGATE GAS PRE-CHECK ('invalid: GAS (insufficient)'). Same reason: it reads the
 //     SOURCE's balances and the token set from the indexer database.
 //
-// A FOURTH cause, the BATCH_COST_WEIGHTING weight budget, IS mirrored, and unlike the caps
+// A FURTHER cause, the BATCH_COST_WEIGHTING weight budget, IS mirrored, and unlike the caps
 // above it is gated on its own vendored instant rather than assumed on (see
 // isBatchCostWeightingActive). Its two under-estimates, the DEPLOY discount and the flat
 // AIRDROP weight past the indexer's per-leg gate, are argued at subCommandCostWeight.

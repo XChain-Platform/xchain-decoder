@@ -168,6 +168,52 @@ describe('the connector records both instants at its single POST choke point', f
         assert.ok(r.node_unreachable, 'the timeout the operator saw 2099 times must show here')
         assert.strictEqual(r.node_unreachable.last_ok_at, null)
     })
+
+    async function postThrowing(c, err){
+        const axios = require('axios')
+        const realPost = axios.post
+        axios.post = async () => { throw err }
+        try {
+            await assert.rejects(() => c.rpcPost({ method: 'getrawtransaction' }), (e) => e === err)
+        } finally {
+            axios.post = realPost
+        }
+    }
+
+    function httpError(status, data){
+        const err = new Error('Request failed with status code ' + status)
+        err.response = { status, data }
+        return err
+    }
+
+    it('an HTTP 500 carrying a JSON-RPC error object counts as the node answering', async function () {
+        const c = newConnector()
+        c.lastNodeFailAt = Date.now() - 1000
+        await postThrowing(c, httpError(500, { result: null, id: 1,
+            error: { code: -5, message: 'No such mempool or blockchain transaction' } }))
+        assert.ok(c.lastNodeOkAt > 0)
+        assert.strictEqual(c.nodeReachability().node_unreachable, null,
+            'the same answer over HTTP 200 reads reachable, so over HTTP 500 it must too')
+    })
+
+    it('an HTTP 500 without a JSON-RPC error object still counts as a failed attempt', async function () {
+        const bodies = [
+            'Work queue depth exceeded',
+            undefined,
+            { error: 'plain string' },
+            { error: { message: 'no numeric code' } },
+            { error: null },
+        ]
+        for (const body of bodies) {
+            const c = newConnector()
+            await postThrowing(c, httpError(500, body))
+            assert.strictEqual(c.lastNodeOkAt, 0, 'body ' + JSON.stringify(body))
+            assert.ok(c.nodeReachability().node_unreachable, 'body ' + JSON.stringify(body))
+        }
+        const c = newConnector()
+        await postThrowing(c, httpError(401, ''))
+        assert.ok(c.nodeReachability().node_unreachable, 'a 401 is not an RPC answer')
+    })
 })
 
 describe('the connector records both instants at its single POST choke point', function () {

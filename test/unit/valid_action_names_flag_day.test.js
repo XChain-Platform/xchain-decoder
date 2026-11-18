@@ -23,22 +23,30 @@ const PINNED_NAMES = [
     'NODEPROOF', 'ORDER', 'PRICE', 'ROLLCALL', 'SEND', 'SLASH', 'SLEEP', 'STAKE',
     'SWAP', 'SWEEP', 'UNSTAKE', 'VOTE', 'WITHDRAW', 'XBRIDGE'
 ]
+const PINNED_DIGEST = '2c4a5838c3cad6f4d1dacc12c2840bac3f815195a77158568de36019af78ce15'
+
+function membershipDiff(names, pinned) {
+    const actual = [...names].sort()
+    const expected = [...pinned].sort()
+    return {
+        added: actual.filter(n => !expected.includes(n)),
+        removed: expected.filter(n => !actual.includes(n))
+    }
+}
+
+function digestOf(names) {
+    return crypto.createHash('sha256').update([...names].sort().join('\n')).digest('hex')
+}
 
 describe('VALID_ACTION_NAMES flag-day pin @regression', function () {
     it('holds exactly the pinned names', function () {
-        const actual = [...VALID_ACTION_NAMES].sort()
-        const expected = [...PINNED_NAMES].sort()
-        assert.deepStrictEqual({
-            added: actual.filter(n => !expected.includes(n)),
-            removed: expected.filter(n => !actual.includes(n))
-        }, { added: [], removed: [] },
+        assert.deepStrictEqual(membershipDiff(VALID_ACTION_NAMES, PINNED_NAMES), { added: [], removed: [] },
         'VALID_ACTION_NAMES changed: a membership change is a consensus flag-day, not an in-place edit')
     })
 
     it('pins a stable digest of the sorted membership', function () {
-        const digest = crypto.createHash('sha256').update([...VALID_ACTION_NAMES].sort().join('\n')).digest('hex')
-        const expected = crypto.createHash('sha256').update([...PINNED_NAMES].sort().join('\n')).digest('hex')
-        assert.strictEqual(digest, expected)
+        assert.strictEqual(digestOf(VALID_ACTION_NAMES), PINNED_DIGEST)
+        assert.strictEqual(digestOf(PINNED_NAMES), PINNED_DIGEST)
     })
 
     it('contains only upper-case names with no duplicates in the pin', function () {
@@ -48,7 +56,9 @@ describe('VALID_ACTION_NAMES flag-day pin @regression', function () {
 
     it('falsification: a changed membership is detected', function () {
         const mutated = new Set(VALID_ACTION_NAMES).add('NEWACTION')
-        const added = [...mutated].filter(n => !PINNED_NAMES.includes(n))
-        assert.deepStrictEqual(added, ['NEWACTION'])
+        const withoutSend = new Set([...VALID_ACTION_NAMES].filter(name => name !== 'SEND'))
+        assert.deepStrictEqual(membershipDiff(mutated, PINNED_NAMES), { added: ['NEWACTION'], removed: [] })
+        assert.deepStrictEqual(membershipDiff(withoutSend, PINNED_NAMES), { added: [], removed: ['SEND'] })
+        assert.notStrictEqual(digestOf(mutated), PINNED_DIGEST)
     })
 })
