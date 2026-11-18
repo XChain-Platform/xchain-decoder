@@ -118,11 +118,28 @@ describe('nodeReachabilityFrom() (the reducer both fields are derived from)', fu
     })
 })
 
-describe('the connector records both instants at its single POST choke point', function () {
-    function newConnector(){
-        return new BlockchainConnector('127.0.0.1', '18443', 'u', 'p')
-    }
+function newConnector(){
+    return new BlockchainConnector('127.0.0.1', '18443', 'u', 'p')
+}
 
+async function postThrowing(c, err){
+    const axios = require('axios')
+    const realPost = axios.post
+    axios.post = async () => { throw err }
+    try {
+        await assert.rejects(() => c.rpcPost({ method: 'getrawtransaction' }), (e) => e === err)
+    } finally {
+        axios.post = realPost
+    }
+}
+
+function httpError(status, data){
+    const err = new Error('Request failed with status code ' + status)
+    err.response = { status, data }
+    return err
+}
+
+describe('the connector records both instants at its single POST choke point', function () {
     it('starts with never-succeeded, never-failed and a start time', function () {
         const c = newConnector()
         assert.strictEqual(c.lastNodeOkAt, 0)
@@ -168,24 +185,9 @@ describe('the connector records both instants at its single POST choke point', f
         assert.ok(r.node_unreachable, 'the timeout the operator saw 2099 times must show here')
         assert.strictEqual(r.node_unreachable.last_ok_at, null)
     })
+})
 
-    async function postThrowing(c, err){
-        const axios = require('axios')
-        const realPost = axios.post
-        axios.post = async () => { throw err }
-        try {
-            await assert.rejects(() => c.rpcPost({ method: 'getrawtransaction' }), (e) => e === err)
-        } finally {
-            axios.post = realPost
-        }
-    }
-
-    function httpError(status, data){
-        const err = new Error('Request failed with status code ' + status)
-        err.response = { status, data }
-        return err
-    }
-
+describe('the connector records both instants at its single POST choke point', function () {
     it('an HTTP 500 carrying a JSON-RPC error object counts as the node answering', async function () {
         const c = newConnector()
         c.lastNodeFailAt = Date.now() - 1000
