@@ -26,7 +26,7 @@ dotenv.config()
 // timestamped, and installObservability does not run until ~200 lines further
 // down.
 const config = require('./config');
-const { patchConsole } = require('./observability');
+const { getSqlTiming, patchConsole } = require('./observability');
 patchConsole({
     service: 'xchain-decoder',
     version: require('../package.json').version,
@@ -271,7 +271,13 @@ function registerRoutes(app, decoder, isDecoderRunning, getDecoderError){
     // that fall through to this root-mounted router get a normal JSON-RPC error
     // response instead of crashing the request.
     app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
-    app.use(jsonRouter({methods: createJsonRpcController(decoder, isDecoderRunning, getDecoderError)}))
+    const methods = Object.assign(
+        Object.create(null),
+        getSqlTiming().wrapRpcMethods(
+            createJsonRpcController(decoder, isDecoderRunning, getDecoderError)
+        )
+    )
+    app.use(jsonRouter({methods}))
 
     // Terminal error handler: body-parser failures (malformed, non-object or oversized
     // JSON) become JSON-RPC errors instead of Express's HTML stack-trace page.
@@ -344,4 +350,4 @@ if (require.main === module) startApi()
 // startApi is exported so the crash handlers it installs can be driven for real
 // rather than asserted against the source text; the require.main guard above
 // still keeps a plain require from opening a port or a DB connection.
-module.exports = { buildHealthResult, makeRpcBatchGuard, registerLiveRoute, registerReadyRoute, registerStatusRoute, startApi, createMempoolMethods, createJsonRpcController, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
+module.exports = { buildHealthResult, makeRpcBatchGuard, registerLiveRoute, registerReadyRoute, registerStatusRoute, registerRoutes, startApi, createMempoolMethods, createJsonRpcController, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }

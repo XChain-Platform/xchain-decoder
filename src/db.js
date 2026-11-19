@@ -20,6 +20,7 @@
 
 const mariadb = require('mariadb');
 const config = require('./config');
+const { getSqlTiming } = require('./observability');
 const { DB_NAME_REGEX, DECODER_SQL_MODE } = require('./db/constants.js')
 const { resolveQueryTimeout } = require('./db/query_helpers.js')
 
@@ -64,7 +65,7 @@ class Database {
             // the driver re-runs initSql after a connection reset and sessionVariables not.
             initSql:          "SET SESSION sql_mode='" + DECODER_SQL_MODE + "'"
         };
-        this.pool = mariadb.createPool(this.connectionPoolParams);
+        this.pool = getSqlTiming().wrapPool(mariadb.createPool(this.connectionPoolParams));
         this.transactionConnection = null;
         this._transactionLock = false;
         this._transactionLockQueue = [];
