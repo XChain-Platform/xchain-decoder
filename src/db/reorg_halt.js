@@ -195,8 +195,14 @@ module.exports = {
                     throw new Error('countReorgDeletesAboveTip: REORG marker id ' + row.id
                         + ' is not the expected array payload, so the rollback depth cannot be bounded')
                 for (const entry of payload){
-                    const height = Number(entry && entry.block_index)
-                    if (!Number.isFinite(height))
+                    // Accept integers and legacy digit strings only. Other values
+                    // must fail closed instead of coercing to height zero.
+                    const raw = entry && typeof entry === 'object' && !Array.isArray(entry)
+                        ? entry.block_index : undefined
+                    const readable = typeof raw === 'number'
+                        || (typeof raw === 'string' && /^\d+$/.test(raw))
+                    const height = readable ? Number(raw) : NaN
+                    if (!Number.isSafeInteger(height) || height < 0)
                         throw new Error('countReorgDeletesAboveTip: REORG marker id ' + row.id
                             + ' carries a non-numeric block_index, so the rollback depth cannot be bounded')
                     if (height > tip) heightsAboveTip.add(height)

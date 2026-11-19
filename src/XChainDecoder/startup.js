@@ -125,11 +125,15 @@ async function prepareDatabase(){
         if(!tablesVerified)
             util.throwError(new Error("Database " + this.dbName + " tables don't exist!"));
 
-        // Apply any pending `auto` schema migrations (additive/idempotent changes the
-        // drift reconciler can't make on its own). Manual/destructive migrations stay
-        // gated for an explicit operator run (`node src/db/migrate.js`). Recorded in the
-        // schema_migrations ledger, so this is a no-op once applied.
-        await this.db.runMigrations();
+        // Apply any pending `auto` schema migrations and complete the checksum
+        // pass before parsing. A lock skip examined neither, so startup must fail
+        // and let the process restart after the other migrator releases the lock.
+        const migrationResult = await this.db.runMigrations();
+        if (migrationResult && migrationResult.lockSkipped === true) {
+            util.throwError(new Error('Refusing to parse because migration lock xchain_migrate_' + this.dbName
+                + ' was unavailable; no pending migration was applied and no applied checksum was verified. '
+                + 'Restart after the other migrator releases the lock.'));
+        }
     }
 
     // Report a LATENT reorg halt at boot. A decoder restored from (or running on)

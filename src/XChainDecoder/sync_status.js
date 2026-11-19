@@ -209,11 +209,14 @@ module.exports = {
         // In that window blockchainInfoLastBlock is frozen, so a zero lag does not
         // mean caught-up; it means we cannot see how far the chain has advanced.
         const nodeHeightStale = this.isNodeHeightStale()
+        // -1 means no node tip has been accepted since boot. Keep the stored
+        // cursor, but expose the tip and gap as unknown rather than negative.
+        const nodeHeight = this.blockchainInfoLastBlock < 0 ? null : this.blockchainInfoLastBlock
 
         const status = {
             last_processed_block: this.lastProcessedBlockIndex,
-            node_height: this.blockchainInfoLastBlock,
-            lag: this.blockchainInfoLastBlock - this.lastProcessedBlockIndex,
+            node_height: nodeHeight,
+            lag: nodeHeight == null ? null : nodeHeight - this.lastProcessedBlockIndex,
             // Reorg churn, additive: an operator polling /status sees how often this
             // decoder has rolled back and how deep the last one went, without joining
             // against the indexer. Absent from the nothing-processed-yet shape above,

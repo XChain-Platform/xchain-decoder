@@ -243,6 +243,23 @@ describe('Database#countReorgDeletesAboveTip()', function () {
         const { db } = dbWith([{ max_height: 200n }], [{ id: 7, data: JSON.stringify([{ block_index: 'tip' }]) }])
         await assert.rejects(() => db.countReorgDeletesAboveTip(), /non-numeric block_index/)
     })
+
+    it('THROWS instead of coercing malformed block_index values to zero', async function () {
+        const invalid = [null, '', false, [], {}, -1, 201.5]
+        for (const block_index of invalid){
+            const data = JSON.stringify([{ block_index }])
+            const { db } = dbWith([{ max_height: 200n }], [{ id: 7, data }])
+            await assert.rejects(() => db.countReorgDeletesAboveTip(), /non-numeric block_index/)
+        }
+        const { db } = dbWith([{ max_height: 200n }], [{ id: 8, data: JSON.stringify([null]) }])
+        await assert.rejects(() => db.countReorgDeletesAboveTip(), /non-numeric block_index/)
+    })
+
+    it('continues to accept a legacy digit-string block_index', async function () {
+        const rows = [{ id: 9, data: JSON.stringify([{ block_index: '201' }]) }]
+        const { db } = dbWith([{ max_height: 200n }], rows)
+        assert.strictEqual(await db.countReorgDeletesAboveTip(), 1)
+    })
 })
 
 describe('Database#countReorgDeletesAboveTip()', function () {
