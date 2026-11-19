@@ -19,26 +19,49 @@ const assert = require('assert');
 const Database = require('../../src/db');
 
 const columns = [
-    { col: 'tx_index', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
-    { col: 'tx_hash_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
-    { col: 'block_index', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
-    { col: 'source_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
-    { col: 'destination_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' }
+    { tbl: 'transactions', col: 'tx_index', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+    { tbl: 'transactions', col: 'tx_hash_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+    { tbl: 'transactions', col: 'block_index', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+    { tbl: 'transactions', col: 'source_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+    { tbl: 'transactions', col: 'destination_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' }
 ];
 
-function ctxReturning(rows) {
+function completeColumns() {
+    return Object.entries(Database.BIGINT_ID_COLUMNS).flatMap(([tbl, names]) => names.map(col => ({
+        tbl,
+        col,
+        dataType: 'bigint',
+        columnType: 'bigint(20) unsigned',
+        extra: col === 'id' ? 'auto_increment' : ''
+    })));
+}
+
+const linkedPubkeysForeignKey = [{
+    tbl: 'pubkeys',
+    col: 'address_id',
+    referencedTable: 'index_addresses',
+    referencedColumn: 'id',
+    constraintName: '1'
+}];
+
+function ctxReturning(rows, fkRows = []) {
     return {
         dbName: 'test_decoder',
         transactionConnection: null,
         getConnection: async () => ({
-            query: async () => rows.map(row => ({ tableExists: 1, ...row })),
+            query: async (sql) => {
+                if(/information_schema\.key_column_usage/i.test(sql)) return fkRows;
+                const selected = /t\.table_name\s*=\s*'transactions'/i.test(sql)
+                    ? rows.filter(row => row.tbl === 'transactions')
+                    : rows;
+                return selected.map(row => ({ tableExists: 1, ...row }));
+            },
             release: async () => {}
         })
     };
 }
 
-describe('assertTransactionIdsAreBigint types @regression @tier1', function () {
-
+function registerTransactionIdTypeTests() {
     it('names the exact migration file when a column is still INT', async function () {
         let message = null;
         try {
@@ -66,6 +89,54 @@ describe('assertTransactionIdsAreBigint types @regression @tier1', function () {
     it('accepts the complete transactions id set at BIGINT UNSIGNED', async function () {
         await Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning(columns));
     });
+}
+
+function registerSharedContractTests() {
+    it('rejects a narrow transaction output after transactions is fully widened', async function () {
+        await assert.rejects(
+            Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning([
+                ...columns,
+                {
+                    tbl: 'transaction_outputs', col: 'destination_id',
+                    dataType: 'int', columnType: 'int(10) unsigned'
+                }
+            ])),
+            /transaction_outputs\.destination_id=int\(10\) unsigned/);
+    });
+
+    it('rejects a narrow dispenser address id', async function () {
+        await assert.rejects(
+            Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning([
+                { tbl: 'dispensers', col: 'tx_index', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+                { tbl: 'dispensers', col: 'address_id', dataType: 'int', columnType: 'int(10) unsigned' }
+            ])),
+            /dispensers\.address_id=int\(10\) unsigned/);
+    });
+
+    it('names every narrow column in one failure', async function () {
+        const rows = completeColumns().map(row => {
+            if((row.tbl === 'dispensers' && row.col === 'address_id') ||
+                (row.tbl === 'transaction_outputs' && row.col === 'destination_id')){
+                return { ...row, dataType: 'int', columnType: 'int(10) unsigned' };
+            }
+            return row;
+        });
+        await assert.rejects(
+            Database.prototype.assertTransactionIdsAreBigint.call(
+                ctxReturning(rows, linkedPubkeysForeignKey)),
+            /dispensers\.address_id=int\(10\) unsigned.*transaction_outputs\.destination_id=int\(10\) unsigned/s);
+    });
+
+    it('accepts the complete shared contract with a differently named foreign key', async function () {
+        assert.strictEqual(completeColumns().length, 17);
+        await Database.prototype.assertTransactionIdsAreBigint.call(
+            ctxReturning(completeColumns(), linkedPubkeysForeignKey));
+    });
+}
+
+describe('assertTransactionIdsAreBigint types @regression @tier1', function () {
+    registerTransactionIdTypeTests();
+    registerSharedContractTests();
 });
 
 describe('assertTransactionIdsAreBigint metadata @regression @tier1', function () {
@@ -86,6 +157,29 @@ describe('assertTransactionIdsAreBigint metadata @regression @tier1', function (
             release: async () => {}
         });
         await Database.prototype.assertTransactionIdsAreBigint.call(ctx);
+    });
+
+    it('rejects complete columns when the pubkeys foreign key is absent', async function () {
+        await assert.rejects(
+            Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning(completeColumns())),
+            /pubkeys\.address_id->index_addresses\.id=missing/);
+    });
+
+    it('rejects a surrogate id without AUTO_INCREMENT', async function () {
+        const rows = completeColumns().map(row =>
+            row.tbl === 'index_addresses' && row.col === 'id' ? { ...row, extra: '' } : row);
+        await assert.rejects(
+            Database.prototype.assertTransactionIdsAreBigint.call(
+                ctxReturning(rows, linkedPubkeysForeignKey)),
+            /index_addresses\.id=bigint\(20\) unsigned \(missing auto_increment\)/);
+    });
+
+    it('checks only the migration tables that exist', async function () {
+        await Database.prototype.assertTransactionIdsAreBigint.call(ctxReturning([
+            { tbl: 'transaction_outputs', col: 'tx_index', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+            { tbl: 'transaction_outputs', col: 'vout', dataType: 'bigint', columnType: 'bigint(20) unsigned' },
+            { tbl: 'transaction_outputs', col: 'destination_id', dataType: 'bigint', columnType: 'bigint(20) unsigned' }
+        ]));
     });
 });
 
