@@ -152,4 +152,28 @@ async function haltReorg(reason, blocksDeleted){
     reportReorgHaltMarker.call(this, persisted, attempts, lastError)
 }
 
-module.exports = { haltReorg, RESET_RECOVERY, readRolledBackAboveTip }
+// Before a parked decoder resumes on a cleared marker, recount the rolled-back
+// heights above the tip. A clear that left any behind is re-halted and the decoder
+// stays parked; an unreadable count keeps it parked too. True only when resuming is safe.
+async function validateClearedHaltResume(){
+    const rolledBack = await readRolledBackAboveTip(this.db)
+    if (rolledBack === undefined || rolledBack === 0) return true
+    if (rolledBack === null){
+        this.logError('REORG_HALT clear cannot be validated because the rolled-back range is unreadable; staying parked.')
+        return false
+    }
+    const reason = 'A REORG_HALT clear raced a halted rollback; ' + rolledBack
+        + ' rolled-back block(s) remain above the stored tip. Recover with a reset.'
+    let persisted = false
+    if (typeof this.db.markReorgHalted === 'function'){
+        try { persisted = await this.db.markReorgHalted(reason) === true } catch (_) {}
+    }
+    this.reorgHalted = true
+    this.reorgHaltReason = reason
+    this.reorgHaltAt = new Date().toISOString()
+    this.reorgHaltMarkerPersisted = persisted
+    this.logError(reason + ' The decoder remains parked and wrote a fresh halt marker: ' + persisted + '.')
+    return false
+}
+
+module.exports = { haltReorg, RESET_RECOVERY, readRolledBackAboveTip, validateClearedHaltResume }

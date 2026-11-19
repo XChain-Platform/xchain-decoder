@@ -140,6 +140,42 @@ module.exports = {
         }
     },
 
+    // deleteBlockByIndex for a halted rollback, run as one transaction on the session
+    // that holds the reorg rollback lock (acquireReorgRollbackLock), with ownership
+    // re-read inside that transaction. A named lock lives exactly as long as its
+    // session, and a session that ends takes its open transaction with it, so this
+    // delete commits only while the lock is held: a halt clear holding the lock can
+    // never see a delete land after its count. Throws { rollbackLockLost } when the
+    // session no longer owns the lock; nothing is deleted then.
+    async deleteBlockOnRollbackSession(blockIndex, reorgBlockHash, lock){
+        if (!lock || !lock.connection || !lock.name)
+            throw new Error('deleteBlockOnRollbackSession: a held rollback lock is required')
+        const connection = lock.connection
+        await this.acquireTransactionLock()
+        let open = false
+        try {
+            await connection.beginTransaction()
+            open = true
+            const rows = await connection.query('SELECT IS_USED_LOCK(?) = CONNECTION_ID() AS owned', [lock.name])
+            if (!(rows && rows[0] && String(rows[0].owned) === '1')){
+                const err = new Error('deleteBlockOnRollbackSession: the reorg rollback lock is no longer held, so block ' + blockIndex + ' was not deleted')
+                err.rollbackLockLost = true
+                throw err
+            }
+            await this.restoreDispenserExtensions(connection, blockIndex)
+            await deleteBlockRows(connection, blockIndex)
+            await insertReorgEvent(connection, blockIndex, reorgBlockHash)
+            await connection.commit()
+            open = false
+            return true
+        } catch (err){
+            if (open){ try { await connection.rollback() } catch (_) {} }
+            throw err
+        } finally {
+            this.releaseTransactionLock()
+        }
+    },
+
     async getLastBlockIndex(){
         const query = `
             SELECT MAX(block_index) AS max_height FROM blocks ;

@@ -17,7 +17,7 @@ const { ensureLedgerAppliedAtDatetime } = require('./migration_ledger.js')
 const { stripBlockComments } = require('./migration_live_schema_guard.js')
 const {
     hasUnquotedHash, isSimpleDestructiveStatement, createOutsideAllowList, isDestructiveAlter,
-    statementOutsideAllowList, addsDeferredConstraint,
+    statementOutsideAllowList, addsDeferredConstraint, qualifiedWriteTarget,
 } = require('./migration_guards/destructive_statement_rules.js')
 
 module.exports = {
@@ -71,7 +71,7 @@ module.exports = {
     // (the statically detectable narrowing; the runner's live-schema guard catches a
     // width cut or a dropped attribute), MODIFY id without AUTO_INCREMENT (strips the
     // generated key), a MODIFY not opening its alter_spec (WAIT n / NOWAIT belongs to the head),
-    // any ALTER TABLE PARTITION, TABLESPACE or ENGINE clause, ALTER IGNORE
+    // any ALTER TABLE PARTITION, TABLESPACE or ENGINE clause, a schema-qualified write target, ALTER IGNORE
     // TABLE (deletes duplicate-key rows), any other ALTER than ALTER [ONLINE] TABLE, a CREATE
     // TABLE naming an engine other than InnoDB, any FOREIGN KEY, REFERENCES or CHECK constraint
     // definition (cascades, restricts or rejects later writes and deletes), and any CREATE other
@@ -109,6 +109,7 @@ module.exports = {
             // a hit; quote-aware, so a '/*' literal and a later '*/' literal hide no real clause.
             const stmt = stripBlockComments(raw).trim();
             if(!stmt) continue;
+            if(qualifiedWriteTarget(stmt)) return raw;
             // Second layer behind stripSqlLineComments: MariaDB/MySQL honour `#` to
             // end-of-line as a comment, so `# note\nDROP TABLE balances` is a DROP every
             // ^-anchored check below is blind to. The strip removes it upstream; if one

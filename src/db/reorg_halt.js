@@ -12,8 +12,11 @@
  *
  **********************************************************************/
 
+const crypto = require('node:crypto')
+
 // Reason reported for a clear row that lifts nothing (see readReorgHaltState).
 const UNAUDITED_CLEAR_REASON = 'unreadable or unaudited REORG_HALT_CLEARED row, treated as a live halt'
+const HALT_SCAN_LIMIT = 1000
 
 // Check a clear row's payload carries the reason bar clearReorgHalt enforces.
 function isAuditedClear(payload){
@@ -21,7 +24,107 @@ function isAuditedClear(payload){
     return typeof payload.reason === 'string' && payload.reason.trim().length >= 8
 }
 
+function rowDetail(row){
+    let payload = null
+    try {
+        payload = (typeof row.data === 'string') ? JSON.parse(row.data) : row.data
+    } catch (_) {}
+    return {
+        row, payload,
+        id: row.id != null ? Number(row.id) : null,
+        at: payload && payload.at ? payload.at : (row.time != null ? String(row.time) : null),
+        reason: payload && payload.reason ? payload.reason : null
+    }
+}
+
+function clearedState(detail, none){
+    return { ...none, cleared_at: detail.at, cleared_reason: detail.reason }
+}
+
+function haltedState(detail, reason = detail.reason, extra = {}){
+    return { halted: true, id: detail.id, at: detail.at, reason,
+        cleared_at: null, cleared_reason: null, ...extra }
+}
+
+function foldHaltRows(rows, none){
+    let state = none
+    for (const row of [...rows].reverse()){
+        const detail = rowDetail(row)
+        if (row.code === 'REORG_HALT'){
+            state = haltedState(detail)
+            continue
+        }
+        if (!isAuditedClear(detail.payload)){
+            state = haltedState(detail, UNAUDITED_CLEAR_REASON, { unaudited_clear: true })
+            continue
+        }
+        if (!state.halted){
+            state = clearedState(detail, none)
+            continue
+        }
+        const hasTarget = Object.prototype.hasOwnProperty.call(detail.payload, 'cleared_halt_id')
+        const target = Number(detail.payload.cleared_halt_id)
+        if (!hasTarget || (Number.isSafeInteger(target) && target === state.id)){
+            state = clearedState(detail, none)
+        } else {
+            state = { ...state, stale_clear: true }
+        }
+    }
+    return state
+}
+
+function rollbackLockName(dbName){
+    const plain = 'xchain_reorg_' + dbName
+    if (plain.length <= 64) return plain
+    return 'xchain_reorg_' + crypto.createHash('sha256').update(dbName).digest('hex').slice(0, 51)
+}
+
 module.exports = {
+    // Session-owned exclusion shared by verifyReorg and clear-reorg-halt. The lock
+    // session is drawn straight from the pool, never through getConnection(), which
+    // hands back the shared transaction connection while one is open.
+    async acquireReorgRollbackLock(waitSeconds = 0){
+        const wait = Number(waitSeconds)
+        if (!Number.isInteger(wait) || wait < 0 || wait > 60)
+            throw new Error('acquireReorgRollbackLock: invalid wait')
+        const connection = await this.pool.getConnection()
+        const name = rollbackLockName(this.dbName)
+        try {
+            const rows = await connection.query('SELECT GET_LOCK(?, ?) AS l', [name, wait])
+            if (rows && rows[0] && String(rows[0].l) === '1') return { connection, name }
+            await connection.release()
+            return null
+        } catch (err){
+            try { await connection.release() } catch (_) {}
+            throw err
+        }
+    },
+
+    async ownsReorgRollbackLock(lock){
+        if (!lock || !lock.connection || !lock.name) return false
+        const rows = await lock.connection.query(
+            'SELECT IS_USED_LOCK(?) = CONNECTION_ID() AS owned', [lock.name])
+        return !!(rows && rows[0] && String(rows[0].owned) === '1')
+    },
+
+    // Run fn with every read and write this Database makes on the lock's own session,
+    // through the slot getConnection() already honours. clear-reorg-halt uses it so
+    // its count, pin, append and read-back all run while its session holds the lock;
+    // a session lost midway fails the clear instead of finishing it unexcluded.
+    async runOnReorgRollbackSession(lock, fn){
+        if (!lock || !lock.connection) throw new Error('runOnReorgRollbackSession: a held rollback lock is required')
+        if (this.transactionConnection != null) throw new Error('runOnReorgRollbackSession: another transaction holds the connection slot')
+        this.transactionConnection = lock.connection
+        try { return await fn() } finally { this.transactionConnection = null }
+    },
+
+    async releaseReorgRollbackLock(lock){
+        if (!lock || !lock.connection) return
+        try { await lock.connection.query('SELECT RELEASE_LOCK(?)', [lock.name]) } finally {
+            await lock.connection.release()
+        }
+    },
+
     // Durable reorg-halt flag. verifyReorg's fail-closed safe-depth
     // ceiling is a per-invocation counter: on a reorg deeper than
     // DISPENSER_EXPIRE_SAFE_DEPTH it aborts mid-rollback, but nothing persisted
@@ -34,9 +137,8 @@ module.exports = {
     //
     // An operator can CLEAR a halt through clearReorgHalt (src/clear_reorg_halt.js,
     // `xchain-node clear-reorg-halt`): that writes a REORG_HALT_CLEARED row carrying
-    // the reason and the checks that passed, and the NEWEST of the two codes decides.
-    // The halt row is never deleted, so the audit trail survives, and a later halt
-    // writes a newer REORG_HALT row that is live again.
+    // the reason and the checks that passed. A clear lifts only the halt whose id
+    // it names, so a delayed clear cannot hide a later halt. The rows stay append-only.
     async isReorgHalted(){
         return (await this.readReorgHaltState()).halted
     },
@@ -50,35 +152,30 @@ module.exports = {
     async readReorgHaltState(existingConnection){
         const query = `SELECT id, time, code, data FROM events WHERE code IN ('REORG_HALT', 'REORG_HALT_CLEARED') ORDER BY id DESC LIMIT 1;`
         const none = { halted: false, id: null, at: null, reason: null, cleared_at: null, cleared_reason: null }
-        let connection = existingConnection || await this.getConnection()
+        const connection = existingConnection || await this.getConnection()
         const ownLease = (existingConnection == null && this.transactionConnection == null)
         try {
             const rows = await connection.query(query)
             if (!Array.isArray(rows) || rows.length === 0) return none
             const row = rows[0]
-            let payload = null
-            try {
-                payload = (typeof row.data === 'string') ? JSON.parse(row.data) : row.data
-            } catch (_) {
-                payload = null
-            }
-            const at = (payload && payload.at) ? payload.at : (row.time != null ? String(row.time) : null)
-            const reason = (payload && payload.reason) ? payload.reason : null
-            // events.id is a BIGINT column, and the pool below sets insertIdAsNumber
-            // but not bigIntAsNumber, so the driver hands row.id back as a JS BigInt.
-            // An events id never approaches Number.MAX_SAFE_INTEGER, so normalise to a
-            // plain number here: every caller that compares it or puts it in a JSON
-            // audit payload (clearReorgHalt's cleared_halt_id) gets a safe value
-            // instead of a BigInt that JSON.stringify throws on.
-            const id = (row.id != null) ? Number(row.id) : null
+            const detail = rowDetail(row)
             if (row.code === 'REORG_HALT_CLEARED'){
-                if (isAuditedClear(payload)) return { ...none, cleared_at: at, cleared_reason: reason }
+                if (isAuditedClear(detail.payload)){
+                    const historyQuery = `SELECT id, time, code, data FROM events WHERE code IN ('REORG_HALT', 'REORG_HALT_CLEARED') ORDER BY id DESC LIMIT ${HALT_SCAN_LIMIT + 1};`
+                    const history = await connection.query(historyQuery)
+                    if (!Array.isArray(history)) return haltedState(detail, UNAUDITED_CLEAR_REASON)
+                    if (history.length > HALT_SCAN_LIMIT){
+                        const newestHalt = history.find((entry) => entry.code === 'REORG_HALT')
+                        return haltedState(rowDetail(newestHalt || row), 'REORG_HALT history exceeded the safe scan bound')
+                    }
+                    return foldHaltRows(history, none)
+                }
                 // Live under the clear row's own id, so clear-reorg-halt can pin it.
-                return { halted: true, id: id, at: at, reason: UNAUDITED_CLEAR_REASON, cleared_at: null, cleared_reason: null, unaudited_clear: true }
+                return haltedState(detail, UNAUDITED_CLEAR_REASON, { unaudited_clear: true })
             }
             // Any other shape (the expected REORG_HALT, or a row whose code could not
             // be read) is a live halt.
-            return { halted: true, id: id, at: at, reason: reason, cleared_at: null, cleared_reason: null }
+            return haltedState(detail)
         } finally {
             if (ownLease){
                 await connection.release()
@@ -131,6 +228,9 @@ module.exports = {
             }, undefined, connection)
             if (written !== true) return { cleared: false, alreadyClear: false }
             const after = await this.readReorgHaltState(connection)
+            if (after.halted && after.id != null && String(after.id) !== String(state.id)){
+                return { cleared: false, alreadyClear: false, superseded: true, liveHaltId: after.id }
+            }
             return { cleared: after.halted === false, alreadyClear: false }
         } finally {
             if (ownLease && connection){
@@ -173,7 +273,7 @@ module.exports = {
         if (!Number.isInteger(limit) || limit < 1 || limit > 1000000)
             throw new Error('countReorgDeletesAboveTip: refusing an out-of-range scan limit: ' + scanLimit)
         const query = `SELECT id, data FROM events WHERE code = 'REORG' ORDER BY id DESC LIMIT ${limit};`
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         const ownLease = (this.transactionConnection == null)
         try {
             const rows = await connection.query(query)
@@ -217,9 +317,9 @@ module.exports = {
     },
 
     // Read the durable halt marker WITH its detail. isReorgHalted() above is the
-    // boolean view of the same readReorgHaltState() read: the newest REORG_HALT /
-    // REORG_HALT_CLEARED row by id decides, so a bare `code = 'REORG_HALT'` existence
-    // check would report a cleared halt as live. Operator-facing surfaces (health,
+    // boolean view of the same readReorgHaltState() read. An audited clear resolves
+    // only the halt id it names, so a bare `code = 'REORG_HALT'` existence check is
+    // insufficient. Operator-facing surfaces (health,
     // GET /status, the bootstrap publisher's source gate) need to say WHEN the decoder
     // halted and WHY, because a latent marker is otherwise invisible until a reorg
     // trips it days later. Returns readReorgHaltState() without its unaudited_clear

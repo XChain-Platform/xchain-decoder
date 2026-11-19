@@ -237,8 +237,7 @@ function finishReorgRun(blocksDeleted, walk){
     }
 }
 
-module.exports = {
-    async verifyReorg(nodeTip){
+async function verifyReorgLocked(nodeTip, rollbackLock = null){
         const blocksDeleted = []
 
         // Restart-durable halt guard. The safe-depth ceiling below is a per-invocation
@@ -281,10 +280,39 @@ module.exports = {
         // haltError: set once a safe-depth halt is durable, after which finishHaltedWalk
         // rolls back to the fork point only on the node's confirmed readings and the halt
         // is thrown here. haltStop: why that walk stopped above the fork point, if it did.
-        const walk = { haltError: null, haltStop: null }
+        const walk = { haltError: null, haltStop: null, rollbackLock }
         await walkReorg.call(this, nodeTip, priorDepth, blocksDeleted, walk)
 
         finishReorgRun.call(this, blocksDeleted, walk)
         return true
-    },
 }
+
+function rollbackLockWait(message){
+    const err = new Error(message)
+    err.reorgWait = true
+    err.refusalClass = 'rollback-lock'
+    err.reorgWaitState = { class: 'rollback-lock' }
+    return err
+}
+
+async function verifyReorg(nodeTip){
+    if (typeof this.db.acquireReorgRollbackLock !== 'function'){
+        return verifyReorgLocked.call(this, nodeTip)
+    }
+    let lock
+    try {
+        lock = await this.db.acquireReorgRollbackLock(30)
+    } catch (err){
+        throw rollbackLockWait('Reorg rollback lock could not be checked; no block was deleted: ' + err.message)
+    }
+    if (!lock) throw rollbackLockWait('Another rollback or halt clear holds the reorg lock; no block was deleted.')
+    try {
+        return await verifyReorgLocked.call(this, nodeTip, lock)
+    } finally {
+        try { await this.db.releaseReorgRollbackLock(lock) } catch (err){
+            logger.error(formatLogLine('reorg: failed to release the rollback lock connection:', err))
+        }
+    }
+}
+
+module.exports = { verifyReorg }

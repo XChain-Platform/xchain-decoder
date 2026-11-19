@@ -38,15 +38,38 @@ async function readNodeBlockHash(height){
     }
 }
 
+// Stop the walk when its rollback lock is gone. The delete itself re-checks ownership
+// inside its own transaction on the lock session; this cheaper read only spares a
+// dead session ten failed attempts.
+const LOCK_LOST_STOP = 'the rollback lock was lost, so no further block is deleted'
+
+async function rollbackLockHeld(walk){
+    if (!walk.rollbackLock) return true
+    try { return await this.db.ownsReorgRollbackLock(walk.rollbackLock) === true } catch (_) { return false }
+}
+
 // Delete one stored block of a halted walk, retrying a failed delete as the walk does.
-// True once it is gone, false when every attempt failed.
-async function deleteHaltedBlock(block, blocksDeleted){
+// True once it is gone, false when every attempt failed. A walk holding the rollback
+// lock deletes on that lock's session, so the delete cannot outlive the lock.
+async function deleteHaltedBlock(block, blocksDeleted, walk){
     for (let attempt = 1; attempt <= 10; attempt++){
+        if (!(await rollbackLockHeld.call(this, walk))){
+            walk.haltStop = LOCK_LOST_STOP
+            return false
+        }
         try {
-            await this.db.deleteBlockByIndex(block.block_index, block.block_hash)
+            if (walk.rollbackLock){
+                await this.db.deleteBlockOnRollbackSession(block.block_index, block.block_hash, walk.rollbackLock)
+            } else {
+                await this.db.deleteBlockByIndex(block.block_index, block.block_hash)
+            }
             blocksDeleted.push({ "block_index": block.block_index, "block_hash": block.block_hash })
             return true
         } catch (err){
+            if (err && err.rollbackLockLost){
+                walk.haltStop = LOCK_LOST_STOP
+                return false
+            }
             logger.error(formatLogLine(`reorg: halted; failed to delete block ${block.block_index} (${block.block_hash}): `, err))
             if (attempt < 10) await this.sleep(3000)
         }
@@ -95,14 +118,15 @@ async function readHaltedWalk(tip, budget){
 // Delete the doomed blocks top first, each only once the node reports confirmations
 // -1 for that stored hash. Asking immediately before each delete lets a node that
 // moves back onto the stored chain stop the walk.
-async function deleteProvenBlocks(doomed, blocksDeleted){
+async function deleteProvenBlocks(doomed, blocksDeleted, walk){
     for (const block of doomed){
         const proof = await proveReorgedAway.call(this, block)
         if (!proof.proven){
             return 'the node does not prove it reorged away from the stored block at height ' + block.block_index
                 + ': ' + proof.why + '.' + (proof.unknown ? ' ' + UNKNOWN_BLOCK_NOTE : '')
         }
-        if (!(await deleteHaltedBlock.call(this, block, blocksDeleted))){
+        if (!(await deleteHaltedBlock.call(this, block, blocksDeleted, walk))){
+            if (walk.haltStop) return walk.haltStop
             return 'the stored block at height ' + block.block_index + ' could not be deleted'
         }
     }
@@ -145,7 +169,7 @@ async function finishHaltedWalk(nodeTip, priorDepth, blocksDeleted, walk){
             + (read.storedTip - nodeTip) + ' stored block(s) above it may still be on its chain'
         return
     }
-    walk.haltStop = await deleteProvenBlocks.call(this, read.doomed, blocksDeleted)
+    walk.haltStop = await deleteProvenBlocks.call(this, read.doomed, blocksDeleted, walk)
 }
 
 module.exports = { finishHaltedWalk }

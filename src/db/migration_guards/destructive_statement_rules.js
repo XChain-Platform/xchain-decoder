@@ -15,6 +15,7 @@
 // The statement rules behind destructiveAutoStatement in ../migration_statements.js.
 const { opensBackslashEscape, createNamesNonInnoDb, dropTargetDestroys } = require('../query_helpers.js')
 const { alterSpecs, blankLiterals } = require('../migration_live_schema_guard.js')
+const { qualifiedWriteTarget } = require('./column_change_safety.js')
 
 // True when a `#` sits outside every quoted span - a line comment
 // stripSqlLineComments should already have removed. Quote-aware so a `#`
@@ -170,5 +171,5 @@ function isDestructiveAlter(stmt, safeAlterDrop){
 
 module.exports = {
     hasUnquotedHash, isSimpleDestructiveStatement, createOutsideAllowList, isDestructiveAlter, statementOutsideAllowList,
-    addsDeferredConstraint,
+    addsDeferredConstraint, qualifiedWriteTarget,
 }

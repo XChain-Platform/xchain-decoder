@@ -20,7 +20,7 @@
 
 const { chainGenesisMismatch, chainGenesisUnpinned } = require('../protocol/chain_identity')
 const { logger, REORG_HALT_PROBE_INTERVAL_MS, AUXPOW_REASSEMBLE_AFTER, TIP_SETTLE_DELAY_MS, TIP_SETTLE_MAX_READS } = require('./constants.js')
-const { RESET_RECOVERY, readRolledBackAboveTip } = require('./reorg_halt.js')
+const { RESET_RECOVERY, readRolledBackAboveTip, validateClearedHaltResume } = require('./reorg_halt.js')
 const { isWholeHex, malformedHexError } = require('../chain/blockchain_connector/rpc_helpers.js')
 
 // Read the durable REORG_HALT marker through whichever probe the db exposes, or
@@ -268,6 +268,7 @@ module.exports = {
         if (this.reorgHaltMarkerPersisted === false) return false
         const status = await this.checkReorgHalt()
         if (status.halted) return false
+        if (!(await validateClearedHaltResume.call(this))) return false
         const height = this.reorgHaltParkedHeight
         this.reorgHaltParked = false
         this.reorgHaltParkedAt = null
