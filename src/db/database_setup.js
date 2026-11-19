@@ -18,6 +18,7 @@ const util = require('../util')
 const Database = require('../db.js')
 const { format: formatLogLine } = require('node:util');
 const { logger } = require('./constants.js')
+const { evaluateColumns, hasPubkeysAddressForeignKey } = require('./migration_guards/widen_ids_contract.js')
 
 async function existingTableNames(database, db){
     // Snapshot the set of tables currently in this database. SHOW TABLES is a
@@ -343,40 +344,47 @@ module.exports = {
     },
 
     async assertTransactionIdsAreBigint(){
-        const expected = ['tx_index', 'tx_hash_id', 'block_index', 'source_id', 'destination_id'];
+        const expected = Database.BIGINT_ID_COLUMNS;
+        const tableNames = Object.keys(expected);
+        const columnNames = [...new Set(Object.values(expected).flat())];
+        const sqlList = values => values.map(value => "'" + value + "'").join(', ');
         let conn;
         try {
             conn = await this.getConnection();
             const rows = await conn.query(
-                "SELECT 1 AS tableExists, c.COLUMN_NAME AS col, c.DATA_TYPE AS dataType, c.COLUMN_TYPE AS columnType " +
+                "SELECT 1 AS tableExists, t.TABLE_NAME AS tbl, c.COLUMN_NAME AS col, " +
+                "c.DATA_TYPE AS dataType, c.COLUMN_TYPE AS columnType, c.EXTRA AS extra " +
                 "FROM information_schema.tables t " +
                 "LEFT JOIN information_schema.columns c " +
                 "  ON c.table_schema = t.table_schema AND c.table_name = t.table_name " +
-                " AND c.column_name IN ('tx_index', 'tx_hash_id', 'block_index', 'source_id', 'destination_id') " +
-                "WHERE t.table_schema = ? AND t.table_name = 'transactions'",
+                " AND c.column_name IN (" + sqlList(columnNames) + ") " +
+                "WHERE t.table_schema = ? AND t.table_name IN (" + sqlList(tableNames) + ")",
                 [this.dbName]
             );
-            if(!rows.length || !rows.some(row => row.tableExists != null)) return;
-            const types = new Map();
-            for(const row of rows){
-                if(row.col != null) types.set(String(row.col).toLowerCase(), {
-                    dataType: String(row.dataType || '').toLowerCase(),
-                    columnType: String(row.columnType || '').toLowerCase()
-                });
+            const { presentTables, invalid } = evaluateColumns(expected, rows);
+            if(!presentTables.size) return;
+
+            if(presentTables.has('pubkeys') && presentTables.has('index_addresses')){
+                const foreignKeys = await conn.query(
+                    "SELECT TABLE_NAME AS tbl, COLUMN_NAME AS col, " +
+                    "REFERENCED_TABLE_NAME AS referencedTable, REFERENCED_COLUMN_NAME AS referencedColumn " +
+                    "FROM information_schema.key_column_usage " +
+                    "WHERE table_schema = ? AND table_name = 'pubkeys' AND column_name = 'address_id' " +
+                    "AND referenced_table_name = 'index_addresses' AND referenced_column_name = 'id'",
+                    [this.dbName]
+                );
+                if(!hasPubkeysAddressForeignKey(foreignKeys))
+                    invalid.push('pubkeys.address_id->index_addresses.id=missing');
             }
-            const invalid = expected.filter(col => {
-                const type = types.get(col);
-                return !type || type.dataType !== 'bigint' || !/\bunsigned\b/.test(type.columnType);
-            });
+
             if(invalid.length){
-                const found = invalid.map(col => {
-                    const type = types.get(col);
-                    return col + '=' + (type ? (type.columnType || type.dataType || 'unknown') : 'missing');
-                }).join(', ');
                 throw new Error(
-                    'transactions id columns must use BIGINT UNSIGNED, but found ' + found + '. Run the pending migration: ' +
+                    'widen-ids schema contract is incomplete: every listed column must use BIGINT UNSIGNED and id columns ' +
+                    'must keep AUTO_INCREMENT, but found ' + invalid.join(', ') + '. Run the pending migration: ' +
                     'node src/db/migrate.js --file ' +
-                    Database.startupAssertedMigrationFile('assertTransactionIdsAreBigint')
+                    Database.startupAssertedMigrationFile('assertTransactionIdsAreBigint') +
+                    '. If that migration is ALREADY recorded in schema_migrations, the runner will not re-run it: stop ' +
+                    "the decoder and run the migration file's statements by hand; every MODIFY is idempotent."
                 );
             }
         } finally {

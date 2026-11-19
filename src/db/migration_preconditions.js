@@ -30,15 +30,20 @@ const Database = require('../db.js')
 const BIGINT_ID_MIGRATION = '2026-06-02-widen-ids-to-bigint.sql';
 
 // Every (table, column) pair BIGINT_ID_MIGRATION MODIFYs, in file order.
-const BIGINT_ID_COLUMNS = {
-    index_addresses:     ['id'],
-    index_transactions:  ['id'],
-    pubkeys:             ['address_id'],
-    blocks:              ['block_index', 'block_time', 'block_hash_id', 'previous_block_hash_id'],
-    transactions:        ['tx_index', 'tx_hash_id', 'block_index', 'source_id', 'destination_id'],
-    dispensers:          ['tx_index', 'address_id'],
-    transaction_outputs: ['tx_index', 'vout', 'destination_id'],
-};
+const BIGINT_ID_COLUMNS = Object.freeze({
+    index_addresses:     Object.freeze(['id']),
+    index_transactions:  Object.freeze(['id']),
+    pubkeys:             Object.freeze(['address_id']),
+    blocks:              Object.freeze(['block_index', 'block_time', 'block_hash_id', 'previous_block_hash_id']),
+    transactions:        Object.freeze(['tx_index', 'tx_hash_id', 'block_index', 'source_id', 'destination_id']),
+    dispensers:          Object.freeze(['tx_index', 'address_id']),
+    transaction_outputs: Object.freeze(['tx_index', 'vout', 'destination_id']),
+});
+
+// The migration precondition and its startup assertion must enforce one shared
+// contract. Expose the frozen inventory after Database loads this module so the
+// assertion cannot silently drift back to checking only one table.
+Database.BIGINT_ID_COLUMNS = BIGINT_ID_COLUMNS;
 
 Database.MIGRATION_PRECONDITIONS = {
     // Widens every id/key column to BIGINT UNSIGNED and re-adds pubkeys_ibfk_1. It is
@@ -289,7 +294,7 @@ Database.STARTUP_ASSERTED_MIGRATIONS = [
     {
         file:      BIGINT_ID_MIGRATION,
         assertion: 'assertTransactionIdsAreBigint',
-        symptom:   'Fatal decoder error: transactions id columns must use BIGINT UNSIGNED'
+        symptom:   'Fatal decoder error: widen-ids schema contract is incomplete'
     },
     {
         file:      '2026-06-13-dispensers-expiration-bigint.sql',
