@@ -22,7 +22,7 @@
     "helmet": "^8.2.0",
     "lru-cache": "^11.5.3",
     "mariadb": "3.5.4",
-    "tiny-secp256k1": "2.2.4"
+    "tiny-secp256k1": "2.2.5"
   },
   "scripts": {
     "api": "node ./src/api.js",
