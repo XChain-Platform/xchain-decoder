@@ -73,7 +73,7 @@ function plainTxHash(txBuf) {
     if (txBuf[4] === 0x00 && (txBuf[5] === 0x08 || txBuf[5] === 0x09)) {
         return dsha(Buffer.concat([txBuf.subarray(0, 4), txBuf.subarray(6, txBuf.length - 5), txBuf.subarray(txBuf.length - 4)]))
     }
-    return bitcoin.Transaction.fromBuffer(txBuf).getHash()
+    return Buffer.from(bitcoin.Transaction.fromBuffer(txBuf).getHash())
 }
 
 // The merkle root over tx hashes, the last one doubled on an odd level.
@@ -240,7 +240,7 @@ describe('XChainBlockDecoder litecoin blockFromBuffer', () => {
         const SEGWIT_LITECOIN_BLOCK_HEX =
             '04000000' +                                                          // version 4
             'aa'.repeat(32) +                                                     // prevHash
-            plainTxHash(Buffer.from(SEGWIT_COINBASE_HEX, 'hex')).toString('hex') + // merkleRoot: the coinbase txid
+            Buffer.from(plainTxHash(Buffer.from(SEGWIT_COINBASE_HEX, 'hex'))).toString('hex') + // merkleRoot: the coinbase txid
             '00f15365' +                                                          // timestamp
             'ffff001d' +                                                          // bits
             '78563412' +                                                          // nonce

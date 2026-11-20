@@ -13,7 +13,7 @@
  **********************************************************************
 /** @type {import('@stryker-mutator/core').PartialStrykerOptions} */
 export default {
-  plugins: ['@stryker-mutator/mocha-runner'],
+  plugins: [],
 
   mutate: [
     'src/XChainDecoder.js',
@@ -23,23 +23,14 @@ export default {
     'src/util.js',
   ],
 
-  testRunner: 'mocha',
-  mochaOptions: {
-    // test/unit/support/setup.js is sufficient for BOTH unit and security tests;
-    // both setup files install the same Module._resolveFilename patch.
-    require: ['test/unit/support/setup.js'],
-    spec: [
-      'test/unit/**/*.test.js',
-      'test/security/**/*.test.js',
-    ],
-    // See stryker.config.mjs: this one greps src/XChainDecoder.js as text and
-    // cannot run against Stryker's instrumented sandbox copy.
-    ignore: ['test/unit/action_manifest_conformance.test.js'],
-    config: 'test/mutation/.mocharc.mutation-phase2.yml',
-    'no-package': true,
+  testRunner: 'command',
+  commandRunner: {
+    command: "./node_modules/.bin/mocha --timeout 10000 --exit --require ./test/unit/support/setup.js " +
+      "'test/unit/**/*.test.js' 'test/security/**/*.test.js' " +
+      "--ignore test/unit/action_manifest_conformance.test.js",
   },
 
-  coverageAnalysis: 'perTest',
+  coverageAnalysis: 'off',
 
   // Higher timeout to accommodate security tests.
   timeoutMS: 60000,

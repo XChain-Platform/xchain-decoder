@@ -53,7 +53,7 @@
 
 const fs       = require('fs');
 const dotenv   = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const Database = require('../db.js');
 const config   = require('../config.js');

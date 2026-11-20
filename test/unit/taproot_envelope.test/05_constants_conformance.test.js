@@ -235,7 +235,8 @@ describe('Taproot envelope recognition', function () {
                     ? Buffer.from([script.length])
                     : (() => { const b = Buffer.alloc(3); b[0] = 0xfd; b.writeUInt16LE(script.length, 1); return b })()
                 const leaf = bitcoin.crypto.taggedHash('TapLeaf', Buffer.concat([Buffer.from([0xc0]), lenPrefix, script]))
-                assert.strictEqual(leaf.toString('hex'), vectors.envelope_grammar.tapleaf_hash)
+                // bitcoinjs-lib 7 returns a Uint8Array, whose toString ignores 'hex'.
+                assert.strictEqual(Buffer.from(leaf).toString('hex'), vectors.envelope_grammar.tapleaf_hash)
             })
         })
     })

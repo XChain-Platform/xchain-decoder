@@ -19,7 +19,7 @@
  ********************************************************************/
 
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 // Before anything else logs. The env-validation failure at startApi()'s
 // DECODER_API_PORT check is exactly the line an operator needs levelled and

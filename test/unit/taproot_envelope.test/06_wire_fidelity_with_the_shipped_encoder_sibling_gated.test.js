@@ -118,7 +118,7 @@ describe('Taproot envelope recognition', function () {
             const pub = Buffer.from(ecc.pointFromScalar(priv, true))
             const { encoder, caller, callerSpk } = createEncoder(XChainEncoder, pub)
             const fundingTxid = 'a'.repeat(64)
-            const utxos = [{ txid: fundingTxid, vout: 0, value: 10000000, confirmations: 6, scriptPubKey: callerSpk.toString('hex') }]
+            const utxos = [{ txid: fundingTxid, vout: 0, value: 10000000, confirmations: 6, scriptPubKey: Buffer.from(callerSpk).toString('hex') }]
 
             const action = 'FILE|0|wire-fidelity.bin|application/octet-stream|||||||'
             const raw = crypto.randomBytes(9000).toString('binary')

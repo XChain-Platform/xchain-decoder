@@ -60,7 +60,7 @@
 // The service .env is loaded first, before db.js, and only when this file runs
 // as the process: a test that requires it for run() and parseArgs() must not
 // have a checkout's .env poured into its process environment.
-if (require.main === module) require('dotenv').config()
+if (require.main === module) require('dotenv').config({ quiet: true })
 
 const Database = require('./db.js')
 const config = require('./config.js')

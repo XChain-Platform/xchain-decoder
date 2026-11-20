@@ -18,7 +18,6 @@
  *
  ********************************************************************/
 
-const bs58check = require('bs58check')
 const bitcoin = require('bitcoinjs-lib')
 const { createHash } = require('crypto')
 const ecc = require('tiny-secp256k1')

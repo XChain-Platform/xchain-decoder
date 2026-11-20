@@ -9,6 +9,8 @@
 // contact legal@dankest.llc.
 
 // Fuzz test setup: mock mariadb (same as unit test setup)
+require('../../helpers/bitcoinjs_v7_fixtures').installBitcoinJsV7Fixtures()
+
 const Module = require('module')
 const originalResolveFilename = Module._resolveFilename
 

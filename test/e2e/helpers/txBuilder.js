@@ -32,7 +32,6 @@ const bip39 = require('bip39')
 const { ECPairFactory } = require('ecpair')
 const nodeHelper = require('../../helpers/node_helper')
 const { waitUntil } = require('../../helpers/waitUntil')
-const bufferutils = require('bitcoinjs-lib/src/bufferutils')
 
 bitcoin.initEccLib(ecc)
 const bip32 = BIP32Factory(ecc)
@@ -94,36 +93,6 @@ function buildXchnP2wshMarker(txid) {
 }
 
 /**
- * Add an input to a PSBT with the stock Number-valued 64-bit reader in force.
- *
- * bitcoinjs-lib parses a legacy input's nonWitnessUtxo transaction once, here at
- * addInput time, and caches the result for signing and for the amount arithmetic
- * inside extractTransaction. These fixtures load the decoder into the same
- * process, and the decoder patches bitcoinjs-lib's 64-bit reader to return BigInt
- * so Dogecoin outputs above 2^53 survive (src/chain/apply_bufferutils_patch.js). PSBT's
- * own amount arithmetic starts from a Number, so a cached BigInt output value
- * makes extractTransaction throw "Cannot mix BigInt and other types" on every
- * legacy input. Parsing the previous transaction with the stock reader keeps the
- * cache in Numbers; regtest values are nowhere near the 2^53 ceiling the patch
- * exists for. The swap spans a single synchronous call, so the decoder polling in
- * this same process can never observe it.
- */
-function addPsbtInput(psbt, inputData) {
-    const proto = bufferutils.BufferReader.prototype
-    const patchedReader = proto.readUInt64
-    proto.readUInt64 = function readUInt64AsNumber() {
-        const value = this.buffer.readBigUInt64LE(this.offset)
-        this.offset += 8
-        return Number(value)
-    }
-    try {
-        return psbt.addInput(inputData)
-    } finally {
-        proto.readUInt64 = patchedReader
-    }
-}
-
-/**
  * Fund an address by sending BTC from the test wallet, then mine a block.
  */
 async function fundAddress(address, btcAmount) {
@@ -132,12 +101,12 @@ async function fundAddress(address, btcAmount) {
     const rawTxHex = await global.nodeClientTest.getRawTransaction(txid)
     await global.nodeClientTest.generateToAddress(1, global.mainTestAddress)
 
-    let satoshis = 0
+    let satoshis = 0n
     let voutIndex = -1
     for (let i = 0; i < rawTx.vout.length; i++) {
         const v = rawTx.vout[i]
         if (v.scriptPubKey && v.scriptPubKey.address === address) {
-            satoshis = Math.round(v.value * 100000000)
+            satoshis = BigInt(Math.round(v.value * 100000000))
             voutIndex = i
             break
         }
@@ -189,11 +158,11 @@ async function createFundedTaprootAddress(btcAmount) {
  * Build, sign, and broadcast an OP_RETURN transaction with an XCHN ACTION payload.
  */
 async function broadcastOpReturn(funded, actionString, rawData) {
-    const fee = 10000
+    const fee = 10000n
     const psbt = new bitcoin.Psbt({ network })
 
     if (funded.addressType === 'taproot') {
-        addPsbtInput(psbt, {
+        psbt.addInput({
             hash: funded.txid,
             index: funded.voutIndex,
             sequence: 0x00000001,
@@ -202,14 +171,14 @@ async function broadcastOpReturn(funded, actionString, rawData) {
         })
     } else if (funded.addressType === 'segwit') {
         const p2wpkh = bitcoin.payments.p2wpkh({ pubkey: funded.key.publicKey, network })
-        addPsbtInput(psbt, {
+        psbt.addInput({
             hash: funded.txid,
             index: funded.voutIndex,
             sequence: 0x00000001,
             witnessUtxo: { value: funded.satoshis, script: p2wpkh.output }
         })
     } else {
-        addPsbtInput(psbt, {
+        psbt.addInput({
             hash: funded.txid,
             index: funded.voutIndex,
             sequence: 0x00000001,
@@ -220,7 +189,7 @@ async function broadcastOpReturn(funded, actionString, rawData) {
     const encryptedPayload = buildXchnPayload(actionString, funded.txid, rawData)
     const opReturnScript = bitcoin.payments.embed({ data: [encryptedPayload] })
 
-    psbt.addOutput({ script: opReturnScript.output, value: 0 })
+    psbt.addOutput({ script: opReturnScript.output, value: 0n })
     psbt.addOutput({ address: funded.address, value: funded.satoshis - fee })
 
     if (funded.addressType === 'taproot') {
@@ -249,11 +218,11 @@ async function broadcastOpReturn(funded, actionString, rawData) {
  * Used for mempool tests.
  */
 async function broadcastOpReturnNoMine(funded, actionString) {
-    const fee = 10000
+    const fee = 10000n
     const psbt = new bitcoin.Psbt({ network })
 
     if (funded.addressType === 'taproot') {
-        addPsbtInput(psbt, {
+        psbt.addInput({
             hash: funded.txid,
             index: funded.voutIndex,
             sequence: 0x00000001,
@@ -262,14 +231,14 @@ async function broadcastOpReturnNoMine(funded, actionString) {
         })
     } else if (funded.addressType === 'segwit') {
         const p2wpkh = bitcoin.payments.p2wpkh({ pubkey: funded.key.publicKey, network })
-        addPsbtInput(psbt, {
+        psbt.addInput({
             hash: funded.txid,
             index: funded.voutIndex,
             sequence: 0x00000001,
             witnessUtxo: { value: funded.satoshis, script: p2wpkh.output }
         })
     } else {
-        addPsbtInput(psbt, {
+        psbt.addInput({
             hash: funded.txid,
             index: funded.voutIndex,
             sequence: 0x00000001,
@@ -280,7 +249,7 @@ async function broadcastOpReturnNoMine(funded, actionString) {
     const encryptedPayload = buildXchnPayload(actionString, funded.txid)
     const opReturnScript = bitcoin.payments.embed({ data: [encryptedPayload] })
 
-    psbt.addOutput({ script: opReturnScript.output, value: 0 })
+    psbt.addOutput({ script: opReturnScript.output, value: 0n })
     psbt.addOutput({ address: funded.address, value: funded.satoshis - fee })
 
     if (funded.addressType === 'taproot') {
@@ -305,10 +274,10 @@ async function broadcastOpReturnNoMine(funded, actionString) {
  * Build, sign, and broadcast a 1-of-3 multisig transaction with XCHN payload.
  */
 async function broadcastMultisig(funded, actionString) {
-    const fee = 10000
+    const fee = 10000n
     const psbt = new bitcoin.Psbt({ network })
 
-    addPsbtInput(psbt, {
+    psbt.addInput({
         hash: funded.txid,
         index: funded.voutIndex,
         sequence: 0x00000001,
@@ -343,8 +312,8 @@ async function broadcastMultisig(funded, actionString) {
         bitcoin.opcodes.OP_3, bitcoin.opcodes.OP_CHECKMULTISIG
     ])
 
-    psbt.addOutput({ script: multisigScript, value: 1000 })
-    psbt.addOutput({ address: funded.address, value: funded.satoshis - fee - 1000 })
+    psbt.addOutput({ script: multisigScript, value: 1000n })
+    psbt.addOutput({ address: funded.address, value: funded.satoshis - fee - 1000n })
 
     const signer = ECPair.fromPrivateKey(funded.key.privateKey, { network })
     for (let i = 0; i < psbt.data.inputs.length; i++) {
@@ -365,10 +334,10 @@ async function broadcastMultisig(funded, actionString) {
  * Build and broadcast a transaction with NO XCHN data (just a regular P2PKH send).
  */
 async function broadcastPlainTransaction(funded) {
-    const fee = 10000
+    const fee = 10000n
     const psbt = new bitcoin.Psbt({ network })
 
-    addPsbtInput(psbt, {
+    psbt.addInput({
         hash: funded.txid,
         index: funded.voutIndex,
         sequence: 0x00000001,
@@ -393,10 +362,10 @@ async function broadcastPlainTransaction(funded) {
  * Build and broadcast a transaction with a non-XCHN OP_RETURN.
  */
 async function broadcastNonXchnOpReturn(funded, rawBytes) {
-    const fee = 10000
+    const fee = 10000n
     const psbt = new bitcoin.Psbt({ network })
 
-    addPsbtInput(psbt, {
+    psbt.addInput({
         hash: funded.txid,
         index: funded.voutIndex,
         sequence: 0x00000001,
@@ -404,7 +373,7 @@ async function broadcastNonXchnOpReturn(funded, rawBytes) {
     })
 
     const opReturnScript = bitcoin.payments.embed({ data: [rawBytes || crypto.randomBytes(20)] })
-    psbt.addOutput({ script: opReturnScript.output, value: 0 })
+    psbt.addOutput({ script: opReturnScript.output, value: 0n })
     psbt.addOutput({ address: funded.address, value: funded.satoshis - fee })
 
     const signer = ECPair.fromPrivateKey(funded.key.privateKey, { network })

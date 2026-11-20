@@ -35,7 +35,7 @@ function envelopeScriptFromWitness(witness){
     const lastItem = witness[stackTop]
     // The last item must be real bytes: an empty or non-buffer slot is a
     // malformed stack, not an envelope.
-    if (!Buffer.isBuffer(lastItem) || lastItem.length === 0) return null
+    if (!(lastItem instanceof Uint8Array) || lastItem.length === 0) return null
     // Annex present: at least (script, control, annex) would remain,
     // but the rule is unconditional: annex-bearing => not an envelope.
     if (lastItem[0] === TAPROOT_ANNEX_MARKER) return null
@@ -50,12 +50,14 @@ function envelopeScriptFromWitness(witness){
     const script = witness[stackTop - 1]
     // The script sits directly under the control block, and the shortest
     // possible envelope script is 8 bytes, so anything smaller cannot be one.
-    if (!Buffer.isBuffer(script) || script.length < 8) return null
+    if (!(script instanceof Uint8Array) || script.length < 8) return null
     return script
 }
 
 function envelopeShapeFromScript(script){
-    const decompiled = bitcoin.script.decompile(script)
+    const chunks = bitcoin.script.decompile(script)
+    const decompiled = chunks && chunks.map(chunk =>
+        typeof chunk === 'number' ? chunk : Buffer.from(chunk))
     // Minimum shape: OP_0, OP_IF, magic, format, 1 push, OP_ENDIF, key, OP_CHECKSIG.
     if (!decompiled || decompiled.length < 8) return null
     let i = 0

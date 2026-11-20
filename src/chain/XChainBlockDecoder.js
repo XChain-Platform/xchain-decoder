@@ -178,7 +178,7 @@ function assertBlockBodyIntact(block, bufferLength, bodyEnd, extensionFollows) {
     if (bodyEnd !== bufferLength && !extensionFollows) {
         throw new Error('Block has ' + (bufferLength - bodyEnd) + ' bytes after its last transaction')
     }
-    if (!bitcoinjs.Block.calculateMerkleRoot(txs).equals(block.merkleRoot)) {
+    if (!Buffer.from(bitcoinjs.Block.calculateMerkleRoot(txs)).equals(Buffer.from(block.merkleRoot))) {
         throw new Error('Block merkle root mismatch: the header root is not the root of its transactions')
     }
 }
@@ -192,7 +192,7 @@ function readMwebTransactions(bufferReader, block) {
       bufferReader.offset += tx.byteLength();
       return tx;
     };
-    const nTransactions = bufferReader.readVarInt();
+    const nTransactions = Number(bufferReader.readVarInt());
     // Sanity-bound the claimed tx count against the bytes actually
     // present: the smallest possible serialized transaction is well
     // over 10 bytes, so a varint claiming more than remaining/10
@@ -305,7 +305,7 @@ class XChainBlockDecoder {
                 assertBlockBodyIntact(block, buffer.length, bufferReader.offset, extensionFollows)
                 const witnessCommit = block.getWitnessCommit();
                 // This Block contains a witness commit
-                if (witnessCommit) block.witnessCommit = witnessCommit;
+                if (witnessCommit) block.witnessCommit = Buffer.from(witnessCommit);
                 return block;
             default: {
                 let plainBlock

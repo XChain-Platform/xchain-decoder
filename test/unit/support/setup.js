@@ -23,6 +23,8 @@ process.env.RPC_TIMEOUT_RETRY_DELAY_MS = '0'
 // covered directly in the observability shim's own unit tests, which opt back in.
 process.env.XCHAIN_LOG_PATCH = '0'
 
+require('../../helpers/bitcoinjs_v7_fixtures').installBitcoinJsV7Fixtures()
+
 const Module = require('module')
 const originalResolveFilename = Module._resolveFilename
 

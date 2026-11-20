@@ -154,7 +154,9 @@ function candidatePubkeyFromInput(input){
     }
     // P2PKH: scriptSig is <sig> <pubkey>, decompile and take last element
     if (input.script && input.script.length > 0){
-        let decompiledScript = bitcoin.script.decompile(input.script)
+        const chunks = bitcoin.script.decompile(input.script)
+        let decompiledScript = chunks && chunks.map(chunk =>
+            typeof chunk === 'number' ? chunk : Buffer.from(chunk))
         if (decompiledScript && decompiledScript.length >= 2){
             let lastElement = decompiledScript[decompiledScript.length - 1]
             if (Buffer.isBuffer(lastElement) && (lastElement.length === 33 || lastElement.length === 65)){

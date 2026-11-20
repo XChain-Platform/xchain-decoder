@@ -79,7 +79,7 @@ describe('Taproot envelope recognition', function () {
             const script = makeEnvelopeScript(payload)
             const hit = decoder.detectEnvelopeWitness([DUMMY_SIG, script, CONTROL_BLOCK])
             assert.ok(hit)
-            assert.deepStrictEqual(hit.payload, payload)
+            assert.deepStrictEqual(Buffer.from(hit.payload), Buffer.from(payload))
         })
 
         it('recognition is framing-agnostic: a fat-framed (PUSHDATA1) payload push reassembles identically', function () {

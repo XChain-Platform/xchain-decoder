@@ -12,9 +12,9 @@
  *
  ********************************************************************/
 
-const BitcoinCore = require('bitcoin-core');
 const axios = require('axios');
 const crypto = require('crypto');
+const JsonRpcClient = require('./json_rpc_client');
 
 // Where the test node lives. Resolved per call rather than at require time so a
 // fixture can point the whole test tree at its own throwaway node by setting
@@ -49,7 +49,7 @@ module.exports = {
 		   password: cfg.pass
 		}
 
-		let connection = new BitcoinCore(connectionParams)
+		let connection = new JsonRpcClient(connectionParams)
 
 		let walletList = await connection.listWallets()
 
@@ -67,7 +67,7 @@ module.exports = {
 		// wallet RPCs the fixtures call next (getnewaddress, getbalance) then go to
 		// the node's default wallet or fail outright.
 		connectionParams["wallet"] = walletName
-		return new BitcoinCore(connectionParams)
+		return new JsonRpcClient(connectionParams)
 	},
 	
 	async broadcastTx(txHex){
