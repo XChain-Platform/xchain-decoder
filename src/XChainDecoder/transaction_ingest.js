@@ -55,12 +55,14 @@ function clearQuarantineState(loop){
     loop.txParseRetryCounts.clear()
     loop.insertQuarantineCounts.clear()
     loop.insertQuarantine.clear()
+    if (loop.insertQuarantineCounted) loop.insertQuarantineCounted.clear()
     if (loop.parseQuarantine) loop.parseQuarantine.clear()
 }
 
 // Count a transaction this decoder skipped for good, apart from the routine rejections
-// parseErrors also counts. A position is counted once: the pass that quarantines it records it
-// in loop.parseQuarantine, and later passes of the block re-parse it without re-counting.
+// parseErrors also counts. Parse failures are tracked in loop.parseQuarantine and
+// insert failures in loop.insertQuarantineCounted. Later passes rewrite only the
+// PARSE_ERROR row, which may have been rolled back, without re-counting the position.
 function noteQuarantine(decoder, height, hash){
     decoder.quarantinedTxs = (decoder.quarantinedTxs || 0) + 1
     decoder.lastQuarantinedBlock = height
@@ -68,8 +70,7 @@ function noteQuarantine(decoder, height, hash){
     decoder.lastQuarantinedAt = new Date().toISOString()
 }
 
-async function skipQuarantinedTransaction(block, nextBlockHeight, nextTransaction, txIndex){
-    this.parseErrors++
+async function skipQuarantinedTransaction(loop, retryKey, block, nextBlockHeight, nextTransaction, txIndex){
     let quarantinedHash = null
     try { quarantinedHash = nextTransaction.getId() } catch(_){ /* unparseable id; leave null */ }
     let eventResult = await this.db.insertEvent("PARSE_ERROR", {
@@ -82,7 +83,11 @@ async function skipQuarantinedTransaction(block, nextBlockHeight, nextTransactio
         // insertEvent already rolled the block transaction back
         return 'rollback'
     }
+    if (loop.insertQuarantineCounted && loop.insertQuarantineCounted.has(retryKey)) return 'continue'
+    this.parseErrors++
     noteQuarantine(this, nextBlockHeight, quarantinedHash)
+    if (!loop.insertQuarantineCounted) loop.insertQuarantineCounted = new Set()
+    loop.insertQuarantineCounted.add(retryKey)
     return 'continue'
 }
 
@@ -353,7 +358,9 @@ async function ingestTransaction(loop, block, nextBlockHeight, openDispenserAddr
     // (beginTransaction ran when blocksQuantity hit 0), so the event commits
     // with the block. Deterministic across instances, so parity holds.
     if (loop.insertQuarantine.has(retryKey)){
-        return await skipQuarantinedTransaction.call(this, block, nextBlockHeight, nextTransaction, txIndex)
+        return await skipQuarantinedTransaction.call(
+            this, loop, retryKey, block, nextBlockHeight, nextTransaction, txIndex,
+        )
     }
 
     const parsed = await parseBlockTransaction.call(this, loop, block, nextBlockHeight, openDispenserAddresses, nextTransaction, txIndex, retryKey)

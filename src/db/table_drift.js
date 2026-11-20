@@ -16,6 +16,26 @@ const fs = require('fs');
 const util = require('../util')
 const { logger } = require('./constants.js')
 
+// Intentionally empty. Automatic dedupe is safe only after reviewing survivor
+// direction and every table that references the deleted ids. Other cases use a
+// dated mode=manual migration.
+const AUTO_DEDUP_TABLES = Object.freeze(Object.create(null))
+
+function isAutoDedupAllowed(table, indexName, columns){
+    const indexes = AUTO_DEDUP_TABLES[table]
+    if(!indexes) return false
+    const expected = Object.entries(indexes).find(([name]) => name.toLowerCase() === indexName.toLowerCase())
+    if(!expected) return false
+    const allowed = expected[1].map((column) => column.toLowerCase())
+    return allowed.length === columns.length && allowed.every((column, i) => column === columns[i].toLowerCase())
+}
+
+function manualDedupeStep(table){
+    if(table === 'index_addresses' || table === 'index_transactions')
+        return 'apply mode=manual migration 2026-05-28-unique-index-tables.sql with node src/db/migrate.js'
+    return 'apply a dated mode=manual migration with node src/db/migrate.js'
+}
+
 // alterTableForDrift, a column live as NOT NULL that the source declares nullable: relaxed
 // only when the bare MODIFY that does it would lose nothing.
 async function relaxNullability(db, table, exp, cur){
@@ -159,8 +179,9 @@ module.exports = {
 
     // Reconcile declared indexes against the live table. Adds any index named in the
     // SQL source that is absent live (matched by column set, so a renamed-but-equivalent
-    // index is treated as present). For a UNIQUE index blocked by pre-existing duplicate
-    // rows, dedupes first (see dedupeForUniqueIndex) then retries. Never throws (a
+    // index is treated as present). A UNIQUE index blocked by duplicate rows is
+    // auto-deduped only when its exact table, name and columns are allow-listed.
+    // Other duplicates are left for a mode=manual migration. Never throws (a
     // failure is logged and startup continues). On a table that already has every declared
     // index (the normal case) this is a single information_schema read and a no-op.
     async reconcileTableIndexes(file, db){
@@ -203,8 +224,12 @@ module.exports = {
                 } catch(e){
                     const dup = e && (Number(e.errno) === 1062 || /duplicate entry/i.test(e.message || ''));
                     if(!dup){ logger.info('  could not add UNIQUE index ' + idx.name + ' on ' + table + ': ' + (e && e.message)); continue; }
+                    if(!isAutoDedupAllowed(table, idx.name, idx.columns)){
+                        logger.warn('  ' + table + '.' + idx.name + ' (' + key + ') has duplicate rows; no rows deleted. ' + manualDedupeStep(table) + '.');
+                        continue;
+                    }
                     logger.info('  ' + table + '.' + idx.name + ': duplicate rows block the UNIQUE index; deduping (keep newest id per ' + key + ') then retrying.');
-                    if(!(await this.dedupeForUniqueIndex(db, table, idx.columns))) continue;
+                    if(!(await this.dedupeForUniqueIndex(db, table, idx.columns, idx.name))) continue;
                     try {
                         await db.query('ALTER TABLE `' + table + '` ADD UNIQUE INDEX `' + idx.name + '` (' + colList + ')');
                         logger.info('  added ' + idx.name + ' after dedupe.');
@@ -219,7 +244,7 @@ module.exports = {
         }
     },
 
-    // Collapse duplicate rows on `columns` so a UNIQUE index can be added, keeping the
+    // Collapse allow-listed duplicate rows on `columns`, keeping the
     // row with the highest `id` in each group. For the failure this repairs: an
     // INSERT ... ON DUPLICATE KEY UPDATE upsert that degraded to plain INSERT because the
     // unique index was missing. Each change appended a fresh row with the current
@@ -227,7 +252,11 @@ module.exports = {
     // Uses `=` (not `<=>`) so NULL tuples are left intact, matching UNIQUE semantics (a
     // UNIQUE index permits multiple NULLs). Requires a single `id` column to pick a
     // survivor; skips with a warning if absent. Returns true if the table is now safe to index.
-    async dedupeForUniqueIndex(db, table, columns){
+    async dedupeForUniqueIndex(db, table, columns, indexName){
+        if(!isAutoDedupAllowed(table, indexName, columns)){
+            logger.warn('  ' + table + '.' + indexName + ' is not approved for automatic dedupe; no rows deleted. ' + manualDedupeStep(table) + '.');
+            return false;
+        }
         const hasId = (await db.query(
             "SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema = ? AND table_name = ? AND COLUMN_NAME = 'id'",
             [this.dbName, table])).length > 0;

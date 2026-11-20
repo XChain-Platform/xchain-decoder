@@ -217,12 +217,15 @@ function initialLoopLatches(){
     // no instance ever skips a tx a healthy instance accepts (cross-instance parity).
     const insertQuarantineCounts = new Map()
     const insertQuarantine = new Set()
+    // Insert-quarantined positions whose successful skip has already been
+    // counted. The PARSE_ERROR row is still rewritten until block commit.
+    const insertQuarantineCounted = new Set()
 
     // Positions quarantined by a parse throw, keyed like the maps above. Later passes of the block
     // still re-parse them but write only their PARSE_ERROR row, without re-counting; cleared on
     // block commit.
     const parseQuarantine = new Set()
-    return { nodeSyncedProblem, nodeCatchingUpProblem, tipBelowStoredTipRefused, wrongChainProblem, wrongGenesisProblem, chainFieldMissingLogged, txParseRetryCounts, insertQuarantineCounts, insertQuarantine, parseQuarantine }
+    return { nodeSyncedProblem, nodeCatchingUpProblem, tipBelowStoredTipRefused, wrongChainProblem, wrongGenesisProblem, chainFieldMissingLogged, txParseRetryCounts, insertQuarantineCounts, insertQuarantine, insertQuarantineCounted, parseQuarantine }
 }
 
 async function bootDecoder(){

@@ -120,8 +120,39 @@ describe('Database#reconcileTableIndexes()', () => {
         await db.reconcileTableIndexes('mempool_transactions.sql', conn)
         const adds    = conn.calls.filter(s => /ADD UNIQUE INDEX/i.test(s))
         const dedupes = conn.calls.filter(s => /^DELETE t1 FROM `mempool_transactions` t1 JOIN/i.test(s))
-        assert.strictEqual(adds.length, 2, 'ADD UNIQUE should be attempted, then retried after dedupe')
-        assert.strictEqual(dedupes.length, 1, 'one dedupe DELETE expected')
+        assert.strictEqual(adds.length, 1, 'ADD UNIQUE should be attempted once')
+        assert.strictEqual(dedupes.length, 0, 'an unapproved table must not be deduped')
+    })
+
+    it('does not auto-dedupe address or transaction intern tables', async () => {
+        for (const [file, table, index, column] of [
+            ['index_addresses.sql', 'index_addresses', 'address', 'address'],
+            ['index_transactions.sql', 'index_transactions', 'hash', 'hash']
+        ]) {
+            writeFixture(file, `CREATE TABLE ${table} (id INT, ${column} VARBINARY(64));\n`
+                + `CREATE UNIQUE INDEX ${index} ON ${table} (${column});`)
+            const conn = makeConn({ uniqueAddFailsOnce: true })
+            await db.reconcileTableIndexes(file, conn)
+            assert.strictEqual(conn.calls.filter(s => /^DELETE t1 FROM/i.test(s)).length, 0)
+        }
+    })
+
+    it('continues after a refused unique dedupe', async () => {
+        writeFixture('t.sql', [
+            'CREATE TABLE t (id INT, a INT, b INT) ENGINE=InnoDB;',
+            'CREATE UNIQUE INDEX uq_a ON t (a);',
+            'CREATE INDEX idx_b ON t (b);'
+        ].join('\n'))
+        const conn = makeConn({ uniqueAddFailsOnce: true })
+        await db.reconcileTableIndexes('t.sql', conn)
+        assert.ok(conn.calls.some(s => /ADD INDEX `idx_b`/.test(s)), 'the later index must still be added')
+        assert.ok(!conn.calls.some(s => /^DELETE t1 FROM/i.test(s)), 'no dedupe DELETE is allowed')
+    })
+
+    it('refuses a direct dedupe call outside the allow-list', async () => {
+        const conn = makeConn()
+        assert.strictEqual(await db.dedupeForUniqueIndex(conn, 'index_addresses', ['address'], 'address'), false)
+        assert.ok(!conn.calls.some(s => /^DELETE t1 FROM/i.test(s)), 'the defensive gate must issue no DELETE')
     })
 
     it('skips the unique add (still resolving) when the table has no id column to dedupe by', async () => {
