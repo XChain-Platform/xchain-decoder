@@ -304,12 +304,12 @@ describe('decoder stability fixes @regression', function () {
         const { bigIntBufferutilsActive } = require('../../src/XChainDecoder')
 
         it('reports inactive when the reader throws (stock bitcoinjs, wedge-prone)', function () {
-            const throwing = { BufferReader: class { readUInt64(){ throw new Error('RangeError: value out of range') } } }
+            const throwing = { BufferReader: class { readUInt64(){ throw new Error('RangeError: value out of range') } readInt64(){ return -1n } } }
             assert.strictEqual(bigIntBufferutilsActive(throwing), false)
         })
 
         it('reports active when the reader tolerates a > 2^53 value (BigInt-safe patch)', function () {
-            const working = { BufferReader: class { readUInt64(){ return 9007199254740992n } } }
+            const working = { BufferReader: class { readUInt64(){ return 2n ** 64n - 1n } readInt64(){ return 2n ** 64n - 1n } } }
             assert.strictEqual(bigIntBufferutilsActive(working), true)
         })
 

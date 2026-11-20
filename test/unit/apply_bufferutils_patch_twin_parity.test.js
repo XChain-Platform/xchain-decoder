@@ -8,8 +8,8 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// src/chain/apply_bufferutils_patch.js and src/chain/bufferutils.js are byte-identical
-// twins of the xchain-utxo-tracker files at the same paths. Both services decode the
+// The bufferutils patch files and v7 compatibility shim are byte-identical twins of
+// the xchain-utxo-tracker files at the same paths. Both services decode the
 // same blocks, so a one-sided edit (the verifuint bounds, the unsigned 64-bit read, the
 // writer's Number/BigInt acceptance) splits UTXO-set and action-record output values at
 // the same height. Change both copies together; the tracker carries the mirror guard.
@@ -25,7 +25,11 @@ const { siblingCheckout, skipOrFail } = require('../helpers/sibling_checkout')
 const REPO_ROOT = path.join(__dirname, '..', '..')
 const TRACKER_DIR = process.env.XCHAIN_UTXO_TRACKER_DIR ||
     path.join(__dirname, '..', '..', '..', 'xchain-utxo-tracker')
-const TWIN_FILES = ['src/chain/apply_bufferutils_patch.js', 'src/chain/bufferutils.js']
+const TWIN_FILES = [
+    'src/chain/apply_bufferutils_patch.js',
+    'src/chain/bufferutils.js',
+    'src/chain/bitcoinjs_v7_compat.js',
+]
 
 // Names the first differing line so a drift report points at the edit.
 function firstDifferingLine(a, b) {
