@@ -173,6 +173,10 @@ describe('quarantine retry state is per tx position and per block', function () 
         assert.strictEqual(decoder.parseErrors, 1)
         assert.strictEqual(decoder.lastQuarantinedTxHash, 'cafe01')
     })
+})
+
+describe('quarantine retry state is per tx position and per block', function () {
+    this.timeout(0)
 
     it('counts an INSERT quarantine once across repeated later rollbacks', async function () {
         const chain = { hash: 'blockA', txs: ['cafe01', 'beef02'] }

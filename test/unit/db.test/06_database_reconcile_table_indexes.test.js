@@ -148,6 +148,18 @@ describe('Database#reconcileTableIndexes()', () => {
         assert.ok(conn.calls.some(s => /ADD INDEX `idx_b`/.test(s)), 'the later index must still be added')
         assert.ok(!conn.calls.some(s => /^DELETE t1 FROM/i.test(s)), 'no dedupe DELETE is allowed')
     })
+})
+
+describe('Database#reconcileTableIndexes()', () => {
+    beforeEach(() => {
+        fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decoder-idx-test-'))
+        db = makeDb()
+        db.sqlPath = fixtureDir
+    })
+
+    afterEach(() => {
+        fs.rmSync(fixtureDir, { recursive: true, force: true })
+    })
 
     it('refuses a direct dedupe call outside the allow-list', async () => {
         const conn = makeConn()
