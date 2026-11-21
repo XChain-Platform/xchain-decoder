@@ -79,6 +79,38 @@ function rollbackLockName(dbName){
     return 'xchain_reorg_' + crypto.createHash('sha256').update(dbName).digest('hex').slice(0, 51)
 }
 
+function reorgMarkerId(row){
+    const raw = row && row.id
+    const valid = typeof raw === 'bigint' ? raw >= 0n
+        : typeof raw === 'number' ? Number.isSafeInteger(raw) && raw >= 0
+        : typeof raw === 'string' && /^\d+$/.test(raw)
+    if (!valid) throw new Error('countReorgDeletesAboveTip: REORG marker has an unreadable id')
+    return BigInt(raw)
+}
+
+function addReorgMarkerHeights(row, tip, heights){
+    let payload
+    try {
+        payload = (typeof row.data === 'string') ? JSON.parse(row.data) : row.data
+    } catch (err){
+        throw new Error('countReorgDeletesAboveTip: REORG marker id ' + row.id
+            + ' has an unreadable payload, so the rollback depth cannot be bounded: ' + err.message)
+    }
+    if (!Array.isArray(payload))
+        throw new Error('countReorgDeletesAboveTip: REORG marker id ' + row.id
+            + ' is not the expected array payload, so the rollback depth cannot be bounded')
+    for (const entry of payload){
+        const raw = entry && typeof entry === 'object' && !Array.isArray(entry)
+            ? entry.block_index : undefined
+        const readable = typeof raw === 'number' || (typeof raw === 'string' && /^\d+$/.test(raw))
+        const height = readable ? Number(raw) : NaN
+        if (!Number.isSafeInteger(height) || height < 0)
+            throw new Error('countReorgDeletesAboveTip: REORG marker id ' + row.id
+                + ' carries a non-numeric block_index, so the rollback depth cannot be bounded')
+        if (height > tip) heights.add(height)
+    }
+}
+
 module.exports = {
     // Session-owned exclusion shared by verifyReorg and clear-reorg-halt. The lock
     // session is drawn straight from the pool, never through getConnection(), which
@@ -246,73 +278,43 @@ module.exports = {
     // How many distinct block heights above the current tip have already been
     // rolled back and not yet re-synced.
     //
-    // This is the restart-durable half of the safe-depth ceiling. The REORG_HALT
-    // marker above is best-effort by construction: markReorgHalted runs on the
-    // abort path, so a DB fault at exactly that moment leaves the halt recorded
-    // nowhere, and a restarted decoder re-entered verifyReorg with a zeroed depth
-    // counter and finished the over-deep rollback. The evidence this method reads
-    // cannot be lost that way, because deleteBlockByIndex commits the REORG marker
-    // INSIDE the same transaction as the block delete: a deleted block and its
-    // marker are atomic, so the marker rows above the tip ARE the rollback depth.
-    //
     // Distinct heights, not a row count: a height deleted, re-synced and deleted
-    // again writes two markers and is one block of depth. Bounded scan: the largest
-    // configured ceiling is 5006, so the newest 10000 REORG rows cover every reachable depth, and
-    // (code, id) is indexed (src/sql/events.sql). THROWS on an unreadable or
-    // unparseable result - "we could not tell" must never reach the caller as "no
-    // prior rollback", which is the exact collapse this whole guard exists to stop.
+    // again writes two markers and is one block of depth. A row window is not sound
+    // because repeat markers can crowd out an older height that remains above the
+    // tip, so the indexed (code, id) history is scanned with keyset pagination.
+    // Every unreadable result fails closed rather than becoming zero prior depth.
     async countReorgDeletesAboveTip(scanLimit = 10000){
-        // Throws (after its own retries) rather than returning a sentinel, so an
-        // unknown tip cannot silently become "everything is above it" or "nothing is".
         const tip = await this.getLastBlockIndex()
-        // Interpolated, not bound: LIMIT placeholders are not used anywhere else in
-        // this file, so the bound is range-checked here instead and the SQL stays the
-        // plain shape the rest of the module uses. The value is internal, never
-        // operator input, and the guard is what makes that literal safe.
         const limit = Number(scanLimit)
         if (!Number.isInteger(limit) || limit < 1 || limit > 1000000)
             throw new Error('countReorgDeletesAboveTip: refusing an out-of-range scan limit: ' + scanLimit)
-        const query = `SELECT id, data FROM events WHERE code = 'REORG' ORDER BY id DESC LIMIT ${limit};`
         const connection = await this.getConnection()
         const ownLease = (this.transactionConnection == null)
+        const heightsAboveTip = new Set()
+        let cursor = null
+        let priorId = null
         try {
-            const rows = await connection.query(query)
-            if (!Array.isArray(rows))
-                throw new Error('countReorgDeletesAboveTip: the REORG marker scan returned no readable rows')
-            const heightsAboveTip = new Set()
-            for (const row of rows){
-                let payload
-                try {
-                    payload = (typeof row.data === 'string') ? JSON.parse(row.data) : row.data
-                } catch (err){
-                    throw new Error('countReorgDeletesAboveTip: REORG marker id ' + row.id
-                        + ' has an unreadable payload, so the rollback depth cannot be bounded: ' + err.message)
+            for (;;){
+                const query = cursor == null
+                    ? `SELECT id, data FROM events WHERE code = 'REORG' ORDER BY id DESC LIMIT ${limit};`
+                    : `SELECT id, data FROM events WHERE code = 'REORG' AND id < ? ORDER BY id DESC LIMIT ${limit};`
+                const rows = cursor == null
+                    ? await connection.query(query) : await connection.query(query, [cursor])
+                if (!Array.isArray(rows))
+                    throw new Error('countReorgDeletesAboveTip: the REORG marker scan returned no readable rows')
+                for (const entry of rows){
+                    const id = reorgMarkerId(entry)
+                    if (priorId != null && id >= priorId)
+                        throw new Error('countReorgDeletesAboveTip: REORG marker cursor did not strictly decrease')
+                    priorId = id
+                    addReorgMarkerHeights(entry, tip, heightsAboveTip)
                 }
-                // Both marker shapes are arrays of {block_index, block_hash} (one entry
-                // per row since M-12, several on older rows); anything else means this
-                // is not the marker whose depth we are counting.
-                if (!Array.isArray(payload))
-                    throw new Error('countReorgDeletesAboveTip: REORG marker id ' + row.id
-                        + ' is not the expected array payload, so the rollback depth cannot be bounded')
-                for (const entry of payload){
-                    // Accept integers and legacy digit strings only. Other values
-                    // must fail closed instead of coercing to height zero.
-                    const raw = entry && typeof entry === 'object' && !Array.isArray(entry)
-                        ? entry.block_index : undefined
-                    const readable = typeof raw === 'number'
-                        || (typeof raw === 'string' && /^\d+$/.test(raw))
-                    const height = readable ? Number(raw) : NaN
-                    if (!Number.isSafeInteger(height) || height < 0)
-                        throw new Error('countReorgDeletesAboveTip: REORG marker id ' + row.id
-                            + ' carries a non-numeric block_index, so the rollback depth cannot be bounded')
-                    if (height > tip) heightsAboveTip.add(height)
-                }
+                if (rows.length < limit) break
+                cursor = priorId.toString()
             }
             return heightsAboveTip.size
         } finally {
-            if (ownLease){
-                await connection.release()
-            }
+            if (ownLease) await connection.release()
         }
     },
 

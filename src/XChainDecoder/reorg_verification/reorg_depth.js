@@ -65,8 +65,7 @@ async function readPriorRollbackDepth(){
     let seedErr = null
     for (let attempt = 1; attempt <= 3; attempt++){
         try {
-            // Default scan bound, never the height ceiling: the bound counts ROWS and the
-            // method returns distinct HEIGHTS, so re-deleted heights would crowd out older ones.
+            // The default controls page size, while the method scans the full marker history.
             const depth = await this.db.countReorgDeletesAboveTip()
             // A non-count is a read fault, never a depth: NaN fails both ceiling comparisons open.
             if (!Number.isInteger(depth) || depth < 0){
