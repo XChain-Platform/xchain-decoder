@@ -22,7 +22,7 @@ const util = require('../util')
 const coins = require('../coins')
 const Database = require('../db.js')
 const { chainGenesisUnpinned } = require('../protocol/chain_identity')
-const { logger, BLOCKCHAIN_INFO_REFRESH_MS } = require('./constants.js')
+const { logger, BLOCKCHAIN_INFO_REFRESH_MS, BLOCKCHAIN_INFO_BEHIND_REFRESH_MS } = require('./constants.js')
 const { bigIntBufferutilsActive } = require('./payload_helpers.js')
 const { resetAfterRollback, reorgHaltHoldsLoop, waitAtTip } = require('./sync_loop.js')
 const { refreshChainTip } = require('./tip_refresh.js')
@@ -87,7 +87,7 @@ function openDatabaseHandles(){
     }
 
     // Only Dogecoin can carry a single output > 2^53-1 sat (~90.07M DOGE); BTC/LTC caps
-    // are lower. The patch is applied in-process (src/chain/apply_bufferutils_patch.js, required
+    // are lower. The patch is applied in-process (src/chain/bitcoinjs_v7_compat.js, required
     // by XChainBlockDecoder), so this can only fire if that module regresses or a stray
     // bitcoinjs-lib copy shadows the patched one; keep the backstop so any such
     // regression is loud at startup rather than a mid-operation fleet halt.
@@ -102,7 +102,7 @@ function openDatabaseHandles(){
     if (this.xchainBlockDecoder && this.xchainBlockDecoder.coin === 'dogecoin' && !bigIntBufferutilsActive()){
         util.throwError(new Error('CRITICAL: bitcoinjs-lib bufferutils BigInt-safe 64-bit reader is NOT active on a ' +
             'Dogecoin decoder. A DOGE output > 2^53-1 sat (~90.07M DOGE) will throw during block decode ' +
-            'and wedge this decoder permanently. src/chain/apply_bufferutils_patch.js should have applied it ' +
+            'and wedge this decoder permanently. src/chain/bitcoinjs_v7_compat.js should have applied it ' +
             'in-process; investigate before running on mainnet.'))
     }
 }
@@ -125,11 +125,15 @@ async function prepareDatabase(){
         if(!tablesVerified)
             util.throwError(new Error("Database " + this.dbName + " tables don't exist!"));
 
-        // Apply any pending `auto` schema migrations (additive/idempotent changes the
-        // drift reconciler can't make on its own). Manual/destructive migrations stay
-        // gated for an explicit operator run (`node src/db/migrate.js`). Recorded in the
-        // schema_migrations ledger, so this is a no-op once applied.
-        await this.db.runMigrations();
+        // Apply any pending `auto` schema migrations and complete the checksum
+        // pass before parsing. A lock skip examined neither, so startup must fail
+        // and let the process restart after the other migrator releases the lock.
+        const migrationResult = await this.db.runMigrations();
+        if (migrationResult && migrationResult.lockSkipped === true) {
+            util.throwError(new Error('Refusing to parse because migration lock xchain_migrate_' + this.dbName
+                + ' was unavailable; no pending migration was applied and no applied checksum was verified. '
+                + 'Restart after the other migrator releases the lock.'));
+        }
     }
 
     // Report a LATENT reorg halt at boot. A decoder restored from (or running on)
@@ -213,12 +217,15 @@ function initialLoopLatches(){
     // no instance ever skips a tx a healthy instance accepts (cross-instance parity).
     const insertQuarantineCounts = new Map()
     const insertQuarantine = new Set()
+    // Insert-quarantined positions whose successful skip has already been
+    // counted. The PARSE_ERROR row is still rewritten until block commit.
+    const insertQuarantineCounted = new Set()
 
     // Positions quarantined by a parse throw, keyed like the maps above. Later passes of the block
     // still re-parse them but write only their PARSE_ERROR row, without re-counting; cleared on
     // block commit.
     const parseQuarantine = new Set()
-    return { nodeSyncedProblem, nodeCatchingUpProblem, tipBelowStoredTipRefused, wrongChainProblem, wrongGenesisProblem, chainFieldMissingLogged, txParseRetryCounts, insertQuarantineCounts, insertQuarantine, parseQuarantine }
+    return { nodeSyncedProblem, nodeCatchingUpProblem, tipBelowStoredTipRefused, wrongChainProblem, wrongGenesisProblem, chainFieldMissingLogged, txParseRetryCounts, insertQuarantineCounts, insertQuarantine, insertQuarantineCounted, parseQuarantine }
 }
 
 async function bootDecoder(){
@@ -260,6 +267,16 @@ async function bootDecoder(){
 }
 
 module.exports = {
+    // Whether the cached node tip must be re-read this iteration. Behind the cached tip
+    // the refresh runs on the short BEHIND interval so lag_blocks tracks a burst of new
+    // blocks instead of reporting the gap as of the last 30 s refresh.
+    chainTipRefreshDue(loop, now){
+        if (!loop.lastBlockchainInfo) return true
+        if (loop.lastProcessedBlockIndex >= this.blockchainInfoLastBlock) return true
+        const age = now - loop.lastBlockchainInfoRefreshAt
+        return age >= BLOCKCHAIN_INFO_BEHIND_REFRESH_MS || age >= BLOCKCHAIN_INFO_REFRESH_MS
+    },
+
     async start(){
         verifyBundledConsensusPin.call(this)
         const loop = await bootDecoder.call(this)
@@ -300,9 +317,7 @@ module.exports = {
             //last condition keeps blockchainInfoLastBlock tracking the live chain
             //during a long catch-up, so the reported lag reflects the true remaining
             //gap instead of converging to zero against a frozen tip.
-            if (!loop.lastBlockchainInfo
-                || (loop.lastProcessedBlockIndex >= this.blockchainInfoLastBlock)
-                || (Date.now() - loop.lastBlockchainInfoRefreshAt >= BLOCKCHAIN_INFO_REFRESH_MS)){
+            if (this.chainTipRefreshDue(loop, Date.now())){
                 if ((await refreshChainTip.call(this, loop, loop.lastProcessedBlockIndex)) === 'continue') continue
             }
 

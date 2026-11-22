@@ -111,7 +111,7 @@ module.exports = {
     // deterministic error at different wall-clock times produce byte-identical rows.
     // REORG events are operator-local by nature (each node's reorg exposure differs)
     // and may omit blockTime; they fall back to the current wall clock.
-    async insertEvent(code, data, blockTime){
+    async insertEvent(code, data, blockTime, existingConnection){
         const query = `
             INSERT INTO events (
             time,
@@ -120,9 +120,9 @@ module.exports = {
         ) VALUES (?, ?, ?);
         `;
 
-        let connection = await this.getConnection()
+        let connection = existingConnection || await this.getConnection()
         // Entry-time lease snapshot (rationale at insertBlock).
-        const ownLease = (this.transactionConnection == null)
+        const ownLease = (existingConnection == null && this.transactionConnection == null)
 
         try {
             let timeString = blockTime != null
@@ -144,7 +144,7 @@ module.exports = {
                 return this.DUPLICATED_TRANSACTION
             } else {
                 logger.error(formatLogLine('Error inserting event:', err));
-                if (this.transactionConnection){
+                if (this.transactionConnection && existingConnection == null){
                     // Roll back + free the transaction lock, matching every sibling
                     // insert. releaseConnection() alone leaves the transaction open on
                     // the pooled connection AND never calls releaseTransactionLock(),

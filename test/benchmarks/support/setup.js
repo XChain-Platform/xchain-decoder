@@ -11,6 +11,8 @@
 // Pre-load: mock mariadb before any source file requires it.
 // mariadb v3.5+ is ESM-only which breaks CommonJS require().
 // Benchmarks never need a real DB connection, so we stub it out.
+require('../../helpers/bitcoinjs_v7_fixtures').installBitcoinJsV7Fixtures()
+
 const Module = require('module')
 const originalResolveFilename = Module._resolveFilename
 

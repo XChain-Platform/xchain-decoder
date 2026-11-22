@@ -17,7 +17,7 @@ const { ensureLedgerAppliedAtDatetime } = require('./migration_ledger.js')
 const { stripBlockComments } = require('./migration_live_schema_guard.js')
 const {
     hasUnquotedHash, isSimpleDestructiveStatement, createOutsideAllowList, isDestructiveAlter,
-    statementOutsideAllowList, addsDeferredConstraint,
+    statementOutsideAllowList, addsDeferredConstraint, qualifiedWriteTarget,
 } = require('./migration_guards/destructive_statement_rules.js')
 
 module.exports = {
@@ -31,6 +31,9 @@ module.exports = {
         // tight, because the multi-line license banner pushes the tag past it and the
         // migration then silently reads as the `manual` default. Anchoring to the
         // prologue keeps both properties at any banner length.
+        // Keep this parser aligned with xchain-indexer/src/db/database/migration_scan.js,
+        // xchain-node/src/services/migration_precondition_service/migration_scan.js,
+        // and xchain-hub/src/db/schema/sql_migration_files.js.
         const lines    = String(raw).split('\n');
         const prologue = [];
         for(const line of lines){
@@ -38,8 +41,14 @@ module.exports = {
             if(trimmed === '' || trimmed.startsWith('--')){ prologue.push(line); continue; }
             break;   // first non-blank, non-comment line ends the prologue
         }
-        const m = prologue.join('\n').match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im);
-        return m ? m[1].toLowerCase() : 'manual';
+        const modes = [];
+        for(const line of prologue){
+            const header = /^\s*--\s*xchain:migration\b(.*)$/i.exec(line);
+            if(!header) continue;
+            for(const token of header[1].matchAll(/\bmode\s*=\s*([A-Za-z]+)\b/gi))
+                modes.push(token[1].toLowerCase());
+        }
+        return modes.length > 0 && modes.every(mode => mode === 'auto') ? 'auto' : 'manual';
     },
 
     // Destructive-DDL scan for the auto-apply path. Given a migration file's
@@ -51,8 +60,9 @@ module.exports = {
     //
     // Flagged as destructive: any top-level DROP other than DROP INDEX and DROP TEMPORARY
     // TABLE (sequences, triggers, views, events and routines too), TRUNCATE, RENAME TABLE,
-    // DELETE (any form), REPLACE INTO (atomic DELETE+INSERT), INSERT ... ON DUPLICATE
-    // KEY UPDATE (rewrites every colliding row), LOAD DATA (rows from a file the
+    // DELETE (any form), REPLACE INTO (atomic DELETE+INSERT), INSERT IGNORE,
+    // INSERT ... ON DUPLICATE KEY UPDATE, CREATE TABLE ... IGNORE/REPLACE SELECT,
+    // LOAD DATA (rows from a file the
     // scanner cannot read), UPDATE (except the
     // committed AUTO_INCREMENT id=0 repair),
     // ALTER TABLE ... DROP <column|partition|bare identifier>,
@@ -61,7 +71,7 @@ module.exports = {
     // (the statically detectable narrowing; the runner's live-schema guard catches a
     // width cut or a dropped attribute), MODIFY id without AUTO_INCREMENT (strips the
     // generated key), a MODIFY not opening its alter_spec (WAIT n / NOWAIT belongs to the head),
-    // any ALTER TABLE PARTITION, TABLESPACE or ENGINE clause, ALTER IGNORE
+    // any ALTER TABLE PARTITION, TABLESPACE or ENGINE clause, a schema-qualified write target, ALTER IGNORE
     // TABLE (deletes duplicate-key rows), any other ALTER than ALTER [ONLINE] TABLE, a CREATE
     // TABLE naming an engine other than InnoDB, any FOREIGN KEY, REFERENCES or CHECK constraint
     // definition (cascades, restricts or rejects later writes and deletes), and any CREATE other
@@ -99,6 +109,7 @@ module.exports = {
             // a hit; quote-aware, so a '/*' literal and a later '*/' literal hide no real clause.
             const stmt = stripBlockComments(raw).trim();
             if(!stmt) continue;
+            if(qualifiedWriteTarget(stmt)) return raw;
             // Second layer behind stripSqlLineComments: MariaDB/MySQL honour `#` to
             // end-of-line as a comment, so `# note\nDROP TABLE balances` is a DROP every
             // ^-anchored check below is blind to. The strip removes it upstream; if one

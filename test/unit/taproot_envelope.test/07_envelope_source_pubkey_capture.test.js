@@ -35,9 +35,14 @@ const {
     createDecoder,
     wireConnector
 } = require('./helpers/taproot_envelope.js')
+const ecc = require('tiny-secp256k1')
 
 // A one-push compiled payload of 20 bytes (1-byte push opcode + 19 data bytes).
 const PAYLOAD_20 = bitcoin.script.compile([Buffer.alloc(19, 0x41)])
+
+// A real key from a fixed private key. The decoder records a key only when it hashes
+// to the source, so the funding output pays this key's P2WPKH address.
+const FUNDER_KEY = Buffer.from(ecc.pointFromScalar(Buffer.alloc(32, 0x05), true))
 
 function captureRig(commitWitness) {
     const decoder = createDecoder()
@@ -45,8 +50,9 @@ function captureRig(commitWitness) {
     decoder.db.getAddressId = sinon.stub().resolves(42)
     decoder.db.hasPubkey = sinon.stub().resolves(false)
     const fundingTx = buildFundingTx()
+    fundingTx.outs[0].script = bitcoin.payments.p2wpkh({ pubkey: FUNDER_KEY }).output
     const commitTx = buildCommitTx(fundingTx)
-    if (commitWitness) commitTx.ins[0].witness = commitWitness
+    commitTx.ins[0].witness = commitWitness || [Buffer.alloc(72, 0x30), FUNDER_KEY]
     const script = makeEnvelopeScript(PAYLOAD_20)
     const revealTx = buildRevealTx(commitTx, script)
     wireConnector(decoder, [fundingTx, commitTx])
@@ -62,6 +68,7 @@ describe('Taproot envelope source pubkey capture', function () {
         assert.strictEqual(PAYLOAD_20.length, 20)
         assert.strictEqual(script.length, 65, 'precondition: the tapscript is uncompressed-key sized')
         const funderKey = commitTx.ins[0].witness[1].toString('hex')
+        assert.strictEqual(funderKey, FUNDER_KEY.toString('hex'))
         const result = await decoder.parseTransaction(revealTx, new Set(), null, POST_FLAG)
         assert.strictEqual(result.envelope, true)
         assert.strictEqual(result.source, sourceAddr)

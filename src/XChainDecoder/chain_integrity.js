@@ -20,7 +20,8 @@
 
 const { chainGenesisMismatch, chainGenesisUnpinned } = require('../protocol/chain_identity')
 const { logger, REORG_HALT_PROBE_INTERVAL_MS, AUXPOW_REASSEMBLE_AFTER, TIP_SETTLE_DELAY_MS, TIP_SETTLE_MAX_READS } = require('./constants.js')
-const { RESET_RECOVERY, readRolledBackAboveTip } = require('./reorg_halt.js')
+const { RESET_RECOVERY, readRolledBackAboveTip, validateClearedHaltResume } = require('./reorg_halt.js')
+const { isWholeHex, malformedHexError } = require('../chain/blockchain_connector/rpc_helpers.js')
 
 // Read the durable REORG_HALT marker through whichever probe the db exposes, or
 // null when it exposes none (or there is no db) and the cached state must stand.
@@ -74,7 +75,14 @@ function noteReorgHaltTransition(decoder, wasHalted){
             '`xchain-node clear-reorg-halt <chain> <network> --reason "..."`.' +
             (decoder.reorgHaltReason ? ' Marker detail: ' + decoder.reorgHaltReason : ''))
     } else if (!decoder.reorgHalted && wasHalted){
-        logger.warn('XChainDecoder: REORG_HALT marker is gone; halt cleared.')
+        // The halt row is never deleted: a newer audited REORG_HALT_CLEARED row supersedes it,
+        // or no halt row is present at all (a rebuilt schema).
+        logger.warn(decoder.reorgHaltClearedAt
+            ? 'XChainDecoder: REORG_HALT no longer live; superseded by an audited REORG_HALT_CLEARED row (cleared ' +
+              decoder.reorgHaltClearedAt + ': ' + (decoder.reorgHaltClearedReason || 'no reason recorded') +
+              '). The REORG_HALT row is kept for audit; a newer REORG_HALT would be live again.'
+            : 'XChainDecoder: REORG_HALT no longer live; no REORG_HALT row is present (for example, the ' +
+              'database was rebuilt by a resync).')
     }
 }
 
@@ -260,6 +268,7 @@ module.exports = {
         if (this.reorgHaltMarkerPersisted === false) return false
         const status = await this.checkReorgHalt()
         if (status.halted) return false
+        if (!(await validateClearedHaltResume.call(this))) return false
         const height = this.reorgHaltParkedHeight
         this.reorgHaltParked = false
         this.reorgHaltParkedAt = null
@@ -304,7 +313,14 @@ module.exports = {
     // in the first place.
     async fetchBlockHex(blockHash, blockHeight){
         if (!this.auxPow) {
-            return this.connector.getBlock(blockHash)
+            const blockHex = await this.connector.getBlock(blockHash)
+            // A malformed answer is a wire fault: raised here it retries as a fetch
+            // error instead of reaching the parser as an undecodable block.
+            if (!isWholeHex(blockHex)) {
+                if (typeof this.connector.rpcErrors === 'number') this.connector.rpcErrors++
+                throw malformedHexError('getblock', blockHash, blockHex)
+            }
+            return blockHex
         }
         if (this._auxPowParseErrorCount >= AUXPOW_REASSEMBLE_AFTER) {
             logger.error('AuxPoW header strip at height ' + blockHeight + ' failed ' + this._auxPowParseErrorCount +

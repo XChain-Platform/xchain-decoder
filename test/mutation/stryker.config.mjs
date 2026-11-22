@@ -14,7 +14,7 @@
 /** @type {import('@stryker-mutator/core').PartialStrykerOptions} */
 export default {
   // ── Plugins ────────────────────────────────────────────────────────────────
-  plugins: ['@stryker-mutator/mocha-runner'],
+  plugins: [],
 
   // ── What to mutate ─────────────────────────────────────────────────────────
   // Excludes db.js (requires real MariaDB) and api.js (requires running server).
@@ -31,38 +31,22 @@ export default {
   ],
 
   // ── Test runner ────────────────────────────────────────────────────────────
-  testRunner: 'mocha',
-  mochaOptions: {
-    // CRITICAL: setup.js installs a Module._resolveFilename patch that redirects
-    // require('mariadb') to a mock. Stryker workers are fresh Node.js forks that
-    // do NOT inherit the parent's module state; this require entry re-installs
-    // the patch in each worker before any source file is loaded.
-    require: ['test/unit/support/setup.js'],
-    spec: ['test/unit/**/*.test.js'],
-    // These tests read src/XChainDecoder.js and/or the src/XChainDecoder/**
-    // split modules as TEXT and grep them for source literals (e.g. a Set
-    // literal, an exact conditional string). Stryker runs against an
-    // instrumented copy of those files in its sandbox, where the literal no
-    // longer looks the way the regex expects, so the test fails on every
-    // mutation run including the dry run and takes the whole run down with
-    // it. Each is a real guard on the real tree (npm test runs it); it just
-    // cannot participate here now that the split modules are mutated too.
-    ignore: [
-      'test/unit/action_manifest_conformance.test.js',
-      'test/unit/chain_genesis_pin.test.js',
-      'test/unit/chain_identity_gate.test.js',
-      'test/unit/decoder_tip_stale_surface.test.js',
-      'test/unit/node_catch_up_wait.test.js',
-      'test/unit/node_catching_up_status.test.js',
-    ],
-    config: 'test/mutation/.mocharc.mutation.yml',
-    'no-package': true,
+  testRunner: 'command',
+  commandRunner: {
+    command: "./node_modules/.bin/mocha --timeout 5000 --exit --require ./test/unit/support/setup.js 'test/unit/**/*.test.js' " +
+      "--ignore test/unit/action_manifest_conformance.test.js " +
+      "--ignore test/unit/chain_genesis_pin.test.js " +
+      "--ignore test/unit/chain_identity_gate.test.js " +
+      "--ignore test/unit/decoder_tip_stale_surface.test.js " +
+      "--ignore test/unit/node_catch_up_wait.test.js " +
+      "--ignore test/unit/node_catching_up_status.test.js " +
+      "--ignore test/unit/reorg_recovery.test/05_reorg_wait_surface.test.js",
   },
 
   // ── Coverage analysis ──────────────────────────────────────────────────────
-  // "perTest" builds a test→mutant coverage map during a dry run, then only
-  // executes relevant tests per mutant. 3-10x faster than "off".
-  coverageAnalysis: 'perTest',
+  // Mocha 12 no longer exposes the private module path used by the Stryker
+  // Mocha runner. The command runner is public-CLI-only and cannot map tests.
+  coverageAnalysis: 'off',
 
   // ── Timing ─────────────────────────────────────────────────────────────────
   timeoutMS: 30000,

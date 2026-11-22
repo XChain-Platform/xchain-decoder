@@ -15,6 +15,7 @@
 // The statement rules behind destructiveAutoStatement in ../migration_statements.js.
 const { opensBackslashEscape, createNamesNonInnoDb, dropTargetDestroys } = require('../query_helpers.js')
 const { alterSpecs, blankLiterals } = require('../migration_live_schema_guard.js')
+const { qualifiedWriteTarget } = require('./column_change_safety.js')
 
 // True when a `#` sits outside every quoted span - a line comment
 // stripSqlLineComments should already have removed. Quote-aware so a `#`
@@ -86,10 +87,16 @@ function isSimpleDestructiveStatement(stmt){
     // touches - the same data-loss profile as DELETE, with no non-destructive
     // form - so match the bare keyword like DELETE above.
     if(/^REPLACE\b/i.test(stmt)) return true;
+    // INSERT IGNORE disables strict conversion errors for one statement, so it can
+    // clamp values that a plain INSERT would reject. CREATE TABLE ... IGNORE or
+    // REPLACE SELECT has the same conversion or replacement hazard.
+    if(/^INSERT\s+(?:(?:LOW_PRIORITY|DELAYED|HIGH_PRIORITY)\s+)*IGNORE\b/i.test(stmt)) return true;
+    if(/^CREATE\s+(?:TEMPORARY\s+)?TABLE\b/i.test(stmt)){
+        const bare = blankLiterals(stmt);
+        if(/\b(?:IGNORE|REPLACE)\b\s*(?:AS\b\s*)?\(?\s*(?:SELECT|WITH)\b/i.test(bare)) return true;
+    }
     // INSERT ... ON DUPLICATE KEY UPDATE overwrites columns of every existing
-    // duplicate-key row it touches - the same data-rewrite profile the UPDATE arm
-    // below hard-blocks, reached from a keyword that arm never sees. Plain INSERT
-    // stays auto-eligible: with no ON DUPLICATE clause it only adds rows.
+    // duplicate-key row it touches. Plain INSERT without IGNORE only adds rows.
     if(/^INSERT\b[\s\S]*\bON\s+DUPLICATE\s+KEY\s+UPDATE\b/i.test(stmt)) return true;
     // LOAD DATA ... REPLACE INTO TABLE is a DELETE+INSERT on every key collision,
     // and the rows come from a file the classifier cannot read, so no form of it
@@ -164,5 +171,5 @@ function isDestructiveAlter(stmt, safeAlterDrop){
 
 module.exports = {
     hasUnquotedHash, isSimpleDestructiveStatement, createOutsideAllowList, isDestructiveAlter, statementOutsideAllowList,
-    addsDeferredConstraint,
+    addsDeferredConstraint, qualifiedWriteTarget,
 }

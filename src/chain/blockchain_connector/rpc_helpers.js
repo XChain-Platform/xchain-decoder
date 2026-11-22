@@ -36,6 +36,19 @@ function envInt(raw, fallback, name, min = 1) {
     return n
 }
 
+// Accept only a non-empty, byte-aligned hex string from block RPCs.
+function isWholeHex(value){
+    return typeof value === 'string' && value.length > 0 && value.length % 2 === 0
+        && /^[0-9a-fA-F]+$/.test(value)
+}
+
+// The error a block RPC answer that is not whole hex raises, naming the method, the block
+// and the answer's shape (never its content) so a wire fault reads as one.
+function malformedHexError(method, blockhash, value){
+    const shape = typeof value === 'string' ? 'string length ' + value.length : typeof value
+    return new Error(method + ' returned malformed block hex for ' + blockhash + ' (' + shape + ')')
+}
+
 // Attach the node's JSON-RPC error code and message to an error, non-enumerable so
 // JSON serialization of the error is unchanged. The one definition both transports
 // use: sanitizeRpcError for an HTTP-500 body, rpcResult for an HTTP-200 one.
@@ -161,6 +174,16 @@ function nodeReachabilityFrom(startedAt, lastNodeOkAt, lastNodeFailAt, now = Dat
     }
 }
 
+// Did a thrown HTTP error carry a JSON-RPC error object as its body? Nodes that predate
+// JSON-RPC 2.0 deliver an ordinary RPC error ("No such mempool or blockchain
+// transaction", height out of range) as HTTP 500 with that body, so axios throws for an
+// answer the node gave. Only an object with a numeric code counts: a timeout, a socket
+// fault, a 401 or a body-less or text-only 5xx page says nothing about the node answering.
+function isJsonRpcErrorAnswer(error) {
+    const rpcError = error && error.response && error.response.data && error.response.data.error
+    return Boolean(rpcError) && typeof rpcError === 'object' && typeof rpcError.code === 'number'
+}
+
 // Copy a cause's identity (error.code plus rpcCode/rpcMessage) onto an error built in its
 // place, so a retry ladder's exhaustion error still tells a transport fault from a node answer.
 function carryErrorIdentity(target, cause){
@@ -172,10 +195,13 @@ function carryErrorIdentity(target, cause){
 
 module.exports = {
     envInt,
+    isWholeHex,
+    malformedHexError,
     attachRpcFields,
     carryErrorIdentity,
     sanitizeRpcError,
     rpcResult,
     normalizeEndpoint,
     nodeReachabilityFrom,
+    isJsonRpcErrorAnswer,
 }

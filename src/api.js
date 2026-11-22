@@ -19,7 +19,7 @@
  ********************************************************************/
 
 const dotenv = require('dotenv')
-dotenv.config()
+dotenv.config({ quiet: true })
 
 // Before anything else logs. The env-validation failure at startApi()'s
 // DECODER_API_PORT check is exactly the line an operator needs levelled and
@@ -54,6 +54,7 @@ const {
     ageProbeLogState,
     PROBE_LOG_WINDOW_MS
 } = require('./api/probe_routes');
+const { rpcErrorHandler } = require('./api/rpc_error_handler');
 const { reportStartFailure, installCrashHandlers } = require('./api/crash_reporting');
 const { getHealthProbeState } = require('./api/health_probe');
 const { createMempoolMethods: createMempoolRpcMethods } = require('./api/mempool_methods');
@@ -201,7 +202,9 @@ function createMempoolMethods(decoder){
 // The JSON-RPC methods, keyed by name for express-json-rpc-router. The health
 // method's flag and error come through getters for the same reason as /status.
 function createJsonRpcController(decoder, isDecoderRunning, getDecoderError){
-    return {
+    // Prototype-free table: the router looks methods up by name, so a plain object
+    // would let inherited members ("constructor", "toString") pass as methods.
+    return Object.assign(Object.create(null), {
         // Function to check if xchain-decoder is up
         async ping() {
             return {status:"success"};
@@ -226,7 +229,7 @@ function createJsonRpcController(decoder, isDecoderRunning, getDecoderError){
             };
         },
         ...createMempoolMethods(decoder)
-    }
+    })
 }
 
 // The app's middleware in registration order: security headers, the per-IP rate
@@ -269,6 +272,10 @@ function registerRoutes(app, decoder, isDecoderRunning, getDecoderError){
     // response instead of crashing the request.
     app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
     app.use(jsonRouter({methods: createJsonRpcController(decoder, isDecoderRunning, getDecoderError)}))
+
+    // Terminal error handler: body-parser failures (malformed, non-object or oversized
+    // JSON) become JSON-RPC errors instead of Express's HTML stack-trace page.
+    app.use(rpcErrorHandler)
 }
 
 async function startApi(){
@@ -337,4 +344,4 @@ if (require.main === module) startApi()
 // startApi is exported so the crash handlers it installs can be driven for real
 // rather than asserted against the source text; the require.main guard above
 // still keeps a plain require from opening a port or a DB connection.
-module.exports = { buildHealthResult, makeRpcBatchGuard, registerLiveRoute, registerReadyRoute, registerStatusRoute, startApi, createMempoolMethods, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }
+module.exports = { buildHealthResult, makeRpcBatchGuard, registerLiveRoute, registerReadyRoute, registerStatusRoute, startApi, createMempoolMethods, createJsonRpcController, noteProbeFailure, nodeReachabilityFields, resetProbeLogState, ageProbeLogState, PROBE_LOG_WINDOW_MS }

@@ -313,9 +313,10 @@ describe('BATCH whole-batch rejection: the rest of the class', function () {
     describe('what is NOT mirrored stays captured, deliberately', function () {
 
         it('does not suppress an UNREGISTERED action name', function () {
-            // A vendored name list is not closed under registry growth, so a stale decoder
-            // would suppress batches the indexer dispatches. Over-capture is the safe
-            // direction and is left open; see hasProvablyRejectedBatch.
+            // A vendored name list is not closed under registry growth, and the indexer's
+            // dispatched-action set grows with each handler, so a stale copy of either would
+            // suppress batches the indexer dispatches. Over-capture is the safe direction and
+            // is left open; see hasProvablyRejectedBatch.
             assert.strictEqual(reject([COINPAY, 'NOT_AN_ACTION|0|x']), false);
             assert.strictEqual(reject([COINPAY, 'issue|0|AAA|1']), false);
         });

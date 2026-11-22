@@ -93,12 +93,36 @@ function nodeReachabilityFields(decoder){
 // health() draws a pooled MariaDB connection - amplifying one unauthenticated request
 // into pool contention against the liveness-critical block loop. Only trivial status
 // methods are exposed, so a small cap is ample.
+//
+// The guard also rejects any batch holding a non-plain-object element (null, number, string,
+// nested array). The router calls handleSingleReq(null) un-awaited and then reads body.id on
+// null, so one such element produced an HTTP 500 stack trace plus a CRASH unhandledRejection
+// record from unauthenticated input. Answering -32600 here keeps it from ever reaching the router.
+function isPlainRpcObject(v){
+    return v !== null && typeof v === 'object' && !Array.isArray(v)
+}
+
 function makeRpcBatchGuard(maxBatch){
     return (req, res, next) => {
         if (Array.isArray(req.body) && req.body.length > maxBatch){
             return res.status(400).json({
                 jsonrpc: '2.0',
                 error: { code: -32600, message: 'Batch too large (max ' + maxBatch + ' requests per call)' },
+                id: null
+            })
+        }
+        // JSON-RPC 2.0: an empty batch array is an Invalid Request, not an empty success.
+        if (Array.isArray(req.body) && req.body.length === 0){
+            return res.status(400).json({
+                jsonrpc: '2.0',
+                error: { code: -32600, message: 'Invalid Request: empty batch' },
+                id: null
+            })
+        }
+        if (Array.isArray(req.body) && !req.body.every(isPlainRpcObject)){
+            return res.status(400).json({
+                jsonrpc: '2.0',
+                error: { code: -32600, message: 'Invalid Request: every batch element must be an object' },
                 id: null
             })
         }
@@ -222,6 +246,7 @@ function liveBody(decoder, state) {
         // decoder answering 503 here would restart-loop it for a marker no restart
         // clears. isStalled() carries the matching gate.
         reorg_halt_parked: reorgHalt.parked === true,
+        reorg_halt_parked_at: reorgHalt.parked_at || null,
         // Ships beside the halt flag, as on /status and the health method: null means no
         // marker probe has completed, so a false halt flag is not yet an answer.
         reorg_halt_checked_at: reorgHalt.checked_at || null,

@@ -92,20 +92,17 @@ function canonicalizeActionPayload(buffer) {
     return { buffer: outBuffer, rawActionName, actionName, isKnown }
 }
 
-// Probe whether bitcoinjs-lib's 64-bit reader tolerates a value > 2^53-1 (the BigInt-safe
-// bufferutils patch) rather than throwing 'value out of range'. The decoder relies on this
-// patch to decode a Dogecoin output > 2^53-1 sat (~90.07M DOGE) without wedging block
-// decode; it ships via a Dockerfile COPY over node_modules, so a stock/unpatched
-// node_modules (a Dockerfile regression, or a non-Docker run) would silently reintroduce
-// the wedge. Reads a synthetic 2^53 uint64 (one past the stock reader's ceiling). The
-// bufferutils module is injectable for testing. Returns false on any failure (fail-safe:
-// an unrecognizable module reads as "patch not confirmed").
+// Probe both 64-bit readers used by supported bitcoinjs-lib versions. The v6 parser
+// calls readUInt64 and v7 calls readInt64 for transaction output values. Both must
+// preserve the unsigned wire value, including a set high bit. The module is injectable
+// for testing and any failure reads as "patch not confirmed".
 function bigIntBufferutilsActive(bufferutils){
     try {
-        let bu = bufferutils || require('bitcoinjs-lib/src/bufferutils')
+        const bu = bufferutils || require('bitcoinjs-lib/src/bufferutils')
         if (!bu.BufferReader) return false
-        new bu.BufferReader(Buffer.from([0, 0, 0, 0, 0, 0, 0x20, 0])).readUInt64()
-        return true
+        const max = Buffer.from('ffffffffffffffff', 'hex')
+        return new bu.BufferReader(max).readUInt64() === 18446744073709551615n
+            && new bu.BufferReader(max).readInt64() === 18446744073709551615n
     } catch(_){
         return false
     }

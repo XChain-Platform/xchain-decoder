@@ -9,7 +9,9 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const { resetAfterRollback, leaveReorgHaltPark, parkOrRethrow } = require('../../src/XChainDecoder/sync_loop.js')
+const fs = require('fs')
+const path = require('path')
+const { rederiveAfterRollback, resetAfterRollback, leaveReorgHaltPark, parkOrRethrow } = require('../../src/XChainDecoder/sync_loop.js')
 
 // A rolled-back parse pass must not leak its in-memory counts into the next
 // pass: the commit log line describes the block that actually committed.
@@ -17,7 +19,8 @@ const { resetAfterRollback, leaveReorgHaltPark, parkOrRethrow } = require('../..
 function dirtyLoop() {
   return {
     lastProcessedBlockIndex: 500, lastProcessedTxIndex: 9999, blocksQuantity: 7,
-    blocksCount: 36, transactionsCount: 120, validTransactionsCount: 234, outputCount: 88
+    blocksCount: 36, transactionsCount: 120, validTransactionsCount: 234, outputCount: 88,
+    mempoolPruneHashes: ['stale']
   }
 }
 
@@ -44,6 +47,7 @@ function assertZeroed(loop) {
   for (const k of ['blocksQuantity', 'blocksCount', 'transactionsCount', 'validTransactionsCount', 'outputCount']) {
     assert.strictEqual(loop[k], 0, k)
   }
+  assert.strictEqual(loop.mempoolPruneHashes, null, 'mempoolPruneHashes')
 }
 
 describe('rollback zeroes the loop log counters', () => {
@@ -53,6 +57,18 @@ describe('rollback zeroes the loop log counters', () => {
     assertZeroed(loop)
     assert.strictEqual(loop.lastProcessedBlockIndex, 42)
     assert.strictEqual(loop.lastProcessedTxIndex, 1000)
+  })
+
+  it('rederiveAfterRollback resets without adding a retry pause', async () => {
+    const loop = dirtyLoop()
+    const decoder = stubThis([])
+    let slept = false
+    decoder.sleep = async () => { slept = true }
+    await rederiveAfterRollback.call(decoder, loop)
+    assertZeroed(loop)
+    assert.strictEqual(loop.lastProcessedBlockIndex, 42)
+    assert.strictEqual(loop.lastProcessedTxIndex, 1000)
+    assert.strictEqual(slept, false)
   })
 
   it('leaveReorgHaltPark zeroes all counters on resume', async () => {
@@ -75,5 +91,17 @@ describe('rollback zeroes the loop log counters', () => {
     loop.validTransactionsCount += 13
     assert.strictEqual(loop.blocksCount, 1)
     assert.strictEqual(loop.validTransactionsCount, 13)
+  })
+
+  it('keeps rollback cursor re-derivation in the shared helper', () => {
+    const sourceDir = path.join(__dirname, '../../src/XChainDecoder')
+    const hits = fs.readdirSync(sourceDir)
+      .filter((name) => name.endsWith('.js'))
+      .flatMap((name) => {
+        const source = fs.readFileSync(path.join(sourceDir, name), 'utf8')
+        return source.includes('getLastTxIndex(') ? [name] : []
+      })
+      .sort()
+    assert.deepStrictEqual(hits, ['startup.js', 'sync_loop.js'])
   })
 })

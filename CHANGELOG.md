@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-22
+
+### Changed
+- Accepted FILE manifest versions 0, 1 and 2 in the canonical action manifest.
+- Validated the complete widened ID schema at startup and re-read the node tip each second while behind.
+
+### Fixed
+- Returned bounded JSON-RPC errors for malformed bodies, empty or invalid batches and inherited method names.
+- Made transaction quarantine, rollback counters and queue-full backoff converge without false stalls or repeated side effects.
+- Captured P2SH spender keys only when they hash to the resolved source address.
+- Persisted each block's transaction index cursor and removed confirmed transactions promptly from mempool results.
+- Stopped a source walk-back at a coinbase instead of fetching the zero transaction id.
+
+### Security
+- Updated bitcoinjs-lib and tiny-secp256k1 for known advisories, and refreshed zod, qs, serialize-javascript, moment, minimatch and glob.
+
 ## [0.27.2] - 2026-11-02
 
 ### Fixed

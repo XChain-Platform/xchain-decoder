@@ -3,7 +3,7 @@
   "paths": {},
   "titles": {
     "test/unit/db_queries.test/04_delete_block_by_index.test.js": {
-      "Database#deleteBlockByIndex() executes 4 DELETE queries and returns true on success": "Database#deleteBlockByIndex() executes 5 DELETE queries and returns true on success"
+      "Database#deleteBlockByIndex() executes 5 DELETE queries and returns true on success": "Database#deleteBlockByIndex() executes 6 DELETE queries and returns true on success"
     },
     "test/unit/db_queries.test/15_delete_and_compare_txs_not_in_list.test.js": {
       "Database#deleteAndCompareTxsNotInList() returns transactionsDeleted=0 on query error": "Database#deleteAndCompareTxsNotInList() rejects on query error, leaving txidList whole and releasing the connection"
@@ -25,6 +25,10 @@
     },
     "test/unit/migration_runner.test.js": {
       "Database.destructiveAutoStatement() @regression does NOT flag benign system-variable SETs (SET NAMES / SET sql_mode / SET @@)": "Database.destructiveAutoStatement() @regression does NOT flag the allow-listed session SETs (SET NAMES / a single UTC time_zone)"
+    },
+    "test/unit/security/configuration/dependency_advisories.test.js": {
+      "Security: remediated dependency advisories @regression @tier4 ADV-1: package.json pins minimatch at or above 10.2.5": "Security: remediated dependency advisories @regression @tier4 ADV-1: package.json pins minimatch at or above 11.0.9",
+      "Security: remediated dependency advisories @regression @tier4 ADV-2: every minimatch entry in package-lock.json is at or above 10.2.5": "Security: remediated dependency advisories @regression @tier4 ADV-2: every minimatch entry in package-lock.json is at or above 11.0.9"
     }
   }
 }

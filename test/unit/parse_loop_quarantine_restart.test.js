@@ -51,7 +51,7 @@ function buildDecoder(txIds){
     decoder.connector = {
         getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: 2 }),
         getBlockHash: async (height) => 'block' + height,
-        getBlock: async () => ''
+        getBlock: async () => '00'
     }
     decoder.db = {
         createDatabase: async () => true, verifyDatabase: async () => true,

@@ -37,7 +37,7 @@ function buildChainDecoder(chain){
     decoder.connector = {
         getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: 0 }),
         getBlockHash: async () => chain.hash,
-        getBlock: async () => ''
+        getBlock: async () => '00'
     }
     decoder.db = {
         createDatabase: async () => true, verifyDatabase: async () => true,
@@ -169,8 +169,32 @@ describe('quarantine retry state is per tx position and per block', function () 
         assert.strictEqual(calls.commit, 1, 'the block commits')
         assert.deepStrictEqual([...new Set(quarantinedHashes(calls))], ['cafe01'], 'only the poison row is quarantined')
         assert.deepStrictEqual(calls.inserted, ['beef02'], 'the second tx is inserted on its retry')
-        assert.ok(decoder.quarantinedTxs >= 1, 'an INSERT quarantine is counted as a skip')
-        assert.strictEqual(decoder.quarantinedTxs, quarantinedHashes(calls).length, 'one count per recorded PARSE_ERROR')
+        assert.strictEqual(decoder.quarantinedTxs, 1, 'one quarantined position is counted once')
+        assert.strictEqual(decoder.parseErrors, 1)
         assert.strictEqual(decoder.lastQuarantinedTxHash, 'cafe01')
+    })
+})
+
+describe('quarantine retry state is per tx position and per block', function () {
+    this.timeout(0)
+
+    it('counts an INSERT quarantine once across repeated later rollbacks', async function () {
+        const chain = { hash: 'blockA', txs: ['cafe01', 'beef02'] }
+        const { decoder, calls } = buildChainDecoder(chain)
+        decoder.parseTransaction = async () => storableParse()
+        let beefHits = 0
+        chain.insert = (hash) => {
+            if (hash === 'cafe01') return decoder.db.POISON_ROW
+            beefHits++
+            return beefHits <= 3 ? false : true
+        }
+        await decoder.start()
+        assert.strictEqual(calls.wedged, false, 'the block must not wedge')
+        assert.strictEqual(calls.commit, 1, 'the block commits once')
+        assert.deepStrictEqual(calls.inserted, ['beef02'])
+        assert.strictEqual(decoder.quarantinedTxs, 1)
+        assert.strictEqual(decoder.parseErrors, 1)
+        assert.ok(quarantinedHashes(calls).length > 1, 'the audit row is rewritten after rollbacks')
+        assert.ok(quarantinedHashes(calls).every((hash) => hash === 'cafe01'))
     })
 })

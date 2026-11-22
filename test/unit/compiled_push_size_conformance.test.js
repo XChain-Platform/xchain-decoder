@@ -272,10 +272,12 @@ function describeBufferutils(helpers) {
 
         it('fails safe for a missing reader or a throwing reader', function () {
             assert.strictEqual(helpers.bigIntBufferutilsActive({}), false);
-            const throwing = { BufferReader: class { readUInt64() { throw new Error('value out of range'); } } };
+            const throwing = { BufferReader: class { readUInt64() { throw new Error('value out of range'); } readInt64() { return -1n; } } };
             assert.strictEqual(helpers.bigIntBufferutilsActive(throwing), false);
-            const tolerant = { BufferReader: class { readUInt64() { return 2n ** 53n; } } };
+            const tolerant = { BufferReader: class { readUInt64() { return 2n ** 64n - 1n; } readInt64() { return 2n ** 64n - 1n; } } };
             assert.strictEqual(helpers.bigIntBufferutilsActive(tolerant), true);
+            const signed = { BufferReader: class { readUInt64() { return 2n ** 64n - 1n; } readInt64() { return -1n; } } };
+            assert.strictEqual(helpers.bigIntBufferutilsActive(signed), false);
         });
     });
 }

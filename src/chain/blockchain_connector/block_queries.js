@@ -13,15 +13,13 @@
  ********************************************************************/
 
 const { encodeVarintHex, stripAuxPowFromBlockHex } = require('./auxpow_codec.js')
-const { attachRpcFields } = require('./rpc_helpers.js')
+const { attachRpcFields, isWholeHex, malformedHexError } = require('./rpc_helpers.js')
 
 // A block hash as every supported node prints it: 32 bytes of hex, either case.
 const BLOCK_HASH_HEX = /^[0-9a-fA-F]{64}$/
 
-function isWholeHex(value){
-    return typeof value === 'string' && value.length > 0 && value.length % 2 === 0
-        && /^[0-9a-fA-F]+$/.test(value)
-}
+// The pure block header is 80 bytes.
+const HEADER_HEX_LENGTH = 160
 
 module.exports = {
     async getNetworkInfo(){
@@ -87,10 +85,9 @@ module.exports = {
         let blockHex = await this.getBlock(blockhash, true)
         if (!isWholeHex(blockHeaderHex) || !isWholeHex(blockHex)) {
             this.rpcErrors++
-            const badMethod = !isWholeHex(blockHeaderHex) ? 'getblockheader' : 'getblock'
-            const badValue = badMethod === 'getblockheader' ? blockHeaderHex : blockHex
-            const shape = typeof badValue === 'string' ? 'string length ' + badValue.length : typeof badValue
-            throw new Error(badMethod + ' returned malformed block hex for ' + blockhash + ' (' + shape + ')')
+            const headerBad = !isWholeHex(blockHeaderHex)
+            throw malformedHexError(headerBad ? 'getblockheader' : 'getblock', blockhash,
+                headerBad ? blockHeaderHex : blockHex)
         }
 
         try {
@@ -127,7 +124,14 @@ module.exports = {
         try {
             // Older daemons append the AuxPoW bytes to getblockheader; the pure
             // header is always the first 80 bytes either way.
-            const headerHex = (await this.getBlockHeader(blockhash, true)).substring(0, 160)
+            const rawHeader = await this.getBlockHeader(blockhash, true)
+            // Checked before the per-tx fan-out: a short or non-hex header would
+            // otherwise build a truncated block after every raw-tx fetch.
+            if (!isWholeHex(rawHeader) || rawHeader.length < HEADER_HEX_LENGTH) {
+                this.rpcErrors++
+                throw malformedHexError('getblockheader', blockhash, rawHeader)
+            }
+            const headerHex = rawHeader.substring(0, HEADER_HEX_LENGTH)
             const verboseBlock = await this.getBlockVerbose(blockhash)
             if (!verboseBlock || !Array.isArray(verboseBlock.tx)) {
                 throw new Error('verbose getblock returned no tx array')

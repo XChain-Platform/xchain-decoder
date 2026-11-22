@@ -22,54 +22,9 @@ const { format: formatLogLine } = require('node:util')
 const { captureCommands, collapseDispenserRegistrations } = require('../protocol/batch_sub_command_capture')
 const { logger, TX_PARSE_MAX_RETRIES } = require('./constants.js')
 const { dispenserCommandPrefixFor, collectDispenserCreates, registerDispenser, dispenserEditExtension, extendEditedDispenser } = require('./dispenser_registration.js')
+const { quarantineKey, countAttempt, noteLadderStep, clearQuarantineState, noteQuarantine } = require('./transaction_ingest/quarantine.js')
 
-// Key retry and quarantine state by height, block hash and tx position, so a
-// second tx in the block, or a sibling block that replaced this one at the same
-// height, never inherits another position's retries or quarantine.
-function quarantineKey(nextBlockHeight, nextBlockHash, txIndex){
-    return nextBlockHeight + ':' + nextBlockHash + ':' + txIndex
-}
-
-// Record one more failed attempt for this key and return the running total.
-function countAttempt(attempts, key){
-    const attempt = (attempts.get(key) || 0) + 1
-    attempts.set(key, attempt)
-    return attempt
-}
-
-// Tell the stall verdict that the quarantine ladder took a real step. A block with
-// many poison positions pays TX_PARSE_MAX_RETRIES rollbacks per position, which can
-// outlast STALL_ALERT_MS while every rollback brings the height closer to commit.
-// Without this the decoder reads as wedged, the liveness consumer restarts it, and the
-// restart throws away the in-memory retry counts, so the same height loops forever.
-// Only attempts up to the quarantining one (MAX + 1) count: a position already
-// quarantined keeps counting on every later pass of the block, and stamping those
-// would hide a real wedge (a transient fault retrying forever) behind it.
-function noteLadderStep(decoder, attempt){
-    if (attempt <= TX_PARSE_MAX_RETRIES + 1) decoder.lastLadderStepAt = Date.now()
-}
-
-// Drop every retry count and quarantined position once the block that owned
-// them has committed (its PARSE_ERROR rows are durable), keeping the state bounded.
-function clearQuarantineState(loop){
-    loop.txParseRetryCounts.clear()
-    loop.insertQuarantineCounts.clear()
-    loop.insertQuarantine.clear()
-    if (loop.parseQuarantine) loop.parseQuarantine.clear()
-}
-
-// Count a transaction this decoder skipped for good, apart from the routine rejections
-// parseErrors also counts. A position is counted once: the pass that quarantines it records it
-// in loop.parseQuarantine, and later passes of the block re-parse it without re-counting.
-function noteQuarantine(decoder, height, hash){
-    decoder.quarantinedTxs = (decoder.quarantinedTxs || 0) + 1
-    decoder.lastQuarantinedBlock = height
-    decoder.lastQuarantinedTxHash = hash || null
-    decoder.lastQuarantinedAt = new Date().toISOString()
-}
-
-async function skipQuarantinedTransaction(block, nextBlockHeight, nextTransaction, txIndex){
-    this.parseErrors++
+async function skipQuarantinedTransaction(loop, retryKey, block, nextBlockHeight, nextTransaction, txIndex){
     let quarantinedHash = null
     try { quarantinedHash = nextTransaction.getId() } catch(_){ /* unparseable id; leave null */ }
     let eventResult = await this.db.insertEvent("PARSE_ERROR", {
@@ -82,7 +37,11 @@ async function skipQuarantinedTransaction(block, nextBlockHeight, nextTransactio
         // insertEvent already rolled the block transaction back
         return 'rollback'
     }
+    if (loop.insertQuarantineCounted && loop.insertQuarantineCounted.has(retryKey)) return 'continue'
+    this.parseErrors++
     noteQuarantine(this, nextBlockHeight, quarantinedHash)
+    if (!loop.insertQuarantineCounted) loop.insertQuarantineCounted = new Set()
+    loop.insertQuarantineCounted.add(retryKey)
     return 'continue'
 }
 
@@ -353,7 +312,9 @@ async function ingestTransaction(loop, block, nextBlockHeight, openDispenserAddr
     // (beginTransaction ran when blocksQuantity hit 0), so the event commits
     // with the block. Deterministic across instances, so parity holds.
     if (loop.insertQuarantine.has(retryKey)){
-        return await skipQuarantinedTransaction.call(this, block, nextBlockHeight, nextTransaction, txIndex)
+        return await skipQuarantinedTransaction.call(
+            this, loop, retryKey, block, nextBlockHeight, nextTransaction, txIndex,
+        )
     }
 
     const parsed = await parseBlockTransaction.call(this, loop, block, nextBlockHeight, openDispenserAddresses, nextTransaction, txIndex, retryKey)

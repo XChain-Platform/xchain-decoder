@@ -35,6 +35,7 @@ const sinon  = require('sinon')
 
 const XChainDecoder = require('../../src/XChainDecoder')
 const Database      = require('../../src/db.js')
+const DispenserModel = require('./dispenser_cancel_grace.test/support/dispenser_model')
 const { DISPENSER_CANCEL_GRACE_ACTIVATION,
         DISPENSER_CANCEL_GRACE_SECONDS,
         cancelGraceFloor } = require('../../src/protocol/dispenser_cancel_grace')
@@ -60,57 +61,6 @@ const INDEXER_CLOSE_DELAY = 3600
 // at cancel time + close delay.
 function indexerStillSettlesFill(blockTime){
     return blockTime < CANCEL_AT + INDEXER_CLOSE_DELAY
-}
-
-// A faithful in-memory model of the decoder `dispensers` table, mirroring the db.js SQL for
-// the two methods this fix touches. Every capture load is recorded with the floor it was
-// given, so a test can assert on the exact set the block loop received.
-class DispenserModel {
-    constructor(){
-        this.rows = []
-        this.captureLoads = []
-        this.purgeCalls = []
-    }
-    async insertDispenser(){ return true }
-    async extendOpenDispenserExpirationBySource(){ return true }
-    async getOpenDispenserOracleAddressBySource(){ return null }
-    async getOpenDispenserOracleAddressesBySource(){ return [] }
-    async purgeExpiredDispensers(safeHeight, graceFloor){
-        this.purgeCalls.push({ safeHeight, graceFloor })
-        return true
-    }
-    // Mirrors deleteOpenDispensers: stamp open rows whose expiration < minExpiration.
-    //
-    // expiredBlockTime stands in for the `LEFT JOIN blocks eb ON eb.block_index =
-    // op.expired_block_index` the production query uses to read the mark block's header time.
-    // The two agree by construction: the block loop hands that same header time in as
-    // minExpiration, and it is the value it writes to blocks.block_time for that height.
-    async deleteOpenDispensers(blockIndex, minExpiration){
-        for (const r of this.rows)
-            if (r.expiredBlockIndex === null && r.expiration < Number(minExpiration)){
-                r.expiredBlockIndex = blockIndex
-                r.expiredBlockTime  = Number(minExpiration)
-            }
-        return true
-    }
-    // Mirrors getAllOpenDispenserAddresses:
-    //   WHERE expired_block_index IS NULL                                    (no floor)
-    //   WHERE expired_block_index IS NULL
-    //      OR eb.block_time >= ?
-    //      OR expiration >= ?                                                (floor bound)
-    async getAllOpenDispenserAddresses(graceFloor){
-        // Same strict number test as db.js: `Number(null)` is 0, which would silently arm a
-        // 1970 floor below the gate.
-        const floor = graceFloor
-        const graceActive = (typeof floor === 'number') && Number.isFinite(floor)
-        const set = new Set(this.rows
-            .filter(r => r.expiredBlockIndex === null
-                      || (graceActive && Number.isFinite(r.expiredBlockTime) && r.expiredBlockTime >= floor)
-                      || (graceActive && r.expiration >= floor))
-            .map(r => r.address))
-        this.captureLoads.push({ floor: graceActive ? floor : null, set })
-        return set
-    }
 }
 
 function fakeTx(id){
@@ -140,11 +90,15 @@ function makeDecoder(consensusNetwork){
 
 function configureBlockDecoder(decoder, blockTimes){
     decoder.xchainBlockDecoder = {
-        blockFromHex: (hex) => ({
-            prevHash: Buffer.from(PREV_WIRE),
-            timestamp: blockTimes[Number(String(hex).split(':')[1])],
-            transactions: [fakeTx('tx-at-' + String(hex))],
-        })
+        // getBlock below hands back the block's label hex-encoded, so it is whole hex.
+        blockFromHex: (hex) => {
+            const label = Buffer.from(String(hex), 'hex').toString()
+            return {
+                prevHash: Buffer.from(PREV_WIRE),
+                timestamp: blockTimes[Number(label.split(':')[1])],
+                transactions: [fakeTx('tx-at-' + label)],
+            }
+        }
     }
 }
 
@@ -163,7 +117,7 @@ function runBlocks(consensusNetwork, blockTimes, model){
     decoder.connector = {
         getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: blockTimes.length - 1 }),
         getBlockHash:      async (height) => 'height:' + height,
-        getBlock:          async (hash) => hash,
+        getBlock:          async (hash) => Buffer.from(hash).toString('hex'),
     }
 
     let commits = 0

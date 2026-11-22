@@ -129,6 +129,26 @@ async function runAdversarialEntry(adv, control){
     assert.strictEqual(rpc.callCount, 0, adv.name + ' never fetches the commit')
 }
 
+function assertHeaderFramingVectors(vectors, control){
+    const expectedPayload = vectors.envelope_grammar.compiled_payload_hex
+    const seen = new Set()
+    for (const entry of vectors.header_framing.vectors){
+        const witness = [Buffer.alloc(64), Buffer.from(entry.envelope_script_hex, 'hex'), control]
+        const result = createDecoder().detectEnvelopeWitness(witness)
+        if (entry.expect === 'recognized'){
+            assert.ok(result, `${entry.name} must be recognized`)
+            assert.strictEqual(result.payload.toString('hex'), expectedPayload, entry.name)
+        } else if (entry.expect === 'not_recognized'){
+            assert.strictEqual(result, null, entry.name)
+        } else {
+            assert.fail(`unknown header-framing expect ${entry.expect} for ${entry.name}`)
+        }
+        seen.add(entry.expect)
+    }
+    assert.ok(vectors.header_framing.vectors.length >= 5, 'header-framing corpus shrank')
+    assert.deepStrictEqual([...seen].sort(), ['not_recognized', 'recognized'])
+}
+
 describe('Taproot envelope recognition', function () {
 
     afterEach(() => sinon.restore())
@@ -215,7 +235,8 @@ describe('Taproot envelope recognition', function () {
                     ? Buffer.from([script.length])
                     : (() => { const b = Buffer.alloc(3); b[0] = 0xfd; b.writeUInt16LE(script.length, 1); return b })()
                 const leaf = bitcoin.crypto.taggedHash('TapLeaf', Buffer.concat([Buffer.from([0xc0]), lenPrefix, script]))
-                assert.strictEqual(leaf.toString('hex'), vectors.envelope_grammar.tapleaf_hash)
+                // bitcoinjs-lib 7 returns a Uint8Array, whose toString ignores 'hex'.
+                assert.strictEqual(Buffer.from(leaf).toString('hex'), vectors.envelope_grammar.tapleaf_hash)
             })
         })
     })
@@ -238,6 +259,7 @@ describe('Taproot envelope recognition', function () {
                     executed++
                 }
                 assert.ok(executed >= 6, `only ${executed} byte-carrying adversarial entries executed`)
+                assertHeaderFramingVectors(vectors, control)
             })
 
             it('the envelope_not_input_0 witness IS an action at input 0, so its refusal comes from the index alone', async function () {

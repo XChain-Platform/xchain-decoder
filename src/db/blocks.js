@@ -47,6 +47,11 @@ async function deleteBlockRows(connection, blockIndex){
         DELETE FROM blocks WHERE block_index = ?;
     `;
     await connection.query(query, [blockIndex])
+    // Drop the block's recorded tx_index cursor with it, so getLastTxIndex resumes from the new tip.
+    query = `
+        DELETE FROM block_tx_index_end WHERE block_index = ?;
+    `;
+    await connection.query(query, [blockIndex])
 }
 
 async function insertReorgEvent(connection, blockIndex, reorgBlockHash){
@@ -135,6 +140,42 @@ module.exports = {
         }
     },
 
+    // deleteBlockByIndex for a halted rollback, run as one transaction on the session
+    // that holds the reorg rollback lock (acquireReorgRollbackLock), with ownership
+    // re-read inside that transaction. A named lock lives exactly as long as its
+    // session, and a session that ends takes its open transaction with it, so this
+    // delete commits only while the lock is held: a halt clear holding the lock can
+    // never see a delete land after its count. Throws { rollbackLockLost } when the
+    // session no longer owns the lock; nothing is deleted then.
+    async deleteBlockOnRollbackSession(blockIndex, reorgBlockHash, lock){
+        if (!lock || !lock.connection || !lock.name)
+            throw new Error('deleteBlockOnRollbackSession: a held rollback lock is required')
+        const connection = lock.connection
+        await this.acquireTransactionLock()
+        let open = false
+        try {
+            await connection.beginTransaction()
+            open = true
+            const rows = await connection.query('SELECT IS_USED_LOCK(?) = CONNECTION_ID() AS owned', [lock.name])
+            if (!(rows && rows[0] && String(rows[0].owned) === '1')){
+                const err = new Error('deleteBlockOnRollbackSession: the reorg rollback lock is no longer held, so block ' + blockIndex + ' was not deleted')
+                err.rollbackLockLost = true
+                throw err
+            }
+            await this.restoreDispenserExtensions(connection, blockIndex)
+            await deleteBlockRows(connection, blockIndex)
+            await insertReorgEvent(connection, blockIndex, reorgBlockHash)
+            await connection.commit()
+            open = false
+            return true
+        } catch (err){
+            if (open){ try { await connection.rollback() } catch (_) {} }
+            throw err
+        } finally {
+            this.releaseTransactionLock()
+        }
+    },
+
     async getLastBlockIndex(){
         const query = `
             SELECT MAX(block_index) AS max_height FROM blocks ;
@@ -176,8 +217,12 @@ module.exports = {
     },
 
     async getLastTxIndex(){
+        // Resume from the larger of the last stored row and the last recorded block end: a skipped
+        // carrier at a block's end consumed an index but wrote no row, and reusing that index would
+        // number every later row differently from a decoder that never restarted.
         const query = `
-            SELECT MAX(tx_index) AS max_tx_index FROM transactions;
+            SELECT (SELECT MAX(tx_index) FROM transactions) AS max_tx_index,
+                   (SELECT MAX(tx_index_end) FROM block_tx_index_end) AS max_tx_index_end;
         `;
         // Retry-then-throw, same rationale as getLastBlockIndex: a `return false`
         // reset the tx counter to 1 on any DB error, colliding tx_index 1.
@@ -187,12 +232,13 @@ module.exports = {
             let connection = await this.getConnection()
             try {
                 const rows = await connection.query(query)
-                if (rows.length > 0 && rows[0]["max_tx_index"] != null){
-                    // tx_index is BIGINT UNSIGNED: coerce the BigInt to Number for the same
-                    // reasons as getLastBlockIndex (arithmetic + JSON-RPC/event serialization).
-                    return Number(rows[0]["max_tx_index"])
+                let last = -1
+                // Both are BIGINT UNSIGNED: coerce each BigInt to Number for the same reasons as
+                // getLastBlockIndex. A NULL (no row, or no block end recorded yet) is skipped.
+                for (const key of ["max_tx_index", "max_tx_index_end"]){
+                    if (rows.length > 0 && rows[0][key] != null) last = Math.max(last, Number(rows[0][key]))
                 }
-                return -1
+                return last
             } catch (err) {
                 lastErr = err
                 logger.error(formatLogLine(`Error selecting max tx index (attempt ${attempt}/${MAX_ATTEMPTS}):`, err));
@@ -204,6 +250,34 @@ module.exports = {
             if (attempt < MAX_ATTEMPTS) await this.sleep(1000)
         }
         throw new Error('getLastTxIndex failed after ' + MAX_ATTEMPTS + ' attempts: ' + (lastErr && lastErr.message))
+    },
+
+    // Record the tx_index cursor at the end of a parsed block in the open block transaction, so it
+    // commits or rolls back with the block's rows. A failure rolls the block back like insertBlock
+    // and returns false; a negative cursor (no index consumed yet) has nothing to record.
+    async recordBlockTxIndexEnd(blockIndex, txIndexEnd){
+        if (txIndexEnd < 0) return true
+        const query = `
+            INSERT INTO block_tx_index_end (block_index, tx_index_end) VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE tx_index_end = VALUES(tx_index_end);
+        `;
+        let connection = await this.getConnection()
+        // Entry-time lease snapshot (rationale at insertBlock).
+        const ownLease = (this.transactionConnection == null)
+        try {
+            await connection.query(query, [blockIndex, txIndexEnd])
+            return true
+        } catch (err) {
+            logger.error(formatLogLine(`Error recording tx_index_end for block ${blockIndex}:`, err));
+            if (this.transactionConnection){
+                await this.endTransaction()
+            }
+            return false
+        } finally {
+            if (ownLease){
+                await connection.release()
+            }
+        }
     },
 
     async getBlockByIndex(blockIndex){

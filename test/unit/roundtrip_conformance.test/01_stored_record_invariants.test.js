@@ -14,14 +14,17 @@ const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
 const bitcoin = require('bitcoinjs-lib')
+const ecc = require('tiny-secp256k1')
 const XChainDecoder = require('../../../src/XChainDecoder')
 
 const VENDORED = path.join(__dirname, '..', '..', 'fixtures', 'roundtrip-conformance.json')
 const fixture = JSON.parse(fs.readFileSync(VENDORED, 'utf8'))
 
-const SOURCE_ADDRESS = 'mh5CE8Nbj38iND267s4XnvhSmhDW7yWc6Q'
+// A real key from a fixed private key, and the regtest P2PKH address it hashes to.
+// The decoder records a spender key only when it hashes to the source address.
 const DUMMY_SIG = Buffer.concat([Buffer.from([0x30]), Buffer.alloc(70, 0xab)])
-const DUMMY_PUBKEY = Buffer.concat([Buffer.from([0x02]), Buffer.alloc(32, 0xcd)])
+const DUMMY_PUBKEY = Buffer.from(ecc.pointFromScalar(Buffer.alloc(32, 0x09), true))
+const SOURCE_ADDRESS = bitcoin.payments.p2pkh({ pubkey: DUMMY_PUBKEY, network: bitcoin.networks.regtest }).address
 const PARSE_HEIGHT = 0
 
 function createDecoder () {
@@ -156,9 +159,10 @@ describe('roundtrip conformance fixture: stored-record invariants', function () 
     // must look it up against the resolved source rather than skipping the write.
     const c = fixture.p2shCases.find((x) => x.encoding === 'P2WSH')
     assert.ok(c, 'expected a P2WSH case in the fixture')
-    await storedRecordFor(decoder, db, buildP2shTransaction(c))
+    const { parseResult } = await storedRecordFor(decoder, db, buildP2shTransaction(c))
     assert.deepStrictEqual(db.calls.getAddressId, [SOURCE_ADDRESS],
       'the pubkey capture must resolve the source address exactly once')
+    assert.strictEqual(parseResult.sourcePubkey, DUMMY_PUBKEY.toString('hex'))
   })
 })
 

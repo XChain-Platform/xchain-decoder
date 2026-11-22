@@ -37,27 +37,33 @@ function setReorgWait(err){
     this.reorgWait = next
 }
 
-// Zero the per-batch progress and log counters. A rolled-back pass leaves its
-// counts in memory; without this the next pass adds to them and the commit log
-// over-counts blocks and transactions (log only, stored rows are unaffected).
+// Zero all per-batch state. A rolled-back pass leaves its counters and mempool
+// prune candidates in memory; carrying either into the next batch misreports
+// progress or hides transactions from the pending view.
 function resetBatchCounters(loop){
     loop.blocksQuantity = 0
     loop.blocksCount = 0
     loop.transactionsCount = 0
     loop.validTransactionsCount = 0
     loop.outputCount = 0
+    loop.mempoolPruneHashes = null
 }
 
-// Re-derive the loop cursors from the DB after any mid-block rollback, then
-// pause before the retry. Every rollback path MUST run this before continuing:
+// Re-derive the loop cursors from the DB after any mid-block rollback and reset
+// the batch state. Every rollback path MUST run this before continuing:
 // in particular lastProcessedTxIndex advances in memory while a block is being
 // parsed, so retrying a rolled-back block with the stale counter would assign
 // different tx_index values than a clean instance decoding the same block
 // (replicated content, so that is a cross-instance divergence, not cosmetics).
-async function resetAfterRollback(loop){
+async function rederiveAfterRollback(loop){
     loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
     loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
     resetBatchCounters(loop)
+}
+
+// The ordinary retry path also pauses before reading the block again.
+async function resetAfterRollback(loop){
+    await rederiveAfterRollback.call(this, loop)
     await this.sleep(3000)
 }
 
@@ -84,9 +90,7 @@ async function parkOrRethrow(err, loop){
     }
     if (!(err && err.reorgHalt)) throw err
     try {
-        loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
-        loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-        resetBatchCounters(loop)
+        await rederiveAfterRollback.call(this, loop)
     } catch (readErr){
         logger.error(formatLogLine('Could not re-read the stored tip before parking; parking at the loop cursor:', readErr))
     }
@@ -106,9 +110,7 @@ async function leaveReorgHaltPark(loop){
     // Resumed. Re-derive the cursors from the stored tip exactly as the
     // rollback paths do, and drop the cached tip so the next pass re-polls
     // the node and re-runs the reorg check the clear has now unblocked.
-    loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
-    loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-    resetBatchCounters(loop)
+    await rederiveAfterRollback.call(this, loop)
     loop.lastBlockchainInfo = null
 }
 
@@ -182,9 +184,7 @@ async function reconcileEqualHeightTip(loop){
         }
         this.reorgWait = null
         loop.tipBelowStoredTipRefused = false
-        loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
-        loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-        resetBatchCounters(loop)
+        await rederiveAfterRollback.call(this, loop)
         return 'continue'
     }
 }
@@ -212,4 +212,4 @@ async function waitAtTip(loop){
     await this.sleep(CHECK_BLOCK_DELAY_MS)
 }
 
-module.exports = { resetAfterRollback, setReorgWait, parkOrRethrow, leaveReorgHaltPark, reorgHaltHoldsLoop, waitAtTip }
+module.exports = { resetBatchCounters, rederiveAfterRollback, resetAfterRollback, setReorgWait, parkOrRethrow, leaveReorgHaltPark, reorgHaltHoldsLoop, waitAtTip }

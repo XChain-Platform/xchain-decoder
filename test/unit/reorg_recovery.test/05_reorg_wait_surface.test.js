@@ -70,7 +70,7 @@ function laggingLoopDecoder(){
             return 'hash' + height
         },
         getBlockHeader: async (hash) => ({ confirmations: Number(hash.slice(4)) > 98 ? -1 : 1 }),
-        getBlock: async () => ''
+        getBlock: async () => '00'
     }
     decoder.db = {
         createDatabase: async () => true,

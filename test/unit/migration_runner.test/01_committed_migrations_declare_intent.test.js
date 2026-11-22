@@ -43,18 +43,22 @@ describe('committed migrations declare intent @regression', function () {
     files.forEach(function (file) {
         it(file + ': carries a runner-visible `-- xchain:migration mode=auto|manual` tag', function () {
             const raw = fs.readFileSync(path.join(MIG_DIR, file), 'utf8');
-            const anywhere = raw.match(/^\s*--\s*xchain:migration\b[^\n]*\bmode\s*=\s*(auto|manual)\b/im);
-            assert.ok(anywhere,
+            const declaredModes = [...raw.matchAll(/^\s*--\s*xchain:migration\b([^\n]*)$/gim)]
+                .flatMap((header) => [...header[1].matchAll(/\bmode\s*=\s*([A-Za-z]+)\b/gi)])
+                .map((token) => token[1].toLowerCase());
+            assert.ok(declaredModes.length > 0,
                 file + ' has no explicit mode tag. Every migration must declare intent so a ' +
                 'destructive change can never silently auto-run at startup. Add a first line: ' +
                 '`-- xchain:migration mode=auto` (additive + idempotent) or `mode=manual` (gated).');
+            assert.strictEqual(declaredModes.length, 1,
+                file + ' must carry exactly one mode token across its xchain:migration header lines.');
             // The runner must actually SEE that tag. A whole-file regex passes even when
             // the tag sits below the runner's prologue window (e.g. pushed past a fixed
             // line count by the license banner), which silently gates a declared
             // mode=auto migration to the manual default. Assert the real code path agrees
             // with the declared intent so a runner-invisible tag fails CI.
-            assert.strictEqual(modeOf(raw), anywhere[1].toLowerCase(),
-                file + ' declares mode=' + anywhere[1].toLowerCase() + ' but the runner reads mode=' +
+            assert.strictEqual(modeOf(raw), declaredModes[0],
+                file + ' declares mode=' + declaredModes[0] + ' but the runner reads mode=' +
                 modeOf(raw) + '; the tag is outside the runner-visible comment prologue. Move it into ' +
                 'the leading comment block, before the first SQL statement.');
         });

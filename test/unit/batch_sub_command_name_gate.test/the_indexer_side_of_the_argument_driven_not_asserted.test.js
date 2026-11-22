@@ -39,6 +39,68 @@ function protocolChanges() {
     })
 }
 
+async function rejectsEmptyName(ctx) {
+    if (!siblingOrSkip(ctx, INDEXER_CHANGES)) return
+    const changes = protocolChanges()
+    assert.strictEqual(await changes.isEnabled('', 1), false,
+        "isEnabled('') must be false: one such sub-command invalidates the whole batch")
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(changes.changes, ''), false,
+        'nothing may register the empty name; that is what makes the verdict provable')
+    // The other half of the same claim: a real ACTION is enabled, so this is not a
+    // registry that says no to everything.
+    assert.strictEqual(await changes.isEnabled('COINPAY', 1), true)
+    assert.strictEqual(await changes.isEnabled('DISPENSER', 1), true)
+}
+
+async function enablesUnknownNames(ctx) {
+    if (!siblingOrSkip(ctx, INDEXER_CHANGES)) return
+    const changes = protocolChanges()
+    const known   = require('../../../src/XChainDecoder').VALID_ACTION_NAMES
+    const unknownButEnabled = []
+    for (const name of Object.keys(changes.changes)) {
+        if (!known.has(name) && await changes.isEnabled(name, 1))
+            unknownButEnabled.push(name)
+    }
+    // A gate keyed on VALID_ACTION_NAMES would suppress capture for every batch
+    // carrying one of these. Where the dispatched-only admission gate is unarmed
+    // (mainnet, and below its height elsewhere) the indexer dispatches those
+    // batches normally; where it is armed (regtest, which protocolChanges() builds,
+    // from block 0) only the names that are also in DISPATCHED_ACTIONS (DISPENSE,
+    // XCALL) are dispatched and a flag name such as UNIFIED_FEES rejects the batch.
+    // The under-capture argument therefore holds through names that are both
+    // enabled and dispatched: under-capture, the money-bearing direction. The
+    // measurement is the reason hasProvablyRejectedSubCommand fires on the empty
+    // name ALONE.
+    assert.ok(unknownButEnabled.length > 0,
+        'if this ever reaches zero, a decoder-side name gate becomes buildable and ' +
+        'the rest of this defect class can be closed; re-derive rather than delete ' +
+        '(where the dispatched-only gate is armed the set that matters is enabled ' +
+        'AND in DISPATCHED_ACTIONS)')
+    for (const name of ['DISPENSE', 'XCALL', 'UNIFIED_FEES'])
+        assert.ok(unknownButEnabled.includes(name),
+            name + ' is enabled in the indexer and unknown here')
+}
+
+function admitsDispatchedOnly(ctx) {
+    const dispatch = path.join(INDEXER_ROOT, 'src', 'actions', 'actions_class', 'dispatch.js')
+    if (!siblingOrSkip(ctx, dispatch)) return
+    const { DISPATCHED_ACTIONS } = require(dispatch)
+    for (const name of ['DISPENSE', 'XCALL'])
+        assert.ok(DISPATCHED_ACTIONS.has(name), name + ' is dispatched by the indexer')
+    assert.strictEqual(DISPATCHED_ACTIONS.has('UNIFIED_FEES'), false,
+        'UNIFIED_FEES is a registered flag name with no handler, so a dispatched-only ' +
+        'network rejects a batch carrying it')
+}
+
+async function rejectsAliasNames(ctx) {
+    if (!siblingOrSkip(ctx, INDEXER_CHANGES)) return
+    const changes = protocolChanges()
+    for (const alias of Object.keys(ACTION_ALIASES))
+        assert.strictEqual(await changes.isEnabled(alias, 1), false,
+            alias + ' is not registered, so below the normalization flag-day a batched ' +
+            alias + ' whole-batch-rejects instead of dispatching')
+}
+
 describe('BATCH sub-command ACTION-name gate and alias expansion', function () {
     this.timeout(0)
 
@@ -46,46 +108,19 @@ describe('BATCH sub-command ACTION-name gate and alias expansion', function () {
     describe('the indexer side of the argument, driven not asserted', function () {
 
         it('really does reject the EMPTY ACTION name, which is what suppression rests on', async function () {
-            if (!siblingOrSkip(this, INDEXER_CHANGES)) return
-            const changes = protocolChanges()
-            assert.strictEqual(await changes.isEnabled('', 1), false,
-                "isEnabled('') must be false: one such sub-command invalidates the whole batch")
-            assert.strictEqual(Object.prototype.hasOwnProperty.call(changes.changes, ''), false,
-                'nothing may register the empty name; that is what makes the verdict provable')
-            // The other half of the same claim: a real ACTION is enabled, so this is not a
-            // registry that says no to everything.
-            assert.strictEqual(await changes.isEnabled('COINPAY', 1), true)
-            assert.strictEqual(await changes.isEnabled('DISPENSER', 1), true)
+            await rejectsEmptyName(this)
         })
 
         it('enables names this decoder does not know, which is why the gate stops at the empty one', async function () {
-            if (!siblingOrSkip(this, INDEXER_CHANGES)) return
-            const changes = protocolChanges()
-            const known   = require('../../../src/XChainDecoder').VALID_ACTION_NAMES
-            const unknownButEnabled = []
-            for (const name of Object.keys(changes.changes)) {
-                if (!known.has(name) && await changes.isEnabled(name, 1))
-                    unknownButEnabled.push(name)
-            }
-            // A gate keyed on VALID_ACTION_NAMES would suppress capture for every batch
-            // carrying one of these, and the indexer dispatches those batches normally:
-            // under-capture, the money-bearing direction. The measurement is the reason
-            // hasProvablyRejectedSubCommand fires on the empty name ALONE.
-            assert.ok(unknownButEnabled.length > 0,
-                'if this ever reaches zero, a decoder-side name gate becomes buildable and ' +
-                'the rest of this defect class can be closed; re-derive rather than delete')
-            for (const name of ['DISPENSE', 'XCALL', 'UNIFIED_FEES'])
-                assert.ok(unknownButEnabled.includes(name),
-                    name + ' is enabled in the indexer and unknown here')
+            await enablesUnknownNames(this)
+        })
+
+        it('admits DISPENSE and XCALL through the dispatched-only set while UNIFIED_FEES stays outside it', function () {
+            admitsDispatchedOnly(this)
         })
 
         it('rejects an ALIAS name, so expansion must never run below BATCH_SUBACTION_NORMALIZATION', async function () {
-            if (!siblingOrSkip(this, INDEXER_CHANGES)) return
-            const changes = protocolChanges()
-            for (const alias of Object.keys(ACTION_ALIASES))
-                assert.strictEqual(await changes.isEnabled(alias, 1), false,
-                    alias + ' is not registered, so below the normalization flag-day a batched ' +
-                    alias + ' whole-batch-rejects instead of dispatching')
+            await rejectsAliasNames(this)
         })
     })
 })

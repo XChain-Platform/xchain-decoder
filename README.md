@@ -4,8 +4,8 @@
 # XChain Platform Decoder
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.27.2-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-2%2C778%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.28.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-2%2C947%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -45,6 +45,23 @@ Full decoder documentation is available in the [xchain-documentation](https://gi
 | [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/configuration.md) | Environment variables, internal constants, network-specific settings |
 | [Database](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/database.md) | Full schema reference: 8 tables covering blocks, transactions, dispensers, indexes, events |
 | [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/decoder/operations.md) | Running, Docker, API endpoints, reorg handling, mempool, troubleshooting |
+
+### Dependency pins
+
+The decoder and UTXO tracker intentionally pin bitcoinjs-lib 6.1.8, while the
+encoder and SDK use 7.0.4. The v6 decoder patch reads Dogecoin output values
+above JavaScript's safe integer limit. It is applied by the Dockerfile copy,
+`src/chain/apply_bufferutils_patch.js`, and the startup check in
+`src/XChainDecoder/startup.js`.
+
+The decoder and tracker patch files must remain byte-identical, so those two
+services must migrate majors together. The service boundary carries raw
+transaction hex rather than bitcoinjs-lib objects, so the split does not alter
+their wire contract. Revisit the split when v6 reaches end of support or has a
+security advisory, when a coordinated decoder and tracker migration is planned,
+or before any service boundary starts carrying library objects or byte-array
+values. A migration must keep the large Dogecoin output regressions and the
+decoder startup check green.
 
 ## Quick Start
 
@@ -113,16 +130,16 @@ neither source sets one, so these defaults hold on an unconfigured box:
 | `npm run migrate` | Apply pending database migrations (auto + manual; `--file <name>` scopes to specific migration(s)) |
 | `npm run ci` | The full no-external-services gate: unit, security, smoke, regression, chaos, and a 100-iteration fuzz pass (about a minute) |
 | `npm run test:smoke` | Smoke tests (58 tests, no external services) |
-| `npm run test:unit` | Unit tests (2,258 tests, no external services) |
+| `npm run test:unit` | Unit tests (2,427 tests, no external services) |
 | `npm run test:security` | Security tests (83 tests, no external services) |
 | `npm run test:integration` | Integration tests (45 tests; brings up its own throwaway regtest node and MariaDB, requires Docker) |
 | `npm run test:e2e` | End-to-end tests (72 tests; brings up its own throwaway regtest node and MariaDB on separate ports, requires Docker) |
 | `npm run test:fuzz` | Fuzz tests (5 harnesses, 1000-5000 iterations each depending on harness, 177 tests) |
 | `npm run test:fuzz:quick` | Quick fuzz (100 iterations, 177 tests) |
 | `npm run test:chaos` | Chaos engineering tests (64 tests) |
-| `npm run test:regression` | Regression tests P0+P1 (139 tests) |
+| `npm run test:regression` | Regression tests P0+P1 (140 tests) |
 | `npm run test:regression:critical` | Regression tests P0 only (54 tests, <1s) |
-| `npm run test:regression:full` | Full regression suite (179 tests) |
+| `npm run test:regression:full` | Full regression suite (180 tests) |
 | `npm run test:bench` | Performance benchmarks (7 scenarios) |
 | `npm run test:bench:quick` | Quick benchmarks |
 | `npm run test:mutation` | Mutation testing (Stryker Mutator) |

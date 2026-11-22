@@ -32,6 +32,7 @@ const REORG_POLICY = Object.freeze({
     transaction_outputs:      { mode: 'rollback' },
     dispensers:               { mode: 'rollback' },
     dispenser_extension_undo: { mode: 'rollback' },
+    block_tx_index_end:       { mode: 'rollback' },
     events: { mode: 'exempt', reason:
         'Append-only audit log with no block_index column; the REORG marker records the rollback in this same log, ' +
         'and the indexer reads events by ascending id, so removing rows would break its reorg detection.' },

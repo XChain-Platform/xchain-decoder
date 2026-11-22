@@ -42,5 +42,9 @@
   "2026-09-27-mempool-first-seen-datetime.sql": {
     "residue": "ad7e67e22f93b412624d1eea2e3039ff2d523b4bb7142380ee6a91b64d64b266",
     "sha256": "4342fc1560c68b7b14a86a7c0338dd879a769c1651f441348fc7ac9ec12bcc05"
+  },
+  "2026-11-03-block-tx-index-end.sql": {
+    "residue": "81fc3195f2bce0fe1beadfdee50cac302eb79e170638c25cfa3288ce492eeeb4",
+    "sha256": "1d761887ecc54c3a7160bab91b4bbe2ef29f9286687a1a54efee59896aa0c2a0"
   }
 }

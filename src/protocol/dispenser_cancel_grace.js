@@ -144,6 +144,5 @@ module.exports = {
     isDispenserCancelGraceActive,
     isDispenserCancelGraceParentFloorActive,
     cancelGraceFloor,
-    isDispenserPurgeGraceActive,
     purgeGraceFloor,
 }

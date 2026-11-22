@@ -316,35 +316,41 @@ function prepareDecoder() {
     decoder = createDecoder()
 }
 
+// A key is returned only when it hashes to the source, so each case passes the
+// address a real key from a fixed private key would have.
+const realKey = (byte, compressed = true) => Buffer.from(ecc.pointFromScalar(Buffer.alloc(32, byte), compressed))
+const p2pkhOf = (key) => bitcoin.payments.p2pkh({ hash: bitcoin.crypto.hash160(key), network: decoder.network }).address
+const p2wpkhOf = (key) => bitcoin.payments.p2wpkh({ hash: bitcoin.crypto.hash160(key), network: decoder.network }).address
+
 describe('XChainDecoder#extractPubkeyFromInput()', () => {
     before(prepareDecoder)
 
     it('should return compressed pubkey (33 bytes) from P2WPKH witness', () => {
-        const pubkey = Buffer.alloc(33, 0x02)
+        const pubkey = realKey(0x03)
         const input = {
             witness: [Buffer.alloc(71, 0x30), pubkey],
             script: Buffer.alloc(0)
         }
-        const result = decoder.extractPubkeyFromInput(input)
+        const result = decoder.extractPubkeyFromInput(input, p2wpkhOf(pubkey))
         assert.strictEqual(result, pubkey.toString('hex'))
     })
 
     it('should return uncompressed pubkey (65 bytes) from P2WPKH witness', () => {
-        const pubkey = Buffer.alloc(65, 0x04)
+        const pubkey = realKey(0x04, false)
         const input = {
             witness: [Buffer.alloc(71, 0x30), pubkey],
             script: Buffer.alloc(0)
         }
-        const result = decoder.extractPubkeyFromInput(input)
+        const result = decoder.extractPubkeyFromInput(input, p2wpkhOf(pubkey))
         assert.strictEqual(result, pubkey.toString('hex'))
     })
 
     it('should return null for witness with only one element (no pubkey slot)', () => {
         const input = {
-            witness: [Buffer.alloc(33, 0x02)],
+            witness: [realKey(0x05)],
             script: Buffer.alloc(0)
         }
-        const result = decoder.extractPubkeyFromInput(input)
+        const result = decoder.extractPubkeyFromInput(input, p2wpkhOf(realKey(0x05)))
         assert.strictEqual(result, null)
     })
 })
@@ -353,20 +359,20 @@ describe('XChainDecoder#extractPubkeyFromInput()', () => {
     before(prepareDecoder)
 
     it('should extract pubkey from P2PKH scriptSig', () => {
-        const pubkey = Buffer.alloc(33, 0x02)
+        const pubkey = realKey(0x06)
         const sig    = Buffer.alloc(71, 0x30)
         const scriptSig = bitcoin.script.compile([sig, pubkey])
         const input = {
             witness: [],
             script: scriptSig
         }
-        const result = decoder.extractPubkeyFromInput(input)
+        const result = decoder.extractPubkeyFromInput(input, p2pkhOf(pubkey))
         assert.strictEqual(result, pubkey.toString('hex'))
     })
 
     it('should return null for an input with empty witness and empty script', () => {
         const input = { witness: [], script: Buffer.alloc(0) }
-        const result = decoder.extractPubkeyFromInput(input)
+        const result = decoder.extractPubkeyFromInput(input, p2wpkhOf(realKey(0x07)))
         assert.strictEqual(result, null)
     })
 
@@ -375,17 +381,17 @@ describe('XChainDecoder#extractPubkeyFromInput()', () => {
             witness: [Buffer.alloc(71, 0x30), Buffer.alloc(10, 0x02)], // 10 bytes (not 33 or 65)
             script: Buffer.alloc(0)
         }
-        const result = decoder.extractPubkeyFromInput(input)
+        const result = decoder.extractPubkeyFromInput(input, p2wpkhOf(realKey(0x07)))
         assert.strictEqual(result, null)
     })
 
     it('should return null when scriptSig decompiles to only 1 element', () => {
-        const scriptSig = bitcoin.script.compile([Buffer.alloc(33, 0x02)])
+        const scriptSig = bitcoin.script.compile([realKey(0x08)])
         const input = {
             witness: [],
             script: scriptSig
         }
-        const result = decoder.extractPubkeyFromInput(input)
+        const result = decoder.extractPubkeyFromInput(input, p2pkhOf(realKey(0x08)))
         // Last element is the 33-byte buffer but length === 1, so >= 2 fails
         assert.strictEqual(result, null)
     })

@@ -87,7 +87,7 @@ function buildDecoder({ dbOverrides = {}, nodeTips = [NODE_TIP], maxSleeps = 4 }
         },
         getBlockHash: async () => 'aabbccdd',
         getBlockHeader: async () => ({ confirmations: -1 }),
-        getBlock: async () => ''
+        getBlock: async () => '00'
     }
     // The parse path is not this file's subject: stop the loop at the fetch, the
     // way the sibling IBD suite does, so a resumed loop is observable without

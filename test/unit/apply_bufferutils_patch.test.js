@@ -14,7 +14,7 @@
 // permanently on any non-Docker run.
 
 const assert = require('assert')
-const bufferutils = require('../../src/chain/apply_bufferutils_patch')
+const bufferutils = require('../../src/chain/bitcoinjs_v7_compat')
 const XChainBlockDecoder = require('../../src/chain/XChainBlockDecoder')
 const { bigIntBufferutilsActive } = require('../../src/XChainDecoder')
 
@@ -49,12 +49,17 @@ describe('applyBufferutilsPatch', function () {
 
         const max = new bufferutils.BufferReader(Buffer.from('ffffffffffffffff', 'hex'))
         assert.strictEqual(max.readUInt64(), 18446744073709551615n)
+        assert.strictEqual(new bufferutils.BufferReader(Buffer.from('0000000000000080', 'hex')).readInt64(), 9223372036854775808n)
+        assert.strictEqual(new bufferutils.BufferReader(Buffer.from('ffffffffffffffff', 'hex')).readInt64(), 18446744073709551615n)
     })
 
     it('BufferWriter.writeUInt64 round-trips a BigInt value', function () {
         const writer = new bufferutils.BufferWriter(Buffer.alloc(8))
         writer.writeUInt64(9007199254740993n)
         assert.strictEqual(new bufferutils.BufferReader(writer.end()).readUInt64(), 9007199254740993n)
+        const signedNamedWriter = new bufferutils.BufferWriter(Buffer.alloc(8))
+        signedNamedWriter.writeInt64(2n ** 63n)
+        assert.strictEqual(new bufferutils.BufferReader(signedNamedWriter.end()).readInt64(), 2n ** 63n)
     })
 
     it('exported readUInt64LE/writeUInt64LE keep the Number-safe contract', function () {

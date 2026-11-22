@@ -142,7 +142,7 @@ function buildDecoder(txSpecs, model) {
     decoder.connector = {
         getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: 0 }),
         getBlockHash:      async () => 'aabbccdd',
-        getBlock:          async () => '',
+        getBlock:          async () => '00',
     }
 
     decoder.db = {

@@ -9,6 +9,8 @@
 // contact legal@dankest.llc.
 
 // Pre-load setup: mock mariadb before any source file requires it.
+require('../../helpers/bitcoinjs_v7_fixtures').installBitcoinJsV7Fixtures()
+
 const Module = require('module')
 const originalResolveFilename = Module._resolveFilename
 

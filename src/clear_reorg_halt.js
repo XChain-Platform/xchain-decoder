@@ -42,7 +42,13 @@
  *      action, so the purge cannot have lost anything. --force overrides this one
  *      for an operator who has compared the dispensers table against a known-good
  *      replica; the clear row records that it was forced.
- *   3. the session passes the decoder's strict sql_mode check. Cannot be forced.
+ *   3. the connection that writes and reads back the clear row passes the
+ *      decoder's strict sql_mode check. Cannot be forced. The CLI also checks one
+ *      pooled session before --dry-run so a dry run predicts the same refusal.
+ *   4. no rollback owns the database's reorg lock. The clear holds that lock
+ *      and runs every check, the append and its read-back on the lock's own
+ *      session; a halted rollback deletes only on its own lock session, so no
+ *      delete can land between this count and the append.
  *
  * Reads DECODER_DB_* from the service environment (.env) through src/config.js,
  * like migrate.js.
@@ -54,7 +60,7 @@
 // The service .env is loaded first, before db.js, and only when this file runs
 // as the process: a test that requires it for run() and parseArgs() must not
 // have a checkout's .env poured into its process environment.
-if (require.main === module) require('dotenv').config()
+if (require.main === module) require('dotenv').config({ quiet: true })
 
 const Database = require('./db.js')
 const config = require('./config.js')
@@ -67,7 +73,8 @@ const EXIT = {
     DISPENSER_STATE: 4,
     // The decoder halted again while the checks above were running, so the live halt
     // is not the one they were measured against. Refuse and re-run, never clear.
-    HALT_SUPERSEDED: 5
+    HALT_SUPERSEDED: 5,
+    ROLLBACK_IN_PROGRESS: 6
 }
 
 const RESET_COMMAND = 'xchain-node reset xchain-decoder <chain> <network> --with-indexer --yes'
@@ -75,7 +82,8 @@ const RESET_COMMAND = 'xchain-node reset xchain-decoder <chain> <network> --with
 const USAGE = 'usage: node src/clear_reorg_halt.js [--reason "<why this database is known good>"] [--force] [--dry-run]  (--reason is required unless --dry-run)\n'
     + 'Clears a REORG_HALT only when no rolled-back block remains above the stored tip. A halt that rolled blocks back '
     + '(the dispenser safe-depth abort) leaves them above the tip, a parked decoder never re-parses them, and --force '
-    + 'cannot override that check: recover such a halt with `' + RESET_COMMAND + '`.'
+    + 'cannot override that check: recover such a halt with `' + RESET_COMMAND + '`. '
+    + 'The command also refuses while a rollback owns the database reorg lock.'
 
 function parseArgs(argv){
     const out = { reason: null, force: false, dryRun: false, help: false, bad: null }
@@ -154,9 +162,8 @@ function refuseUnpinnableHalt(marker, error){
     return true
 }
 
-// Refuse a session whose sql_mode the decoder itself would refuse at startup. This
-// CLI builds its own pool and never runs runMigrations, so without this check the row
-// that decides halt state could be written on a lax session with no warning.
+// Pre-check a session so --dry-run predicts the binding refusal. clearReorgHalt repeats
+// the check on the connection that writes and reads back REORG_HALT_CLEARED.
 async function refuseLaxSqlMode(db, error){
     try {
         await db.assertStrictSqlMode()
@@ -169,19 +176,35 @@ async function refuseLaxSqlMode(db, error){
     }
 }
 
+function reportClearResult(result, { log, error, verdict, reason }){
+    if (result.laxSession){
+        error('clear-reorg-halt: REFUSED. The connection that would have written the REORG_HALT_CLEARED row '
+            + 'failed the strict-mode check: ' + result.error + '. Nothing was cleared.')
+        return EXIT.FAILED
+    }
+    if (result.alreadyClear){
+        log('clear-reorg-halt: the marker was cleared by someone else while this ran. Nothing to do.')
+        return EXIT.OK
+    }
+    if (result.superseded){
+        error('clear-reorg-halt: REFUSED. The decoder halted again while these checks ran, so the live halt'
+            + (result.liveHaltId != null ? ' (events id ' + result.liveHaltId + ')' : '')
+            + ' is not the one they were measured against. Nothing was cleared. Wait for the decoder to settle, then run this again '
+            + 'so the checks are taken against the halt being cleared.')
+        return EXIT.HALT_SUPERSEDED
+    }
+    if (!result.cleared){
+        error('clear-reorg-halt: FAILED. The REORG_HALT_CLEARED row could not be written or read back; the halt is still live.')
+        return EXIT.FAILED
+    }
+    log('clear-reorg-halt: cleared. ' + verdict + '. Recorded as events.code=REORG_HALT_CLEARED with reason: ' + reason
+        + '. The decoder reports reorg_halted=false on its next probe (within a minute); the halt row itself is kept for the audit trail.')
+    return EXIT.OK
+}
+
 // The whole decision, with the database and the output injected so it can be
 // exercised without MariaDB. Returns the process exit code.
-async function run({ db, argv = [], log = console.log, error = console.error }){
-    const args = parseArgs(argv)
-    if (args.help){ log(USAGE); return EXIT.OK }
-    if (args.bad){ error('clear-reorg-halt: ' + args.bad + '\n' + USAGE); return EXIT.USAGE }
-    // A dry run writes nothing, so it needs no reason; a real clear records one.
-    const reason = typeof args.reason === 'string' ? args.reason.trim() : ''
-    if (!args.dryRun && reason.length < 8){
-        error('clear-reorg-halt: --reason must say, in at least 8 characters, why this database is known good; it is recorded with the clear.\n' + USAGE)
-        return EXIT.USAGE
-    }
-
+async function decideClear({ db, args, reason, log, error }){
     const marker = await db.getReorgHaltMarker()
     if (!marker.halted){
         log('clear-reorg-halt: no live REORG_HALT marker'
@@ -212,24 +235,41 @@ async function run({ db, argv = [], log = console.log, error = console.error }){
     // REORG_HALT inside that window; clearing without the pin would supersede a halt
     // nobody audited and record checks taken before it existed.
     const result = await db.clearReorgHalt({ reason, checks: checks, forced: !dispenserClean, expectedHaltId: marker.id })
-    if (result.alreadyClear){
-        log('clear-reorg-halt: the marker was cleared by someone else while this ran. Nothing to do.')
-        return EXIT.OK
+    return reportClearResult(result, { log, error, verdict, reason })
+}
+
+async function run({ db, argv = [], log = console.log, error = console.error }){
+    const args = parseArgs(argv)
+    if (args.help){ log(USAGE); return EXIT.OK }
+    if (args.bad){ error('clear-reorg-halt: ' + args.bad + '\n' + USAGE); return EXIT.USAGE }
+    const reason = typeof args.reason === 'string' ? args.reason.trim() : ''
+    if (!args.dryRun && reason.length < 8){
+        error('clear-reorg-halt: --reason must say, in at least 8 characters, why this database is known good; it is recorded with the clear.\n' + USAGE)
+        return EXIT.USAGE
     }
-    if (result.superseded){
-        error('clear-reorg-halt: REFUSED. The decoder halted again while these checks ran, so the live halt'
-            + (result.liveHaltId != null ? ' (events id ' + result.liveHaltId + ')' : '')
-            + ' is not the one they were measured against. Nothing was cleared. Wait for the decoder to settle, then run this again '
-            + 'so the checks are taken against the halt being cleared.')
-        return EXIT.HALT_SUPERSEDED
+    if (typeof db.acquireReorgRollbackLock !== 'function'){
+        return decideClear({ db, args, reason, log, error })
     }
-    if (!result.cleared){
-        error('clear-reorg-halt: FAILED. The REORG_HALT_CLEARED row could not be written or read back; the halt is still live.')
+    let lock
+    try {
+        lock = await db.acquireReorgRollbackLock(0)
+    } catch (err){
+        error('clear-reorg-halt: FAILED. The rollback lock could not be checked, so nothing was cleared. ' + err.message)
         return EXIT.FAILED
     }
-    log('clear-reorg-halt: cleared. ' + verdict + '. Recorded as events.code=REORG_HALT_CLEARED with reason: ' + reason
-        + '. The decoder reports reorg_halted=false on its next probe (within a minute); the halt row itself is kept for the audit trail.')
-    return EXIT.OK
+    if (!lock){
+        error('clear-reorg-halt: REFUSED. A rollback is running on this database. Nothing was cleared; run this again once the decoder has parked or finished.')
+        return EXIT.ROLLBACK_IN_PROGRESS
+    }
+    try {
+        const decide = () => decideClear({ db, args, reason, log, error })
+        return typeof db.runOnReorgRollbackSession === 'function'
+            ? await db.runOnReorgRollbackSession(lock, decide) : await decide()
+    } finally {
+        try { await db.releaseReorgRollbackLock(lock) } catch (err){
+            error('clear-reorg-halt: warning: the rollback lock connection could not be released cleanly: ' + err.message)
+        }
+    }
 }
 
 async function main(){

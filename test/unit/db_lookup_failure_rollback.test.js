@@ -76,7 +76,7 @@ describe('DB lookup failure inside the block transaction', function () {
         decoder.sleep = async () => {}
         const events = []
         let parses = 0
-        decoder.connector = { getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: 0 }), getBlockHash: async () => 'blockA', getBlock: async () => '' }
+        decoder.connector = { getBlockchainInfo: async () => ({ verificationprogress: 1, blocks: 0 }), getBlockHash: async () => 'blockA', getBlock: async () => '00' }
         decoder.db = {
             createDatabase: async () => true, verifyDatabase: async () => true, verifyTables: async () => true,
             runMigrations: async () => ({ applied: [], pending: [] }), getLastBlockIndex: async () => -1, getLastTxIndex: async () => 0,

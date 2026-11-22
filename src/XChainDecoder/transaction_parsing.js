@@ -89,7 +89,7 @@ function* capturePubkey(keyInput, db, source){
     // insertTransactionRow after creating a first-ever address.
     let sourcePubkey = null
     if (source && keyInput){
-        const pubkey = this.extractPubkeyFromInput(keyInput)
+        const pubkey = this.extractPubkeyFromInput(keyInput, source)
         if (pubkey){
             sourcePubkey = pubkey
             if (db !== this.mempoolDb){

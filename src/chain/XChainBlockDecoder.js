@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const bitcoinjs = require('bitcoinjs-lib');
 // BigInt-safe 64-bit reader/writer, applied in-process so a >2^53-1 sat DOGE
 // output cannot wedge block decode even when the Dockerfile COPY patch is absent.
-const bufferutils_js_1 = require('./apply_bufferutils_patch');
+const bufferutils_js_1 = require('./bitcoinjs_v7_compat');
 const transaction_js_1 = require('bitcoinjs-lib/src/transaction');
 const coins = require('../coins');
 
@@ -178,7 +178,7 @@ function assertBlockBodyIntact(block, bufferLength, bodyEnd, extensionFollows) {
     if (bodyEnd !== bufferLength && !extensionFollows) {
         throw new Error('Block has ' + (bufferLength - bodyEnd) + ' bytes after its last transaction')
     }
-    if (!bitcoinjs.Block.calculateMerkleRoot(txs).equals(block.merkleRoot)) {
+    if (!Buffer.from(bitcoinjs.Block.calculateMerkleRoot(txs)).equals(Buffer.from(block.merkleRoot))) {
         throw new Error('Block merkle root mismatch: the header root is not the root of its transactions')
     }
 }
@@ -192,7 +192,7 @@ function readMwebTransactions(bufferReader, block) {
       bufferReader.offset += tx.byteLength();
       return tx;
     };
-    const nTransactions = bufferReader.readVarInt();
+    const nTransactions = Number(bufferReader.readVarInt());
     // Sanity-bound the claimed tx count against the bytes actually
     // present: the smallest possible serialized transaction is well
     // over 10 bytes, so a varint claiming more than remaining/10
@@ -305,7 +305,7 @@ class XChainBlockDecoder {
                 assertBlockBodyIntact(block, buffer.length, bufferReader.offset, extensionFollows)
                 const witnessCommit = block.getWitnessCommit();
                 // This Block contains a witness commit
-                if (witnessCommit) block.witnessCommit = witnessCommit;
+                if (witnessCommit) block.witnessCommit = Buffer.from(witnessCommit);
                 return block;
             default: {
                 let plainBlock

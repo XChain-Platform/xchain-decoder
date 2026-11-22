@@ -21,7 +21,7 @@
 const util = require('../util')
 const { format: formatLogLine } = require('node:util')
 const { logger, SYNCED_THRESHOLD } = require('./constants.js')
-const { parkOrRethrow } = require('./sync_loop.js')
+const { parkOrRethrow, rederiveAfterRollback, resetAfterRollback } = require('./sync_loop.js')
 const { storeBlock } = require('./block_store.js')
 
 async function fetchNextBlock(nextBlockHeight){
@@ -77,10 +77,7 @@ async function retryUndecodableBlock(loop, e, nextBlockHeight, nextBlockHash){
     this.parseErrors++
     logger.error(formatLogLine(`Failed to decode block ${nextBlockHeight} (${nextBlockHash}), retrying:`, e))
     await this.db.endTransaction()
-    loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
-    loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-    loop.blocksQuantity = 0
-    await this.sleep(3000)
+    await resetAfterRollback.call(this, loop)
     return 'continue'
 }
 
@@ -99,15 +96,10 @@ async function rollBackDetectedReorg(loop, nextBlockHeight){
     this.reorgWait = null
     loop.tipBelowStoredTipRefused = false
     // Re-clamp: same as the pre-loop guard and the node-tip regression path.
-    loop.lastProcessedBlockIndex = this.lastProcessedBlockIndex = Math.max(await this.db.getLastBlockIndex(), this.startBlockIndex - 1)
+    await rederiveAfterRollback.call(this, loop)
     // Count rolled-back blocks as the difference between the pre-reorg tip
     // and the newly confirmed last good block so the log entry is actionable.
     const rolledBackCount = Math.max(0, preReorgBlock - loop.lastProcessedBlockIndex)
-    loop.lastProcessedTxIndex = await this.db.getLastTxIndex()
-    loop.blocksQuantity = 0
-    loop.transactionsCount = 0
-    loop.validTransactionsCount = 0
-    loop.outputCount = 0
     loop.startTimeStamp = Date.now()
     this.log("Blocks were updated (" + rolledBackCount + " blocks rolled back)")
     return 'continue'
@@ -188,7 +180,47 @@ async function ingestNextBlock(loop){
     this.reorgWait = null
     loop.tipBelowStoredTipRefused = false
 
-    return await storeBlock.call(this, loop, block, nextBlockHeight, nextBlockHash, previousBlockHash)
+    const stored = await storeBlock.call(this, loop, block, nextBlockHeight, nextBlockHash, previousBlockHash)
+    await pruneConfirmedFromMempool.call(this, loop, stored, block, nextBlockHeight)
+    return stored
+}
+
+function blockTxHashes(block){
+    const hashes = []
+    for (const tx of (block.transactions || [])) {
+        try { hashes.push(tx.getId()) } catch (_) { /* unparseable id; the mempool poll reconciles it */ }
+    }
+    return hashes
+}
+
+// mempool_transactions is otherwise reconciled only on the 60 s mempool poll, so a tx
+// a block just confirmed kept reading as pending (beside its confirmed row) for up to
+// a full poll interval. Prune the block's txs once the block is durable: a rolled-back
+// or retried block must not hide a tx that is still genuinely pending. The hashes of a
+// multi-block batch accumulate until the batch commits (blocksQuantity resets to 0).
+async function pruneConfirmedFromMempool(loop, stored, block, nextBlockHeight){
+    if (stored === 'rollback' || stored === 'continue') {
+        loop.mempoolPruneHashes = null
+        return
+    }
+    const mempoolDb = this.mempoolDb
+    if (!mempoolDb || typeof mempoolDb.deleteConfirmedMempoolTransactions !== 'function') return
+    // Deep catch-up runs with the mempool poll stopped and the table is reconciled on
+    // resync, so a per-block round trip there is pure cost.
+    if ((this.blockchainInfoLastBlock - nextBlockHeight) > SYNCED_THRESHOLD) {
+        loop.mempoolPruneHashes = null
+        return
+    }
+    loop.mempoolPruneHashes = (loop.mempoolPruneHashes || []).concat(blockTxHashes(block))
+    if (loop.blocksQuantity !== 0) return
+    const hashes = loop.mempoolPruneHashes
+    loop.mempoolPruneHashes = null
+    try {
+        await mempoolDb.deleteConfirmedMempoolTransactions(hashes)
+    } catch (err) {
+        // The DB method never throws; a stand-in that does must not stop the block loop.
+        logger.warn(formatLogLine('Mempool prune after block ' + nextBlockHeight + ' failed:', err))
+    }
 }
 
 module.exports = { ingestNextBlock }

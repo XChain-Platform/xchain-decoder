@@ -190,7 +190,7 @@ function bootingDecoder({ db, onSleep = null, maxSleeps = 6 }){
         rpcErrors: 0,
         getBlockchainInfo: async () => ({ blocks: 150, verificationprogress: 1, initialblockdownload: false }),
         getBlockHash: async () => 'aabbccdd',
-        getBlock: async () => ''
+        getBlock: async () => '00'
     }
     decoder.fetchBlockHex = async (hash, height) => { fetched.push(height); throw new Error('test: stop before parsing') }
     decoder.db = Object.assign({

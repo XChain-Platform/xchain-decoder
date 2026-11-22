@@ -23,6 +23,16 @@ const { format: formatLogLine } = require('node:util')
 const { logger, MAGIC_WORD, MAGIC_WORD_BUFFER, P2SH_BUFFER, P2WSH_BUFFER, FUNDING_VOUT_BASE } = require('./constants.js')
 const { compiledPushSize } = require('./payload_helpers.js')
 
+function decompileScript(script){
+    const chunks = bitcoin.script.decompile(script)
+    if (!chunks) return null
+    return chunks.map(chunk => typeof chunk === 'number' ? chunk : Buffer.from(chunk))
+}
+
+function isBytes(value){
+    return value instanceof Uint8Array
+}
+
 function captureOutputAddress(nextOutput, txOutputIndex, nextTxId, openDispenserAddresses, dispenseOutputs, paymentOutputs){
     let outputAddress = null
     try {
@@ -63,10 +73,10 @@ function readP2shChunks(transaction, nextTxId, nextDataBuffer){
     for (let txInputIndex=0;txInputIndex < transaction.ins.length;txInputIndex++){
         let nextInput = transaction.ins[txInputIndex]
         try {
-            let decodedScriptSig = bitcoin.script.decompile(nextInput["script"])
-            if (!decodedScriptSig || decodedScriptSig.length < 3 || !Buffer.isBuffer(decodedScriptSig[2])) continue
-            let decodedRedeemScript = bitcoin.script.decompile(decodedScriptSig[2])
-            if (!decodedRedeemScript || decodedRedeemScript.length < 1 || !Buffer.isBuffer(decodedRedeemScript[0])) continue
+            let decodedScriptSig = decompileScript(nextInput["script"])
+            if (!decodedScriptSig || decodedScriptSig.length < 3 || !isBytes(decodedScriptSig[2])) continue
+            let decodedRedeemScript = decompileScript(decodedScriptSig[2])
+            if (!decodedRedeemScript || decodedRedeemScript.length < 1 || !isBytes(decodedRedeemScript[0])) continue
             let decodedData = decodedRedeemScript[0]
             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
         } catch (e) {
@@ -95,9 +105,9 @@ function readP2wshChunks(transaction, nextTxId, nextDataBuffer){
             // witness-shape check on the next line: this input carries no
             // payload for us.
             if (this.network.supportsSegwit === false) continue
-            if (!nextInput["witness"] || nextInput["witness"].length < 3 || !Buffer.isBuffer(nextInput["witness"][2])) continue
-            let decodedRedeemScript = bitcoin.script.decompile(nextInput["witness"][2])
-            if (!decodedRedeemScript || decodedRedeemScript.length < 1 || !Buffer.isBuffer(decodedRedeemScript[0])) continue
+            if (!nextInput["witness"] || nextInput["witness"].length < 3 || !isBytes(nextInput["witness"][2])) continue
+            let decodedRedeemScript = decompileScript(nextInput["witness"][2])
+            if (!decodedRedeemScript || decodedRedeemScript.length < 1 || !isBytes(decodedRedeemScript[0])) continue
             let decodedData = decodedRedeemScript[0]
             nextDataBuffer = Buffer.concat([nextDataBuffer,decodedData])
         } catch (e) {
@@ -211,7 +221,7 @@ function* scanOutputs(transaction, openDispenserAddresses, nextTxId, firstInputT
             logger.error(`FATAL invariant violation: real output index ${txOutputIndex} in tx ${nextTxId} reaches FUNDING_VOUT_BASE (${FUNDING_VOUT_BASE}); funding fee outputs can no longer be stored collision-free`)
         }
         let nextOutput = transaction.outs[txOutputIndex]
-        let decompiledScript = bitcoin.script.decompile(nextOutput.script)
+        let decompiledScript = decompileScript(nextOutput.script)
         let nextDataBuffer = new Buffer.allocUnsafe(0)
 
         if (captureOutputAddress.call(this, nextOutput, txOutputIndex, nextTxId, openDispenserAddresses, dispenseOutputs, paymentOutputs)) getSource = true
@@ -229,7 +239,7 @@ function* scanOutputs(transaction, openDispenserAddresses, nextTxId, firstInputT
                 (decompiledScript.length == 6)
                 && (decompiledScript[5] == bitcoin.opcodes.OP_CHECKMULTISIG)
             ){
-                if (!Buffer.isBuffer(decompiledScript[1]) || !Buffer.isBuffer(decompiledScript[2])) {
+                if (!isBytes(decompiledScript[1]) || !isBytes(decompiledScript[2])) {
                     continue
                 }
 
@@ -273,7 +283,7 @@ function reportEmptyLeadingPush(decompiledData, dataBuffer, nextTxId){
 function decompilePayload(nextTxId, envelopeCarrier, payload){
     let { dataBuffer, rawData, getSource, compiledDataLength } = payload
     if (dataBuffer.length > 0){
-        let decompiledData = bitcoin.script.decompile(dataBuffer)
+        let decompiledData = decompileScript(dataBuffer)
         if (decompiledData != null && decompiledData.length > 0) {
             // A single-byte OP_0 segment ([0x00]) decompiles to the integer 0,
             // not a Buffer, and a non-standard script can decompile to a leading

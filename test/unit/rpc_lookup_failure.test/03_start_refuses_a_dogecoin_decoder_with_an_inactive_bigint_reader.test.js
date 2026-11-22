@@ -25,14 +25,14 @@ describe(OUTER_TITLE, function () {
 
         function withInactiveReader(run) {
             const originalReadUInt64 = bufferutils.BufferReader.prototype.readUInt64
-            bufferutils.BufferReader.prototype.readUInt64 = function () {
-                throw new Error('RangeError: value out of range')
-            }
+            const originalReadInt64 = bufferutils.BufferReader.prototype.readInt64
+            bufferutils.BufferReader.prototype.readInt64 = function () { return -1n }
             return (async () => {
                 try {
                     await run()
                 } finally {
                     bufferutils.BufferReader.prototype.readUInt64 = originalReadUInt64
+                    bufferutils.BufferReader.prototype.readInt64 = originalReadInt64
                 }
             })()
         }

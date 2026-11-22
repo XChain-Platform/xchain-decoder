@@ -251,7 +251,8 @@ const DISPENSER_CANCEL_GRACE_ACTIVATION = {
 // gate from DISPENSER_CANCEL_GRACE_ACTIVATION because capture eligibility and row
 // retention change independently.
 //
-// Mainnet and testnet remain unarmed so existing history is not reinterpreted.
+// Mainnet remains unarmed so existing history is not reinterpreted. Testnet is
+// armed at the cut's flag day under the ruling that every testnet gate arms.
 // Regtest is genesis-active so the grace-aware purge path is exercised there.
 const DISPENSER_PURGE_GRACE_ACTIVATION = {
     mainnet: 9999999999,
@@ -265,6 +266,12 @@ const DISPENSER_CANCEL_GRACE_PARENT_FLOOR_ACTIVATION = {
     regtest: 0,
 };
 
+// Collapses batched dispenser creates by their resolved address id, matching the
+// dispensers table key. Testnet is armed at its cut flag day and regtest from
+// genesis. Mainnet remains unarmed: from batch capture activation at 1786838400
+// until this gate is armed, collation-equivalent raw spellings can select the
+// first expiration through a duplicate-key insert. Arming changes persisted rows
+// and needs a fleet flag day plus a historical audit.
 const DISPENSER_ADDRESS_ID_COLLAPSE_ACTIVATION = {
     mainnet: 9999999999,
     testnet: 1792454400,

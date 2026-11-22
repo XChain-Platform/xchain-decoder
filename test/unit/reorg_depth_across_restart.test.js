@@ -199,6 +199,22 @@ function dbWith(tipRows, eventRows) {
 }
 
 const marker = (height) => ({ id: height, data: JSON.stringify([{ block_index: height, block_hash: 'bb' }]) })
+const event = (id, height) => ({ id, data: JSON.stringify([{ block_index: height, block_hash: 'bb' }]) })
+
+function dbWithPagedEvents(tip, eventRows, ignoreCursor = false) {
+    const db = Object.create(Database.prototype)
+    db.transactionConnection = null
+    db.getLastBlockIndex = async () => tip
+    const query = sinon.stub().callsFake(async (sql, params = []) => {
+        const limit = Number(/LIMIT (\d+)/.exec(sql)[1])
+        const cursor = params[0]
+        const eligible = ignoreCursor || cursor == null
+            ? eventRows : eventRows.filter((row) => BigInt(row.id) < BigInt(cursor))
+        return eligible.slice(0, limit)
+    })
+    db.getConnection = async () => ({ query, release: sinon.stub().resolves() })
+    return { db, query }
+}
 
 describe('Database#countReorgDeletesAboveTip()', function () {
     afterEach(() => sinon.restore())
@@ -209,7 +225,7 @@ describe('Database#countReorgDeletesAboveTip()', function () {
     })
 
     it('counts a height once even when it was deleted, re-synced and deleted again', async function () {
-        const { db } = dbWith([{ max_height: 200n }], [marker(201), marker(201), marker(202)])
+        const { db } = dbWith([{ max_height: 200n }], [event(3, 201), event(2, 201), event(1, 202)])
         assert.strictEqual(await db.countReorgDeletesAboveTip(), 2)
     })
 
@@ -243,6 +259,23 @@ describe('Database#countReorgDeletesAboveTip()', function () {
         const { db } = dbWith([{ max_height: 200n }], [{ id: 7, data: JSON.stringify([{ block_index: 'tip' }]) }])
         await assert.rejects(() => db.countReorgDeletesAboveTip(), /non-numeric block_index/)
     })
+
+    it('THROWS instead of coercing malformed block_index values to zero', async function () {
+        const invalid = [null, '', false, [], {}, -1, 201.5]
+        for (const block_index of invalid){
+            const data = JSON.stringify([{ block_index }])
+            const { db } = dbWith([{ max_height: 200n }], [{ id: 7, data }])
+            await assert.rejects(() => db.countReorgDeletesAboveTip(), /non-numeric block_index/)
+        }
+        const { db } = dbWith([{ max_height: 200n }], [{ id: 8, data: JSON.stringify([null]) }])
+        await assert.rejects(() => db.countReorgDeletesAboveTip(), /non-numeric block_index/)
+    })
+
+    it('continues to accept a legacy digit-string block_index', async function () {
+        const rows = [{ id: 9, data: JSON.stringify([{ block_index: '201' }]) }]
+        const { db } = dbWith([{ max_height: 200n }], rows)
+        assert.strictEqual(await db.countReorgDeletesAboveTip(), 1)
+    })
 })
 
 describe('Database#countReorgDeletesAboveTip()', function () {
@@ -275,6 +308,45 @@ describe('Database#countReorgDeletesAboveTip()', function () {
     })
 })
 
+describe('Database#countReorgDeletesAboveTip() paging', function () {
+    afterEach(() => sinon.restore())
+
+    it('pages past newer re-deletes to markers that remain above the tip', async function () {
+        const rows = [event('6', 199), event(5n, 198), event(4, 197), event('3', 203), event(2n, 202), event(1, 201)]
+        const { db } = dbWithPagedEvents(200, rows)
+        assert.strictEqual(await db.countReorgDeletesAboveTip(3), 3)
+    })
+
+    it('finds a marker older than one full default page', async function () {
+        const rows = Array.from({ length: 10000 }, (_, i) => event(10001 - i, 199))
+        rows.push(event(1, 201))
+        const { db } = dbWithPagedEvents(200, rows)
+        assert.strictEqual(await db.countReorgDeletesAboveTip(), 1)
+    })
+
+    it('reads a trailing empty page when the row count is an exact page multiple', async function () {
+        const { db, query } = dbWithPagedEvents(4, [marker(6), marker(5), marker(4), marker(3), marker(2), marker(1)])
+        assert.strictEqual(await db.countReorgDeletesAboveTip(3), 2)
+        assert.strictEqual(query.callCount, 3)
+    })
+
+    it('throws when a driver returns a non-advancing page', async function () {
+        const { db } = dbWithPagedEvents(0, [marker(3), marker(2)], true)
+        await assert.rejects(() => db.countReorgDeletesAboveTip(2), /cursor did not strictly decrease/)
+    })
+
+    it('throws on an unreadable marker id', async function () {
+        const { db } = dbWithPagedEvents(0, [event('not-an-id', 1)])
+        await assert.rejects(() => db.countReorgDeletesAboveTip(), /unreadable id/)
+    })
+
+    it('still rejects an unreadable payload found on a later page', async function () {
+        const rows = [marker(3), { id: 2, data: '{not json' }, marker(1)]
+        const { db } = dbWithPagedEvents(0, rows)
+        await assert.rejects(() => db.countReorgDeletesAboveTip(1), /unreadable payload/)
+    })
+})
+
 // Two interrupted rollbacks over the same range: the older run deleted 410..311, the
 // decoder re-synced, and the newer run deleted 400..301, so 110 distinct heights sit
 // above the stored tip of 300 behind 200 marker rows. The scan below honours LIMIT the
@@ -291,14 +363,17 @@ function reDeletedRangeDecoder() {
     markerDb.transactionConnection = null
     markerDb.getLastBlockIndex = () => decoder.db.getLastBlockIndex()
     markerDb.getConnection = async () => ({
-        query: async (sql) => {
+        query: async (sql, params = []) => {
             const limit = Number(/LIMIT (\d+)/.exec(sql)[1])
             scans.push(limit)
-            return newestFirst.slice(0, limit)
+            const cursor = params[0]
+            const eligible = cursor == null
+                ? newestFirst : newestFirst.filter((row) => BigInt(row.id) < BigInt(cursor))
+            return eligible.slice(0, limit)
         },
         release: async () => {}
     })
-    decoder.db.countReorgDeletesAboveTip = (...args) => markerDb.countReorgDeletesAboveTip(...args)
+    decoder.db.countReorgDeletesAboveTip = () => markerDb.countReorgDeletesAboveTip(100)
     return { decoder, deleted, atHalt, scans }
 }
 
@@ -315,6 +390,7 @@ describe('verifyReorg: a re-deleted height does not shrink the carried-over dept
 
         assert.deepStrictEqual(atHalt, [SAFE_DEPTH - 110],
             'a scan bounded at the height ceiling reads 100 here and spends ten blocks past the purge horizon')
-        assert.ok(scans.every((limit) => limit >= 200), 'the scan must reach both runs\' markers: ' + scans)
+        assert.ok(scans.length >= 3 && scans.every((limit) => limit === 100),
+            'the paged scan must reach both runs\' markers: ' + scans)
     })
 })

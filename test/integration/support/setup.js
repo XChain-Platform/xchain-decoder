@@ -37,8 +37,8 @@
  * keeps an override honest.
  */
 
-const BitcoinCore = require('bitcoin-core')
 const nodeHelper = require('../../helpers/node_helper')
+const JsonRpcClient = require('../../helpers/json_rpc_client')
 const XChainDecoder = require('../../../src/XChainDecoder')
 const Database = require('../../../src/db.js')
 const { dropAllTables } = require('../../support/drop_tables')
@@ -76,7 +76,7 @@ async function wait(ms) {
 // a node that never comes up is a venue failure and should say so, not hang the
 // suite until mocha's (disabled) timeout.
 async function waitForNode(timeoutMs) {
-    const probe = new BitcoinCore({
+    const probe = new JsonRpcClient({
         host: 'http://' + NODE_HOST + ':' + NODE_PORT,
         username: NODE_USER,
         password: NODE_PASSWORD

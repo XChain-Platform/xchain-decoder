@@ -41,7 +41,7 @@ function bootingDecoder(db){
         rpcErrors: 0,
         getBlockchainInfo: async () => ({ blocks: 150, headers: 150, verificationprogress: 1, initialblockdownload: false }),
         getBlockHash: async () => 'aabbccdd',
-        getBlock: async () => ''
+        getBlock: async () => '00'
     }
     decoder.fetchBlockHex = async (hash, height) => { fetched.push(height); throw new Error('test: stop before parsing') }
     decoder.db = Object.assign({
@@ -54,6 +54,25 @@ function bootingDecoder(db){
 }
 
 describe('a restart on a halted database parks unless it reads no rolled-back block above the tip', function () {
+    it('rejects startup before cursor reads when the migration pass skipped its lock', async function () {
+        let cursorReads = 0
+        const { decoder, fetched } = bootingDecoder({
+            runMigrations: async () => ({ applied: [], pending: [], lockSkipped: true }),
+            getLastBlockIndex: async () => { cursorReads++; return 100 },
+        })
+        await assert.rejects(() => decoder.start(), /xchain_migrate_db/)
+        assert.strictEqual(cursorReads, 0)
+        assert.deepStrictEqual(fetched, [])
+    })
+
+    it('surfaces a migration failure without replacing it with the lock error', async function () {
+        const { decoder, fetched } = bootingDecoder({
+            runMigrations: async () => { throw new Error('schema assertion failed') },
+        })
+        await assert.rejects(() => decoder.start(), /schema assertion failed/)
+        assert.deepStrictEqual(fetched, [])
+    })
+
     it('a count that cannot be read parks before the first block', async function () {
         const { decoder, fetched, lines } = bootingDecoder({
             countReorgDeletesAboveTip: async () => { throw new Error('harness: injected fault') } })

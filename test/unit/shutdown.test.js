@@ -254,6 +254,22 @@ describe('graceful shutdown', function(){
 });
 
 describe('graceful shutdown', function(){
+    describe('compose stop wait', function(){
+        // A compose-created container never gets xchain-node's stamped budget, so the
+        // compose file has to carry the wait itself or docker's 10 s default applies.
+        it('stays under the stop_grace_period the compose file gives the decoder service', function(){
+            const compose = fs.readFileSync(path.join(__dirname, '..', '..', 'docker-compose.yml'), 'utf8');
+            const service = /^  xchain_decoder:\n([\s\S]*?)(?=^\S|^  \S)/m.exec(compose);
+            assert.ok(service, 'docker-compose.yml has no xchain_decoder service block');
+            const grace = /^    stop_grace_period:\s*(\d+)s\s*$/m.exec(service[1]);
+            assert.ok(grace, 'xchain_decoder sets no stop_grace_period, so compose stop SIGKILLs after docker\'s 10 s default');
+            assert.ok(DEFAULT_SHUTDOWN_TIMEOUT_MS < parseInt(grace[1], 10) * 1000,
+                'the drain bound of ' + DEFAULT_SHUTDOWN_TIMEOUT_MS + ' ms is not under the compose grace of ' + grace[1] + ' s');
+        });
+    });
+});
+
+describe('graceful shutdown', function(){
     describe('createDecoderDrain', function(){
 
         it('flips health, stops the decoder, drains the server and loop, then closes both pools', async function(){

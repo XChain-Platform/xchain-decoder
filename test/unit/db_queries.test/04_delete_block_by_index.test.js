@@ -62,7 +62,7 @@ function assertRestoreOrdering(calls) {
 describe('Database#deleteBlockByIndex()', () => {
     afterEach(() => sinon.restore());
 
-    it('executes 5 DELETE queries and returns true on success', async () => {
+    it('executes 6 DELETE queries and returns true on success', async () => {
         const db = makeDb();
         const q  = sinon.stub().resolves([]);
         const { pool, conn } = withConn(q);
@@ -72,8 +72,8 @@ describe('Database#deleteBlockByIndex()', () => {
         const calls = conn.query.getCalls().map(c => c.args[0]);
         // Explicit per-table checks instead of a magic DELETE count: the rollback
         // must touch exactly transaction_outputs, dispensers, dispenser_extension_undo,
-        // transactions, blocks.
-        for (const table of ['transaction_outputs', 'dispensers', 'dispenser_extension_undo', 'transactions', 'blocks']) {
+        // transactions, blocks, block_tx_index_end.
+        for (const table of ['transaction_outputs', 'dispensers', 'dispenser_extension_undo', 'transactions', 'blocks', 'block_tx_index_end']) {
             assert.ok(
                 calls.some(s => new RegExp(`DELETE\\s+FROM\\s+${table}\\b`, 'i').test(s)),
                 `must DELETE FROM ${table} on reorg rollback`
@@ -88,7 +88,7 @@ describe('Database#deleteBlockByIndex()', () => {
             'events/index_addresses must never be deleted on reorg'
         );
         const deletes = calls.filter(s => /DELETE/i.test(s));
-        assert.strictEqual(deletes.length, 5, 'no additional undeclared DELETE targets');
+        assert.strictEqual(deletes.length, 6, 'no additional undeclared DELETE targets');
         assertRestoreOrdering(calls);
     });
 
@@ -108,9 +108,14 @@ describe('Database#deleteBlockByIndex()', () => {
         const { pool, conn } = withConn(q);
         injectPool(db, pool);
         await db.deleteBlockByIndex(77);
-        // Every parameterized DELETE call should include [77] as params
-        const paramCalls = conn.query.getCalls().filter(c => Array.isArray(c.args[1]) && c.args[1][0] === 77);
-        assert.ok(paramCalls.length >= 4);
+        // Two restore statements and six row-deletion statements are block-scoped.
+        const writeCalls = conn.query.getCalls().filter(c => /\b(DELETE|UPDATE)\b/i.test(c.args[0]));
+        assert.strictEqual(writeCalls.length, 8,
+            'expected 2 restoreDispenserExtensions statements and 6 deleteBlockRows statements');
+        for (const call of writeCalls) {
+            const sql = call.args[0].trim().replace(/\s+/g, ' ');
+            assert.deepStrictEqual(call.args[1], [77], 'wrong blockIndex binding for: ' + sql);
+        }
     });
 
 });

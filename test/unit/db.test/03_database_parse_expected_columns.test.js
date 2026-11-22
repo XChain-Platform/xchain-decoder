@@ -50,16 +50,20 @@ describe('Database#parseExpectedColumns()', () => {
             CREATE TABLE t (
                 id INT NOT NULL AUTO_INCREMENT,
                 name VARCHAR(64) NOT NULL,
+                fulltext_score INT NULL,
+                shape GEOMETRY NOT NULL,
                 PRIMARY KEY (id),
-                INDEX idx_name (name)
+                INDEX idx_name (name),
+                FULLTEXT KEY ft_name (name),
+                FULLTEXT INDEX ft_name_2 (name),
+                FULLTEXT ft_name_3 (name),
+                SPATIAL INDEX sp_shape (shape)
             );
         `
         const cols = db.parseExpectedColumns(sql)
         assert.ok(cols)
         const names = cols.map(c => c.name)
-        assert.ok(!names.includes('PRIMARY'))
-        assert.ok(!names.includes('INDEX'))
-        assert.strictEqual(names.length, 2)
+        assert.deepStrictEqual(names, ['id', 'name', 'fulltext_score', 'shape'])
     })
 })
 

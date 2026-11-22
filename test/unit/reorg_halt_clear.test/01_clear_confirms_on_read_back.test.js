@@ -23,7 +23,10 @@ const Database = require('../../../src/db.js')
 
 function dbAnswering(handler) {
     const db = new Database('127.0.0.1', 3306, 'xchain_btc_mainnet', 'u', 'p')
-    const query = sinon.stub().callsFake(async (sql, params) => handler(sql, params))
+    const query = sinon.stub().callsFake(async (sql, params) => {
+        if (/@@SESSION\.sql_mode/.test(sql)) return [{ mode: 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION' }]
+        return handler(sql, params)
+    })
     db.pool = { getConnection: sinon.stub().resolves({ query, release: sinon.stub().resolves() }) }
     return { db, query }
 }
