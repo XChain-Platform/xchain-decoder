@@ -30,6 +30,7 @@
 
 const { opensBackslashEscape } = require('./query_helpers.js');
 const { generationLosses, intraFileColumnDependencies } = require('./migration_guards/column_change_safety.js');
+const { parseColumnType } = require('./migration_guards/column_type_parser.js');
 
 const INT_RANK  = { tinyint: 1, smallint: 2, mediumint: 3, int: 4, integer: 4, bigint: 5 };
 const TEXT_RANK = { tinytext: 1, text: 2, mediumtext: 3, longtext: 4 };
@@ -150,9 +151,7 @@ function modifyClauses(statements){
 
 // The data type, its arguments and unsignedness as the definition states them.
 function parseType(definition){
-    const m = /^\s*(\w+)\s*(?:\(([^)]*)\))?\s*(unsigned)?/i.exec(definition);
-    if(!m) return null;
-    return { name: m[1].toLowerCase(), args: m[2] == null ? null : m[2].trim(), unsigned: !!m[3] };
+    return parseColumnType(definition, opensBackslashEscape);
 }
 
 // The same shape from the live COLUMN_TYPE (`bigint(20) unsigned`, `enum('a','b')`).
@@ -222,7 +221,9 @@ function narrowedType(rawLive, rawNext){
     if(live.name in INT_RANK && next.name in INT_RANK){
         const l = INT_RANK[live.name], n = INT_RANK[next.name];
         if(n < l) return live.name + ' -> ' + next.name;
-        if(n === l && live.unsigned !== next.unsigned) return live.name + (live.unsigned ? ' unsigned' : '') + ' -> ' + next.name + (next.unsigned ? ' unsigned' : '');
+        const toUnsigned = !live.unsigned && next.unsigned;
+        if(toUnsigned || (n === l && live.unsigned && !next.unsigned))
+            return live.name + (live.unsigned ? ' unsigned' : '') + ' -> ' + next.name + (next.unsigned ? ' unsigned' : '');
         return null;
     }
     if(live.name in TEXT_RANK && next.name in TEXT_RANK) return TEXT_RANK[next.name] < TEXT_RANK[live.name] ? live.name + ' -> ' + next.name : null;
@@ -263,7 +264,11 @@ function losses(live, definition){
         out.push('narrows NULL -> NOT NULL');
     }
 
-    const narrowed = narrowedType(parseLiveType(live.COLUMN_TYPE), parseType(definition));
+    const liveType = parseLiveType(live.COLUMN_TYPE), nextType = parseType(definition);
+    if(!liveType || liveType.incomplete) out.push('cannot read the live column type');
+    if(!nextType || nextType.incomplete) out.push('cannot read the restated column type');
+    const narrowed = liveType && !liveType.incomplete && nextType && !nextType.incomplete
+        ? narrowedType(liveType, nextType) : null;
     if(narrowed) out.push('narrows the type (' + narrowed + ')');
 
     const liveSet = live.CHARACTER_SET_NAME ? String(live.CHARACTER_SET_NAME).toLowerCase() : null;
@@ -274,7 +279,6 @@ function losses(live, definition){
     }
     // A text MODIFY naming neither CHARACTER SET nor COLLATE takes the table's default collation,
     // so a column widened apart from its table (utf8mb4 in a utf8mb3 table) silently reverts.
-    const nextType = parseType(definition);
     const liveCollation = collationKey(live.COLLATION_NAME), tableCollation = collationKey(live.TABLE_COLLATION);
     if(liveSet && !nextSet && nextType && TEXTUAL.has(nextType.name) && liveCollation && tableCollation &&
        liveCollation !== tableCollation){
