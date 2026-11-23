@@ -103,7 +103,8 @@ const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // reorg-recovery window, or a row is deleted before a legal in-window reorg can
 // restore it (deleteBlockByIndex then matches zero rows), permanently losing a
 // money-bearing dispenser on the reorged node. Standard networks use 126 and
-// Litecoin testnet uses 5006. Invariant: SAFE_DEPTH >= matching undo window +
+// Litecoin and Bitcoin testnet use 5006 (BTC testnet runs a deliberate 5000-block
+// tracker undo override). Invariant: SAFE_DEPTH >= matching undo window +
 // margin. The +6 margin means a small undo-window re-tune
 // cannot land exactly at the purge threshold; test/unit/dispenser_safe_depth.test.js
 // enforces the invariant with a conformance read of DEFAULT_UNDO_BLOCKS in
@@ -112,11 +113,14 @@ const SYNCED_THRESHOLD = 3 //Maximum blocks behind to be synced
 // before hard-purge; expiry semantics and action evaluation are unchanged).
 const DISPENSER_EXPIRE_SAFE_DEPTH = 126 // 120 (deepest standard window) + 6 margin
 const LTC_TESTNET_DISPENSER_EXPIRE_SAFE_DEPTH = 5006
+const BTC_TESTNET_DISPENSER_EXPIRE_SAFE_DEPTH = 5006
 
 function resolveDispenserExpireSafeDepth(coin, network){
-    return String(coin).toUpperCase() === 'LTC' && String(network).toLowerCase() === 'testnet'
-        ? LTC_TESTNET_DISPENSER_EXPIRE_SAFE_DEPTH
-        : DISPENSER_EXPIRE_SAFE_DEPTH
+    if (String(network).toLowerCase() !== 'testnet') return DISPENSER_EXPIRE_SAFE_DEPTH
+    const tick = String(coin).toUpperCase()
+    if (tick === 'LTC') return LTC_TESTNET_DISPENSER_EXPIRE_SAFE_DEPTH
+    if (tick === 'BTC') return BTC_TESTNET_DISPENSER_EXPIRE_SAFE_DEPTH
+    return DISPENSER_EXPIRE_SAFE_DEPTH
 }
 
 // There is deliberately no DISPENSER_CLOSE_DELAY twin of the indexer's here: the decoder

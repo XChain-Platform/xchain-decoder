@@ -44,7 +44,8 @@ describe('DISPENSER_EXPIRE_SAFE_DEPTH', function () {
         assert.strictEqual(XChainDecoder.resolveDispenserExpireSafeDepth('LTC', 'testnet'), 5006);
         assert.strictEqual(XChainDecoder.resolveDispenserExpireSafeDepth('LTC', 'mainnet'), 126);
         assert.strictEqual(XChainDecoder.resolveDispenserExpireSafeDepth('LTC', 'regtest'), 126);
-        assert.strictEqual(XChainDecoder.resolveDispenserExpireSafeDepth('BTC', 'testnet'), 126);
+        assert.strictEqual(XChainDecoder.resolveDispenserExpireSafeDepth('BTC', 'testnet'), 5006);
+        assert.strictEqual(XChainDecoder.resolveDispenserExpireSafeDepth('DOGE', 'testnet'), 126);
     });
 
     // CONFORMANCE: read the canonical per-chain undo windows instead of
@@ -98,6 +99,11 @@ function trackerConformanceSuite() {
             `decoder SAFE_DEPTH (${decoderDepth}); ` +
             'a split lets the decoder abort reorg recovery at one depth while the tracker auto-recovers to another'
         );
+    });
+
+    it('tracker BTC testnet ceiling equals the decoder BTC testnet depth', function () {
+        const { safeUndoBlocksCeiling } = require(UNDO);
+        assert.strictEqual(safeUndoBlocksCeiling('bitcoin-testnet'), XChainDecoder.resolveDispenserExpireSafeDepth('BTC', 'testnet'));
     });
 
     // Pins the standard half of the same lockstep on every network. The margin test above
