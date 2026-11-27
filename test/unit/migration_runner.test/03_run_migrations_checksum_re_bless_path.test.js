@@ -162,4 +162,24 @@ describe('runMigrations() checksum re-bless path @regression', function () {
             assert.deepStrictEqual(updates, [], 'an unpinned hash must not be healed');
         });
     });
+
+    describe('2026-06-02-widen-ids-to-bigint.sql June revision', function () {
+
+        const REAL_FILE = '2026-06-02-widen-ids-to-bigint.sql';
+        // sha256 of the last June revision, committed by 576ea8a before the
+        // foreign-key repair landed. Applied ledgers retain this exact identity.
+        const JUNE_576EA8A = 'e9b534afe1e1fab8024bd8e9c513708517c73d6fcfd9cfebe40f8c639dd64bb9';
+
+        it('heals a ledger recording the last June revision', async function () {
+            const realPath = path.join(__dirname, '..', '..', '..', 'src', 'sql', 'migrations', REAL_FILE);
+            const realContent = fs.readFileSync(realPath, 'utf8');
+            const realSum = crypto.createHash('sha256').update(realContent).digest('hex');
+            const root = tmpMigrationsDir(REAL_FILE, realContent);
+            const { db, updates } = makeDb(root, [{ name: REAL_FILE, checksum: JUNE_576EA8A }]);
+            const res = await db.runMigrations({ includeManual: true });
+            assert.deepStrictEqual(updates, [[realSum, REAL_FILE]],
+                'expected the June ledger identity to heal to the committed checksum');
+            assert.deepStrictEqual(res.applied, [], 'an already-applied file must not re-run');
+        });
+    });
 });

@@ -21,14 +21,15 @@ const Database = require('../db.js')
 // DBs recorded whichever revision they applied first). Executable SQL is
 // byte-identical across every pinned revision (verified: strip `--` comment
 // lines and blank lines; the residue hashes identically from first commit to
-// HEAD) for every entry EXCEPT two, which are justified by a measured data
+// HEAD) for every entry EXCEPT three, which are justified by a measured data
 // equivalence instead and each carry that argument in full at its own entry
 // rather than relying on this blanket sentence: the byte-order one at the
-// bottom, and the 8151979 revision of the unique-index one.
+// bottom, the 8151979 revision of the unique-index one, and the June widen-ids
+// revisions.
 // Applied fleet-wide through code deploy: both the startup auto-run and
 // `node src/db/migrate.js` pass through this heal before the mismatch guard, so no
-// direct schema_migrations SQL is ever needed. Mirrors
-// xchain-indexer/src/db/migration/checksum_rebaselines.js:MIGRATION_CHECKSUM_REBASELINES.
+// direct schema_migrations SQL is ever needed. Keeps the shared entries aligned
+// with xchain-indexer while also pinning decoder-specific historical revisions.
 Database.MIGRATION_CHECKSUM_REBASELINES = {
     // Comment-only edits: 3a1c435 rewrote the validator note into the follower
     // ordering note (and dropped an em-dash), ec36bd4 added the license header.
@@ -65,6 +66,7 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
             '8b163db63932ec7940fc0c4ff83abb6a52d27ab4a192c377ce5195c3ca4b969f',  // 63fc384
             'c4d622adc34b3190a7cc43954b4c815a3c79bb6c6b7374be39c16d66454d1549',  // ec36bd4 (license header)
             '44901ce7272347e6665ffe29655dbd7b8f3e45ba58b26671e50d07c0c629caef',  // header correction
+            '36a7d4566d462c2b76734c4527ad203d408cbf6cc75d483bcedc9e5b74929ad2',  // c657df8 (decoder header correction)
             '2e20aceb9a446f03ff8ef7a9fd2cc6dede722c30610de57c0d1ef25a455b4dca',  // comment tidy
         ],
         to:   '0e871ed4aea8649d6a5ffe866d78af38ceee37e5cd07d651287cfe1e8c99c8b2',  // deploy-precondition tag (HEAD)
@@ -87,14 +89,25 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
         from: '027a643d3ff0be087b38889f947fdde2b4d8c696682c3b3642f288553f419068',
         to:   '0b3b2fefb780da1fb96a0d5518967b67b215676cc1ac02efc08ec1672d9091b2',  // deploy-precondition tag (HEAD)
     },
-    // Comment-only edits: the header prose was tidied and a stale operator note
-    // dropped, then the `deploy-precondition=required` tag was added for the
-    // startup assertion. The executable statements are unchanged since a0f826b,
-    // which is the earliest revision that can be blessed here: 6869813 and older
-    // carry a different statement residue and must still fail the immutability check.
+    // Comment-only edits after the foreign-key repair: 7817e6c added the decoder
+    // license header, 2d85912 tidied comments, and 6e78693 added the deploy tag.
+    // 4d5db57 and the mirrored a0f826b revision introduced the same executable SQL.
+    //
+    // Treat the June decoder revisions as schema equivalence. A recorded row proves
+    // every statement completed. The oldest revision's extra mempool id MODIFYs were
+    // superseded when 4dcea50 rebuilt that table with raw string columns.
+    //
+    // Preserve the successful earlier revisions that left the schema-source FK in
+    // place instead of temporarily dropping and restoring it. The startup contract
+    // checks all widened columns and the FK, so any drift still fails closed.
     '2026-06-02-widen-ids-to-bigint.sql': {
         from: [
+            '715bd5cc798334117d435e7314ddbb14a94992fa5a7074ca9ac7c0159ad2aff8',  // 418df36 (first ledger-tracked decoder revision)
+            '09bfe2eaa495e175c7619de075776bd0ce35f1fbff24a412d3787090a6c0f802',  // ef4c606 (mempool id ALTERs removed)
+            'e9b534afe1e1fab8024bd8e9c513708517c73d6fcfd9cfebe40f8c639dd64bb9',  // 576ea8a (June comment correction)
+            '6abc5b52e41a33995272334c88d09f9d1c05f478dc62078f295485789ec5c82a',  // 4d5db57 (foreign-key repair)
             'e508ea3bcc4ea4f8f6fd241d93c678245a0ddcb9e582094fe4ddbb636b66d6d7',  // a0f826b
+            'b06d1edc06351ad523568191146a127c8e8fa5c76d7dcfe88f8ed40542196dde',  // 7817e6c (decoder license header)
             '82865499dd2ccc48c0a0a016535409a9201b415395f49c70b41c73a3aeda8847',  // ec36bd4 (license header)
             'b03b41b6fcabef9c959851ede9b75cc9089cef7c015bdd69cfcea74ad5acea7a',  // comment tidy
         ],
@@ -138,9 +151,9 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
         ],
         to:   '4f7f53ea5423d5ad50e0a2136243dab9e215033e6a110c7b47e66ba5361d44c2',  // 7817e6c (HEAD)
     },
-    // THE ONE ENTRY THAT DOES NOT MEET THE BYTE-IDENTICAL-SQL CONTRACT ABOVE, said plainly
-    // rather than filed quietly alongside the comment-only ones. The fleet recorded 0a6afe3,
-    // which PREDATES c808bd1, so the SQL that ran there really was the earlier form:
+    // c808bd1 carries the same executable SQL as HEAD; 7817e6c only added the
+    // license header. The earlier 0a6afe3 revision is a data equivalence instead,
+    // said plainly rather than filed quietly alongside the comment-only revisions:
     //
     //     recorded (0a6afe3):  JOIN blocks prev ON prev.block_index = b.block_index - 1
     //     HEAD     (c808bd1):  JOIN blocks prev ON prev.block_index + 1 = b.block_index
@@ -157,7 +170,16 @@ Database.MIGRATION_CHECKSUM_REBASELINES = {
     // The check to re-run before extending this entry to a new database: if it can ever hold
     // block_index 0, this reasoning does NOT carry and the schema must be reconciled instead.
     '2026-06-02-fix-previous-block-hash-byte-order.sql': {
-        from: '263aba4e1f16aca19342cb1d58eb072735e822ddffc3823e8850cf52404c37dd',  // 0a6afe3..c808bd1^
+        from: [
+            '263aba4e1f16aca19342cb1d58eb072735e822ddffc3823e8850cf52404c37dd',  // 0a6afe3..c808bd1^
+            '508028700454d7a8785e9795cb3ab7c42cfc3454b8e2171c6cab69b378f51998',  // c808bd1 (underflow fix)
+        ],
         to:   'db1e2cac25b7ed132dddaf33a483f35151208901c40a5b4c637d5b5f23492663',  // 7817e6c (HEAD)
+    },
+    // Comment-only edit: 7817e6c added the license header. The DROP, CREATE,
+    // INSERT, and DROP statements are unchanged since authorship (4dcea50).
+    '2026-06-15-mempool-raw-strings.sql': {
+        from: '67a001bbb0ae04c2919f77df3b6da715e527858a3bc7c4a05d53305c6a2d7bf3',  // 4dcea50
+        to:   '571c0a30c8264acf89e5f5a11e491cb2c733d96c9ec732c0036bf6cdeb273456',  // 7817e6c (HEAD)
     },
 };
