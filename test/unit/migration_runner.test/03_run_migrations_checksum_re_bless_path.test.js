@@ -162,6 +162,11 @@ describe('runMigrations() checksum re-bless path @regression', function () {
             assert.deepStrictEqual(updates, [], 'an unpinned hash must not be healed');
         });
     });
+});
+
+// Same suite title as above, split so each describe body stays within the
+// function-length limit; the full test titles are unchanged.
+describe('runMigrations() checksum re-bless path @regression', function () {
 
     describe('2026-06-02-widen-ids-to-bigint.sql June revision', function () {
 
